@@ -9,30 +9,29 @@ export default function AuthCallbackPage() {
   const [msg, setMsg] = useState("Signing you in...");
 
   useEffect(() => {
-    async function run() {
-      // Supabase reads the token from the URL and stores a session automatically.
-      const { data, error } = await supabase.auth.getSession();
+    (async () => {
+      try {
+        const url = new URL(window.location.href);
+        const code = url.searchParams.get("code");
 
-      if (error) {
-        setMsg("Auth error: " + error.message);
-        return;
-      }
+        if (!code) {
+          setMsg("No code found in the URL. Try logging in again.");
+          return;
+        }
 
-      if (data.session) {
+        const { error } = await supabase.auth.exchangeCodeForSession(code);
+
+        if (error) {
+          setMsg("Auth error: " + error.message);
+          return;
+        }
+
+        // Session should now exist on THIS origin (localhost or LAN IP)
         router.replace("/calculator");
-        return;
+      } catch (e: any) {
+        setMsg("Auth error: " + (e?.message ?? String(e)));
       }
-
-      // Sometimes session isn't ready instantly; retry once.
-      setTimeout(async () => {
-        const { data: d2, error: e2 } = await supabase.auth.getSession();
-        if (e2) setMsg("Auth error: " + e2.message);
-        else if (d2.session) router.replace("/calculator");
-        else setMsg("No session found. Try logging in again.");
-      }, 800);
-    }
-
-    run();
+    })();
   }, [router]);
 
   return (
@@ -42,3 +41,4 @@ export default function AuthCallbackPage() {
     </main>
   );
 }
+
