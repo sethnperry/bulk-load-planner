@@ -435,10 +435,44 @@ const terminalLabel =
 
 const terminalEnabled = Boolean(locationLabel);
 
-const terminalDisplayISO = selectedTerminal ? terminalDisplayDate_(selectedTerminal) : null;
+const terminalDisplayISO = (() => {
+  if (!selectedTerminal) return null;
+
+  const tid = String(selectedTerminalId);
+
+  const cat =
+    terminalCatalog.find((x) => String(x.terminal_id) === tid) ?? null;
+
+  const activationISO =
+    accessDateByTerminalId[tid] ||
+    (selectedTerminal as any)?.carded_on ||
+    (selectedTerminal as any)?.added_on ||
+    "";
+
+  const expiresISO =
+    (selectedTerminal as any)?.expires_on ||
+    (selectedTerminal as any)?.expires ||
+    (selectedTerminal as any)?.expires_at ||
+    "";
+
+  const renewalDays = Number(
+    (selectedTerminal as any)?.renewal_days ??
+      (selectedTerminal as any)?.renewalDays ??
+      (cat as any)?.renewal_days ??
+      90
+  ) || 90;
+
+  const computedExpiresISO =
+    activationISO && /^\d{4}-\d{2}-\d{2}$/.test(activationISO)
+      ? addDaysISO_(activationISO, renewalDays)
+      : "";
+
+  return expiresISO || computedExpiresISO || terminalDisplayDate_(selectedTerminal);
+})();
+
 const terminalCardedText = terminalDisplayISO ? formatMDYWithCountdown_(terminalDisplayISO) : undefined;
 const terminalCardedClass = terminalCardedText
-  ? (selectedTerminal?.status === "expired" || isPastISO_(terminalDisplayISO) ? "text-red-500" : "text-white/50")
+  ? (isPastISO_(terminalDisplayISO) ? "text-red-500" : "text-white/50")
   : undefined;
 
 
@@ -1300,6 +1334,17 @@ useEffect(() => {
           : "";
 
       const displayISO = expiresISO || computedExpiresISO;
+
+console.log("MAIN selectedTerminal", {
+  id: selectedTerminalId,
+  name: selectedTerminal.terminal_name,
+  activationISO,
+  expiresISO,
+  computedExpiresISO,
+  displayISO,
+  renewalDays,
+  rawSelectedTerminal: selectedTerminal,
+});
 
       const tz = (cat as any)?.timezone ?? "";
 
