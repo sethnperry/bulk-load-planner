@@ -175,6 +175,10 @@ const [catalogOpen, setCatalogOpen] = useState(false);
 
 const [cardingBusyId, setCardingBusyId] = useState<string | null>(null);
 const [catalogExpandedId, setCatalogExpandedId] = useState<string | null>(null);
+const [myTerminalIds, setMyTerminalIds] = useState<Set<string>>(new Set());
+
+
+
 
   // -----------------------
   // Data (from Supabase)
@@ -201,6 +205,12 @@ const [catalogExpandedId, setCatalogExpandedId] = useState<string | null>(null);
   const [selectedTerminalId, setSelectedTerminalId] = useState("");
 
 const [expandedTerminalId, setExpandedTerminalId] = useState<string | null>(null);
+
+useEffect(() => {
+  // terminals = rows from my_terminals_with_status
+  setMyTerminalIds(new Set(terminals.map((t: any) => String(t.terminal_id))));
+}, [terminals]);
+
 
   async function toggleTerminalStar(terminalId: string, currentlyStarred: boolean) {
   // Ensure we have the current user id (needed for INSERT policies)
@@ -250,6 +260,87 @@ const [expandedTerminalId, setExpandedTerminalId] = useState<string | null>(null
 
 
 
+
+async function setAccessDateForTerminal_(terminalId: string, isoDate: string) {
+  if (!authUserId) return;
+  const tid = String(terminalId);
+  // optimistic
+  setAccessDateByTerminalId((prev) => ({ ...prev, [tid]: isoDate }));
+
+  // guard: must be YYYY-MM-DD
+if (!isoDate || !/^\d{4}-\d{2}-\d{2}$/.test(isoDate)) return;
+
+const uid = authUserId; // local alias for clarity
+
+const res = await supabase
+  .from("terminal_access")
+  .upsert(
+    { user_id: uid, terminal_id: tid, carded_on: isoDate },
+    { onConflict: "user_id,terminal_id" }
+  )
+  .select();
+
+
+if (res.error) {
+  console.error("setAccessDateForTerminal_ error:", res.error);
+  console.error("setAccessDateForTerminal_ debug:", { isoDate, uid, tid });
+  return;
+}
+
+await loadMyTerminals();
+
+
+    // leave optimistic state; next refresh will correct
+  }
+async function loadMyTerminalsMembership() {
+  setTermError(null);
+  setTermLoading(true);
+
+  const uid = authUserId;
+  if (!uid) {
+    setTermLoading(false);
+    return;
+  }
+
+  const { data, error } = await supabase
+    .from("my_terminals")
+    .select(`
+      terminal_id,
+      is_starred,
+      terminals:terminals (
+        terminal_id,
+        terminal_name,
+        city,
+        state,
+        renewal_days
+      )
+    `)
+    .eq("user_id", uid);
+
+  if (error) {
+    setTermError(error.message);
+    setTermLoading(false);
+    return;
+  }
+
+  // Flatten into the same shape your UI expects
+  const rows =
+    (data ?? []).map((r: any) => ({
+      terminal_id: r.terminal_id,
+      terminal_name: r.terminals?.terminal_name,
+      city: r.terminals?.city,
+      state: r.terminals?.state,
+      renewal_days: r.terminals?.renewal_days,
+      // these will be filled by access map / status logic below
+      carded_on: null,
+      status: "not_carded",
+      expires_on: null,
+    })) ?? [];
+
+  setTerminals(rows as any);
+  setTermLoading(false);
+}
+
 async function doGetCardedForTerminal(terminalId: string) {
   try {
     setTermError(null);
@@ -279,6 +370,8 @@ async function doGetCardedForTerminal(terminalId: string) {
 const [terminalCatalog, setTerminalCatalog] = useState<TerminalCatalogRow[]>([]);
 const [catalogLoading, setCatalogLoading] = useState(false);
 const [catalogError, setCatalogError] = useState<string | null>(null);
+const [accessDateByTerminalId, setAccessDateByTerminalId] = useState<Record<string, string>>({});
+const [catalogEditingDateId, setCatalogEditingDateId] = useState<string | null>(null);
 
 
 
@@ -343,7 +436,7 @@ const terminalLabel =
 const terminalEnabled = Boolean(locationLabel);
 
 const terminalDisplayISO = selectedTerminal ? terminalDisplayDate_(selectedTerminal) : null;
-const terminalCardedText = terminalDisplayISO ? formatMDY(terminalDisplayISO) : undefined;
+const terminalCardedText = terminalDisplayISO ? formatMDYWithCountdown_(terminalDisplayISO) : undefined;
 const terminalCardedClass = terminalCardedText
   ? (selectedTerminal?.status === "expired" || isPastISO_(terminalDisplayISO) ? "text-red-500" : "text-white/50")
   : undefined;
@@ -408,6 +501,32 @@ function formatMDY(dateLike: string) {
 
 function isoToday_() {
   return new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+}
+
+function addDaysISO_(iso: string, days: number) {
+  if (!iso) return "";
+  const [y, m, d] = iso.slice(0, 10).split("-").map((v) => Number(v));
+  const dt = new Date(y, (m || 1) - 1, d || 1);
+  dt.setDate(dt.getDate() + (Number(days) || 0));
+  return dt.toISOString().slice(0, 10);
+}
+
+function daysUntilISO_(iso: string | null | undefined) {
+  if (!iso) return null;
+  const todayISO = isoToday_();
+  const [ty, tm, td] = todayISO.slice(0, 10).split("-").map((v) => Number(v));
+  const [y, m, d] = iso.slice(0, 10).split("-").map((v) => Number(v));
+  const a = new Date(ty, (tm || 1) - 1, td || 1);
+  const b = new Date(y, (m || 1) - 1, d || 1);
+  const ms = b.getTime() - a.getTime();
+  return Math.round(ms / (1000 * 60 * 60 * 24));
+}
+
+function formatMDYWithCountdown_(iso: string) {
+  const mdy = formatMDY(iso);
+  const d = daysUntilISO_(iso);
+  if (d === null) return mdy;
+  return `${mdy} (${d} days)`;
 }
 
 function isPastISO_(iso: string | null | undefined) {
@@ -987,6 +1106,32 @@ const cities = useMemo(() => {
 
 }, [terminalCatalog, selectedState, selectedCity, myTerminalIdSet]);
 
+useEffect(() => {
+  (async () => {
+    if (!authUserId) return;
+    if (!selectedState || !selectedCity) return;
+    const ids = catalogTerminalsInCity.map((t) => String(t.terminal_id));
+    if (ids.length === 0) {
+      setAccessDateByTerminalId({});
+      return;
+    }
+    const { data, error } = await supabase
+      .from("terminal_access")
+      .select("terminal_id, carded_on")
+      .eq("user_id", authUserId)
+      .in("terminal_id", ids);
+    if (error) {
+      console.error(error);
+      return;
+    }
+    const map: Record<string, string> = {};
+    (data ?? []).forEach((r: any) => {
+      if (r?.terminal_id && r?.carded_on) map[String(r.terminal_id)] = String(r.carded_on);
+    });
+    setAccessDateByTerminalId(map);
+  })();
+}, [authUserId, selectedState, selectedCity, catalogTerminalsInCity]);
+
   return (
     <div style={styles.page}>
       <h1 style={{ marginBottom: 6 }}>Calculator</h1>
@@ -1124,17 +1269,64 @@ const cities = useMemo(() => {
           </div>
         </div>
 
-        {selectedTerminal && (
+        
+          {selectedTerminal && (
   <div style={styles.help}>
-    Selected: <strong>{selectedTerminal.terminal_name}</strong>
     {(() => {
-      const tz =
-        terminalCatalog.find((x) => String(x.terminal_id) === String(selectedTerminalId))?.timezone ??
+      const cat =
+        terminalCatalog.find((x) => String(x.terminal_id) === String(selectedTerminalId)) ?? null;
+
+      const activationISO =
+        (selectedTerminal as any)?.carded_on ||
+        (selectedTerminal as any)?.added_on ||
         "";
-      return tz ? ` • ${tz}` : "";
+
+      const expiresISO =
+        (selectedTerminal as any)?.expires_on ||
+        (selectedTerminal as any)?.expires ||
+        (selectedTerminal as any)?.expires_at ||
+        "";
+
+      const renewalDays = Number(
+        (selectedTerminal as any)?.renewal_days ??
+          (selectedTerminal as any)?.renewalDays ??
+          (cat as any)?.renewal_days ??
+          90
+      ) || 90;
+
+      const computedExpiresISO =
+        activationISO && /^\d{4}-\d{2}-\d{2}$/.test(activationISO)
+          ? addDaysISO_(activationISO, renewalDays)
+          : "";
+
+      const displayISO = expiresISO || computedExpiresISO;
+
+      const tz = (cat as any)?.timezone ?? "";
+
+      return (
+        <>
+          Selected: <strong>{selectedTerminal.terminal_name}</strong>
+          {tz ? ` • ${tz}` : ""}
+          {displayISO ? (
+            <span>
+              {" "}
+              •{" "}
+              <span style={{ color: isPastISO_(displayISO) ? "#f87171" : "rgba(255,255,255,0.75)" }}>
+
+                {formatMDYWithCountdown_(displayISO)}
+              </span>
+            </span>
+          ) : (
+            <span style={{ color: "rgba(255,255,255,0.5)" }}> • Set Activation Date</span>
+          )}
+        </>
+      );
     })()}
   </div>
 )}
+
+  
+
 
       </section>
 
@@ -1537,8 +1729,34 @@ const cities = useMemo(() => {
             .filter((t) => t.status !== "not_carded")
             .map((t, idx) => {
               const active = String(t.terminal_id) === String(selectedTerminalId);
-              const displayISO = terminalDisplayDate_(t);
-              const expired = t.status === "expired" || isPastISO_(displayISO);
+              const expiresISO =
+  (t as any).expires_on ||
+  (t as any).expires ||
+  (t as any).expires_at ||
+  ""; // fallback
+
+const activationISO =
+  (t as any).carded_on ||
+  (t as any).added_on ||
+  "";
+
+const renewalDays = Number(
+  (t as any).renewal_days ??
+  (t as any).renewalDays ??
+  (t as any).renewal ??
+  90
+) || 90;
+
+
+const computedExpiresISO =
+  activationISO && /^\d{4}-\d{2}-\d{2}$/.test(activationISO)
+    ? addDaysISO_(activationISO, renewalDays)
+    : "";
+
+const displayISO = expiresISO || computedExpiresISO;
+
+const expired = displayISO ? isPastISO_(displayISO) : false;
+
               const isExpanded = expandedTerminalId === String(t.terminal_id);
               const busy = String(cardingBusyId) === String(t.terminal_id);
 
@@ -1584,26 +1802,44 @@ const cities = useMemo(() => {
                       </div>
 
                       {displayISO ? (
-                        <div className={["mt-1 text-xs tabular-nums", expired ? "text-red-400" : "text-white/50"].join(" ")}>
-                          {formatMDY(displayISO)}
-                        </div>
-                      ) : null}
+  <div className={["mt-1 text-xs tabular-nums", expired ? "text-red-400" : "text-white/50"].join(" ")}>
+    {formatMDYWithCountdown_(displayISO)}
+  </div>
+) : null}
+
                     </div>
 
                     {/* right controls: star + view (side-by-side) */}
                     <div className="flex items-center gap-2">
                       <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toggleTerminalStar(String(t.terminal_id), true);
-                        }}
-                        className="rounded-lg px-2 py-1 text-sm text-yellow-300/90 hover:text-yellow-200"
-                        aria-label="Remove from My Terminals"
-                        title="Remove from My Terminals"
-                      >
-                        ★
-                      </button>
+  type="button"
+  onClick={(e) => {
+    e.stopPropagation();
+ const tid = String(t.terminal_id);
+
+toggleTerminalStar(tid, true); // TRUE = currently starred => DELETE
+
+// optimistic remove from UI
+setMyTerminalIds((prev) => {
+  const s = new Set(prev);
+  s.delete(tid);
+  return s;
+});
+setTerminals((prev: any) => prev.filter((x: any) => String(x.terminal_id) !== tid));
+
+
+  }}
+  className={`rounded-lg px-2 py-1 text-sm transition ${
+    myTerminalIds.has(String(t.terminal_id))
+      ? "text-yellow-300/90 hover:text-yellow-200"
+      : "text-white/40 hover:text-white/70"
+  }`}
+  aria-label={myTerminalIds.has(String(t.terminal_id)) ? "Remove from My Terminals" : "Add to My Terminals"}
+  title={myTerminalIds.has(String(t.terminal_id)) ? "Remove from My Terminals" : "Add to My Terminals"}
+>
+  {myTerminalIds.has(String(t.terminal_id)) ? "★" : "☆"}
+</button>
+
 
                       <button
                         type="button"
@@ -1696,7 +1932,8 @@ const cities = useMemo(() => {
         <div className="grid grid-cols-1 gap-2">
           {catalogTerminalsInCity.map((t, idx) => {
             const id = String(t.terminal_id);
-            const isInMy = myTerminalIdSet.has(id);
+            const isInMy = myTerminalIds.has(id);
+
             const isExpanded = catalogExpandedId === id;
 
             return (
@@ -1724,9 +1961,63 @@ const cities = useMemo(() => {
                     <div className="text-sm font-semibold text-white truncate">
                       {t.terminal_name ?? "(unnamed terminal)"}
                     </div>
-                    <div className="mt-1 text-xs text-white/50">
-                      {t.city}, {t.state}
-                    </div>
+                    {(() => {
+                      const tid = String(t.terminal_id);
+                      const activationISO = accessDateByTerminalId[tid] ?? "";
+                      const renewalDays = Number((t as any).renewal_days ?? 90);
+                      const expiresISO = activationISO ? addDaysISO_(activationISO, renewalDays) : "";
+                      const expiresExpired = expiresISO ? isPastISO_(expiresISO) : false;
+                      const expiresLabel = expiresISO ? formatMDYWithCountdown_(expiresISO) : "Set Activation Date";
+
+                      const isEditing = catalogEditingDateId === tid;
+
+                      return (
+                        <div className="mt-1">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setCatalogEditingDateId(isEditing ? null : tid);
+                            }}
+                            className={[
+                              "text-xs tabular-nums underline-offset-2 hover:underline",
+                              expiresISO ? (expiresExpired ? "text-red-400" : "text-white/50") : "text-white/60",
+                            ].join(" ")}
+                            title="Set activation date"
+                          >
+                            {expiresLabel}
+                          </button>
+
+                          {isEditing ? (
+                            <div
+                              className="mt-2 rounded-xl border border-white/10 bg-black/30 p-3 text-xs text-white/70"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <div className="text-white/80 font-semibold">Set Activation Date</div>
+                              <div className="mt-2 flex items-center gap-2">
+                                <input
+                                  type="date"
+                                  value={activationISO}
+                                  onChange={(e) => setAccessDateForTerminal_(tid, e.target.value)}
+                                  className="rounded-lg border border-white/10 bg-black/40 px-2 py-1 text-xs text-white"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => setAccessDateForTerminal_(tid, isoToday_())}
+                                  className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-xs text-white/80 hover:bg-white/10"
+                                >
+                                  Today
+                                </button>
+                              </div>
+
+                              <div className="mt-2 text-white/60">
+                                Expires: {expiresISO ? formatMDYWithCountdown_(expiresISO) : "—"}
+                              </div>
+                            </div>
+                          ) : null}
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   {/* multi-select star (membership) */}
@@ -1736,6 +2027,19 @@ const cities = useMemo(() => {
                       onClick={(e) => {
                         e.stopPropagation();
                         toggleTerminalStar(id, isInMy);
+
+const next = !isInMy;
+setMyTerminalIds((prev) => {
+  const s = new Set(prev);
+  if (next) s.add(id);
+  else s.delete(id);
+  return s;
+});
+
+                        if (!isInMy && !accessDateByTerminalId[id]) {
+                          setAccessDateForTerminal_(id, isoToday_());
+                        }
+
                       }}
                       className={[
                         "rounded-lg px-2 py-1 text-sm transition",
@@ -1761,16 +2065,7 @@ const cities = useMemo(() => {
         </div>
       )}
 
-      <button
-        type="button"
-        onClick={() => {
-          setCatalogOpen(false);
-          setTermOpen(true);
-        }}
-        className="w-full rounded-2xl bg-white text-black px-4 py-3 text-sm font-semibold hover:bg-white/90"
-      >
-        Done
-      </button>
+    
     </div>
   )}
 </FullscreenModal>

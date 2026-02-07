@@ -1,0 +1,199 @@
+--- a/app/calculator/page.tsx
++++ b/app/calculator/page.tsx
+@@ -260,6 +260,25 @@
+ 
+ 
+ 
++
++async function setAccessDateForTerminal_(terminalId: string, isoDate: string) {
++  if (!authUserId) return;
++  const tid = String(terminalId);
++  // optimistic
++  setAccessDateByTerminalId((prev) => ({ ...prev, [tid]: isoDate }));
++
++  const { error } = await supabase
++    .from("terminal_access")
++    .upsert(
++      { user_id: authUserId, terminal_id: tid, carded_on: isoDate },
++      { onConflict: "user_id,terminal_id" }
++    );
++
++  if (error) {
++    console.error(error);
++    // leave optimistic state; next refresh will correct
++  }
++}
+ async function doGetCardedForTerminal(terminalId: string) {
+   try {
+     setTermError(null);
+@@ -289,6 +308,8 @@
+ const [terminalCatalog, setTerminalCatalog] = useState<TerminalCatalogRow[]>([]);
+ const [catalogLoading, setCatalogLoading] = useState(false);
+ const [catalogError, setCatalogError] = useState<string | null>(null);
++const [accessDateByTerminalId, setAccessDateByTerminalId] = useState<Record<string, string>>({});
++const [catalogEditingDateId, setCatalogEditingDateId] = useState<string | null>(null);
+ 
+ 
+ 
+@@ -353,7 +374,7 @@
+ const terminalEnabled = Boolean(locationLabel);
+ 
+ const terminalDisplayISO = selectedTerminal ? terminalDisplayDate_(selectedTerminal) : null;
+-const terminalCardedText = terminalDisplayISO ? formatMDY(terminalDisplayISO) : undefined;
++const terminalCardedText = terminalDisplayISO ? formatMDYWithCountdown_(terminalDisplayISO) : undefined;
+ const terminalCardedClass = terminalCardedText
+   ? (selectedTerminal?.status === "expired" || isPastISO_(terminalDisplayISO) ? "text-red-500" : "text-white/50")
+   : undefined;
+@@ -418,6 +439,32 @@
+ 
+ function isoToday_() {
+   return new Date().toISOString().slice(0, 10); // YYYY-MM-DD
++}
++
++function addDaysISO_(iso: string, days: number) {
++  if (!iso) return "";
++  const [y, m, d] = iso.slice(0, 10).split("-").map((v) => Number(v));
++  const dt = new Date(y, (m || 1) - 1, d || 1);
++  dt.setDate(dt.getDate() + (Number(days) || 0));
++  return dt.toISOString().slice(0, 10);
++}
++
++function daysUntilISO_(iso: string | null | undefined) {
++  if (!iso) return null;
++  const todayISO = isoToday_();
++  const [ty, tm, td] = todayISO.slice(0, 10).split("-").map((v) => Number(v));
++  const [y, m, d] = iso.slice(0, 10).split("-").map((v) => Number(v));
++  const a = new Date(ty, (tm || 1) - 1, td || 1);
++  const b = new Date(y, (m || 1) - 1, d || 1);
++  const ms = b.getTime() - a.getTime();
++  return Math.round(ms / (1000 * 60 * 60 * 24));
++}
++
++function formatMDYWithCountdown_(iso: string) {
++  const mdy = formatMDY(iso);
++  const d = daysUntilISO_(iso);
++  if (d === null) return mdy;
++  return `${mdy} (${d} days)`;
+ }
+ 
+ function isPastISO_(iso: string | null | undefined) {
+@@ -996,6 +1043,32 @@
+ })
+ 
+ }, [terminalCatalog, selectedState, selectedCity, myTerminalIdSet]);
++
++useEffect(() => {
++  (async () => {
++    if (!authUserId) return;
++    if (!selectedState || !selectedCity) return;
++    const ids = catalogTerminalsInCity.map((t) => String(t.terminal_id));
++    if (ids.length === 0) {
++      setAccessDateByTerminalId({});
++      return;
++    }
++    const { data, error } = await supabase
++      .from("terminal_access")
++      .select("terminal_id, carded_on")
++      .eq("user_id", authUserId)
++      .in("terminal_id", ids);
++    if (error) {
++      console.error(error);
++      return;
++    }
++    const map: Record<string, string> = {};
++    (data ?? []).forEach((r: any) => {
++      if (r?.terminal_id && r?.carded_on) map[String(r.terminal_id)] = String(r.carded_on);
++    });
++    setAccessDateByTerminalId(map);
++  })();
++}, [authUserId, selectedState, selectedCity, catalogTerminalsInCity]);
+ 
+   return (
+     <div style={styles.page}>
+@@ -1595,7 +1668,7 @@
+ 
+                       {displayISO ? (
+                         <div className={["mt-1 text-xs tabular-nums", expired ? "text-red-400" : "text-white/50"].join(" ")}>
+-                          {formatMDY(displayISO)}
++                          {formatMDYWithCountdown_(displayISO)}
+                         </div>
+                       ) : null}
+                     </div>
+@@ -1752,9 +1825,63 @@
+                     <div className="text-sm font-semibold text-white truncate">
+                       {t.terminal_name ?? "(unnamed terminal)"}
+                     </div>
+-                    <div className="mt-1 text-xs text-white/50">
+-                      {t.city}, {t.state}
+-                    </div>
++                    {(() => {
++                      const tid = String(t.terminal_id);
++                      const activationISO = accessDateByTerminalId[tid] ?? "";
++                      const renewalDays = Number((t as any).renewal_days ?? 90);
++                      const expiresISO = activationISO ? addDaysISO_(activationISO, renewalDays) : "";
++                      const expiresExpired = expiresISO ? isPastISO_(expiresISO) : false;
++                      const expiresLabel = expiresISO ? formatMDYWithCountdown_(expiresISO) : "Set Activation Date";
++
++                      const isEditing = catalogEditingDateId === tid;
++
++                      return (
++                        <div className="mt-1">
++                          <button
++                            type="button"
++                            onClick={(e) => {
++                              e.stopPropagation();
++                              setCatalogEditingDateId(isEditing ? null : tid);
++                            }}
++                            className={[
++                              "text-xs tabular-nums underline-offset-2 hover:underline",
++                              expiresISO ? (expiresExpired ? "text-red-400" : "text-white/50") : "text-white/60",
++                            ].join(" ")}
++                            title="Set activation date"
++                          >
++                            {expiresLabel}
++                          </button>
++
++                          {isEditing ? (
++                            <div
++                              className="mt-2 rounded-xl border border-white/10 bg-black/30 p-3 text-xs text-white/70"
++                              onClick={(e) => e.stopPropagation()}
++                            >
++                              <div className="text-white/80 font-semibold">Set Activation Date</div>
++                              <div className="mt-2 flex items-center gap-2">
++                                <input
++                                  type="date"
++                                  value={activationISO}
++                                  onChange={(e) => setAccessDateForTerminal_(tid, e.target.value)}
++                                  className="rounded-lg border border-white/10 bg-black/40 px-2 py-1 text-xs text-white"
++                                />
++                                <button
++                                  type="button"
++                                  onClick={() => setAccessDateForTerminal_(tid, isoToday_())}
++                                  className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-xs text-white/80 hover:bg-white/10"
++                                >
++                                  Today
++                                </button>
++                              </div>
++
++                              <div className="mt-2 text-white/60">
++                                Expires: {expiresISO ? formatMDYWithCountdown_(expiresISO) : "—"}
++                              </div>
++                            </div>
++                          ) : null}
++                        </div>
++                      );
++                    })()}
+                   </div>
+ 
+                   {/* multi-select star (membership) */}
+@@ -1772,6 +1899,10 @@
+   else s.delete(id);
+   return s;
+ });
++
++                        if (!isInMy && !accessDateByTerminalId[id]) {
++                          setAccessDateForTerminal_(id, isoToday_());
++                        }
+ 
+                       }}
+                       className={[
