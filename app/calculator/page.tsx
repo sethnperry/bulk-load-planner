@@ -307,11 +307,48 @@ const locationHydratingRef = useRef(false);
 const locationHydratedOnceRef = useRef(false);
 const locationUserTouchedRef = useRef(false);
 
+
+  // =======================
+  // Step 5: Equipment persistence (selectedComboId)
+  // =======================
+  const equipHydratingRef = useRef(false);
+  const equipHydratedForKeyRef = useRef<string>("");
+
+  function getEquipStorageKey(userId: string) {
+    return `protankr_equip_v1:${userId || "anon"}`;
+  }
+
+  function readPersistedEquip(key: string): { comboId: string } | null {
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      const comboId = String((parsed as any)?.comboId || "");
+      return comboId ? { comboId } : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function writePersistedEquip(key: string, comboId: string) {
+    try {
+      localStorage.setItem(key, JSON.stringify({ comboId }));
+    } catch {
+      // ignore
+    }
+  }
+
+
 function getLocationStorageKey(userId: string) {
   return `protankr_location_v2:${userId || "anon"}`;
 }
 
 const locationStorageKey = useMemo(() => getLocationStorageKey(authUserId), [authUserId]);
+
+  const anonEquipKey = useMemo(() => getEquipStorageKey("anon"), []);
+  const userEquipKey = useMemo(() => getEquipStorageKey(authUserId), [authUserId]);
+  const effectiveEquipKey = authUserId ? userEquipKey : anonEquipKey;
+
 
 const [expandedTerminalId, setExpandedTerminalId] = useState<string | null>(null);
 
@@ -1341,6 +1378,47 @@ useEffect(() => {
     writePersistedLocation(userLocationKey, selectedState, selectedCity, selectedTerminalId);
   }
 }, [authUserId, effectiveLocationKey, userLocationKey, selectedState, selectedCity, selectedTerminalId]);
+
+
+// --- Step 5: Restore equipment combo (after combos load) ---
+useEffect(() => {
+  if (combosLoading) return;
+
+  // Run once per effective key
+  if (equipHydratedForKeyRef.current === effectiveEquipKey) return;
+
+  equipHydratingRef.current = true;
+
+  const fromUser = authUserId ? readPersistedEquip(userEquipKey) : null;
+  const fromAnon = readPersistedEquip(anonEquipKey);
+  const saved = fromUser ?? fromAnon;
+
+  if (saved?.comboId) {
+    const exists = combos.some(
+      (c) => String(c.combo_id) === String(saved.comboId) && c.active !== false
+    );
+    setSelectedComboId(exists ? String(saved.comboId) : "");
+
+    // Migrate anon -> user if needed
+    if (authUserId && !fromUser && fromAnon) {
+      writePersistedEquip(userEquipKey, fromAnon.comboId);
+    }
+  }
+
+  equipHydratedForKeyRef.current = effectiveEquipKey;
+  equipHydratingRef.current = false;
+}, [authUserId, effectiveEquipKey, userEquipKey, anonEquipKey, combosLoading, combos]);
+
+// --- Step 5: Persist equipment combo whenever it changes ---
+useEffect(() => {
+  if (equipHydratedForKeyRef.current !== effectiveEquipKey) return;
+  if (equipHydratingRef.current) return;
+
+  // Always write anon to survive auth timing
+  writePersistedEquip(anonEquipKey, selectedComboId);
+  if (authUserId) writePersistedEquip(userEquipKey, selectedComboId);
+}, [authUserId, effectiveEquipKey, userEquipKey, anonEquipKey, selectedComboId]);
+
 
 // --- Fetch compartments when trailer changes --- when trailer changes ---
   useEffect(() => {
