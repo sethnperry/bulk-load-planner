@@ -3,7 +3,7 @@
 import { QuickPanel } from "./QuickPanel";
 import { FullscreenModal } from "@/lib/ui/FullscreenModal";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 
 import { TopTiles } from "./TopTiles";
@@ -59,6 +59,21 @@ type TerminalCatalogRow = {
   active: boolean | null;
 };
 
+type StateRow = {
+  state_code: string;
+  state_name: string | null;
+  active: boolean | null;
+};
+
+
+
+
+type CityRow = {
+  city_id: string;
+  state_code: string | null;
+  city_name: string | null;
+  active: boolean | null;
+};
 
 type CompRow = {
   trailer_id: string;
@@ -179,7 +194,75 @@ const [myTerminalIds, setMyTerminalIds] = useState<Set<string>>(new Set());
 
 
 
+  function normState(s: string) {
+    return String(s || "").trim().toUpperCase();
+  }
+  function normCity(s: string) {
+    return String(s || "").trim();
+  }
 
+  const starBtnClass = (active: boolean) =>
+    [
+      "h-8 w-8 flex items-center justify-center rounded-lg border transition",
+      active
+        ? "border-yellow-400/40 text-yellow-300 hover:bg-yellow-400/10"
+        : "border-white/10 text-white/40 hover:bg-white/5 hover:text-white/80",
+    ].join(" ");
+
+
+
+
+const CITY_STARS_KEY_PREFIX = "protankr_city_stars_v1::";
+
+function getCityStarsKey() {
+  // per-user if logged in, otherwise anon
+  return `${CITY_STARS_KEY_PREFIX}${authUserId || "anon"}`;
+}
+
+function cityKey(state: string, city: string) {
+  return `${normState(state)}||${normCity(city)}`;
+}
+
+// Keep starred cities in React state so the UI updates immediately.
+// Persist to localStorage so it survives refresh.
+const [starredCitySet, setStarredCitySet] = useState<Set<string>>(new Set());
+
+useEffect(() => {
+  try {
+    const raw = localStorage.getItem(getCityStarsKey());
+    const parsed = raw ? JSON.parse(raw) : [];
+    const keys = Array.isArray(parsed) ? parsed.filter((x) => typeof x === "string") : [];
+    setStarredCitySet(new Set(keys));
+  } catch {
+    setStarredCitySet(new Set());
+  }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [authUserId]); // reload if user changes
+
+function persistStarredCitySet(next: Set<string>) {
+  try {
+    localStorage.setItem(getCityStarsKey(), JSON.stringify(Array.from(next)));
+  } catch {
+    // ignore
+  }
+}
+
+function isCityStarred(state: string, city: string) {
+  return starredCitySet.has(cityKey(state, city));
+}
+
+function toggleCityStar(state: string, city: string) {
+  const key = cityKey(state, city);
+  setStarredCitySet((prev) => {
+    const next = new Set(prev);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    persistStarredCitySet(next);
+    return next;
+  });
+}
+
+  
   // -----------------------
   // Data (from Supabase)
   // -----------------------
@@ -203,6 +286,32 @@ const [myTerminalIds, setMyTerminalIds] = useState<Set<string>>(new Set());
   const [selectedState, setSelectedState] = useState("");
   const [selectedCity, setSelectedCity] = useState("");
   const [selectedTerminalId, setSelectedTerminalId] = useState("");
+
+
+  // States catalog (source of truth for showing all 50 states)
+  const [statesCatalog, setStatesCatalog] = useState<StateRow[]>([]);
+  const [statesLoading, setStatesLoading] = useState(false);
+  const [statesError, setStatesError] = useState<string | null>(null);
+
+
+  const [citiesCatalog, setCitiesCatalog] = useState<CityRow[]>([]);
+  const [citiesLoading, setCitiesLoading] = useState(false);
+  const [citiesError, setCitiesError] = useState<string | null>(null);
+
+  // Location modal UX
+  const [statePickerOpen, setStatePickerOpen] = useState(false);
+
+// Persistence (localStorage; per-user when logged in, anon fallback if not)
+const skipResetRef = useRef(false);
+const locationHydratingRef = useRef(false);
+const locationHydratedOnceRef = useRef(false);
+const locationUserTouchedRef = useRef(false);
+
+function getLocationStorageKey(userId: string) {
+  return `protankr_location_v2:${userId || "anon"}`;
+}
+
+const locationStorageKey = useMemo(() => getLocationStorageKey(authUserId), [authUserId]);
 
 const [expandedTerminalId, setExpandedTerminalId] = useState<string | null>(null);
 
@@ -961,6 +1070,62 @@ useEffect(() => {
     loadMyTerminals();
   }, []);
 
+
+  // --- Fetch states catalog (for Location modal + dropdown) ---
+  useEffect(() => {
+    (async () => {
+      setStatesError(null);
+      setStatesLoading(true);
+
+      const { data, error } = await supabase
+        .from("states")
+        .select("state_code, state_name, active")
+        .order("state_code", { ascending: true })
+        .returns<StateRow[]>();
+
+      if (error) {
+        setStatesError(error.message);
+        setStatesCatalog([]);
+      } else {
+        setStatesCatalog((data ?? []).filter((r) => r.active !== false));
+      }
+
+      setStatesLoading(false);
+    })();
+  }, []);
+
+
+
+
+  // --- Fetch cities for selected state from public.cities (source of truth for city list) ---
+  useEffect(() => {
+    (async () => {
+      setCitiesError(null);
+      if (!selectedState) {
+        setCitiesCatalog([]);
+        return;
+      }
+      setCitiesLoading(true);
+
+      const { data, error } = await supabase
+        .from("cities")
+        .select("city_id, state_code, city_name, active")
+        .eq("state_code", normState(selectedState))
+        .neq("active", false)
+        .order("city_name", { ascending: true })
+        .returns<CityRow[]>();
+
+      if (error) {
+        setCitiesError(error.message);
+        setCitiesCatalog([]);
+      } else {
+        setCitiesCatalog((data ?? []).filter((r) => r.city_name));
+      }
+      setCitiesLoading(false);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedState]);
+
 // --- Fetch terminal catalog once (for Location modal state/city pickers) ---
 useEffect(() => {
   (async () => {
@@ -988,16 +1153,196 @@ useEffect(() => {
 
   // Reset city/terminal when state changes; reset terminal when city changes
   useEffect(() => {
+    if (skipResetRef.current) return;
     setSelectedCity("");
     setSelectedTerminalId("");
   }, [selectedState]);
 
   useEffect(() => {
+    if (skipResetRef.current) return;
     setSelectedTerminalId("");
   }, [selectedCity]);
 
+function readPersistedLocation(key: string): { state: string; city: string; terminalId: string } | null {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return null;
 
-  // --- Fetch compartments when trailer changes ---
+    const st = normState((parsed as any).state || "");
+    const ct = normCity((parsed as any).city || "");
+    const tid = String((parsed as any).terminalId || "");
+
+    if (!st) return null;
+    return { state: st, city: ct, terminalId: tid };
+  } catch {
+    return null;
+  }
+}
+
+function writePersistedLocation(key: string, state: string, city: string, terminalId: string) {
+  try {
+    localStorage.setItem(
+      key,
+      JSON.stringify({
+        state: normState(state),
+        city: normCity(city),
+        terminalId: String(terminalId || ""),
+      })
+    );
+  } catch {
+    // ignore
+  }
+}
+
+// --- Persistence helpers (per-user when logged in; anon fallback) ---
+const ANON_LOCATION_KEY = "protankr_location_v2:anon";
+const LEGACY_LOCATION_KEY = "protankr_location_v1";
+const userLocationKey = authUserId ? getLocationStorageKey(authUserId) : "";
+const effectiveLocationKey = authUserId ? userLocationKey : ANON_LOCATION_KEY;
+
+// Prevent clobber during boot/auth flip:
+// - we only persist AFTER we've hydrated for the current effective key
+const hydratedForKeyRef = useRef<string>("");
+const citiesLoadedForStateRef = useRef<string>("");
+const terminalCatalogLoadedRef = useRef<boolean>(false);
+
+// Mark terminal catalog loaded once
+useEffect(() => {
+  if (!catalogLoading && terminalCatalog.length > 0) {
+    terminalCatalogLoadedRef.current = true;
+  }
+}, [catalogLoading, terminalCatalog]);
+
+// Track that cities were loaded for the currently selected state
+useEffect(() => {
+  if (!selectedState) return;
+  if (citiesLoading) return;
+  // even if there are 0 cities returned, we consider it "loaded" for validation
+  citiesLoadedForStateRef.current = normState(selectedState);
+}, [selectedState, citiesLoading, citiesCatalog]);
+
+// --- Restore persisted location (runs on mount and when auth resolves) ---
+useEffect(() => {
+  // If the user already interacted with location in this tab/session, do not override.
+  if (locationUserTouchedRef.current) return;
+
+  // If we're already hydrated for this key, don't re-run.
+  if (hydratedForKeyRef.current === effectiveLocationKey) return;
+
+  const fromUser = authUserId ? readPersistedLocation(userLocationKey) : null;
+  const fromAnon = readPersistedLocation(ANON_LOCATION_KEY);
+  const fromLegacy = readPersistedLocation(LEGACY_LOCATION_KEY);
+
+  const loc = fromUser || (authUserId ? fromAnon : null) || fromAnon || fromLegacy;
+
+  locationHydratingRef.current = true;
+  skipResetRef.current = true;
+
+  if (loc?.state) {
+    setSelectedState(loc.state);
+    setSelectedCity(loc.city || "");
+    setSelectedTerminalId(loc.terminalId || "");
+  }
+
+  // If logged in and user key is missing but anon exists, migrate anon -> user
+  if (authUserId && !fromUser && fromAnon) {
+    writePersistedLocation(userLocationKey, fromAnon.state, fromAnon.city, fromAnon.terminalId);
+  }
+
+  // Mark hydration complete for this key AFTER React applies the queued state updates
+  // (Do not release skipResetRef too early or the [selectedState] effect will clear city/terminal)
+  setTimeout(() => {
+    skipResetRef.current = false;
+    locationHydratingRef.current = false;
+    locationHydratedOnceRef.current = true;
+    hydratedForKeyRef.current = effectiveLocationKey;
+  }, 50);
+}, [authUserId, effectiveLocationKey, userLocationKey]);
+
+// Mark that the user has manually changed location so we stop auto-restoring over them.
+useEffect(() => {
+  if (!locationHydratedOnceRef.current) return;
+  if (locationHydratingRef.current) return;
+  if (skipResetRef.current) return;
+  locationUserTouchedRef.current = true;
+}, [selectedState, selectedCity, selectedTerminalId]);
+
+// Validate saved selections:
+// - If saved city no longer valid for the state => clear city + terminal
+// - If saved terminal no longer valid for the city => clear terminal only
+useEffect(() => {
+  if (!locationHydratedOnceRef.current) return;
+  if (locationHydratingRef.current) return;
+
+  const st = normState(selectedState);
+  const ct = normCity(selectedCity);
+  const tid = String(selectedTerminalId || "");
+
+  if (!st) {
+    if (ct || tid) {
+      skipResetRef.current = true;
+      setSelectedCity("");
+      setSelectedTerminalId("");
+      setTimeout(() => {
+        skipResetRef.current = false;
+      }, 0);
+    }
+    return;
+  }
+
+  // City validation ONLY after we've loaded cities for this state at least once
+  if (ct && !citiesLoading && citiesLoadedForStateRef.current === st) {
+    const validCities = new Set(
+      citiesCatalog
+        .filter((c) => normState(c.state_code ?? "") === st && c.active !== false)
+        .map((c) => normCity(c.city_name ?? ""))
+        .filter(Boolean)
+    );
+
+    if (!validCities.has(ct)) {
+      skipResetRef.current = true;
+      setSelectedCity("");
+      setSelectedTerminalId("");
+      setTimeout(() => {
+        skipResetRef.current = false;
+      }, 0);
+      return;
+    }
+  }
+
+  // Terminal validation ONLY after terminal catalog has loaded at least once
+  if (tid && ct && !catalogLoading && terminalCatalogLoadedRef.current) {
+    const t = terminalCatalog.find((x) => String(x.terminal_id) === tid);
+    const ok = !!t && normState(t.state ?? "") === st && normCity(t.city ?? "") === ct && t.active !== false;
+
+    if (!ok) {
+      skipResetRef.current = true;
+      setSelectedTerminalId("");
+      setTimeout(() => {
+        skipResetRef.current = false;
+      }, 0);
+    }
+  }
+}, [selectedState, selectedCity, selectedTerminalId, citiesCatalog, citiesLoading, catalogLoading, terminalCatalog]);
+
+// --- Persist location whenever it changes ---
+useEffect(() => {
+  // Do not persist until we have hydrated for the current effective key
+  if (hydratedForKeyRef.current !== effectiveLocationKey) return;
+  if (locationHydratingRef.current) return;
+
+  // Always persist to anon (so auth flip never loses city/terminal)
+  writePersistedLocation(ANON_LOCATION_KEY, selectedState, selectedCity, selectedTerminalId);
+
+  // Persist to user key when logged in
+  if (authUserId && userLocationKey) {
+    writePersistedLocation(userLocationKey, selectedState, selectedCity, selectedTerminalId);
+  }
+}, [authUserId, effectiveLocationKey, userLocationKey, selectedState, selectedCity, selectedTerminalId]);
+
+// --- Fetch compartments when trailer changes --- when trailer changes ---
   useEffect(() => {
     (async () => {
       setCompError(null);
@@ -1094,29 +1439,75 @@ useEffect(() => {
   }, [selectedTerminalId]);
 
   // --- Option lists for state/city/terminal ---
-  const states = useMemo(() => {
-  return Array.from(new Set(terminalCatalog.map((t) => (t.state ?? "").trim())))
-    .filter(Boolean)
-    .sort();
-}, [terminalCatalog]);
+  const stateOptions = useMemo(() => {
+    // Preferred: states table (shows all 50)
+    if (statesCatalog.length > 0) {
+      return statesCatalog
+        .map((r) => ({
+          code: normState(r.state_code),
+          name: String(r.state_name || "").trim(),
+        }))
+        .filter((r) => r.code);
+    }
 
-const cities = useMemo(() => {
-  return Array.from(
-    new Set(
-      terminalCatalog
-        .filter((t) => (t.state ?? "").trim() === selectedState)
-        .map((t) => (t.city ?? "").trim())
+    // Fallback: derive from terminals table (won't show missing states)
+    const codes = Array.from(new Set(terminalCatalog.map((t) => normState(t.state ?? "")))).filter(
+      Boolean
+    );
+    return codes.map((code) => ({ code, name: code }));
+  }, [statesCatalog, terminalCatalog]);
+
+  const stateNameByCode = useMemo(() => {
+    const m = new Map<string, string>();
+    stateOptions.forEach((s) => m.set(s.code, s.name || s.code));
+    return m;
+  }, [stateOptions]);
+
+  const states = useMemo(() => stateOptions.map((s) => s.code), [stateOptions]);
+
+  const selectedStateLabel = useMemo(() => {
+    if (!selectedState) return "";
+    const code = normState(selectedState);
+    const name = stateNameByCode.get(code) || code;
+    return `${code} — ${name}`;
+  }, [selectedState, stateNameByCode]);
+
+  const cities = useMemo(() => {
+    const st = normState(selectedState);
+    return Array.from(
+      new Set(
+        citiesCatalog
+          .filter((c) => normState(c.state_code ?? "") === st && c.active !== false)
+          .map((c) => normCity(c.city_name ?? ""))
+      )
     )
-  )
-    .filter(Boolean)
-    .sort();
-}, [terminalCatalog, selectedState]);
+      .filter(Boolean)
+      .sort();
+  }, [citiesCatalog, selectedState]);
+
+
+const topCities = useMemo(() => {
+  if (!selectedState || cities.length === 0) return [];
+  const st = normState(selectedState);
+
+  // Manual: starred cities are "Top Cities"
+  const out = cities.filter((c) => starredCitySet.has(cityKey(st, c)));
+  out.sort();
+  return out;
+}, [selectedState, cities, starredCitySet]);
+
+const allCities = useMemo(() => {
+  if (!selectedState) return cities;
+  const st = normState(selectedState);
+  return cities.filter((c) => !starredCitySet.has(cityKey(st, c)));
+}, [selectedState, cities, starredCitySet]);
+
 
 
   const terminalsFiltered = useMemo(() => {
     return terminals
       .filter(
-        (t) => (t.state ?? "").trim() === selectedState && (t.city ?? "").trim() === selectedCity
+        (t) => normState(t.state ?? "") === normState(selectedState) && normCity(t.city ?? "") === normCity(selectedCity)
       )
       .sort((a, b) => {
         const aStar = Boolean(a.starred);
@@ -1129,7 +1520,7 @@ const cities = useMemo(() => {
   const catalogTerminalsInCity = useMemo(() => {
   return terminalCatalog
     .filter(
-      (t) => (t.state ?? "").trim() === selectedState && (t.city ?? "").trim() === selectedCity
+      (t) => normState(t.state ?? "") === normState(selectedState) && normCity(t.city ?? "") === normCity(selectedCity)
     )
     .sort((a, b) => {
   const aInMy = myTerminalIdSet.has(String(a.terminal_id));
@@ -1687,65 +2078,186 @@ console.log("MAIN selectedTerminal", {
   open={locOpen}
   title="Select Location"
   onClose={() => setLocOpen(false)}
->
+ footer={null}>
   <div className="space-y-4">
-  <div className="text-sm text-white/70">
-    Choose your loading city.
-  </div>
+    <div className="text-sm text-white/70">Choose your loading city.</div>
 
-  {/* STATE */}
-  <div>
-    <div className="mb-2 text-xs uppercase tracking-wide text-white/50">State</div>
-    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-      {states.map((s) => {
-        const active = s === selectedState;
-        return (
-          <button
-            key={s}
-            onClick={() => setSelectedState(s)}
-            className={[
-              "rounded-2xl border px-3 py-3 text-left",
-              active ? "border-white/30 bg-white/5" : "border-white/10 hover:bg-white/5",
-            ].join(" ")}
-          >
-            <div className="text-sm font-semibold">{s}</div>
-          </button>
-        );
-      })}
+    {/* STATE (compact / set-and-forget) */}
+    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-xs uppercase tracking-wide text-white/50">State</div>
+          <div className="mt-1 text-sm font-semibold">
+            {selectedState ? selectedStateLabel : "Select a state"}
+          </div>
+          {statesError ? <div className="mt-1 text-xs text-red-400">{statesError}</div> : null}
+        </div>
+
+        <button
+          onClick={() => setStatePickerOpen((v) => !v)}
+          className="rounded-xl border border-white/10 px-3 py-2 text-sm hover:bg-white/5"
+        >
+          {statePickerOpen ? "Close" : "Change"}
+        </button>
+      </div>
+
+      {statePickerOpen ? (
+        <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
+          {statesLoading ? (
+            <div className="col-span-2 sm:col-span-3 text-sm text-white/60">Loading states…</div>
+          ) : (
+            stateOptions.map((s) => {
+              const active = normState(s.code) === normState(selectedState);
+              return (
+                <button
+                  key={s.code}
+                  onClick={() => {
+                    setSelectedState(s.code);
+                    setStatePickerOpen(false);
+                  }}
+                  className={[
+                    "rounded-2xl border px-3 py-3 text-left",
+                    active ? "border-white/30 bg-white/5" : "border-white/10 hover:bg-white/5",
+                  ].join(" ")}
+                >
+                  <div className="text-sm font-semibold">
+                    {s.code} — {s.name || s.code}
+                  </div>
+                </button>
+              );
+            })
+          )}
+        </div>
+      ) : null}
     </div>
-  </div>
 
-  {/* CITY */}
-  <div>
-    <div className="mb-2 text-xs uppercase tracking-wide text-white/50">City</div>
+    {/* CITY (cards) */}
+    <div>
 
-    {!selectedState ? (
-      <div className="text-sm text-white/50">Select a state first.</div>
-    ) : (
+      {!selectedState ? (
+        <div className="text-sm text-white/50">Select a state first.</div>
+      ) : citiesLoading ? (
+        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm text-white/60">
+          Loading cities…
+        </div>
+      ) : citiesError ? (
+        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm text-red-400">
+          {citiesError}
+        </div>
+      ) : cities.length === 0 ? (
+        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm text-white/60">
+          No cities available yet.
+        </div>
+      ) : (
+        
+  <div className="space-y-3">
+    {/* Top Cities (manual starred) */}
+    {topCities.length ? (
+      <div>
+        <div className="mb-2 text-xs uppercase tracking-wide text-white/50">Top Cities</div>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          {topCities.map((c) => {
+            const active = c === selectedCity;
+            return (
+              <div
+                key={`top-${c}`}
+                role="button"
+                tabIndex={0}
+                onClick={() => {
+                  setSelectedCity(c);
+                  setLocOpen(false);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setSelectedCity(c);
+                    setLocOpen(false);
+                  }
+                }}
+                className={[
+                  "rounded-2xl border px-4 py-3 text-left cursor-pointer select-none",
+                  active ? "border-white/30 bg-white/5" : "border-white/10 hover:bg-white/5",
+                ].join(" ")}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-sm font-semibold">{c}</div>
+
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleCityStar(selectedState, c);
+                    }}
+                    aria-label="Unstar city"
+                    className={starBtnClass(true)}
+                  >
+                    ★
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    ) : null}
+
+    {/* Ghost divider */}
+    {topCities.length ? <div className="h-px w-full bg-white/10" /> : null}
+
+    {/* All Cities (non-starred only) */}
+    <div>
+      <div className="mb-2 text-xs uppercase tracking-wide text-white/50">All Cities</div>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        {cities.map((c) => {
+        {allCities.map((c) => {
           const active = c === selectedCity;
+          const starred = isCityStarred(selectedState, c);
+
           return (
-            <button
+            <div
               key={c}
+              role="button"
+              tabIndex={0}
               onClick={() => {
                 setSelectedCity(c);
-                setLocOpen(false); // close after city pick
+                setLocOpen(false);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setSelectedCity(c);
+                  setLocOpen(false);
+                }
               }}
               className={[
-                "rounded-2xl border px-4 py-3 text-left",
+                "rounded-2xl border px-4 py-3 text-left cursor-pointer select-none",
                 active ? "border-white/30 bg-white/5" : "border-white/10 hover:bg-white/5",
               ].join(" ")}
             >
-              <div className="text-sm font-semibold">{c}</div>
-            </button>
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-sm font-semibold">{c}</div>
+
+                <button
+                  type="button"
+                  onClick={(e) => {
+                      e.stopPropagation();
+                      toggleCityStar(selectedState, c);
+                  }}
+                  aria-label={starred ? "Unstar city" : "Star city"}
+                  className={starBtnClass(starred)}
+                >
+                  {starred ? "★" : "☆"}
+                </button>
+              </div>
+            </div>
           );
         })}
       </div>
-    )}
+    </div>
   </div>
-</div>
+)}
+    </div>
 
+    </div>
 </FullscreenModal>
 
 <FullscreenModal
@@ -1874,11 +2386,7 @@ setTerminals((prev: any) => prev.filter((x: any) => String(x.terminal_id) !== ti
 
 
   }}
-  className={`rounded-lg px-2 py-1 text-sm transition ${
-    myTerminalIds.has(String(t.terminal_id))
-      ? "text-yellow-300/90 hover:text-yellow-200"
-      : "text-white/40 hover:text-white/70"
-  }`}
+  className={starBtnClass(myTerminalIds.has(String(t.terminal_id)))}
   aria-label={myTerminalIds.has(String(t.terminal_id)) ? "Remove from My Terminals" : "Add to My Terminals"}
   title={myTerminalIds.has(String(t.terminal_id)) ? "Remove from My Terminals" : "Add to My Terminals"}
 >
@@ -2086,10 +2594,7 @@ setMyTerminalIds((prev) => {
                         }
 
                       }}
-                      className={[
-                        "rounded-lg px-2 py-1 text-sm transition",
-                        isInMy ? "text-yellow-300/90 hover:text-yellow-200" : "text-white/50 hover:text-white",
-                      ].join(" ")}
+                      className={starBtnClass(isInMy)}
                       aria-label={isInMy ? "Remove from My Terminals" : "Add to My Terminals"}
                       title={isInMy ? "Remove from My Terminals" : "Add to My Terminals"}
                     >
