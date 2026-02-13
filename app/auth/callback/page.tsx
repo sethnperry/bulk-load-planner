@@ -9,34 +9,39 @@ export default function AuthCallbackPage() {
   const [msg, setMsg] = useState("Signing you in...");
 
   useEffect(() => {
-    (async () => {
-      try {
-        const url = new URL(window.location.href);
-        const code = url.searchParams.get("code");
+  (async () => {
+    try {
+      console.log("[AuthCallback] href:", window.location.href);
 
-        if (!code) {
-          setMsg("No code found in the URL. Try logging in again.");
-          return;
-        }
+      // Let Supabase auto-detect tokens in URL
+      const { data, error } = await supabase.auth.getSession();
 
-        const { error } = await supabase.auth.exchangeCodeForSession(code);
-
-        if (error) {
-          setMsg("Auth error: " + error.message);
-          return;
-        }
-
-        // Session should now exist on THIS origin (localhost or LAN IP)
-        router.replace("/calculator");
-      } catch (e: any) {
-        setMsg("Auth error: " + (e?.message ?? String(e)));
+      if (error) {
+        setMsg("Auth error: " + error.message);
+        return;
       }
-    })();
-  }, [router]);
+
+      if (!data.session) {
+        setMsg("No session found. Open the newest magic link.");
+        return;
+      }
+
+      router.replace("/calculator");
+    } catch (e: any) {
+      setMsg("Auth error: " + (e?.message ?? String(e)));
+    }
+  })();
+}, [router]);
+
 
   return (
     <main style={{ padding: 24 }}>
       <h1 style={{ fontSize: 20, fontWeight: 700 }}>Signing in…</h1>
+
+      <p style={{ opacity: 0.7, fontSize: 12, wordBreak: "break-all" }}>
+        href: {typeof window !== "undefined" ? window.location.href : ""}
+      </p>
+
       <p style={{ marginTop: 12 }}>{msg}</p>
     </main>
   );

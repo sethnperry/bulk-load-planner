@@ -2517,7 +2517,6 @@ useEffect(() => {
       </section>
 
       {/* Terminal */}
-      {false && (
       <section style={styles.section}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
           <h2 style={{ margin: 0 }}>Terminal</h2>
@@ -2656,7 +2655,6 @@ console.log("MAIN selectedTerminal", {
 
 
       </section>
-      )}
 
       {/* Products */}
       <section style={styles.section}>
@@ -2678,9 +2676,18 @@ console.log("MAIN selectedTerminal", {
           <div style={styles.help}>No products found for this terminal.</div>
         )}
 
-{/* Temp (°F) input removed; use the Product Temp slider below. */}
-
-
+<div style={{ ...styles.row, marginTop: 10 }}>
+   <div>
+    <label style={styles.label}>Temp (°F)</label>
+    <input
+      type="number"
+      value={tempF}
+      onChange={(e) => setTempF(Number(e.target.value))}
+      style={{ ...styles.input, width: 140 }}
+      disabled={!selectedTerminalId}
+    />
+  </div>
+</div>
 
 {selectedTerminalId && (
   <div
@@ -3088,7 +3095,7 @@ console.log("MAIN selectedTerminal", {
 )}
 
 
-        {false && terminalProducts.length > 0 && (
+        {terminalProducts.length > 0 && (
           <table style={styles.table}>
             <thead>
               <tr>
@@ -3312,10 +3319,68 @@ console.log("MAIN selectedTerminal", {
         )}
 
         {compartments.length > 0 && (
-          <>
-            {/* (UI) removed compartments detail table */}
-          </>
+          <table style={styles.table}>
+            <thead>
+              <tr>
+                <th style={styles.th}>Comp #</th>
+<th style={styles.th}>Max Gallons</th>
+<th style={styles.th}>Position</th>
+<th style={styles.th}>Empty</th>
+<th style={styles.th}>Product</th>
 
+              </tr>
+            </thead>
+            <tbody>
+              {compartments.map((c) => (
+                <tr key={c.comp_number}>
+                  <td style={styles.td}>{c.comp_number}</td>
+                  <td style={styles.td}>{c.max_gallons}</td>
+                  <td style={styles.td}>{c.position}</td>
+<td style={styles.td}>
+  <input
+    type="checkbox"
+    checked={!!compPlan[c.comp_number]?.empty}
+    onChange={(e) => {
+      const checked = e.target.checked;
+      setCompPlan((prev) => ({
+        ...prev,
+        [c.comp_number]: {
+          empty: checked,
+          productId: checked ? "" : (prev[c.comp_number]?.productId ?? ""),
+        },
+      }));
+    }}
+  />
+</td>
+
+<td style={styles.td}>
+  <select
+    value={compPlan[c.comp_number]?.productId ?? ""}
+    onChange={(e) => {
+      const value = e.target.value;
+      setCompPlan((prev) => ({
+        ...prev,
+        [c.comp_number]: {
+          empty: prev[c.comp_number]?.empty ?? false,
+          productId: value,
+        },
+      }));
+    }}
+    style={{ ...styles.select, width: 240 }}
+    disabled={!!compPlan[c.comp_number]?.empty || terminalProducts.length === 0}
+  >
+    <option value="">Select…</option>
+    {terminalProducts.map((p) => (
+      <option key={p.product_id} value={p.product_id}>
+        {p.product_name ?? "(unnamed product)"}
+      </option>
+    ))}
+  </select>
+</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         )}
       
         <FullscreenModal
