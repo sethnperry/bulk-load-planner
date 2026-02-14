@@ -34,3 +34,41 @@ export async function beginLoad(payload: BeginLoadPayload) {
   if (error) throw error;
   return data as { load_id: string; lines_inserted: number };
 }
+
+// Phase 4: complete load
+export type CompleteLoadLine = {
+  comp_number: number;
+  actual_gallons: number | null;
+  actual_lbs: number | null;
+  temp_f: number | null;
+};
+
+export type CompleteLoadPayload = {
+  load_id: string;
+  loaded_at?: string | null; // ISO timestamp
+  completed_at?: string | null; // ISO timestamp
+  lines: CompleteLoadLine[];
+    // NEW (optional)
+  product_updates?: Array<{
+    product_id: string;
+    api: number;
+    temp_f: number | null;
+  }>;
+};
+
+export type CompleteLoadResult = {
+  ok: boolean;
+  load_id: string;
+  planned_lbs: number;
+  actual_lbs: number;
+  diff_lbs: number;
+  completed_at: string;
+};
+
+export async function completeLoad(payload: CompleteLoadPayload) {
+  const { data, error } = await supabase.rpc("complete_load", { payload });
+  if (error) throw error;
+  return data as CompleteLoadResult;
+}
+
+

@@ -1,3 +1,4 @@
+// lib/supabase/client.ts
 import { createClient } from "@supabase/supabase-js";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -11,4 +12,25 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=${supabaseAnonKey ? "[set]" : "[missing]"}`
   );
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+/**
+ * Browser-only storage for auth persistence.
+ * In App Router, modules can be imported in server contexts;
+ * avoid touching window/localStorage when it's not available.
+ */
+const storage =
+  typeof window !== "undefined"
+    ? window.localStorage
+    : {
+        getItem: () => null,
+        setItem: () => {},
+        removeItem: () => {},
+      };
+
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true,
+    storage,
+  },
+});

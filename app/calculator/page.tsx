@@ -4,7 +4,24 @@ import { QuickPanel } from "./QuickPanel";
 import { FullscreenModal } from "@/lib/ui/FullscreenModal";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { beginLoad } from "@/lib/supabase/load";
+import { beginLoad, completeLoad } from "@/lib/supabase/load";
+import PlanSection from "./sections/PlanSection";
+import PlannerControls from "./sections/PlannerControls";
+import LocationBar from "./sections/LocationBar";
+import EquipmentBar from "./sections/EquipmentBar";
+import ProductTempModal from "./modals/ProductTempModal";
+import EquipmentModal from "./modals/EquipmentModal";
+import LocationModal from "./modals/LocationModal";
+import MyTerminalsModal from "./modals/MyTerminalsModal";
+import TerminalCatalogModal from "./modals/TerminalCatalogModal";
+import { styles } from "./ui/styles";
+import { addDaysISO_, formatMDYWithCountdown_, isPastISO_ } from "./utils/dates";
+import { normCity, normState } from "./utils/normalize";
+import CompleteLoadModal from "./modals/CompleteLoadModal";
+import { useTerminalFilters } from "./hooks/useTerminalFilters";
+import { usePlanRows } from "./hooks/usePlanRows";
+import LoadingModal from "./modals/LoadingModal";
+import TempDialModal from "./modals/TempDialModal";
 
 
 // UI theme constants (keep local + simple)
@@ -202,6 +219,24 @@ function TempDial({ value, min, max, step, onChange }: TempDialProps) {
   );
 }
 
+function isoTodayInTimeZone_(timeZone?: string | null) {
+  const tz = timeZone || "America/New_York";
+
+  // en-CA gives YYYY-MM-DD ordering
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+
+  const y = parts.find((p) => p.type === "year")?.value ?? "1970";
+  const m = parts.find((p) => p.type === "month")?.value ?? "01";
+  const d = parts.find((p) => p.type === "day")?.value ?? "01";
+  return `${y}-${m}-${d}`; // YYYY-MM-DD
+}
+
+
 // SVG arc helpers (small + dependency-free)
 function polarToCartesian(cx: number, cy: number, r: number, deg: number) {
   const rad = (deg - 90) * (Math.PI / 180);
@@ -299,122 +334,12 @@ type ProductRow = {
   hex_code?: string | null;
   api_60: number | null;
   alpha_per_f: number | null;
-};
-
-const styles = {
-  page: {
-    padding: 16,
-    maxWidth: 1100,
-    margin: "0 auto",
-  } as React.CSSProperties,
-
-  section: {
-    marginTop: 18,
-    padding: 14,
-    border: "1px solid #333",
-    borderRadius: 10,
-    background: "#0b0b0b",
-  } as React.CSSProperties,
-
-  row: {
-    display: "flex",
-    gap: 12,
-    flexWrap: "wrap",
-    alignItems: "end",
-  } as React.CSSProperties,
-
-  label: {
-    display: "block",
-    marginBottom: 6,
-    opacity: 0.9,
-  } as React.CSSProperties,
-
-  input: {
-    padding: 10,
-    borderRadius: 8,
-    border: "1px solid #444",
-    background: "#111",
-    color: "#fff",
-    outline: "none",
-  } as React.CSSProperties,
-
-  select: {
-    padding: 10,
-    borderRadius: 8,
-    border: "1px solid #444",
-    background: "#111",
-    color: "#fff",
-    outline: "none",
-  } as React.CSSProperties,
-
-  help: {
-    marginTop: 8,
-    opacity: 0.85,
-    fontSize: 14,
-  } as React.CSSProperties,
-
-  error: {
-    color: "#ff6b6b",
-    marginTop: 8,
-    fontSize: 14,
-  } as React.CSSProperties,
-
-  table: {
-    width: "100%",
-    borderCollapse: "collapse",
-    marginTop: 10,
-  } as React.CSSProperties,
-
-  th: {
-    textAlign: "left",
-    padding: 10,
-    borderBottom: "1px solid #333",
-    fontSize: 14,
-    opacity: 0.9,
-  } as React.CSSProperties,
-
-  td: {
-    padding: 10,
-    borderBottom: "1px solid #222",
-    fontSize: 14,
-  } as React.CSSProperties,
-
-  badge: {
-    display: "inline-block",
-    padding: "4px 8px",
-    borderRadius: 999,
-    border: "1px solid #444",
-    background: "#111",
-    fontSize: 12,
-    opacity: 0.9,
-  } as React.CSSProperties,
-
-  smallBtn: {
-    padding: "10px 12px",
-    borderRadius: 10,
-    border: "1px solid rgba(255,255,255,0.14)",
-    background: "rgba(255,255,255,0.06)",
-    color: "white",
-    cursor: "pointer",
-    fontSize: 13,
-    lineHeight: 1.1,
-    whiteSpace: "nowrap",
-  } as React.CSSProperties,
-
-  doneBtn: {
-    padding: "12px 14px",
-    borderRadius: 12,
-    border: "1px solid rgba(255,255,255,0.14)",
-    background: "rgba(0,0,0,0.55)",
-    color: "rgba(255,255,255,0.92)",
-    cursor: "pointer",
-    fontSize: 14,
-    fontWeight: 800,
-    letterSpacing: 0.2,
-  } as React.CSSProperties,
-
+  last_api?: number | null;
+last_api_updated_at?: string | null;
 
 };
+
+
 
 const PLAN_SNAPSHOT_VERSION = 1;
 
@@ -433,13 +358,6 @@ const [catalogExpandedId, setCatalogExpandedId] = useState<string | null>(null);
 const [myTerminalIds, setMyTerminalIds] = useState<Set<string>>(new Set());
 
 
-
-  function normState(s: string) {
-    return String(s || "").trim().toUpperCase();
-  }
-  function normCity(s: string) {
-    return String(s || "").trim();
-  }
 
   const starBtnClass = (active: boolean) =>
     [
@@ -550,6 +468,16 @@ function toggleCityStar(state: string, city: string) {
 // =======================
 const [activeLoadId, setActiveLoadId] = useState<string | null>(null);
 const [beginLoadBusy, setBeginLoadBusy] = useState(false);
+
+const [completeOpen, setCompleteOpen] = useState(false);
+const [completeBusy, setCompleteBusy] = useState(false);
+const [completeError, setCompleteError] = useState<string | null>(null);
+
+const [actualByComp, setActualByComp] = useState<
+  Record<number, { actual_gallons: number | null; actual_lbs: number | null; temp_f: number | null }>
+>({});
+
+
 
 // Derive city_id from citiesCatalog using selectedState + selectedCity
 const selectedCityId = useMemo<string | null>(() => {
@@ -667,6 +595,30 @@ useEffect(() => {
 }
 
 
+async function refreshTerminalAccessForUser() {
+  try {
+    const { data: { user }, error: userErr } = await supabase.auth.getUser();
+    if (userErr) throw userErr;
+    if (!user?.id) return;
+
+    const { data, error } = await supabase
+      .from("terminal_access")
+      .select("terminal_id, carded_on")
+      .eq("user_id", user.id);
+
+    if (error) throw error;
+
+    // Assuming you already maintain this map in state:
+    // const [accessDateByTerminalId, setAccessDateByTerminalId] = useState<Record<string,string|undefined>>({})
+    const next: Record<string, string> = {};
+    for (const row of data ?? []) {
+      if (row?.terminal_id && row?.carded_on) next[String(row.terminal_id)] = String(row.carded_on);
+    }
+    setAccessDateByTerminalId(next);
+  } catch (e) {
+    console.error("refreshTerminalAccessForUser failed:", e);
+  }
+}
 
 
 async function setAccessDateForTerminal_(terminalId: string, isoDate: string) {
@@ -754,7 +706,15 @@ async function doGetCardedForTerminal(terminalId: string) {
     setTermError(null);
     setCardingBusyId(String(terminalId));
 
-    const cardedOnISO = new Date().toISOString().slice(0, 10);
+    const tzForCarded =
+  (terminals as any[]).find((t) => String(t.terminal_id) === String(terminalId))?.timezone ??
+  (terminalCatalog as any[]).find((t) => String(t.terminal_id) === String(terminalId))?.timezone ??
+  selectedTerminalTimeZone ??
+  null;
+
+
+
+    const cardedOnISO = isoTodayInTimeZone_(tzForCarded);
 
     const { error: rpcError } = await supabase.rpc("get_carded", {
       p_terminal_id: terminalId,
@@ -767,6 +727,7 @@ async function doGetCardedForTerminal(terminalId: string) {
     }
 
     await loadMyTerminals();
+    await refreshTerminalAccessForUser();
     setSelectedTerminalId(String(terminalId));
     setTermOpen(false);
   } finally {
@@ -788,13 +749,119 @@ const [catalogEditingDateId, setCatalogEditingDateId] = useState<string | null>(
   const [tpLoading, setTpLoading] = useState(false);
   const [tpError, setTpError] = useState<string | null>(null);
 
+  // Map terminal_products -> { [productId]: { last_api, last_api_updated_at } }
+const lastProductInfoById = useMemo(() => {
+  const out: Record<string, { last_api: number | null; last_api_updated_at: string | null }> = {};
+  for (const tp of terminalProducts ?? []) {
+    const pid = String((tp as any).product_id ?? "");
+    if (!pid) continue;
+    out[pid] = {
+      last_api: (tp as any).last_api ?? null,
+      last_api_updated_at: (tp as any).last_api_updated_at ?? null,
+    };
+  }
+  return out;
+}, [terminalProducts]);
+
+const productButtonCodeById = useMemo(() => {
+  const rec: Record<string, string> = {};
+  for (const p of terminalProducts) {
+    if (p.product_id && p.button_code) rec[p.product_id] = String(p.button_code);
+  }
+  return rec;
+}, [terminalProducts]);
+
+const productHexCodeById = useMemo(() => {
+  const rec: Record<string, string> = {};
+  for (const p of terminalProducts) {
+    if (p.product_id && p.hex_code) rec[p.product_id] = String(p.hex_code);
+  }
+  return rec;
+}, [terminalProducts]);
+
+  // Selected terminal timezone (derived from terminals + selectedTerminalId)
+const selectedTerminalTimeZone = useMemo(() => {
+  const tid = String(selectedTerminalId ?? "");
+  if (!tid) return null;
+
+  const t = (terminals as any[])?.find(
+    (x) => String(x.terminal_id) === tid
+  );
+
+  return (t?.timezone ?? null) as string | null;
+}, [selectedTerminalId, terminals]);
+
+useEffect(() => {
+  if (!selectedTerminalId) return;
+
+  async function loadTerminalProducts() {
+    const { data, error } = await supabase
+      .from("terminal_products")
+      .select("terminal_id, product_id, last_api, last_api_updated_at, last_temp_f, last_loaded_at")
+      .eq("terminal_id", selectedTerminalId);
+
+    if (!error) {
+  const rows = (data ?? []) as any[];
+  setTerminalProducts(rows as any);
+
+  const m = new Map<string, { last_api: number | null; last_api_updated_at: string | null }>();
+
+  for (const tp of rows) {
+    const pid = String(tp?.product_id ?? "");
+    if (!pid) continue;
+
+    m.set(pid, {
+      last_api: tp?.last_api ?? null,
+      last_api_updated_at: tp?.last_api_updated_at ?? null,
+    });
+  }
+
+  setLastProductInfoMapById(m);
+}
+
+  }
+
+  loadTerminalProducts();
+}, [selectedTerminalId]);
+
+
   // -----------------------
   // Planning inputs
   // -----------------------
 
   // Temperature (applies to all compartments for now)
   const [tempF, setTempF] = useState<number>(60);
-  const [tempDialOpen, setTempDialOpen] = useState(false);
+const [tempDialOpen, setTempDialOpen] = useState(false);
+
+// ===== New Phase 4 loading workflow state =====
+const [loadingOpen, setLoadingOpen] = useState(false);
+const [loadingModalError, setLoadingModalError] = useState<string | null>(null);
+
+// Per-product inputs keyed by product_id: { api, tempF }
+const [productInputs, setProductInputs] = useState<Record<string, { api?: string; tempF?: number }>>({});
+const [lastProductInfoMapById, setLastProductInfoMapById] = useState<
+  Map<
+    string,
+    {
+      last_api: number | null;
+      last_api_updated_at: string | null;
+    }
+  >
+>(new Map());
+
+
+// Temp dial context (which product are we editing?)
+const [tempDial2Open, setTempDial2Open] = useState(false);
+const [tempDial2ProductId, setTempDial2ProductId] = useState<string | null>(null);
+
+// Report shown after LOADED
+const [loadReport, setLoadReport] = useState<null | {
+  planned_total_gal: number;
+  planned_gross_lbs: number | null;
+  actual_gross_lbs: number | null;
+  diff_lbs: number | null;
+}>(null);
+
 
  
   // Per-compartment planning inputs
@@ -1218,6 +1285,12 @@ const myTerminalIdSet = useMemo(
     [terminals, selectedTerminalId]
   );
 
+  const terminalTimeZone =
+  (selectedTerminal as any)?.timezone ??
+  (selectedTerminal as any)?.terminal_timezone ??
+  (selectedTerminal as any)?.tz ??
+  null;
+
 const equipmentLabel =
   selectedCombo?.combo_name ??
   (selectedCombo
@@ -1302,74 +1375,6 @@ function sortMyTerminals(rows: TerminalRow[]) {
   });
 }
 
-// -----------------------
-  // Helpers
-  // -----------------------
-
-function todayYMD() {
-  const d = new Date();
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
-}
-
-function toLocalMidnight(dateLike: string) {
-  // Accepts "YYYY-MM-DD" OR "YYYY-MM-DDTHH:mm:ss..." and normalizes to local midnight
-  const ymd = dateLike.slice(0, 10);
-  const [y, m, d] = ymd.split("-").map(Number);
-  return new Date(y, (m ?? 1) - 1, d ?? 1, 0, 0, 0, 0);
-}
-
-function todayLocalMidnight() {
-  const n = new Date();
-  return new Date(n.getFullYear(), n.getMonth(), n.getDate(), 0, 0, 0, 0);
-}
-
-
-
-function formatMDY(dateLike: string) {
-  const ymd = dateLike.slice(0, 10);
-  const [y, m, d] = ymd.split("-");
-  return `${m}-${d}-${y}`;
-}
-
-
-function isoToday_() {
-  return new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-}
-
-function addDaysISO_(iso: string, days: number) {
-  if (!iso) return "";
-  const [y, m, d] = iso.slice(0, 10).split("-").map((v) => Number(v));
-  const dt = new Date(y, (m || 1) - 1, d || 1);
-  dt.setDate(dt.getDate() + (Number(days) || 0));
-  return dt.toISOString().slice(0, 10);
-}
-
-function daysUntilISO_(iso: string | null | undefined) {
-  if (!iso) return null;
-  const todayISO = isoToday_();
-  const [ty, tm, td] = todayISO.slice(0, 10).split("-").map((v) => Number(v));
-  const [y, m, d] = iso.slice(0, 10).split("-").map((v) => Number(v));
-  const a = new Date(ty, (tm || 1) - 1, td || 1);
-  const b = new Date(y, (m || 1) - 1, d || 1);
-  const ms = b.getTime() - a.getTime();
-  return Math.round(ms / (1000 * 60 * 60 * 24));
-}
-
-function formatMDYWithCountdown_(iso: string) {
-  const mdy = formatMDY(iso);
-  const d = daysUntilISO_(iso);
-  if (d === null) return mdy;
-  return `${mdy} (${d} days)`;
-}
-
-function isPastISO_(iso: string | null | undefined) {
-  if (!iso) return false;
-  // Lexicographic compare works for YYYY-MM-DD
-  return iso < isoToday_();
-}
 
 function normalizeStatus_(raw: any): "valid" | "expired" | "not_carded" {
   const s =
@@ -1417,6 +1422,7 @@ const productNameById = useMemo(() => {
   }
   return m;
 }, [terminalProducts]);
+
 
 
 
@@ -1661,41 +1667,15 @@ const capacityGallonsActive = useMemo(() => {
   return activeComps.reduce((s, c) => s + Number(c.maxGallons || 0), 0);
 }, [activeComps]);
 
-const plannedResult = useMemo(() => {
-  // no plan unless we have active comps + allowed lbs
-  if (!selectedTrailerId) return { planRows: [] as PlanRow[], effectiveMaxGallons: 0 };
+const plannedResult = usePlanRows({
+  selectedTrailerId,
+  activeComps,
+  allowedLbs,
+  cgBias,
+  capacityGallonsActive,
+  planForGallons,
+});
 
-  if (activeComps.length === 0) {
-    return { planRows: [] as PlanRow[], effectiveMaxGallons: 0 };
-  }
-
-  const cap = Math.max(0, capacityGallonsActive);
-  if (!(cap > 0)) {
-    return { planRows: [] as PlanRow[], effectiveMaxGallons: 0 };
-  }
-
-
-  // Binary search max gallons that keeps weight <= allowedLbs
-  let lo = 0;
-  let hi = cap;
-
-  for (let i = 0; i < 22; i++) {
-    const mid = (lo + hi) / 2;
-    const rows = planForGallons(mid, activeComps, cgBias);
-    const lbs = rows.reduce((s, r) => s + r.planned_gallons * r.lbsPerGal, 0);
-    if (lbs <= allowedLbs + 1e-6) lo = mid;
-    else hi = mid;
-  }
-
-  const effectiveMaxGallons = lo;
-
-  // Decide target gallons 
-  const requested = effectiveMaxGallons;
-
-  const finalRows = planForGallons(requested, activeComps, cgBias);
-
-  return { planRows: finalRows, effectiveMaxGallons };
-}, [selectedTrailerId, activeComps, allowedLbs, cgBias, capacityGallonsActive]);
 
 const planRows = plannedResult.planRows;
 
@@ -1797,7 +1777,10 @@ useEffect(() => {
 
 
   useEffect(() => {
-    loadMyTerminals();
+    (async () => {
+      await loadMyTerminals();
+      await refreshTerminalAccessForUser();
+    })();
   }, []);
 
 
@@ -2411,33 +2394,14 @@ const allCities = useMemo(() => {
 }, [selectedState, cities, starredCitySet]);
 
 
+const { terminalsFiltered, catalogTerminalsInCity } = useTerminalFilters({
+  terminals,
+  terminalCatalog,
+  selectedState,
+  selectedCity,
+  myTerminalIdSet,
+});
 
-  const terminalsFiltered = useMemo(() => {
-    return terminals
-      .filter(
-        (t) => normState(t.state ?? "") === normState(selectedState) && normCity(t.city ?? "") === normCity(selectedCity)
-      )
-      .sort((a, b) => {
-        const aStar = Boolean(a.starred);
-        const bStar = Boolean(b.starred);
-        if (aStar !== bStar) return aStar ? -1 : 1;
-        return String(a.terminal_name ?? "").localeCompare(String(b.terminal_name ?? ""));
-      });
-  }, [terminals, selectedState, selectedCity]);
-
-  const catalogTerminalsInCity = useMemo(() => {
-  return terminalCatalog
-    .filter(
-      (t) => normState(t.state ?? "") === normState(selectedState) && normCity(t.city ?? "") === normCity(selectedCity)
-    )
-    .sort((a, b) => {
-  const aInMy = myTerminalIdSet.has(String(a.terminal_id));
-  const bInMy = myTerminalIdSet.has(String(b.terminal_id));
-  if (aInMy !== bInMy) return aInMy ? -1 : 1;
-  return String(a.terminal_name ?? "").localeCompare(String(b.terminal_name ?? ""));
-})
-
-}, [terminalCatalog, selectedState, selectedCity, myTerminalIdSet]);
 
 useEffect(() => {
   (async () => {
@@ -2464,6 +2428,152 @@ useEffect(() => {
     setAccessDateByTerminalId(map);
   })();
 }, [authUserId, selectedState, selectedCity, catalogTerminalsInCity]);
+
+function alphaPerFForProductId(productId: string): number | null {
+  const p = terminalProducts.find((x: any) => x.product_id === productId);
+  if (!p || p.alpha_per_f == null) return null;
+  const v = Number(p.alpha_per_f);
+  return Number.isFinite(v) ? v : null;
+}
+
+function computePlannedGrossLbs_(): number | null {
+  const t = Number(tare);
+  const b = Number(buffer);
+  const payload = Number(plannedWeightLbs);
+  if (![t, b, payload].every((x) => Number.isFinite(x))) return null;
+  return t + b + payload;
+}
+
+async function onLoadedFromLoadingModal() {
+  if (!activeLoadId) return;
+
+  // Validate: require API + Temp per product group that appears in plan
+  const requiredProductIds = Array.from(
+    new Set(
+      (planRows as any[])
+        .filter((r) => r?.productId && Number(r?.planned_gallons ?? 0) > 0)
+        .map((r) => String(r.productId))
+    )
+  );
+
+  for (const pid of requiredProductIds) {
+    const apiStr = String(productInputs[pid]?.api ?? "").trim();
+    const tempVal = productInputs[pid]?.tempF;
+
+    const apiNum = Number(apiStr);
+    if (!apiStr || !Number.isFinite(apiNum)) {
+      alert(`Enter API for ${productNameById.get(pid) ?? pid}`);
+      return;
+    }
+    if (tempVal == null || !Number.isFinite(Number(tempVal))) {
+      alert(`Enter Temp for ${productNameById.get(pid) ?? pid}`);
+      return;
+    }
+  }
+
+  // Build actualByComp from planned gallons (gallons unchanged)
+  const nextActualByComp: Record<number, { actual_gallons: number | null; actual_lbs: number | null; temp_f: number | null }> =
+    {};
+
+  let actualPayloadLbs = 0;
+
+  for (const r of planRows as any[]) {
+    const comp = Number(r?.comp_number ?? 0);
+    const gallons = Number(r?.planned_gallons ?? 0);
+    const pid = r?.productId ? String(r.productId) : null;
+
+    if (!Number.isFinite(comp) || comp <= 0) continue;
+    if (!pid || !Number.isFinite(gallons) || gallons <= 0) continue;
+
+    const apiNum = Number(String(productInputs[pid]?.api ?? "").trim());
+    const tempVal = Number(productInputs[pid]?.tempF);
+
+    const alpha = alphaPerFForProductId(pid);
+    if (!Number.isFinite(apiNum) || !Number.isFinite(tempVal) || alpha == null) {
+      // If something’s missing, fall back to planned values already in the row
+      const lpgPlanned = Number(r?.lbsPerGal ?? 0);
+      const lbsPlanned = gallons * (Number.isFinite(lpgPlanned) ? lpgPlanned : 0);
+      nextActualByComp[comp] = { actual_gallons: gallons, actual_lbs: Number.isFinite(lbsPlanned) ? lbsPlanned : null, temp_f: tempVal };
+      actualPayloadLbs += Number.isFinite(lbsPlanned) ? lbsPlanned : 0;
+      continue;
+    }
+
+    // Use your existing density function (API@60 + alpha + temp)
+    const lpg = lbsPerGallonAtTemp(apiNum, alpha, tempVal);
+    const lbs = gallons * lpg;
+
+    nextActualByComp[comp] = {
+      actual_gallons: gallons,
+      actual_lbs: Number.isFinite(lbs) ? lbs : null,
+      temp_f: tempVal,
+    };
+
+    if (Number.isFinite(lbs)) actualPayloadLbs += lbs;
+  }
+
+  setActualByComp(nextActualByComp);
+
+  // Call existing complete_load RPC (UI is stable; backend shape can evolve later)
+  try {
+    setCompleteBusy(true);
+    setCompleteError(null);
+
+    const lines = Object.entries(nextActualByComp).map(([compStr, a]) => ({
+      comp_number: Number(compStr),
+      actual_gallons: a.actual_gallons ?? null,
+      actual_lbs: a.actual_lbs ?? null,
+      temp_f: a.temp_f ?? null,
+    }));
+
+    const product_updates = requiredProductIds.map((pid) => ({
+      product_id: pid,
+      api: Number(String(productInputs[pid]?.api ?? "").trim()),
+      temp_f: (productInputs[pid]?.tempF ?? null) as number | null,
+    }));
+
+
+        const res = await completeLoad({
+      load_id: activeLoadId,
+      lines,
+      completed_at: new Date().toISOString(),
+      product_updates,
+    });
+console.log("complete_load result:", res);
+
+    // Compute report numbers
+    const plannedGross = computePlannedGrossLbs_();
+    const actualGross =
+      Number.isFinite(Number(tare)) && Number.isFinite(Number(buffer)) && Number.isFinite(Number(actualPayloadLbs))
+        ? Number(tare) + Number(buffer) + Number(actualPayloadLbs)
+        : null;
+
+        const diff = Number.isFinite(Number(res?.diff_lbs))
+      ? Number(res.diff_lbs)
+      : plannedGross != null && actualGross != null
+      ? actualGross - plannedGross
+      : null;
+
+    await refreshTerminalAccessForUser();
+
+    setLoadReport({
+      planned_total_gal: Number(plannedGallonsTotal),
+      planned_gross_lbs: plannedGross,
+      actual_gross_lbs: actualGross,
+      diff_lbs: diff,
+    });
+
+    // Close the loading workflow
+    setLoadingOpen(false);
+  } catch (e: any) {
+  console.error("complete_load failed:", e);
+  alert(e?.message ?? String(e));
+  setCompleteError(e?.message ?? String(e));
+} finally {
+  setCompleteBusy(false);
+}
+
+}
+
 
 // =======================
 // begin_load → Supabase
@@ -2536,8 +2646,28 @@ async function beginLoadToSupabase() {
 
     const result = await beginLoad(payload);
 
-    setActiveLoadId(result.load_id);
-    alert(`Load started.\nLoad ID:\n${result.load_id}`);
+setActiveLoadId(result.load_id);
+
+// Initialize per-product inputs for products present in the plan
+const nextInputs: Record<string, { api?: string; tempF?: number }> = {};
+for (const r of planRows as any[]) {
+  const pid = r?.productId ? String(r.productId) : null;
+  const g = Number(r?.planned_gallons ?? 0);
+  if (!pid || !Number.isFinite(g) || g <= 0) continue;
+
+  if (!nextInputs[pid]) {
+    // Default temp to current global tempF so behavior stays familiar
+    nextInputs[pid] = { api: "", tempF: Number(tempF) };
+  }
+}
+setProductInputs(nextInputs);
+
+// Open the new Loading modal (Phase 4)
+setLoadingOpen(true);
+setLoadingModalError(null);
+
+// No alert (modal is the new workflow surface)
+
   } catch (err: any) {
     console.error(err);
     alert(err?.message ?? "Failed to begin load.");
@@ -2546,14 +2676,63 @@ async function beginLoadToSupabase() {
   }
 }
 
+async function completeLoadToSupabase() {
+  if (!activeLoadId) return;
+
+  try {
+    setCompleteBusy(true);
+    setCompleteError(null);
+
+    const lines = (planRows as any[])
+      .map((r) => {
+        const comp = Number((r as any).comp_number ?? (r as any).compNumber ?? 0);
+        if (!Number.isFinite(comp) || comp <= 0) return null;
+
+        const a = actualByComp[comp] ?? { actual_gallons: null, actual_lbs: null, temp_f: null };
+
+        return {
+          comp_number: comp,
+          actual_gallons: a.actual_gallons ?? null,
+          actual_lbs: a.actual_lbs ?? null,
+          temp_f: a.temp_f ?? null,
+        };
+      })
+      .filter(Boolean) as Array<{ comp_number: number; actual_gallons: number | null; actual_lbs: number | null; temp_f: number | null }>;
+
+    const res = await completeLoad({
+      load_id: activeLoadId,
+      lines,
+      completed_at: new Date().toISOString(),
+    });
+
+    await refreshTerminalAccessForUser();
+
+    // Keep behavior minimal: close modal. (We can also surface res.diff_lbs in UI later.)
+    setCompleteOpen(false);
+    // Optional: you might choose to clear activeLoadId here later, but NOT doing it now to avoid behavior drift.
+    // setActiveLoadId(null);
+
+    console.log("complete_load result:", res);
+  } catch (e: any) {
+    setCompleteError(e?.message ?? String(e));
+  } finally {
+    setCompleteBusy(false);
+  }
+}
+
+
 
   return (
     <div style={styles.page}>
       <h1 style={{ marginBottom: 6 }}>Calculator</h1>
-<div className="my-3">
-<TopTiles
+<LocationBar
+  styles={styles}
   locationTitle={locationLabel ?? "City, State"}
-  ambientSubtitle={locationLabel ? `${ambientTempLoading ? "…" : ambientTempF == null ? "—" : Math.round(ambientTempF)}° ambient` : undefined}
+  ambientSubtitle={
+    locationLabel
+      ? `${ambientTempLoading ? "…" : ambientTempF == null ? "—" : Math.round(ambientTempF)}° ambient`
+      : undefined
+  }
   terminalTitle={terminalLabel ?? "Terminal"}
   terminalSubtitle={terminalCardedText}
   terminalSubtitleClassName={terminalCardedClass}
@@ -2562,61 +2741,22 @@ async function beginLoadToSupabase() {
   terminalEnabled={terminalEnabled}
   locationSelected={Boolean(selectedCity && selectedState)}
   terminalSelected={Boolean(selectedTerminalId)}
+  snapshotSlots={SnapshotSlots}
+  authEmail={authEmail}
 />
-        {SnapshotSlots}
 
 
+            {/* Equipment */}
+      <EquipmentBar
+        styles={styles}
+        combosLoading={combosLoading}
+        combosError={combosError}
+        combos={combos}
+        selectedComboId={selectedComboId}
+        onChangeSelectedComboId={setSelectedComboId}
+        selectedCombo={selectedCombo ?? null}
+      />
 
-
-
-
-</div>
-
-
-
-<div style={{ ...styles.help, marginTop: 6 }}>
-  Auth: {authEmail ? `Logged in as ${authEmail}` : "NOT logged in"}
-</div>
-
-      {/* Equipment */}
-      <section style={styles.section}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-          <h2 style={{ margin: 0 }}>Equipment</h2>
-          <span style={styles.badge}>
-            {combosLoading ? "Loading…" : `${combos.length} combos`}
-          </span>
-        </div>
-
-        {combosError && <div style={styles.error}>Error loading equipment: {combosError}</div>}
-
-        <div style={{ marginTop: 10 }}>
-          <label style={styles.label}>Truck + Trailer</label>
-          <select
-            value={selectedComboId}
-            onChange={(e) => setSelectedComboId(e.target.value)}
-            style={{ ...styles.select, width: 420, maxWidth: "100%" }}
-            disabled={combosLoading || combos.length === 0}
-          >
-            <option value="">Select…</option>
-            {combos.map((c) => (
-              <option key={c.combo_id} value={c.combo_id}>
-                {c.combo_name
-                  ? c.combo_name
-                  : `Truck ${c.truck_id ?? "?"} + Trailer ${c.trailer_id ?? "?"}`}
-              </option>
-            ))}
-          </select>
-
-          {selectedCombo && (
-            <div style={styles.help}>
-              Selected:{" "}
-              <strong>
-                Truck {selectedCombo.truck_id ?? "?"} + Trailer {selectedCombo.trailer_id ?? "?"}
-              </strong>
-            </div>
-          )}
-        </div>
-      </section>
 
       {/* Terminal */}
       {false && (
@@ -2721,7 +2861,7 @@ async function beginLoadToSupabase() {
 
 console.log("MAIN selectedTerminal", {
   id: selectedTerminalId,
-  name: selectedTerminal.terminal_name,
+  name: selectedTerminal?.terminal_name ?? "",
   activationISO,
   expiresISO,
   computedExpiresISO,
@@ -2734,7 +2874,8 @@ console.log("MAIN selectedTerminal", {
 
       return (
         <>
-          Selected: <strong>{selectedTerminal.terminal_name}</strong>
+          Selected: <strong>{selectedTerminal?.terminal_name ?? ""}</strong>
+
           {tz ? ` • ${tz}` : ""}
           {displayISO ? (
             <span>
@@ -3083,106 +3224,19 @@ console.log("MAIN selectedTerminal", {
         {Math.round(tempF)}°F
       </button>
     </div>
-    <FullscreenModal open={tempDialOpen} title="Product Temp" onClose={() => setTempDialOpen(false)}>
-      <div style={{ display: "grid", gap: 16 }}>
-        <div
-          style={{
-            textAlign: "center",
-            fontWeight: 800,
-            letterSpacing: 0.2,
-            userSelect: "none",
-          }}
-        >
-          <span style={{ color: "white" }}>
-            {selectedCity && selectedState ? `${selectedCity}, ${selectedState}` : "City, ST"}
-          </span>
-          <span style={{ color: "rgba(255,255,255,0.50)" }}>{" "} - {" "}</span>
-          <span style={{ color: "rgb(0,194,216)" }}>
-            {ambientTempLoading ? "Loading…" : ambientTempF == null ? "—" : `${Math.round(ambientTempF)}°F`}
-          </span>
-        </div>
+    <ProductTempModal
+  open={tempDialOpen}
+  onClose={() => setTempDialOpen(false)}
+  styles={styles}
+  selectedCity={selectedCity}
+  selectedState={selectedState}
+  ambientTempLoading={ambientTempLoading}
+  ambientTempF={ambientTempF}
+  tempF={tempF}
+  setTempF={setTempF}
+  TempDial={TempDial}
+/>
 
-        <TempDial value={tempF} min={-20} max={140} step={0.1} onChange={(v) => setTempF(v)} />
-
-        <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
-          <button
-            type="button"
-            style={styles.smallBtn}
-            onClick={() => setTempF((v) => Math.round((Number(v) - 0.5) * 10) / 10)}
-          >
-            −0.5
-          </button>
-          <button
-            type="button"
-            style={styles.smallBtn}
-            onClick={() => setTempF((v) => Math.round((Number(v) - 0.1) * 10) / 10)}
-          >
-            −0.1
-          </button>
-          <button type="button" style={styles.smallBtn} onClick={() => setTempF(60)} title="Snap back to 60°F">
-            60°
-          </button>
-          <button
-            type="button"
-            style={styles.smallBtn}
-            onClick={() => setTempF((v) => Math.round((Number(v) + 0.1) * 10) / 10)}
-          >
-            +0.1
-          </button>
-          <button
-            type="button"
-            style={styles.smallBtn}
-            onClick={() => setTempF((v) => Math.round((Number(v) + 0.5) * 10) / 10)}
-          >
-            +0.5
-          </button>
-        </div>
-      
-
-        {/* Quick reference (time-of-day guidance) */}
-        <div style={{ display: "grid", gap: 10 }}>
-          <div style={{ fontWeight: 800, letterSpacing: 0.2 }}>Quick reference</div>
-
-          <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))" }}>
-            <div
-              style={{
-                padding: 12,
-                borderRadius: 14,
-                border: "1px solid rgba(255,255,255,0.10)",
-                background: "rgba(255,255,255,0.04)",
-              }}
-            >
-              <div style={{ fontWeight: 800, marginBottom: 6 }}>Daylight (sun / warm tanks)</div>
-              <div style={{ ...styles.help, marginTop: 0 }}>
-                Start near <strong>Ambient + 5°F</strong>. If you’re loading mid‑afternoon in full sun,{" "}
-                <strong>+8–10°F</strong> is often a better proxy.
-              </div>
-            </div>
-
-            <div
-              style={{
-                padding: 12,
-                borderRadius: 14,
-                border: "1px solid rgba(255,255,255,0.10)",
-                background: "rgba(255,255,255,0.04)",
-              }}
-            >
-              <div style={{ fontWeight: 800, marginBottom: 6 }}>Night (cooldown / shaded)</div>
-              <div style={{ ...styles.help, marginTop: 0 }}>
-                Start near <strong>Ambient − 2°F</strong> (or simply Ambient). If tanks are cold‑soaked,{" "}
-                <strong>−3–5°F</strong> can be reasonable.
-              </div>
-            </div>
-          </div>
-
-          <div style={{ ...styles.help, marginTop: 0 }}>
-            If unsure: use <strong>Ambient</strong>, then adjust based on how the product has been stored (sun vs shade,
-            recent loading cycles, etc.).
-          </div>
-        </div>
-
-        </div>
-    </FullscreenModal>
   </div>
 </div>
 
@@ -3212,1194 +3266,208 @@ console.log("MAIN selectedTerminal", {
         )}
       </section>
 
-      {/* Compartments */}
-      <section style={styles.section}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-          <h2 style={{ margin: 0 }}>Compartments</h2>
-          <span style={styles.badge}>
-            {!selectedTrailerId
-              ? "Select equipment"
-              : compLoading
-              ? "Loading…"
-              : `${compartments.length} compartments`}
-          </span>
-        </div>
-
-        {!selectedTrailerId && <div style={styles.help}>Select equipment to load compartments.</div>}
-        {compError && <div style={styles.error}>Error loading compartments: {compError}</div>}
-
-
-        {/* Driver compartment strip (primary interface) */}
-        {selectedTrailerId && !compLoading && !compError && compartments.length > 0 && (
-          <div style={{ marginTop: 14 }}>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "center",
-                gap: compartments.length >= 5 ? 10 : 18,
-                flexWrap: "nowrap",
-              }}
-            >
-              {(() => {
-                const n = compartments.length;
-                const baseW = n === 1 ? 220 : 160;
-                const w = n >= 5 ? 132 : baseW;
-                const h = 330;
-                const ordered = [...compartments].slice().sort((a,b)=>Number(a.comp_number)-Number(b.comp_number)).reverse();
-                return ordered.map((c) => {
-                  const compNumber = Number(c.comp_number);
-                  const trueMax = Number(c.max_gallons ?? 0);
-                  const headPct = headspacePctForComp(compNumber);
-                  const effMax = effectiveMaxGallonsForComp(compNumber, trueMax);
-                  const planned = plannedGallonsByComp[compNumber] ?? 0;
-                  const plannedPct = trueMax > 0 ? Math.max(0, Math.min(1, planned / trueMax)) : 0;
-                  const capPct = trueMax > 0 ? Math.max(0, Math.min(1, effMax / trueMax)) : 0;
-                  const visualTopGap = 0.08; // keeps a bit of visible headspace even when full
-                  const fillPct = Math.max(0, Math.min(1, Math.min(plannedPct, capPct) * (1 - visualTopGap)));
-
-                  const sel = compPlan[compNumber];
-                  const isEmpty = !!sel?.empty || !sel?.productId;
-                  const prod = !isEmpty ? terminalProducts.find((p) => p.product_id === sel?.productId) : null;
-
-                  const productName = isEmpty
-                    ? ""
-                    : ((prod?.display_name ?? prod?.product_name ?? "").trim() || "Product");
-
-                  const code = isEmpty
-                    ? "MT"
-                    : String(prod?.button_code ?? prod?.product_code ?? (productName.split(/\s+/)[0] || "PRD"))
-                        .trim()
-                        .toUpperCase();
-
-                  const codeColor = isEmpty
-                    ? "rgba(180,220,255,0.9)"
-                    : (typeof prod?.hex_code === "string" && prod.hex_code.trim()
-                        ? prod.hex_code.trim()
-                        : "rgba(255,255,255,0.9)");
-
-                  const atMax = headPct <= 0.000001;
-
-                  return (
-                    <div
-                      key={String(c.comp_number)}
-                      onClick={() => {
-                        setCompModalComp(compNumber);
-                        setCompModalOpen(true);
-                      }}
-                      style={{
-                        width: w,
-                        height: h,
-                        borderRadius: 18,
-                        background: "rgba(255,255,255,0.06)",
-                        border: "1px solid rgba(255,255,255,0.14)",
-                        padding: 14,
-                        cursor: "pointer",
-                        display: "flex",
-                        flexDirection: "column",
-                        alignItems: "center",
-                        userSelect: "none",
-                      }}
-                      title={`Comp ${compNumber}`}
-                    >
-                      {/* Comp number label (amber when at max) */}
-                      <div
-                        style={{
-                          fontSize: 22,
-                          fontWeight: 800,
-                          letterSpacing: 0.2,
-                          marginBottom: 10,
-                          color: atMax ? "#ffb020" : "rgba(255,255,255,0.72)",
-                        }}
-                      >
-                        {compNumber}
-                      </div>
+      <PlannerControls
+  styles={styles}
+  selectedTrailerId={selectedTrailerId}
+  compLoading={compLoading}
+  compartments={compartments}
+  compError={compError}
+  headspacePctForComp={headspacePctForComp}
+  effectiveMaxGallonsForComp={effectiveMaxGallonsForComp}
+  plannedGallonsByComp={plannedGallonsByComp}
+  compPlan={compPlan}
+  terminalProducts={terminalProducts}
+  setCompModalComp={setCompModalComp}
+  setCompModalOpen={setCompModalOpen}
+  setCompPlan={setCompPlan}
+  setCompHeadspacePct={setCompHeadspacePct}
+  compModalOpen={compModalOpen}
+  compModalComp={compModalComp}
+/>
 
 
-                      {/* Tank */}
-                      <div
-                        style={{
-                          width: "100%",
-                          flex: 1,
-                          borderRadius: 16,
-                          background: "rgba(255,255,255,0.08)",
-                          position: "relative",
-                          overflow: "hidden",
-                        }}
-                      >
-                        {/* Capped headspace tint (no line) */}
-                        {headPct > 0 && (
-                          <div
-                            style={{
-                              position: "absolute",
-                              left: 0,
-                              right: 0,
-                              top: 0,
-                              height: `${Math.max(0, Math.min(1, headPct)) * 100}%`,
-                              background: "rgba(0,0,0,0.16)",
-                            }}
-                          />
-                        )}
-{/* Fluid */}
-                        <div
-                          style={{
-                            position: "absolute",
-                            left: 0,
-                            right: 0,
-                            bottom: 0,
-                            height: `${fillPct * 100}%`,
-                            background: "rgba(185,245,250,0.85)",
-                          }}
-                        />
+<PlanSection
+  styles={styles}
+  planRows={planRows}
+  targetGallonsRoundedText={targetGallonsRoundedText}
+  targetGallonsText={targetGallonsText}
+  plannedGallonsTotalText={plannedGallonsTotalText}
+  remainingGallonsText={remainingGallonsText}
+  productNameById={productNameById}
+  onLoad={beginLoadToSupabase}
+  loadDisabled={
+    beginLoadBusy ||
+    !selectedComboId ||
+    !selectedTerminalId ||
+    !selectedState ||
+    !selectedCity ||
+    !selectedCityId ||
+    planRows.length === 0
+  }
+ loadLabel={beginLoadBusy ? "Loading…" : loadReport ? "LOADED" : activeLoadId ? "Load started" : "Load"}
 
-                        {/* Wavy surface line */}
-                        {fillPct > 0 && (
-                          <svg
-                            width="100%"
-                            height="16"
-                            viewBox="0 0 100 16"
-                            preserveAspectRatio="none"
-                            style={{
-                              position: "absolute",
-                              left: 0,
-                              right: 0,
-                              bottom: `calc(${fillPct * 100}% - 8px)`,
-                              opacity: 0.9,
-                            }}
-                          >
-                            <path
-                              d="M0,8 C10,2 20,14 30,8 C40,2 50,14 60,8 C70,2 80,14 90,8 C95,6 98,6 100,8"
-                              fill="none"
-                              stroke="rgba(120,210,220,0.95)"
-                              strokeWidth="2"
-                            />
-                          </svg>
-                        )}
-                      </div>
+/>
 
-                      {/* Product button */}
-                      <div
-                        style={{
-                          marginTop: 12,
-                          width: 78,
-                          height: 52,
-                          borderRadius: 14,
-                          backgroundColor: "transparent",
-                          border: `2px solid ${isEmpty ? "rgba(180,220,255,0.55)" : codeColor}`,
-                          boxShadow: "none",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          fontWeight: 800,
-                          fontSize: 20,
-                          color: isEmpty ? "rgba(180,220,255,0.92)" : codeColor,
-                        }}
-                      >
-                        {code}
-                      </div>
-
-                      {/* Planned gallons */}
-                      <div style={{ marginTop: 8, fontSize: 16, color: "rgba(220,220,220,0.85)" }}>
-                        {planned > 0 ? Math.round(planned).toString() : ""}
-                      </div>
-                    </div>
-                  );
-                });
-              })()}
-            </div>
-          </div>
-        )}
-
-        {selectedTrailerId && !compLoading && !compError && compartments.length === 0 && (
-          <div style={styles.help}>No compartments found for this trailer.</div>
-        )}
-
-        {compartments.length > 0 && (
-          <>
-            {/* (UI) removed compartments detail table */}
-          </>
-
-        )}
-      
-        <FullscreenModal
-          open={compModalOpen}
-          title={compModalComp != null ? `Compartment ${compModalComp}` : "Compartment"}
-          onClose={() => {
-            setCompModalOpen(false);
-            setCompModalComp(null);
-          }}
-        >
-          {compModalComp == null ? null : (() => {
-            const compNumber = compModalComp;
-            const c = compartments.find((x) => Number(x.comp_number) === compNumber);
-            const trueMax = Number(c?.max_gallons ?? 0);
-            const headPct = headspacePctForComp(compNumber);
-            const effMax = effectiveMaxGallonsForComp(compNumber, trueMax);
-            const sel = compPlan[compNumber];
-            const isEmpty = !!sel?.empty || !sel?.productId;
-
-            return (
-              <div style={{ display: "grid", gap: 16 }}>
-                <div style={{ ...styles.help }}>
-                  Adjust headspace to stay safely below the top probe and set the product for compartment{" "}
-                  <strong>{compNumber}</strong>.
-                </div>
-
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "1fr",
-                    gap: 14,
-                  }}
-                >
-                  {/* Zoomed compartment + vertical slider */}
-                  <div style={{ display: "flex", gap: 18, alignItems: "stretch", flexWrap: "wrap" }}>
-                    {/* Comp visual */}
-                    <div
-                      style={{
-                        width: 240,
-                        maxWidth: "100%",
-                        borderRadius: 18,
-                        background: "rgba(255,255,255,0.06)",
-                        border: "1px solid rgba(255,255,255,0.14)",
-                        padding: 14,
-                      }}
-                    >
-                      <div
-                        style={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "center",
-                          marginBottom: 10,
-                        }}
-                      >
-                        <div style={{ fontWeight: 700, opacity: 0.9 }}>Max Volume</div>
-                        <div style={{ fontWeight: 800 }}>{Math.round(trueMax)} gal</div>
-                      </div>
-
-                      <div
-                        style={{
-                          height: 280,
-                          borderRadius: 16,
-                          background: "rgba(255,255,255,0.08)",
-                          position: "relative",
-                          overflow: "hidden",
-                        }}
-                      >
-                        {/* Capped headspace tint */}
-                        {headPct > 0 && (
-                          <div
-                            style={{
-                              position: "absolute",
-                              left: 0,
-                              right: 0,
-                              top: 0,
-                              height: `${Math.max(0, Math.min(1, headPct)) * 100}%`,
-                              background: "rgba(0,0,0,0.16)",
-                            }}
-                          />
-                        )}
-
-                        {/* Visual fill based on planned/true max, capped */}
-                        {(() => {
-                          const planned = plannedGallonsByComp[compNumber] ?? 0;
-                          const plannedPct = trueMax > 0 ? Math.max(0, Math.min(1, planned / trueMax)) : 0;
-                          const capPct = trueMax > 0 ? Math.max(0, Math.min(1, effMax / trueMax)) : 0;
-                          const visualTopGap = 0.08;
-                          const fillPct = Math.max(0, Math.min(1, Math.min(plannedPct, capPct) * (1 - visualTopGap)));
-
-                          return (
-                            <>
-                              <div
-                                style={{
-                                  position: "absolute",
-                                  left: 0,
-                                  right: 0,
-                                  bottom: 0,
-                                  height: `${fillPct * 100}%`,
-                                  background: "rgba(185,245,250,0.85)",
-                                }}
-                              />
-                              {fillPct > 0 && (
-                                <svg
-                                  width="100%"
-                                  height="16"
-                                  viewBox="0 0 100 16"
-                                  preserveAspectRatio="none"
-                                  style={{
-                                    position: "absolute",
-                                    left: 0,
-                                    right: 0,
-                                    bottom: `calc(${fillPct * 100}% - 8px)`,
-                                    opacity: 0.9,
-                                  }}
-                                >
-                                  <path
-                                    d="M0,8 C10,2 20,14 30,8 C40,2 50,14 60,8 C70,2 80,14 90,8 C95,6 98,6 100,8"
-                                    fill="none"
-                                    stroke="rgba(120,210,220,0.95)"
-                                    strokeWidth="2"
-                                  />
-                                </svg>
-                              )}
-                            </>
-                          );
-                        })()}
-                      </div>
-
-                      {/* Capped at input + return button */}
-                      <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                          <div style={{ fontWeight: 700, opacity: 0.9 }}>Capped at</div>
-                        </div>
-
-                        <input
-                          type="number"
-                          inputMode="numeric"
-                          value={Math.round(effMax)}
-                          onChange={(e) => {
-                            const v = Number(e.target.value);
-                            if (!Number.isFinite(v) || trueMax <= 0) return;
-                            const capped = Math.max(0, Math.min(trueMax, v));
-                            const pct = Math.max(0, Math.min(0.95, 1 - capped / trueMax));
-                            setCompHeadspacePct((prev) => ({ ...prev, [compNumber]: pct }));
-                          }}
-                          style={{ ...styles.input, width: "100%" }}
-                        />
-
-                        <button
-                          style={{ ...styles.smallBtn, width: "100%" }}
-                          onClick={() => setCompHeadspacePct((prev) => ({ ...prev, [compNumber]: 0 }))}
-                        >
-                          Return to max
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Vertical slider (headspace %) */}
-                    <div
-                      style={{
-                        display: "grid",
-                        alignContent: "start",
-                        justifyItems: "center",
-                        paddingTop: 10,
-                        minWidth: 90,
-                      }}
-                    >
-                      <div style={{ opacity: 0.85, fontSize: 13, marginBottom: 10 }}>Headspace</div>
-                      <input
-                        type="range"
-                        min={0}
-                        max={30}
-                        step={1}
-                        value={Math.round(headPct * 100)}
-                        onChange={(e) => {
-                          const pct = Number(e.target.value) / 100;
-                          setCompHeadspacePct((prev) => ({ ...prev, [compNumber]: pct }));
-                        }}
-                        style={{
-                          height: 280,
-                          width: 28,
-                          WebkitAppearance: "slider-vertical" as any,
-                          writingMode: "bt-lr" as any,
-                        }}
-                      />
-                      <div style={{ ...styles.badge, marginTop: 10 }}>{Math.round(headPct * 100)}%</div>
-                    </div>
-                  </div>
-
-                  {/* Product selection */}
-                  <div style={{ display: "grid", gap: 10 }}>
-                    <strong>Product</strong>
-
-                    <div
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
-                        gap: 12,
-                      }}
-                    >
-                      {/* MT / Empty */}
-                      <button
-                        style={{
-                          textAlign: "left",
-                          padding: 14,
-                          borderRadius: 16,
-                          border: "1px solid rgba(255,255,255,0.14)",
-                          background: isEmpty ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.06)",
-                          color: "white",
-                          cursor: "pointer",
-                        }}
-                        onClick={() => {
-                          setCompPlan((prev) => ({
-                            ...prev,
-                            [compNumber]: { empty: true, productId: "" },
-                          }));
-                          setCompModalOpen(false);
-                          setCompModalComp(null);
-                        }}
-                      >
-                        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                          <div
-                            style={{
-                              width: 54,
-                              height: 44,
-                              borderRadius: 12,
-                              border: "1px solid rgba(180,220,255,0.9)",
-                              background: "rgba(0,0,0,0.35)",
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              fontWeight: 900,
-                              letterSpacing: 0.5,
-                              color: "rgba(180,220,255,0.9)",
-                              flex: "0 0 auto",
-                            }}
-                          >
-                            MT
-                          </div>
-                          <div style={{ display: "grid", gap: 2 }}>
-                            <div style={{ fontWeight: 800 }}>MT (Empty)</div>
-                            <div style={{ opacity: 0.7, fontSize: 13 }}>Leave this compartment empty</div>
-                          </div>
-                        </div>
-                      </button>
-
-                      {terminalProducts.map((p) => {
-                        const selected = !isEmpty && sel?.productId === p.product_id;
-                        const btnCode = ((p.button_code ?? p.product_code ?? "").trim() || "PRD").toUpperCase();
-                        const btnColor = (p.hex_code ?? "").trim() || "rgba(255,255,255,0.85)";
-                        const name = (p.product_name ?? p.display_name ?? "").trim() || "Product";
-                        const sub = (p.description ?? "").trim();
-
-                        return (
-                          <button
-                            key={p.product_id}
-                            style={{
-                              textAlign: "left",
-                              padding: 14,
-                              borderRadius: 16,
-                              border: "1px solid rgba(255,255,255,0.14)",
-                              background: selected ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.06)",
-                              color: "white",
-                              cursor: "pointer",
-                            }}
-                            onClick={() => {
-                              setCompPlan((prev) => ({
-                                ...prev,
-                                [compNumber]: { empty: false, productId: p.product_id },
-                              }));
-                              setCompModalOpen(false);
-                              setCompModalComp(null);
-                            }}
-                            title={name}
-                          >
-                            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                              <div
-                                style={{
-                                  width: 54,
-                                  height: 44,
-                                  borderRadius: 12,
-                                  backgroundColor: "transparent",
-                                  border: `2px solid ${btnColor}`,
-                                  boxShadow: "none",
-                                  display: "flex",
-                                  alignItems: "center",
-                                  justifyContent: "center",
-                                  fontWeight: 900,
-                                  letterSpacing: 0.5,
-                                  color: btnColor,
-                                  flex: "0 0 auto",
-                                }}
-                              >
-                                {btnCode.toUpperCase()}
-                              </div>
-                              <div style={{ display: "grid", gap: 2, minWidth: 0 }}>
-                                <div
-                                  style={{
-                                    fontWeight: 800,
-                                    whiteSpace: "nowrap",
-                                    overflow: "hidden",
-                                    textOverflow: "ellipsis",
-                                  }}
-                                >
-                                  {name}
-                                </div>
-                                <div style={{ opacity: 0.7, fontSize: 13, lineHeight: 1.25 }}>
-                                  {sub || "\u00A0"}
-                                </div>
-                              </div>
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            );
-})()}
-        </FullscreenModal>
-
-</section>
-
-      {/* Plan (Phase 5.5) */}
-<section style={styles.section}>
-  <div
-  style={{
-    display: "flex",
-    justifyContent: "space-between",
-    gap: 12,
-    flexWrap: "wrap",
-    alignItems: "center",
-  }}
->
-  <h2 style={{ margin: 0 }}>Plan</h2>
-
-  <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-    <span style={styles.badge}>
-      {planRows.length === 0 ? "No plan yet" : `${planRows.length} rows`}
-    </span>
-
-    <button
-      type="button"
-      onClick={beginLoadToSupabase}
-      disabled={
-        beginLoadBusy ||
-        !selectedComboId ||
-        !selectedTerminalId ||
-        !selectedState ||
-        !selectedCity ||
-        !selectedCityId ||
-        planRows.length === 0
-      }
+{loadReport ? (
+  <div style={{ marginTop: 12, display: "flex", gap: 10, justifyContent: "flex-end", flexWrap: "wrap" }}>
+    <div
       style={{
-        ...(styles as any).button,
-        padding: "10px 14px",
-        opacity:
-          beginLoadBusy ||
-          !selectedComboId ||
-          !selectedTerminalId ||
-          !selectedState ||
-          !selectedCity ||
-          !selectedCityId ||
-          planRows.length === 0
-            ? 0.55
-            : 1,
+        padding: "10px 12px",
+        borderRadius: 14,
+        border: "1px solid rgba(255,255,255,0.10)",
+        background: "rgba(255,255,255,0.04)",
+        minWidth: 320,
       }}
     >
-      {beginLoadBusy ? "Loading…" : activeLoadId ? "Load started" : "Load"}
-    </button>
-  </div>
-</div>
-
-
-  <div style={styles.help}>
-    Target: <strong>{targetGallonsRoundedText || targetGallonsText}</strong> gal
-    {" • "}
-    Planned: <strong>{planRows.length ? plannedGallonsTotalText : ""}</strong> gal
-    {" • "}
-    Remaining: <strong>{planRows.length ? remainingGallonsText : ""}</strong> gal
-  </div>
-
-  {planRows.length === 0 ? (
-    <div style={styles.help}>
-      Select equipment + product, then choose “Fill to max” or enter a custom target.
-    </div>
-  ) : (
-    <table style={styles.table}>
-      <thead>
-        <tr>
-  <th style={styles.th}>Comp #</th>
-  <th style={styles.th}>Max Gallons</th>
-  <th style={styles.th}>Planned Gallons</th>
-  <th style={styles.th}>Product</th>
-  <th style={styles.th}>lbs/gal</th>
-  <th style={styles.th}>Planned lbs</th>
-</tr>
-
-      </thead>
-      <tbody>
-       {planRows.map((r: any) => {
-  const g = Number(r.planned_gallons ?? 0);
-  const lpg = Number(r.lbsPerGal ?? 0);
-  const plannedLbs = g * lpg;
-
-  
-  return (
-    <tr key={r.comp_number}>
-      <td style={styles.td}>{r.comp_number}</td>
-      <td style={styles.td}>{r.max_gallons}</td>
-      <td style={styles.td}>
-        <strong>{g.toFixed(0)}</strong>
-      </td>
-      <td style={styles.td}>
-        {r.productId ? (productNameById.get(r.productId) ?? r.productId) : ""}
-      </td>
-      <td style={styles.td}>{lpg ? lpg.toFixed(4) : ""}</td>
-      <td style={styles.td}>{plannedLbs ? plannedLbs.toFixed(0) : ""}</td>
-    </tr>
-  );
-})}
-
-      </tbody>
-    </table>
-  )}
-</section>
-<FullscreenModal
-  open={equipOpen}
-  title="Select Equipment"
-  onClose={() => setEquipOpen(false)}
->
-  <div className="text-sm opacity-70">
-    Placeholder: equipment selector goes here (modal list).
-  </div>
-</FullscreenModal>
-
-<FullscreenModal
-  open={locOpen}
-  title="Select Location"
-  onClose={() => setLocOpen(false)}
- footer={null}>
-  <div className="space-y-4">
-    <div className="text-sm text-white/70">Choose your loading city.</div>
-
-    {/* STATE (compact / set-and-forget) */}
-    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <div className="text-xs uppercase tracking-wide text-white/50">State</div>
-          <div className="mt-1 text-sm font-semibold">
-            {selectedState ? selectedStateLabel : "Select a state"}
-          </div>
-          {statesError ? <div className="mt-1 text-xs text-red-400">{statesError}</div> : null}
-        </div>
-
-        <button
-          onClick={() => setStatePickerOpen((v) => !v)}
-          className="rounded-xl border border-white/10 px-3 py-2 text-sm hover:bg-white/5"
-        >
-          {statePickerOpen ? "Close" : "Change"}
-        </button>
+      <div style={{ fontWeight: 900, marginBottom: 6 }}>Load report</div>
+      <div style={{ color: "rgba(255,255,255,0.75)", fontWeight: 800 }}>
+        {Math.round(loadReport.planned_total_gal).toLocaleString()} gal planned
       </div>
-
-      {statePickerOpen ? (
-        <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
-          {statesLoading ? (
-            <div className="col-span-2 sm:col-span-3 text-sm text-white/60">Loading states…</div>
-          ) : (
-            stateOptions.map((s) => {
-              const active = normState(s.code) === normState(selectedState);
-              return (
-                <button
-                  key={s.code}
-                  onClick={() => {
-                    setSelectedState(s.code);
-                    setStatePickerOpen(false);
-                  }}
-                  className={[
-                    "rounded-2xl border px-3 py-3 text-left",
-                    active ? "border-white/30 bg-white/5" : "border-white/10 hover:bg-white/5",
-                  ].join(" ")}
-                >
-                  <div className="text-sm font-semibold">
-                    {s.code} — {s.name || s.code}
-                  </div>
-                </button>
-              );
-            })
-          )}
-        </div>
-      ) : null}
-    </div>
-
-    {/* CITY (cards) */}
-    <div>
-
-      {!selectedState ? (
-        <div className="text-sm text-white/50">Select a state first.</div>
-      ) : citiesLoading ? (
-        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm text-white/60">
-          Loading cities…
-        </div>
-      ) : citiesError ? (
-        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm text-red-400">
-          {citiesError}
-        </div>
-      ) : cities.length === 0 ? (
-        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm text-white/60">
-          No cities available yet.
-        </div>
-      ) : (
-        
-  <div className="space-y-3">
-    {/* Top Cities (manual starred) */}
-    {topCities.length ? (
-      <div>
-        <div className="mb-2 text-xs uppercase tracking-wide text-white/50">Top Cities</div>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          {topCities.map((c) => {
-            const active = c === selectedCity;
-            return (
-              <div
-                key={`top-${c}`}
-                role="button"
-                tabIndex={0}
-                onClick={() => {
-                  setSelectedCity(c);
-                  setLocOpen(false);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    setSelectedCity(c);
-                    setLocOpen(false);
-                  }
-                }}
-                className={[
-                  "rounded-2xl border px-4 py-3 text-left cursor-pointer select-none",
-                  active ? "border-white/30 bg-white/5" : "border-white/10 hover:bg-white/5",
-                ].join(" ")}
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <div className="text-sm font-semibold">{c}</div>
-
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      toggleCityStar(selectedState, c);
-                    }}
-                    aria-label="Unstar city"
-                    className={starBtnClass(true)}
-                  >
-                    ★
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
+      <div style={{ color: "rgba(255,255,255,0.75)", fontWeight: 800 }}>
+        Planned gross:{" "}
+        {loadReport.planned_gross_lbs == null ? "—" : Math.round(loadReport.planned_gross_lbs).toLocaleString()} lbs
       </div>
-    ) : null}
-
-    {/* Ghost divider */}
-    {topCities.length ? <div className="h-px w-full bg-white/10" /> : null}
-
-    {/* All Cities (non-starred only) */}
-    <div>
-      <div className="mb-2 text-xs uppercase tracking-wide text-white/50">All Cities</div>
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        {allCities.map((c) => {
-          const active = c === selectedCity;
-          const starred = isCityStarred(selectedState, c);
-
-          return (
-            <div
-              key={c}
-              role="button"
-              tabIndex={0}
-              onClick={() => {
-                setSelectedCity(c);
-                setLocOpen(false);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  setSelectedCity(c);
-                  setLocOpen(false);
-                }
-              }}
-              className={[
-                "rounded-2xl border px-4 py-3 text-left cursor-pointer select-none",
-                active ? "border-white/30 bg-white/5" : "border-white/10 hover:bg-white/5",
-              ].join(" ")}
-            >
-              <div className="flex items-center justify-between gap-3">
-                <div className="text-sm font-semibold">{c}</div>
-
-                <button
-                  type="button"
-                  onClick={(e) => {
-                      e.stopPropagation();
-                      toggleCityStar(selectedState, c);
-                  }}
-                  aria-label={starred ? "Unstar city" : "Star city"}
-                  className={starBtnClass(starred)}
-                >
-                  {starred ? "★" : "☆"}
-                </button>
-              </div>
-            </div>
-          );
-        })}
+      <div style={{ color: "rgba(255,255,255,0.75)", fontWeight: 800 }}>
+        Actual gross:{" "}
+        {loadReport.actual_gross_lbs == null ? "—" : Math.round(loadReport.actual_gross_lbs).toLocaleString()} lbs
+      </div>
+      <div style={{ color: "rgba(255,255,255,0.85)", fontWeight: 900 }}>
+        Over/Under:{" "}
+        {loadReport.diff_lbs == null
+          ? "—"
+          : `${loadReport.diff_lbs >= 0 ? "+" : ""}${Math.round(loadReport.diff_lbs).toLocaleString()} lbs`}
       </div>
     </div>
-  </div>
-)}
-    </div>
-
-    </div>
-</FullscreenModal>
-
-<FullscreenModal
-  open={termOpen}
-  title="My Terminals"
-  onClose={() => setTermOpen(false)}
->
-  {!selectedState || !selectedCity ? (
-    <div className="text-sm text-white/60">Select a city first.</div>
-  ) : (
-    <div className="space-y-3">
-      <div className="text-sm text-white/70">
-        Showing terminals in{" "}
-        <span className="text-white">
-          {selectedCity}, {selectedState}
-        </span>
-      </div>
-
-      {termError ? <div className="text-sm text-red-400">{termError}</div> : null}
-
-      {terminalsFiltered.filter((t) => t.status !== "not_carded").length === 0 ? (
-        <div className="text-sm text-white/60">No terminals saved for this city.</div>
-      ) : (
-        <div className="grid grid-cols-1 gap-2">
-          {terminalsFiltered
-            .filter((t) => t.status !== "not_carded")
-            .map((t, idx) => {
-              const active = String(t.terminal_id) === String(selectedTerminalId);
-              const expiresISO =
-  (t as any).expires_on ||
-  (t as any).expires ||
-  (t as any).expires_at ||
-  ""; // fallback
-
-const activationISO =
-  (t as any).carded_on ||
-  (t as any).added_on ||
-  "";
-
-const renewalDays = Number(
-  (t as any).renewal_days ??
-  (t as any).renewalDays ??
-  (t as any).renewal ??
-  90
-) || 90;
-
-
-const computedExpiresISO =
-  activationISO && /^\d{4}-\d{2}-\d{2}$/.test(activationISO)
-    ? addDaysISO_(activationISO, renewalDays)
-    : "";
-
-const displayISO = expiresISO || computedExpiresISO;
-
-const expired = displayISO ? isPastISO_(displayISO) : false;
-
-              const isExpanded = expandedTerminalId === String(t.terminal_id);
-              const busy = String(cardingBusyId) === String(t.terminal_id);
-
-              const selectTerminal = () => {
-                setSelectedTerminalId(String(t.terminal_id));
-                setTermOpen(false);
-              };
-
-              return (
-                <div
-                  key={t.terminal_id ? String(t.terminal_id) : `my-${idx}`}
-                  role="button"
-                  tabIndex={0}
-                  onClick={selectTerminal}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      selectTerminal();
-                    }
-                  }}
-                  className={[
-                    "rounded-2xl border transition cursor-pointer select-none px-3 py-3",
-                    active ? "border-white/30 bg-white/5" : "border-white/10 hover:bg-white/5",
-                  ].join(" ")}
-                >
-                  <div className="flex items-start gap-3">
-                    {/* icon well (match top tiles vibe) */}
-                    <div className="shrink-0 p-1">
-                      <div
-                        className={[
-                          "h-14 w-14 rounded-xl border flex items-center justify-center text-xs",
-                          active ? "border-white/20 bg-black text-orange-400" : "border-white/10 bg-[#2a2a2a] text-white/50",
-                        ].join(" ")}
-                        aria-hidden="true"
-                      >
-                        Img
-                      </div>
-                    </div>
-
-                    <div className="min-w-0 flex-1">
-                      <div className="text-sm font-semibold text-white truncate">
-                        {t.terminal_name ?? "(unnamed terminal)"}
-                      </div>
-
-                      {displayISO ? (
-  <div className={["mt-1 text-xs tabular-nums", expired ? "text-red-400" : "text-white/50"].join(" ")}>
-    {formatMDYWithCountdown_(displayISO)}
   </div>
 ) : null}
 
-                    </div>
 
-                    {/* right controls: star + view (side-by-side) */}
-                    <div className="flex items-center gap-2">
-                      <button
-  type="button"
-  onClick={(e) => {
-    e.stopPropagation();
- const tid = String(t.terminal_id);
+<EquipmentModal open={equipOpen} onClose={() => setEquipOpen(false)} />
 
-toggleTerminalStar(tid, true); // TRUE = currently starred => DELETE
-
-// optimistic remove from UI
-setMyTerminalIds((prev) => {
-  const s = new Set(prev);
-  s.delete(tid);
-  return s;
-});
-setTerminals((prev: any) => prev.filter((x: any) => String(x.terminal_id) !== tid));
-
-
+<LoadingModal
+  open={loadingOpen}
+  onClose={() => setLoadingOpen(false)}
+  styles={styles}
+  planRows={planRows as any[]}
+  productNameById={productNameById}
+  productButtonCodeById={productButtonCodeById}
+  productHexCodeById={productHexCodeById}
+  productInputs={productInputs}
+  terminalTimeZone={selectedTerminalTimeZone}
+  lastProductInfoById={lastProductInfoById}
+  setProductApi={(productId, api) => {
+    setProductInputs((prev) => ({ ...prev, [productId]: { ...(prev[productId] ?? {}), api } }));
   }}
-  className={starBtnClass(myTerminalIds.has(String(t.terminal_id)))}
-  aria-label={myTerminalIds.has(String(t.terminal_id)) ? "Remove from My Terminals" : "Add to My Terminals"}
-  title={myTerminalIds.has(String(t.terminal_id)) ? "Remove from My Terminals" : "Add to My Terminals"}
->
-  {myTerminalIds.has(String(t.terminal_id)) ? "★" : "☆"}
-</button>
+  onOpenTempDial={(productId) => {
+    setTempDial2ProductId(productId);
+    setTempDial2Open(true);
+  }}
+  onLoaded={onLoadedFromLoadingModal}
+  loadedDisabled={completeBusy}
+  loadedLabel={completeBusy ? "Saving…" : "LOADED"}
+/>
 
 
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setExpandedTerminalId(isExpanded ? null : String(t.terminal_id));
-                        }}
-                        className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-xs text-white/80 hover:bg-white/10"
-                        aria-label="View terminal details"
-                        title="View"
-                      >
-                        View
-                      </button>
-                    </div>
-                  </div>
+<TempDialModal
+  open={tempDial2Open}
+  onClose={() => setTempDial2Open(false)}
+  title="Temp"
+  value={
+    tempDial2ProductId
+      ? Number(productInputs[tempDial2ProductId]?.tempF ?? 60)
+      : 60
+  }
+  onChange={(v) => {
+    const pid = tempDial2ProductId;
+    if (!pid) return;
+    setProductInputs((prev) => ({ ...prev, [pid]: { ...(prev[pid] ?? {}), tempF: v } }));
+  }}
+  TempDial={TempDial}
+/>
 
-                  {expired ? (
-                    <div className="mt-3">
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          doGetCardedForTerminal(String(t.terminal_id));
-                        }}
-                        className={[
-                          "w-full rounded-xl border px-3 py-2 text-sm",
-                          busy
-                            ? "border-red-400/10 bg-red-400/10 text-red-200/60"
-                            : "border-red-400/20 bg-red-400/10 text-red-200 hover:bg-red-400/15",
-                        ].join(" ")}
-                      >
-                        {busy ? "Getting carded…" : "Get carded"}
-                      </button>
-                    </div>
-                  ) : null}
 
-                  {isExpanded ? (
-                    <div className="mt-3 rounded-xl border border-white/10 bg-white/5 p-3 text-sm text-white/70">
-                      <div className="text-white/80 font-semibold">Terminal details</div>
-                      <div className="mt-1">Business-card placeholder.</div>
-                    </div>
-                  ) : null}
-                </div>
-              );
-            })}
-        </div>
-      )}
 
-      <button
-        type="button"
-        onClick={() => {
-          setTermOpen(false);
-          setCatalogExpandedId(null);
-          setCatalogOpen(true);
-        }}
-        className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-left text-sm text-white/80 hover:bg-white/10"
-      >
-        + Get carded
-      </button>
-    </div>
-  )}
-</FullscreenModal>
+<LocationModal
+  open={locOpen}
+  onClose={() => setLocOpen(false)}
+  selectedState={selectedState}
+  selectedStateLabel={selectedStateLabel}
+  statesError={statesError}
+  statesLoading={statesLoading}
+  statePickerOpen={statePickerOpen}
+  setStatePickerOpen={setStatePickerOpen}
+  stateOptions={stateOptions}
+  setSelectedState={setSelectedState}
+  selectedCity={selectedCity}
+  citiesLoading={citiesLoading}
+  citiesError={citiesError}
+  cities={cities}
+  topCities={topCities}
+  allCities={allCities}
+  setSelectedCity={setSelectedCity}
+  normState={normState}
+  toggleCityStar={toggleCityStar}
+  isCityStarred={isCityStarred}
+  starBtnClass={starBtnClass}
+  setLocOpen={setLocOpen}
+/>
 
-<FullscreenModal
+<MyTerminalsModal
+  open={termOpen}
+  onClose={() => setTermOpen(false)}
+  selectedState={selectedState}
+  selectedCity={selectedCity}
+  termError={termError}
+  terminalsFiltered={terminalsFiltered}
+  selectedTerminalId={selectedTerminalId}
+  expandedTerminalId={expandedTerminalId}
+  setExpandedTerminalId={setExpandedTerminalId}
+  cardingBusyId={cardingBusyId}
+  addDaysISO_={addDaysISO_}
+  isPastISO_={isPastISO_}
+  formatMDYWithCountdown_={formatMDYWithCountdown_}
+  starBtnClass={starBtnClass}
+  myTerminalIds={myTerminalIds}
+  setMyTerminalIds={setMyTerminalIds}
+  setTerminals={setTerminals}
+  toggleTerminalStar={toggleTerminalStar}
+  doGetCardedForTerminal={doGetCardedForTerminal}
+  setSelectedTerminalId={setSelectedTerminalId}
+  setTermOpen={setTermOpen}
+  setCatalogExpandedId={setCatalogExpandedId}
+  setCatalogOpen={setCatalogOpen}
+/>
+
+
+<TerminalCatalogModal
   open={catalogOpen}
-  title="Get Carded"
   onClose={() => {
     setCatalogOpen(false);
     setTermOpen(true);
   }}
->
-  {!selectedState || !selectedCity ? (
-    <div className="text-sm text-white/60">Select a city first.</div>
-  ) : (
-    <div className="space-y-3">
-      <div className="text-sm text-white/70">
-        Terminal catalog for{" "}
-        <span className="text-white">
-          {selectedCity}, {selectedState}
-        </span>
-      </div>
+  selectedState={selectedState}
+  selectedCity={selectedCity}
+  termError={termError}
+  catalogError={catalogError}
+  catalogTerminalsInCity={catalogTerminalsInCity}
+  myTerminalIds={myTerminalIds}
+  setMyTerminalIds={setMyTerminalIds}
+  catalogExpandedId={catalogExpandedId}
+  setCatalogExpandedId={setCatalogExpandedId}
+  catalogEditingDateId={catalogEditingDateId}
+  setCatalogEditingDateId={setCatalogEditingDateId}
+  accessDateByTerminalId={accessDateByTerminalId}
+  setAccessDateForTerminal_={setAccessDateForTerminal_}
+  isoToday_={isoTodayInTimeZone_}
+  toggleTerminalStar={toggleTerminalStar}
+  starBtnClass={starBtnClass}
+  addDaysISO_={addDaysISO_}
+  isPastISO_={isPastISO_}
+  formatMDYWithCountdown_={formatMDYWithCountdown_}
+  setCatalogOpen={setCatalogOpen}
+  setTermOpen={setTermOpen}
+/>
 
-      {termError ? <div className="text-sm text-red-400">{termError}</div> : null}
-      {catalogError ? <div className="text-sm text-red-400">{catalogError}</div> : null}
-
-      {catalogTerminalsInCity.length === 0 ? (
-        <div className="text-sm text-white/60">No terminals found for this city.</div>
-      ) : (
-        <div className="grid grid-cols-1 gap-2">
-          {catalogTerminalsInCity.map((t, idx) => {
-            const id = String(t.terminal_id);
-            const isInMy = myTerminalIds.has(id);
-
-            const isExpanded = catalogExpandedId === id;
-
-            return (
-              <div
-                key={t.terminal_id ? id : `cat-${idx}`}
-                role="button"
-                tabIndex={0}
-                onClick={() => setCatalogExpandedId(isExpanded ? null : id)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    setCatalogExpandedId(isExpanded ? null : id);
-                  }
-                }}
-                className="rounded-2xl border border-white/10 bg-white/5 px-3 py-3 hover:bg-white/10 cursor-pointer select-none"
-              >
-                <div className="flex items-start gap-3">
-                  <div className="shrink-0 p-1">
-                    <div className="h-14 w-14 rounded-xl border border-white/10 bg-[#2a2a2a] flex items-center justify-center text-xs text-white/50">
-                      Img
-                    </div>
-                  </div>
-
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm font-semibold text-white truncate">
-                      {t.terminal_name ?? "(unnamed terminal)"}
-                    </div>
-                    {(() => {
-                      const tid = String(t.terminal_id);
-                      const activationISO = accessDateByTerminalId[tid] ?? "";
-                      const renewalDays = Number((t as any).renewal_days ?? 90);
-                      const expiresISO = activationISO ? addDaysISO_(activationISO, renewalDays) : "";
-                      const expiresExpired = expiresISO ? isPastISO_(expiresISO) : false;
-                      const expiresLabel = expiresISO ? formatMDYWithCountdown_(expiresISO) : "Set Activation Date";
-
-                      const isEditing = catalogEditingDateId === tid;
-
-                      return (
-                        <div className="mt-1">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setCatalogEditingDateId(isEditing ? null : tid);
-                            }}
-                            className={[
-                              "text-xs tabular-nums underline-offset-2 hover:underline",
-                              expiresISO ? (expiresExpired ? "text-red-400" : "text-white/50") : "text-white/60",
-                            ].join(" ")}
-                            title="Set activation date"
-                          >
-                            {expiresLabel}
-                          </button>
-
-                          {isEditing ? (
-                            <div
-                              className="mt-2 rounded-xl border border-white/10 bg-black/30 p-3 text-xs text-white/70"
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              <div className="text-white/80 font-semibold">Set Activation Date</div>
-                              <div className="mt-2 flex items-center gap-2">
-                                <input
-                                  type="date"
-                                  value={activationISO}
-                                  onChange={(e) => setAccessDateForTerminal_(tid, e.target.value)}
-                                  className="rounded-lg border border-white/10 bg-black/40 px-2 py-1 text-xs text-white"
-                                />
-                                <button
-                                  type="button"
-                                  onClick={() => setAccessDateForTerminal_(tid, isoToday_())}
-                                  className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-xs text-white/80 hover:bg-white/10"
-                                >
-                                  Today
-                                </button>
-                              </div>
-
-                              <div className="mt-2 text-white/60">
-                                Expires: {expiresISO ? formatMDYWithCountdown_(expiresISO) : "—"}
-                              </div>
-                            </div>
-                          ) : null}
-                        </div>
-                      );
-                    })()}
-                  </div>
-
-                  {/* multi-select star (membership) */}
-                  <div className="flex items-center">
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleTerminalStar(id, isInMy);
-
-const next = !isInMy;
-setMyTerminalIds((prev) => {
-  const s = new Set(prev);
-  if (next) s.add(id);
-  else s.delete(id);
-  return s;
-});
-
-                        if (!isInMy && !accessDateByTerminalId[id]) {
-                          setAccessDateForTerminal_(id, isoToday_());
-                        }
-
-                      }}
-                      className={starBtnClass(isInMy)}
-                      aria-label={isInMy ? "Remove from My Terminals" : "Add to My Terminals"}
-                      title={isInMy ? "Remove from My Terminals" : "Add to My Terminals"}
-                    >
-                      {isInMy ? "★" : "☆"}
-                    </button>
-                  </div>
-                </div>
-
-                {isExpanded ? (
-                  <div className="mt-3 rounded-xl border border-white/10 bg-black/30 p-3 text-sm text-white/70">
-                    <div className="text-white/80 font-semibold">Terminal details</div>
-                    <div className="mt-1">Business-card placeholder.</div>
-                  </div>
-                ) : null}
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-    
-    </div>
-  )}
-</FullscreenModal>
 
 
 
