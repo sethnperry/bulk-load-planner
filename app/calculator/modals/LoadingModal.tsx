@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo } from "react";
+import React, { useMemo, useEffect } from "react";
 import { FullscreenModal } from "@/lib/ui/FullscreenModal";
 
 type PlanRowLike = {
@@ -25,11 +25,43 @@ type LastProductInfo = {
 function badgeFromName_(name: string): string {
   const s = String(name ?? "").trim();
   if (!s) return "—";
+
+  // If the name ends with a 2–3 digit number (e.g. octane 87/93), use that.
+  const m = s.match(/(\d{2,3})\s*$/);
+  if (m?.[1]) return m[1];
+
   const parts = s.split(/\s+/g).filter(Boolean);
   const first = parts[0] ?? "";
   if (parts.length >= 2) return (first[0] + (parts[1]?.[0] ?? "")).toUpperCase();
   const alnum = first.replace(/[^a-zA-Z0-9]/g, "");
   return (alnum.slice(0, 2) || first.slice(0, 2)).toUpperCase();
+}
+function fmtUpdatedOnLine(args: { updatedAt?: string | null; timeZone?: string | null }): string | null {
+  const ts = args.updatedAt;
+  if (!ts) return null;
+
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return null;
+
+  const tz = args.timeZone || "UTC";
+
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(d);
+
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+  const mm = get("month");
+  const dd = get("day");
+  const hh = get("hour");
+  const mi = get("minute");
+
+  if (mm && dd && hh && mi) return `Updated on ${mm}/${dd} at ${hh}:${mi} hrs`;
+  return null;
 }
 
 function fmtLastApiLine_(args: {
@@ -39,16 +71,19 @@ function fmtLastApiLine_(args: {
 }): string | null {
   const api = args.lastApi;
   const ts = args.lastApiUpdatedAt;
-  if (api == null || !Number.isFinite(Number(api)) || !ts) return null;
+  const tz = args.timeZone;
+
+  if (api == null || !Number.isFinite(Number(api))) return null;
+
+  // If we have an API but no timestamp, still show something.
+  if (!ts) return `API was ${api}`;
 
   const d = new Date(ts);
   if (Number.isNaN(d.getTime())) return `API was ${api}`;
 
-  const tz = args.timeZone || "UTC";
-
-  // MM/DD @ HH:mm (24h) in terminal timezone
+  // MM/DD @ HH:mm (24h) in terminal timezone (if provided)
   const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: tz,
+    timeZone: tz ?? undefined,
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
@@ -141,8 +176,25 @@ export default function LoadingModal(props: {
     });
   }, [plannedLines, productNameById]);
 
+useEffect(() => {
+  if (!open) return;
+
+  for (const g of productGroups) {
+    const pid = String(g.productId ?? "");
+    if (!pid) continue;
+
+    const last = lastProductInfoById?.[pid]?.last_api;
+    const current = (productInputs?.[pid]?.api ?? "").toString().trim();
+
+    // Only prefill if empty and we actually have a previous API
+    if (!current && last != null && Number.isFinite(Number(last))) {
+      setProductApi(pid, String(last));
+    }
+  }
+}, [open, productGroups, lastProductInfoById, productInputs, setProductApi]);
+
   return (
-    <FullscreenModal open={open} title="Loading" onClose={onClose}>
+    <FullscreenModal open={open} title="Loading" onClose={onClose} footer={null}>
       <div style={{ display: "grid", gap: 14 }}>
         {/* A) Compartments */}
         <div style={{ display: "grid", gap: 8 }}>
@@ -205,9 +257,18 @@ export default function LoadingModal(props: {
             <div style={{ display: "grid", gap: 10 }}>
               {productGroups.map((g) => {
                 const name = productNameById.get(g.productId) ?? g.productId;
+                const fromCatalog =
+                  (productButtonCodeById?.[g.productId] && String(productButtonCodeById[g.productId]).trim()) || "";
+                const fromName = badgeFromName_(name);
+
+                // If catalog code is 2 letters (e.g. PU/RU) but name ends with a number (e.g. 87/93),
+                // prefer the number so the badge matches what drivers expect on the button.
                 const badgeText =
-                  (productButtonCodeById?.[g.productId] && String(productButtonCodeById[g.productId]).trim()) ||
-                  badgeFromName_(name);
+                  (fromCatalog &&
+                    /^[A-Za-z]{2}$/.test(fromCatalog) &&
+                    /^\d{2,3}$/.test(fromName)
+                    ? fromName
+                    : (fromCatalog || fromName));
                 const badgeHex =
                   (productHexCodeById?.[g.productId] && String(productHexCodeById[g.productId]).trim()) || null;
                 const apiVal = productInputs[g.productId]?.api ?? "";
@@ -256,7 +317,7 @@ export default function LoadingModal(props: {
                         <div
                           style={{
                             fontWeight: 950,
-                            fontSize: 18,
+                            fontSize: 16,
                             lineHeight: 1.1,
                             whiteSpace: "nowrap",
                             overflow: "hidden",
@@ -267,11 +328,12 @@ export default function LoadingModal(props: {
                         </div>
 
                         <div style={{ marginTop: 4, color: "rgba(255,255,255,0.70)", fontWeight: 750, fontSize: 13 }}>
-                          {fmtLastApiLine_({
-                            lastApi: lastInfo?.last_api,
-                            lastApiUpdatedAt: lastInfo?.last_api_updated_at,
-                            timeZone: terminalTimeZone ?? null,
-                          }) ?? "No previous API recorded"}
+                         
+                         {fmtUpdatedOnLine({
+  updatedAt: lastInfo?.last_api_updated_at,
+  timeZone: terminalTimeZone ?? null,
+}) ?? "No previous API recorded"}
+
                         </div>
                       </div>
                     </div>

@@ -2729,24 +2729,6 @@ async function completeLoadToSupabase() {
 }
 
 
-  // Plan-section-only style tweaks (surgical). Keeps global styles untouched.
-  const planStyles = useMemo(() => {
-    return {
-      ...styles,
-      // Give the Plan "Load/LOADED" button breathing room and a more intentional pill shape.
-      smallBtn: {
-        ...styles.smallBtn,
-        padding: "10px 14px",
-        minWidth: 112,
-        borderRadius: 14,
-        letterSpacing: "0.4px",
-      },
-      // Separate the "rows" badge from the Load button.
-      badge: { ...styles.badge, marginRight: 10 },
-    };
-  }, []);
-
-
 
   return (
     <div style={styles.page}>
@@ -3312,283 +3294,60 @@ console.log("MAIN selectedTerminal", {
 />
 
 
-{/* ===================== PLAN + 4-CARD GRID (PASTE OVER THIS WHOLE SECTION) ===================== */}
+<PlanSection
+  styles={styles}
+  planRows={planRows}
+  targetGallonsRoundedText={targetGallonsRoundedText}
+  targetGallonsText={targetGallonsText}
+  plannedGallonsTotalText={plannedGallonsTotalText}
+  remainingGallonsText={remainingGallonsText}
+  productNameById={productNameById}
+  onLoad={beginLoadToSupabase}
+  loadDisabled={
+    beginLoadBusy ||
+    !selectedComboId ||
+    !selectedTerminalId ||
+    !selectedState ||
+    !selectedCity ||
+    !selectedCityId ||
+    planRows.length === 0
+  }
+ loadLabel={beginLoadBusy ? "Loading…" : loadReport ? "LOADED" : activeLoadId ? "Load started" : "Load"}
 
-{/* ===================== REPLACE YOUR CURRENT PlanSection + loadReport CARD WITH THIS WHOLE BLOCK ===================== */}
+/>
 
-{/* NOTE: This removes the entire Plan table section from view (per your request) and replaces it with the 2x2 big-card grid. */}
-
-<div
-  style={{
-    marginTop: 8,
-    display: "grid",
-    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-    gap: "clamp(12px, 2.2vw, 18px)",
-    alignItems: "stretch",
-  }}
->
-  {/* ===================== PATCH: SWAP TOP-LEFT + TOP-RIGHT, AND MAKE LOADED OPEN LOADING MODAL ===================== */
-/* Replace ONLY the two top cards inside your 2x2 grid with this block:
-   (1) TOP-LEFT becomes the big LOAD/LOADED button card
-   (2) TOP-RIGHT becomes the Planned/Target/Actual report card
-*/}
-
-{/* TOP-LEFT: LOAD / LOADED button (always opens LoadingModal when a load is active; otherwise begins load then opens) */}
-<button
-  type="button"
-  disabled={beginLoadBusy || completeBusy}
-  onClick={async () => {
-    // If already loaded, user likely wants to view/edit inputs -> open modal
-    if (loadReport) {
-      setLoadingOpen(true);
-      return;
-    }
-
-    // If a load is already active, open modal immediately
-    if (activeLoadId) {
-      setLoadingOpen(true);
-      return;
-    }
-
-    // Otherwise begin load, then open modal (gives immediate feedback)
-    await beginLoadToSupabase();
-    setLoadingOpen(true);
-  }}
-  onPointerDown={(e) => {
-    const el = e.currentTarget as HTMLButtonElement;
-    el.style.transform = "translateY(1px)";
-    el.style.filter = "brightness(1.08)";
-  }}
-  onPointerUp={(e) => {
-    const el = e.currentTarget as HTMLButtonElement;
-    el.style.transform = "translateY(0px)";
-    el.style.filter = "brightness(1)";
-  }}
-  onPointerCancel={(e) => {
-    const el = e.currentTarget as HTMLButtonElement;
-    el.style.transform = "translateY(0px)";
-    el.style.filter = "brightness(1)";
-  }}
-  style={{
-    borderRadius: 22,
-    border: "1px solid rgba(255,255,255,0.14)",
-    background: "rgba(0,0,0,0.40)",
-    boxShadow: "0 16px 40px rgba(0,0,0,0.55)",
-    padding: "clamp(16px, 3.0vw, 26px)",
-    minHeight: "clamp(120px, 16vw, 170px)",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    fontWeight: 1000,
-    letterSpacing: "1.6px",
-    fontSize: "clamp(34px, 5.2vw, 56px)",
-    lineHeight: 1.05,
-    color: loadReport ? "rgba(0,245,255,0.95)" : "rgba(255,255,255,0.96)",
-    cursor: beginLoadBusy || completeBusy ? "default" : "pointer",
-    opacity: beginLoadBusy || completeBusy ? 0.60 : 1,
-    transition: "transform 90ms ease, filter 90ms ease, opacity 160ms ease",
-    userSelect: "none",
-    WebkitTapHighlightColor: "transparent",
-  }}
-  aria-label={beginLoadBusy ? "Loading" : loadReport ? "Loaded" : activeLoadId ? "Continue load" : "Load"}
->
-  {beginLoadBusy ? "LOADING…" : loadReport ? "LOADED" : "LOAD"}
-</button>
-
-{/* TOP-RIGHT: Planned + Target + Actual (report card) */}
-<div
-  style={{
-    borderRadius: 22,
-    border: "1px solid rgba(255,255,255,0.10)",
-    background: "rgba(255,255,255,0.04)",
-    boxShadow: "0 14px 34px rgba(0,0,0,0.45)",
-    padding: "clamp(16px, 3.0vw, 26px)",
-    minHeight: "clamp(120px, 16vw, 170px)",
-    display: "grid",
-    gridTemplateRows: "auto auto auto",
-    alignContent: "center",
-    rowGap: "clamp(10px, 1.8vw, 14px)",
-    overflow: "hidden",
-  }}
->
-  {/* Planned */}
-  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, minWidth: 0 }}>
-    <span
+{loadReport ? (
+  <div style={{ marginTop: 12, display: "flex", gap: 10, justifyContent: "flex-end", flexWrap: "wrap" }}>
+    <div
       style={{
-        color: "rgba(255,255,255,0.55)",
-        fontWeight: 900,
-        letterSpacing: "0.4px",
-        fontSize: "clamp(13px, 1.8vw, 16px)",
-        whiteSpace: "nowrap",
+        padding: "10px 12px",
+        borderRadius: 14,
+        border: "1px solid rgba(255,255,255,0.10)",
+        background: "rgba(255,255,255,0.04)",
+        minWidth: 320,
       }}
     >
-      Planned
-    </span>
-    <span
-      style={{
-        color: "rgba(255,255,255,0.96)",
-        fontWeight: 950,
-        fontSize: "clamp(22px, 3.7vw, 34px)",
-        lineHeight: 1.14,
-        paddingBottom: 2,
-        whiteSpace: "nowrap",
-        overflow: "hidden",
-        textOverflow: "ellipsis",
-        textAlign: "right",
-        flex: 1,
-        fontVariantNumeric: "tabular-nums",
-      }}
-    >
-      {loadReport ? `${Math.round(loadReport.planned_total_gal).toLocaleString()} gal` : plannedGallonsTotalText}
-    </span>
-  </div>
-
-  {/* Target */}
-  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, minWidth: 0 }}>
-    <span
-      style={{
-        color: "rgba(255,255,255,0.55)",
-        fontWeight: 900,
-        letterSpacing: "0.4px",
-        fontSize: "clamp(13px, 1.8vw, 16px)",
-        whiteSpace: "nowrap",
-      }}
-    >
-      Target
-    </span>
-    <span
-      style={{
-        color: "rgba(255,255,255,0.94)",
-        fontWeight: 950,
-        fontSize: "clamp(22px, 3.7vw, 34px)",
-        lineHeight: 1.14,
-        paddingBottom: 2,
-        whiteSpace: "nowrap",
-        overflow: "hidden",
-        textOverflow: "ellipsis",
-        textAlign: "right",
-        flex: 1,
-        fontVariantNumeric: "tabular-nums",
-      }}
-    >
-      {loadReport?.planned_gross_lbs == null ? "—" : `${Math.round(loadReport.planned_gross_lbs).toLocaleString()} lbs`}
-    </span>
-  </div>
-
-  {/* Actual */}
-  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, minWidth: 0 }}>
-    <span
-      style={{
-        color: "rgba(255,255,255,0.55)",
-        fontWeight: 900,
-        letterSpacing: "0.4px",
-        fontSize: "clamp(13px, 1.8vw, 16px)",
-        whiteSpace: "nowrap",
-      }}
-    >
-      Actual
-    </span>
-    <span
-      style={{
-        color: "rgba(255,255,255,0.90)",
-        fontWeight: 950,
-        fontSize: "clamp(20px, 3.3vw, 30px)",
-        lineHeight: 1.14,
-        paddingBottom: 2,
-        whiteSpace: "nowrap",
-        overflow: "hidden",
-        textOverflow: "ellipsis",
-        textAlign: "right",
-        flex: 1,
-        fontVariantNumeric: "tabular-nums",
-      }}
-    >
-      {loadReport?.actual_gross_lbs == null ? "—" : `${Math.round(loadReport.actual_gross_lbs).toLocaleString()} lbs`}
-    </span>
-  </div>
-</div>
-
-{/* ===================== END PATCH ===================== */}
-
-
-  {/* BOTTOM-LEFT: placeholder card for Placard (you said we'll do next) */}
-  <div
-    style={{
-      borderRadius: 22,
-      border: "1px solid rgba(255,255,255,0.10)",
-      background: "rgba(255,255,255,0.03)",
-      boxShadow: "0 14px 34px rgba(0,0,0,0.40)",
-      padding: "clamp(16px, 3.0vw, 26px)",
-      minHeight: "clamp(120px, 16vw, 170px)",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      color: "rgba(255,255,255,0.20)",
-      fontWeight: 900,
-      fontSize: "clamp(18px, 2.2vw, 22px)",
-      letterSpacing: "0.6px",
-    }}
-  >
-    {/* Placard card next */}
-  </div>
-
-  {/* BOTTOM-RIGHT: Over/Under (label left, value right). Over > 0 = RED, Under < 0 = GREEN */}
-  <div
-    style={{
-      borderRadius: 22,
-      border: "1px solid rgba(255,255,255,0.10)",
-      background: "rgba(255,255,255,0.04)",
-      boxShadow: "0 14px 34px rgba(0,0,0,0.45)",
-      padding: "clamp(16px, 3.0vw, 26px)",
-      minHeight: "clamp(120px, 16vw, 170px)",
-      display: "flex",
-      flexDirection: "column",
-      justifyContent: "center",
-      overflow: "hidden",
-    }}
-  >
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, minWidth: 0 }}>
-      <span
-        style={{
-          color: "rgba(255,255,255,0.55)",
-          fontWeight: 900,
-          letterSpacing: "0.4px",
-          fontSize: "clamp(13px, 1.8vw, 16px)",
-          whiteSpace: "nowrap",
-        }}
-      >
-        Over/Under
-      </span>
-
-      <span
-        style={{
-          color:
-            loadReport?.diff_lbs == null
-              ? "rgba(255,255,255,0.90)"
-              : loadReport.diff_lbs > 0
-              ? "rgba(255,64,64,0.95)" // OVER = red
-              : "rgba(95, 255, 170, 0.95)", // UNDER = green (matches your look)
-          fontWeight: 1000,
-          fontSize: "clamp(26px, 4.3vw, 44px)",
-          lineHeight: 1.12,
-          paddingBottom: 2,
-          whiteSpace: "nowrap",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          textAlign: "right",
-          flex: 1,
-          fontVariantNumeric: "tabular-nums",
-        }}
-      >
-        {loadReport?.diff_lbs == null
+      <div style={{ fontWeight: 900, marginBottom: 6 }}>Load report</div>
+      <div style={{ color: "rgba(255,255,255,0.75)", fontWeight: 800 }}>
+        {Math.round(loadReport.planned_total_gal).toLocaleString()} gal planned
+      </div>
+      <div style={{ color: "rgba(255,255,255,0.75)", fontWeight: 800 }}>
+        Planned gross:{" "}
+        {loadReport.planned_gross_lbs == null ? "—" : Math.round(loadReport.planned_gross_lbs).toLocaleString()} lbs
+      </div>
+      <div style={{ color: "rgba(255,255,255,0.75)", fontWeight: 800 }}>
+        Actual gross:{" "}
+        {loadReport.actual_gross_lbs == null ? "—" : Math.round(loadReport.actual_gross_lbs).toLocaleString()} lbs
+      </div>
+      <div style={{ color: "rgba(255,255,255,0.85)", fontWeight: 900 }}>
+        Over/Under:{" "}
+        {loadReport.diff_lbs == null
           ? "—"
           : `${loadReport.diff_lbs >= 0 ? "+" : ""}${Math.round(loadReport.diff_lbs).toLocaleString()} lbs`}
-      </span>
+      </div>
     </div>
   </div>
-</div>
-
-{/* ===================== END REPLACEMENT BLOCK ===================== */}
+) : null}
 
 
 <EquipmentModal open={equipOpen} onClose={() => setEquipOpen(false)} />
@@ -3615,8 +3374,6 @@ console.log("MAIN selectedTerminal", {
   loadedDisabled={completeBusy}
   loadedLabel={completeBusy ? "Saving…" : "LOADED"}
 />
-
-{/* ===================== END PLAN + 4-CARD GRID ===================== */}
 
 
 <TempDialModal
