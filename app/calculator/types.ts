@@ -23,8 +23,7 @@ export type ComboRow = {
   truck_id: string | null;
   trailer_id: string | null;
   tare_lbs: number | null;
-  gross_limit_lbs: number | null;
-  buffer_lbs: number | null;
+  target_weight: number | null;   // renamed from gross_limit_lbs
   coupled?: boolean | null;
   claimed_by?: string | null;
   claimed_at?: string | null;
@@ -84,6 +83,9 @@ export type ProductRow = {
   alpha_per_f: number | null;
   last_api?: number | null;
   last_api_updated_at?: string | null;
+  last_temp_f?: number | null;   // observed temp when last_api was recorded
+  last_loaded_at?: string | null;
+  un_number?: string | null;     // DOT UN number e.g. "UN1203" for placard logic
 };
 
 export type TerminalProductMetaRow = {

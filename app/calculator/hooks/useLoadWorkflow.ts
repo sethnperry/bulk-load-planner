@@ -3,6 +3,7 @@
 // Owns: begin_load, complete_load RPCs, load state machine, load report.
 
 import { useCallback, useState } from "react";
+import { supabase } from "@/lib/supabase/client";
 import { beginLoad, completeLoad } from "@/lib/supabase/load";
 import { lbsPerGallonAtTemp } from "../utils/planMath";
 import type { LoadReport, PlanRow, ProductRow } from "../types";
@@ -10,13 +11,13 @@ import type { LoadReport, PlanRow, ProductRow } from "../types";
 // ─── Hook ─────────────────────────────────────────────────────────────────────
 
 type Props = {
+  authUserId: string | null;
   selectedComboId: string;
   selectedTerminalId: string;
   selectedState: string;
   selectedCity: string;
   selectedCityId: string | null;
   tare: number;
-  buffer: number;
   cgBias: number;
   ambientTempF: number | null;
   tempF: number;
@@ -27,14 +28,22 @@ type Props = {
   productNameById: Map<string, string>;
   productInputs: Record<string, { api?: string; tempF?: number }>;
   setProductInputs: (v: Record<string, { api?: string; tempF?: number }>) => void;
+  // Post-load refresh callbacks
+  onRefreshTerminalProducts?: () => Promise<void>;  // re-fetch last_api, last_temp_f
+  onRefreshTerminalAccess?: () => Promise<void>;    // re-fetch terminal expiry dates
+  onPostLoadComplete?: () => Promise<void>;         // re-read load_log for slot 0 / slip seat
 };
 
 export function useLoadWorkflow({
+  authUserId,
   selectedComboId, selectedTerminalId, selectedState, selectedCity, selectedCityId,
-  tare, buffer, cgBias, ambientTempF, tempF,
+  tare, cgBias, ambientTempF, tempF,
   planRows, plannedGallonsTotal, plannedWeightLbs,
   terminalProducts, productNameById,
   productInputs, setProductInputs,
+  onRefreshTerminalProducts,
+  onRefreshTerminalAccess,
+  onPostLoadComplete,
 }: Props) {
   const [activeLoadId, setActiveLoadId] = useState<string | null>(null);
   const [beginLoadBusy, setBeginLoadBusy] = useState(false);
@@ -63,8 +72,8 @@ export function useLoadWorkflow({
   }
 
   function computePlannedGrossLbs(): number | null {
-    if (![tare, buffer, plannedWeightLbs].every((x) => Number.isFinite(x))) return null;
-    return tare + buffer + plannedWeightLbs;
+    if (![tare, plannedWeightLbs].every((x) => Number.isFinite(x))) return null;
+    return tare + plannedWeightLbs;
   }
 
   // ── Begin load ────────────────────────────────────────────────────────────
@@ -84,9 +93,12 @@ export function useLoadWorkflow({
         .map((r) => {
           const gallons = Number(r.planned_gallons ?? 0);
           const lbs = gallons * Number(r.lbsPerGal ?? 0);
+          const prod = terminalProducts.find((p) => p.product_id === r.productId);
           return {
             comp_number: Number(r.comp_number),
             product_id: String(r.productId),
+            product_name: prod?.product_name ?? prod?.display_name ?? null,
+            un_number: (prod as any)?.un_number ?? null,  // for placard residue logic
             planned_gallons: Number.isFinite(gallons) ? gallons : null,
             planned_lbs: Number.isFinite(lbs) ? lbs : null,
             temp_f: tempF ?? null,
@@ -98,8 +110,8 @@ export function useLoadWorkflow({
       const planned_total_gal = Number.isFinite(plannedGallonsTotal) ? plannedGallonsTotal : null;
       const planned_total_lbs = Number.isFinite(plannedWeightLbs) ? plannedWeightLbs : null;
       const planned_gross_lbs =
-        Number.isFinite(tare) && Number.isFinite(buffer) && Number.isFinite(plannedWeightLbs)
-          ? tare + buffer + plannedWeightLbs : null;
+        Number.isFinite(tare) && Number.isFinite(plannedWeightLbs)
+          ? tare + plannedWeightLbs : null;
 
       const result = await beginLoad({
         combo_id: selectedComboId,
@@ -121,12 +133,32 @@ export function useLoadWorkflow({
 
       setActiveLoadId(result.load_id);
 
+      // Reset terminal access expiry — driver is actively loading, so re-card them now.
+      // begin_load doesn't touch terminal_access, so we do it here.
+      if (selectedTerminalId && authUserId) {
+        supabase
+          .from("terminal_access")
+          .upsert(
+            { user_id: authUserId, terminal_id: selectedTerminalId, carded_on: new Date().toISOString().slice(0, 10) },
+            { onConflict: "user_id,terminal_id" }
+          )
+          .then(() => onRefreshTerminalAccess?.())
+          .catch(() => {});
+      }
+
       // Init per-product inputs
       const nextInputs: Record<string, { api?: string; tempF?: number }> = {};
       for (const r of planRows as any[]) {
         const pid = r?.productId ? String(r.productId) : null;
         if (!pid || !Number.isFinite(Number(r?.planned_gallons ?? 0))) continue;
-        if (!nextInputs[pid]) nextInputs[pid] = { api: "", tempF: Number(tempF) };
+        if (!nextInputs[pid]) {
+          // Pre-fill with last observed API from this terminal so driver sees it immediately
+          const product = terminalProducts.find((p) => p.product_id === pid);
+          const prefilledApi = product?.last_api != null && Number.isFinite(Number(product.last_api))
+            ? String(product.last_api)
+            : "";
+          nextInputs[pid] = { api: prefilledApi, tempF: Number(tempF) };
+        }
       }
       setProductInputs(nextInputs);
       setLoadingOpen(true);
@@ -140,7 +172,7 @@ export function useLoadWorkflow({
   }, [
     beginLoadBusy, selectedComboId, selectedTerminalId, selectedState, selectedCity,
     selectedCityId, planRows, plannedGallonsTotal, plannedWeightLbs,
-    tare, buffer, cgBias, ambientTempF, tempF, setProductInputs,
+    tare, cgBias, ambientTempF, tempF, setProductInputs, onRefreshTerminalAccess, authUserId,
   ]);
 
   // ── On loaded (from loading modal) ────────────────────────────────────────
@@ -220,8 +252,8 @@ export function useLoadWorkflow({
 
       const plannedGross = computePlannedGrossLbs();
       const actualGross =
-        Number.isFinite(tare) && Number.isFinite(buffer) && Number.isFinite(actualPayloadLbs)
-          ? tare + buffer + actualPayloadLbs : null;
+        Number.isFinite(tare) && Number.isFinite(actualPayloadLbs)
+          ? tare + actualPayloadLbs : null;
       const diff = Number.isFinite(Number(res?.diff_lbs))
         ? Number(res.diff_lbs)
         : plannedGross != null && actualGross != null ? actualGross - plannedGross : null;
@@ -233,6 +265,15 @@ export function useLoadWorkflow({
         diff_lbs: diff,
       });
       setLoadingOpen(false);
+
+      // ── Post-load refresh (don't reset loadReport — it's set above) ─────────
+      // Fire in parallel — neither touches loadReport state
+      await Promise.allSettled([
+        onRefreshTerminalProducts?.(),
+        onRefreshTerminalAccess?.(),
+        onPostLoadComplete?.(),
+      ]);
+
     } catch (e: any) {
       console.error("complete_load failed:", e);
       alert(e?.message ?? String(e));
@@ -240,7 +281,8 @@ export function useLoadWorkflow({
     } finally {
       setCompleteBusy(false);
     }
-  }, [activeLoadId, planRows, productInputs, productNameById, tare, buffer, plannedGallonsTotal, terminalProducts]);
+  }, [activeLoadId, planRows, productInputs, productNameById, tare, plannedGallonsTotal, terminalProducts,
+      selectedTerminalId, tempF, onRefreshTerminalProducts, onRefreshTerminalAccess, onPostLoadComplete]);
 
   return {
     activeLoadId,

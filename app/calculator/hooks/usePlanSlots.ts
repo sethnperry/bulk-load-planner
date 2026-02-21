@@ -46,20 +46,23 @@ type Props = {
   tempF: number;
   cgSlider: number;
   compPlan: Record<number, CompPlanInput>;
-  setTempF: (v: number) => void;
   setCgSlider: (v: number) => void;
   setCompPlan: (v: Record<number, CompPlanInput>) => void;
   compartmentsLoaded: boolean;
+  // Called by useLoadWorkflow after completeLoad — writes slot 0 as equipment-scoped
+  onSaveLastLoad?: (payload: any) => Promise<void>;
 };
 
 export function usePlanSlots({
   authUserId, selectedTerminalId, selectedComboId,
   tempF, cgSlider, compPlan,
-  setTempF, setCgSlider, setCompPlan,
+  setCgSlider, setCompPlan,
   compartmentsLoaded,
+  onSaveLastLoad,
 }: Props) {
   const [slotBump, setSlotBump] = useState(0);
   const [slotHas, setSlotHas] = useState<Record<number, boolean>>({});
+  const [lastLoadLines, setLastLoadLines] = useState<any[]>([]);
 
   const planRestoreReadyRef = useRef<string | null>(null);
   const planDirtyRef = useRef(false);
@@ -99,10 +102,17 @@ export function usePlanSlots({
   // ── Slot has map ──────────────────────────────────────────────────────────
 
   const refreshSlotHas = useCallback(() => {
-    if (!selectedTerminalId) { setSlotHas({}); return; }
+    if (!selectedTerminalId) { setSlotHas({}); setLastLoadLines([]); return; }
     const next: Record<number, boolean> = {};
     for (const s of PLAN_SLOTS) next[s] = !!safeRead(planStoreKey(s));
     setSlotHas(next);
+    // Read lastLoadLines from dedicated key (never clobbered by autosave)
+    if (selectedComboId) {
+      const llKey = `proTankr:${authUserId ? "u:" + authUserId : "anon"}:combo:${selectedComboId}:lastLoadLines`;
+      const llData = safeRead(llKey) as any;
+      const ll = llData?.lastLoadLines ?? [];
+      setLastLoadLines(ll);
+    }
   }, [selectedTerminalId, planStoreKey, safeRead]);
 
   // ── Supabase server sync ──────────────────────────────────────────────────
@@ -139,6 +149,134 @@ export function usePlanSlots({
     if (error) console.warn("serverDeleteSlot error:", error.message);
   }
 
+  // ── Last load from load_log (equipment-scoped, any driver on this combo sees it) ──
+  // Reads planned_snapshot from the most recent completed load for this combo.
+  // planned_snapshot.lines contains { comp_number, product_id, un_number, ... }
+  // which is all we need to restore slot 0 and compute placard residue.
+
+  // For each empty compartment, find the last product loaded into it for this combo.
+  async function fetchLastProductPerComp(emptyComps: number[]): Promise<Record<number, { product_id: string; un_number: string | null }>> {
+    if (!selectedComboId || emptyComps.length === 0) return {};
+
+    // Step 1: get all completed load_ids for this combo, ordered newest first
+    const { data: logRows, error: logErr } = await supabase
+      .from("load_log")
+      .select("load_id")
+      .eq("combo_id", selectedComboId)
+      .order("started_at", { ascending: false })
+      .limit(50);
+
+    if (logErr || !logRows?.length) return {};
+    const loadIds = logRows.map((r: any) => r.load_id);
+
+    // Step 2: for each empty comp, find the most recent load_line from those loads
+    const result: Record<number, { product_id: string; un_number: string | null }> = {};
+
+    await Promise.all(emptyComps.map(async (compNum) => {
+      const { data, error } = await supabase
+        .from("load_lines")
+        .select("product_id, load_id, products(un_number)")
+        .in("load_id", loadIds)
+        .eq("comp_number", compNum)
+        .gt("planned_gallons", 0)
+        // Order by the position in loadIds array (newest load first)
+        // We can't order by started_at here, so we fetch all and pick the one
+        // whose load_id appears earliest in loadIds
+        .limit(50);
+
+      if (!error && data?.length) {
+        // Pick the row whose load_id is earliest in loadIds (= most recent load)
+        const sorted = data.sort((a: any, b: any) =>
+          loadIds.indexOf(a.load_id) - loadIds.indexOf(b.load_id)
+        );
+        const best = sorted[0];
+        if (best?.product_id) {
+          result[compNum] = {
+            product_id: String(best.product_id),
+            un_number: (best.products as any)?.un_number ?? null,
+          };
+        }
+      }
+    }));
+
+    return result;
+  }
+
+  async function fetchLastLoadFromLog(): Promise<any | null> {
+    console.log("[planSlots] fetchLastLoadFromLog — comboId:", selectedComboId);
+    if (!selectedComboId) return null;
+
+    // Step 1: get the most recent completed load_id for this combo
+    // Broad diagnostic: any rows visible at all?
+    const { data: anyRows, error: anyErr } = await supabase
+      .from("load_log")
+      .select("load_id, status, started_at, combo_id, user_id")
+      .order("started_at", { ascending: false })
+      .limit(3);
+    console.log("[planSlots] BROAD load_log (no filter):", anyRows?.map((r: any) => ({ status: r.status, combo_id: r.combo_id?.slice(0,8), user_id: r.user_id?.slice(0,8) })), "err:", anyErr?.message);
+
+    const { data: comboRows, error: comboErr } = await supabase
+      .from("load_log")
+      .select("load_id, status, started_at, combo_id")
+      .eq("combo_id", selectedComboId)
+      .order("started_at", { ascending: false })
+      .limit(5);
+    console.log("[planSlots] load_log for THIS combo (all statuses):", comboRows?.map((r: any) => ({ status: r.status, load_id: r.load_id?.slice(0,8) })), "err:", comboErr?.message, "comboId:", selectedComboId?.slice(0,8));
+
+    const logRow = comboRows?.find((r: any) => r.status === "completed") ?? null;
+    const logErr = comboErr;
+    if (!logRow) {
+      console.log("[planSlots] no completed row found. All statuses seen:", comboRows?.map((r:any)=>r.status));
+      // Try with any status as fallback — use most recent regardless
+      const fallback = comboRows?.[0] ?? null;
+      if (!fallback) return null;
+      console.log("[planSlots] using fallback row with status:", fallback.status);
+      // Continue with fallback below — reassign
+      Object.assign(logRow ?? {}, fallback);
+    }
+    // Resolved row
+    const resolvedRow = comboRows?.find((r: any) => r.status === "completed") ?? comboRows?.[0] ?? null;
+    console.log("[planSlots] resolved row:", resolvedRow ? { load_id: resolvedRow.load_id?.slice(0,8), status: resolvedRow.status } : null);
+    if (!resolvedRow) return null;
+
+    // Step 2: get load_lines for that load, joined with products for un_number
+    const { data: lineRows, error: lineErr } = await supabase
+      .from("load_lines")
+      .select("comp_number, product_id, planned_gallons, products(un_number, product_name, display_name)")
+      .eq("load_id", resolvedRow.load_id);
+
+    console.log("[planSlots] load_lines:", lineRows?.map((l: any) => ({ comp: l.comp_number, pid: l.product_id, un: l.products?.un_number })), "err:", lineErr?.message);
+    if (lineErr || !lineRows) return null;
+    if (lineRows.length === 0) { console.log("[planSlots] load_lines empty — RLS may be blocking or load has no lines"); }
+
+    const lines = lineRows.map((l: any) => ({
+      comp_number: Number(l.comp_number),
+      product_id: l.product_id ? String(l.product_id) : null,
+      un_number: l.products?.un_number ? String(l.products.un_number) : null,
+      product_name: l.products?.product_name ?? l.products?.display_name ?? null,
+      planned_gallons: Number(l.planned_gallons ?? 0),
+    }));
+
+    const compPlan: Record<string, { empty: boolean; productId: string }> = {};
+    for (const line of lines) {
+      const n = String(line.comp_number ?? "");
+      if (!n || !line.product_id) continue;
+      compPlan[n] = { empty: false, productId: line.product_id };
+    }
+
+    console.log("[planSlots] final lines:", lines);
+    return {
+      v: 1,
+      savedAt: resolvedRow.started_at ? new Date(resolvedRow.started_at).getTime() : Date.now(),
+      terminalId: String((resolvedRow as any).terminal_id ?? selectedTerminalId ?? ""),
+      tempF: 60,
+      cgSlider: 0.5,
+      compPlan,
+      lastLoadLines: lines,
+      lastLoadId: resolvedRow.load_id,
+    };
+  }
+
   // ── Snapshot build/apply ──────────────────────────────────────────────────
 
   const buildSnapshot = useCallback(
@@ -152,10 +290,12 @@ export function usePlanSlots({
   );
 
   const applySnapshot = useCallback((snap: PlanSnapshot) => {
-    setTempF(Number(snap.tempF) || 60);
+    // NOTE: tempF is intentionally NOT restored from any snapshot.
+    // The fuel temp prediction always owns tempF. Restoring it from saved state
+    // would override the prediction every time a slot is switched or the page reloads.
     setCgSlider(Number(snap.cgSlider) || 0.25);
     setCompPlan(snap.compPlan || {});
-  }, [setTempF, setCgSlider, setCompPlan]);
+  }, [setCgSlider, setCompPlan]);
 
   // ── Server pull (once per scope) ──────────────────────────────────────────
 
@@ -191,7 +331,9 @@ export function usePlanSlots({
             lastAppliedScopeRef.current !== planScopeKey;
 
           if (safeToApply) {
-            if (typeof local0.tempF === "number") setTempF(local0.tempF);
+            // NOTE: tempF is intentionally NOT restored from snapshot.
+            // The fuel temp prediction always dominates on load/refresh.
+            // tempF is only ever set by the prediction hook or manually by the user.
             if (typeof local0.cgSlider === "number") setCgSlider(local0.cgSlider);
             if (local0.compPlan && typeof local0.compPlan === "object") setCompPlan(local0.compPlan);
             planDirtyRef.current = false;
@@ -206,6 +348,41 @@ export function usePlanSlots({
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serverSyncEnabled, planScopeKey, selectedTerminalId, selectedComboId, compartmentsLoaded, slotBump]);
+
+  // ── On combo claim: fetch equipment-scoped last load from DB into local slot 0 ─
+
+  // Load cached lastLoadLines immediately when comboId resolves (before DB fetch)
+  useEffect(() => {
+    if (!selectedComboId) { setLastLoadLines([]); return; }
+    const llKey = `proTankr:${authUserId ? "u:" + authUserId : "anon"}:combo:${selectedComboId}:lastLoadLines`;
+    const llData = safeRead(llKey) as any;
+    const ll = llData?.lastLoadLines ?? [];
+    setLastLoadLines(ll);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedComboId, authUserId]);
+
+  useEffect(() => {
+    if (!selectedComboId || !authUserId) return;
+    (async () => {
+      const dbPayload = await fetchLastLoadFromLog();
+      if (!dbPayload) return;
+
+      // Always update lastLoadLines — this is residue data, always current
+      const llKey = `proTankr:${authUserId ? "u:" + authUserId : "anon"}:combo:${selectedComboId}:lastLoadLines`;
+      safeWrite(llKey, { lastLoadLines: dbPayload.lastLoadLines, lastLoadId: dbPayload.lastLoadId });
+      setLastLoadLines(dbPayload.lastLoadLines ?? []);
+
+      // Only restore the plan (compPlan/temp/CG) if slot 0 is empty — i.e. fresh page load
+      // with no autosaved state. If slot 0 has data the driver is mid-plan; don't clobber it.
+      const localRaw = safeRead(planStoreKey(0));
+      const slotIsEmpty = !localRaw || !localRaw.savedAt;
+      if (slotIsEmpty) {
+        safeWrite(planStoreKey(0), dbPayload);
+        applySnapshot(dbPayload);
+      }
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedComboId, authUserId]);
 
   // ── Restore slot 0 on terminal change ─────────────────────────────────────
 
@@ -292,10 +469,30 @@ export function usePlanSlots({
     });
   }, [selectedTerminalId, planStoreKey, safeRead, applySnapshot, planScopeKey]);
 
+  // Public: refresh slot 0 from load_log after a completed load
+  // Called by page.tsx post-completeLoad so slip seat state updates without reload
+  const refreshLastLoad = useCallback(async () => {
+    const dbPayload = await fetchLastLoadFromLog();
+    if (!dbPayload) return;
+    safeWrite(planStoreKey(0), dbPayload);
+    // Write lastLoadLines to dedicated key and update state immediately
+    if (selectedComboId) {
+      const llKey = `proTankr:${authUserId ? "u:" + authUserId : "anon"}:combo:${selectedComboId}:lastLoadLines`;
+      safeWrite(llKey, { lastLoadLines: dbPayload.lastLoadLines, lastLoadId: dbPayload.lastLoadId });
+      setLastLoadLines(dbPayload.lastLoadLines ?? []);
+    }
+    refreshSlotHas();
+    setSlotBump((v) => v + 1);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedComboId, selectedTerminalId, planStoreKey, safeWrite, refreshSlotHas]);
+
   return {
     PLAN_SLOTS,
     slotHas,
+    lastLoadLines,
+    fetchLastProductPerComp,
     saveToSlot,
     loadFromSlot,
+    refreshLastLoad,
   };
 }

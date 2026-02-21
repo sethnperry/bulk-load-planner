@@ -12,11 +12,43 @@ export const PLOW_BIAS_MAX = 2.5;
 export const CG_CURVE = 1.8;
 export const TILT_GAIN = 0.85;
 
-// ─── Density math ─────────────────────────────────────────────────────────────
+// ─── API gravity helpers ──────────────────────────────────────────────────────
 
 /**
- * Compute lbs/gallon at a given temperature using API gravity + thermal expansion.
- * Uses the standard ASTM D1250 approximation.
+ * Back-correct an observed API reading at a known temperature to API at 60°F.
+ *
+ * In the DB:
+ *   terminal_products.last_api     = API observed by the driver at last_temp_f
+ *   terminal_products.last_temp_f  = the temperature at which last_api was observed
+ *   products.api_60                = the manufacturer/reference API at 60°F
+ *
+ * The driver's observed API is more accurate than the static reference because
+ * it reflects the actual product in that tank on that day. We back-correct it
+ * to 60°F so we can compare apples-to-apples and forward-correct to any load temp.
+ *
+ * Formula: API_60 = API_observed + alpha * (T_observed - 60)
+ */
+export function backCorrectApiTo60(
+  lastApi: number,       // observed API at lastTempF
+  lastTempF: number,     // temperature at which lastApi was observed
+  alphaPerF: number      // thermal expansion coefficient (from products table)
+): number {
+  return lastApi + alphaPerF * (lastTempF - 60);
+}
+
+/**
+ * Compute lbs/gallon at a given load temperature using API gravity + thermal expansion.
+ *
+ * Inputs:
+ *   api60     — API gravity at 60°F (either from products.api_60, or back-corrected
+ *               from terminal_products.last_api using backCorrectApiTo60)
+ *   alphaPerF — thermal expansion coefficient (from products.alpha_per_f)
+ *   tempF     — the load temperature set by the driver on the slider
+ *
+ * Formula (ASTM D1250 approximation):
+ *   SG_60  = 141.5 / (API_60 + 131.5)
+ *   rho_60 = SG_60 * 8.345404          (lbs/gal at 60°F, water = 8.345404)
+ *   rho_T  = rho_60 / (1 + alpha * (T - 60))
  */
 export function lbsPerGallonAtTemp(
   api60: number,
@@ -27,6 +59,35 @@ export function lbsPerGallonAtTemp(
   const rho60 = sg60 * 8.345404; // lbs/gal at 60°F
   const rhoT = rho60 / (1 + alphaPerF * (tempF - 60));
   return rhoT;
+}
+
+/**
+ * Best-available lbs/gal for a product at a given load temperature.
+ *
+ * Priority:
+ *   1. If the terminal has a driver-observed API (last_api + last_temp_f),
+ *      back-correct it to API_60 and use that — most accurate.
+ *   2. Fall back to the static products.api_60 reference value.
+ *
+ * This is the function page.tsx should call instead of lbsPerGallonAtTemp directly.
+ */
+export function bestLbsPerGallon(
+  api60Ref: number,          // products.api_60  (static reference)
+  alphaPerF: number,         // products.alpha_per_f
+  tempF: number,             // driver's current load temp slider
+  lastApi?: number | null,   // terminal_products.last_api  (observed, nullable)
+  lastTempF?: number | null  // terminal_products.last_temp_f (nullable)
+): number {
+  // Use driver-observed API if we have both fields and they're valid numbers
+  if (
+    lastApi != null && Number.isFinite(lastApi) &&
+    lastTempF != null && Number.isFinite(lastTempF)
+  ) {
+    const api60Effective = backCorrectApiTo60(lastApi, lastTempF, alphaPerF);
+    return lbsPerGallonAtTemp(api60Effective, alphaPerF, tempF);
+  }
+  // Fallback to static reference
+  return lbsPerGallonAtTemp(api60Ref, alphaPerF, tempF);
 }
 
 // ─── CG bias ──────────────────────────────────────────────────────────────────

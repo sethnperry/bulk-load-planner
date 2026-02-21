@@ -41,18 +41,7 @@ export default function PlannerControls(props: any) {
   } = props;
 
   return (
-    <section style={styles.section}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-        <h2 style={{ margin: 0 }}>Compartments</h2>
-        <span style={styles.badge}>
-          {!selectedTrailerId
-            ? "Select equipment"
-            : compLoading
-            ? "Loading…"
-            : `${compartments.length} compartments`}
-        </span>
-      </div>
-
+    <section style={{ ...styles.section, border: "none", background: "transparent", padding: 0 }}>
       {!selectedTrailerId && <div style={styles.help}>Select equipment to load compartments.</div>}
       {compError && <div style={styles.error}>Error loading compartments: {compError}</div>}
 

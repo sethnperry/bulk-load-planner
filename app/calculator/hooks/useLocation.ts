@@ -21,8 +21,9 @@ async function fetchAmbientTempF(args: {
   city: string;
   apiKey: string;
   signal: AbortSignal;
+  onLatLon?: (lat: number, lon: number) => void;
 }): Promise<number | null> {
-  const { state, city, apiKey, signal } = args;
+  const { state, city, apiKey, signal, onLatLon } = args;
   const qCity = city.trim();
   const qState = state.trim();
   if (!qCity || !qState || !apiKey) return null;
@@ -33,6 +34,10 @@ async function fetchAmbientTempF(args: {
     if (res.ok) {
       const json: any = await res.json();
       const temp = Number(json?.main?.temp);
+      // Capture lat/lon from the current weather response
+      if (json?.coord?.lat && json?.coord?.lon) {
+        onLatLon?.(Number(json.coord.lat), Number(json.coord.lon));
+      }
       if (Number.isFinite(temp)) return temp;
     }
   } catch {}
@@ -46,6 +51,9 @@ async function fetchAmbientTempF(args: {
     const lat = Number(item?.lat);
     const lon = Number(item?.lon);
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+
+    // Capture lat/lon from geo lookup
+    onLatLon?.(lat, lon);
 
     const wUrl = `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&units=imperial&appid=${encodeURIComponent(apiKey)}`;
     const wRes = await fetch(wUrl, { signal, cache: "no-store" });
@@ -110,6 +118,11 @@ export function useLocation(authUserId: string) {
 
   const [ambientTempF, setAmbientTempF] = useState<number | null>(null);
   const [ambientTempLoading, setAmbientTempLoading] = useState(false);
+  const [ambientHeartbeat, setAmbientHeartbeat] = useState(0);
+
+  // Lat/lon resolved from the ambient weather geo lookup
+  const [locationLat, setLocationLat] = useState<number | null>(null);
+  const [locationLon, setLocationLon] = useState<number | null>(null);
 
   // Hydration refs — prevent clobber during boot/auth flip
   const skipResetRef = useRef(false);
@@ -243,6 +256,8 @@ export function useLocation(authUserId: string) {
     if (!selectedState || !selectedCity) {
       setAmbientTempF(null);
       setAmbientTempLoading(false);
+      setLocationLat(null);
+      setLocationLon(null);
       return;
     }
 
@@ -253,6 +268,8 @@ export function useLocation(authUserId: string) {
     const cached = AMBIENT_CACHE.get(cacheKey);
     if (cached && Date.now() - cached.ts < AMBIENT_TTL_MS) {
       setAmbientTempF(cached.tempF);
+      if (cached.lat != null) setLocationLat(cached.lat);
+      if (cached.lon != null) setLocationLon(cached.lon);
       setAmbientTempLoading(false);
       return;
     }
@@ -264,6 +281,16 @@ export function useLocation(authUserId: string) {
       try {
         const temp = await fetchAmbientTempF({
           state: selectedState, city: selectedCity, apiKey, signal: ac.signal,
+          onLatLon: (lat, lon) => {
+            setLocationLat(lat);
+            setLocationLon(lon);
+            // Store in cache entry so subsequent hits get lat/lon too
+            const existing = AMBIENT_CACHE.get(cacheKey);
+            if (existing) {
+              (existing as any).lat = lat;
+              (existing as any).lon = lon;
+            }
+          },
         });
         if (typeof temp === "number" && Number.isFinite(temp)) {
           setAmbientTempF(temp);
@@ -279,6 +306,27 @@ export function useLocation(authUserId: string) {
     })();
 
     return () => ac.abort();
+  }, [selectedState, selectedCity, ambientHeartbeat]);
+
+  // ── Ambient temp heartbeat (every 7 minutes) ──────────────────────────────
+  // Re-fetches even if cache is fresh so the UI stays current without reload.
+  useEffect(() => {
+    if (!selectedState || !selectedCity) return;
+    const apiKey = (process.env.NEXT_PUBLIC_OPENWEATHER_KEY || "").trim();
+    if (!apiKey) return;
+
+    const HEARTBEAT_MS = 7 * 60 * 1000; // 7 minutes
+
+    const tick = () => {
+      const cacheKey = ambientKey(selectedState, selectedCity);
+      // Force expiry so the fetch effect re-runs
+      AMBIENT_CACHE.delete(cacheKey);
+      // Trigger re-fetch by nudging a ref — we use a local state bump
+      setAmbientHeartbeat((v) => v + 1);
+    };
+
+    const id = setInterval(tick, HEARTBEAT_MS);
+    return () => clearInterval(id);
   }, [selectedState, selectedCity]);
 
   // ── Derived ───────────────────────────────────────────────────────────────
@@ -304,6 +352,8 @@ export function useLocation(authUserId: string) {
     selectedTerminalId, setSelectedTerminalId,
     selectedCityId,
     locationLabel,
+    locationLat,
+    locationLon,
     statesCatalog, statesLoading, statesError,
     citiesCatalog, citiesLoading, citiesError,
     ambientTempF, ambientTempLoading,

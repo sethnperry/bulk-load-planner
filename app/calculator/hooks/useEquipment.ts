@@ -55,7 +55,7 @@ export function useEquipment(authUserId: string) {
     const res = await supabase
       .from("equipment_combos")
       .select(
-        "combo_id, combo_name, truck_id, trailer_id, tare_lbs, gross_limit_lbs, buffer_lbs, active, claimed_by, claimed_at"
+        "combo_id, combo_name, truck_id, trailer_id, tare_lbs, target_weight, active, claimed_by, claimed_at"
       )
       .order("combo_name", { ascending: true })
       .order("combo_id", { ascending: true })

@@ -16,6 +16,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { createPortal } from "react-dom";
 import { supabase } from "@/lib/supabase/client";
 
 // ── Hooks ──────────────────────────────────────────────────────────────────────
@@ -26,6 +27,8 @@ import { usePlanSlots } from "./hooks/usePlanSlots";
 import { useLoadWorkflow } from "./hooks/useLoadWorkflow";
 import { usePlanRows } from "./hooks/usePlanRows";
 import { useTerminalFilters } from "./hooks/useTerminalFilters";
+import { useFuelTempPrediction } from "./hooks/useFuelTempPrediction";
+import { useLoadHistory } from "./hooks/useLoadHistory";
 
 // ── Sections ───────────────────────────────────────────────────────────────────
 import LocationBar from "./sections/LocationBar";
@@ -38,6 +41,7 @@ import MyTerminalsModal from "./modals/MyTerminalsModal";
 import TerminalCatalogModal from "./modals/TerminalCatalogModal";
 import LoadingModal from "./modals/LoadingModal";
 import CompleteLoadModal from "./modals/CompleteLoadModal";
+import MyLoadsModal from "./modals/MyLoadsModal";
 import ProductTempModal from "./modals/ProductTempModal";
 import TempDialModal from "./modals/TempDialModal";
 
@@ -49,19 +53,28 @@ import { TopTiles } from "./TopTiles";
 // ── Utils ──────────────────────────────────────────────────────────────────────
 import { addDaysISO_, formatMDYWithCountdown_, isPastISO_ } from "./utils/dates";
 import { normCity, normState } from "./utils/normalize";
-import { cgSliderToBias, lbsPerGallonAtTemp, planForGallons, CG_NEUTRAL } from "./utils/planMath";
+import { cgSliderToBias, lbsPerGallonAtTemp, bestLbsPerGallon, planForGallons, CG_NEUTRAL } from "./utils/planMath";
+import { worstCasePlacard, svgToDataUri, generatePlacardSvg } from "./utils/placardUtils";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 import type { ActiveComp, CompPlanInput, CompRow, ProductRow, TerminalProductMetaRow } from "./types";
+
+// ── ERG 2024 + DOT proper shipping descriptions (49 CFR 172.101) ─────────────
+const ERG_DATA: Record<string, { guide: number; name: string; shipping: string; fire: string; health: string; isolation_small: string; isolation_large: string }> = {
+  "UN1203": { guide: 128, name: "Gasoline",              shipping: "Gasoline, 3, UN1203, PG II",                                 fire: "Highly flammable. Vapors may travel to ignition source and flash back.", health: "Vapors may cause dizziness or suffocation. Low toxicity.",        isolation_small: "60 m (200 ft) all directions",  isolation_large: "300 m (1000 ft) all directions" },
+  "UN1202": { guide: 128, name: "Diesel Fuel",           shipping: "Diesel fuel, 3, UN1202, PG III",                              fire: "Flammable liquid. Flash point 52–96°C (126–205°F).",                 health: "Low acute toxicity. Vapors may cause irritation.",               isolation_small: "60 m (200 ft) all directions",  isolation_large: "300 m (1000 ft) all directions" },
+  "UN1993": { guide: 128, name: "Flammable Liquid NOS",  shipping: "Flammable liquid, n.o.s., 3, UN1993, PG II",                  fire: "Highly flammable. Vapors heavier than air — may accumulate in low areas.", health: "Vapors may cause dizziness. Avoid prolonged skin contact.",  isolation_small: "60 m (200 ft) all directions",  isolation_large: "300 m (1000 ft) all directions" },
+  "NA1993": { guide: 128, name: "Combustible Liquid NOS",shipping: "Combustible liquid, n.o.s., Combustible liquid, NA1993, PG III",fire: "Combustible. May ignite if heated above flash point.",             health: "Low hazard at ambient temps. Vapors may cause irritation.",      isolation_small: "60 m (200 ft) all directions",  isolation_large: "300 m (1000 ft) all directions" },
+  "UN1863": { guide: 128, name: "Aviation Turbine Fuel", shipping: "Fuel, aviation, turbine engine, 3, UN1863, PG I/II/III",      fire: "Flammable. Vapors may travel to ignition source and flash back.",    health: "Vapors may cause CNS depression. Low acute oral toxicity.",      isolation_small: "60 m (200 ft) all directions",  isolation_large: "300 m (1000 ft) all directions" },
+  "UN1075": { guide: 115, name: "Petroleum Gases",       shipping: "Petroleum gases, liquefied, 2.1, UN1075",                     fire: "Extremely flammable gas. May form explosive mixtures with air.",     health: "Asphyxiant. High concentrations may cause rapid suffocation.",   isolation_small: "100 m (330 ft) all directions", isolation_large: "800 m (0.5 mi) all directions"  },
+  "UN1978": { guide: 115, name: "Propane",               shipping: "Propane, 2.1, UN1978",                                        fire: "Extremely flammable gas. May explode if container heated.",          health: "Simple asphyxiant. No significant toxicity.",                   isolation_small: "100 m (330 ft) all directions", isolation_large: "800 m (0.5 mi) all directions"  },
+};
+
 
 // ─── Local UI helpers ─────────────────────────────────────────────────────────
 
 const clampNum = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
-function svgToDataUri(svg: string) {
-  const encoded = encodeURIComponent(svg).replace(/'/g, "%27").replace(/"/g, "%22");
-  return `data:image/svg+xml,${encoded}`;
-}
 
 // Thermometer thumb SVG (unchanged from original)
 const THERMOMETER_THUMB_URI = svgToDataUri(`
@@ -151,6 +164,69 @@ function TempDial({ value, min, max, step, onChange }: TempDialProps) {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
+// ── PlacardDiamond portal component ──────────────────────────────────────────
+// Renders the diamond via a React portal into document.body so it's never
+// clipped by any ancestor overflow or stacking context.
+// Uses getBoundingClientRect() on the anchor card + ResizeObserver to stay
+// perfectly positioned across all screen sizes and on scroll/resize.
+function PlacardDiamond({ anchorRef, svgUri, unNumber, size = 150, onClick }: {
+  anchorRef: React.RefObject<HTMLDivElement | null>;
+  svgUri: string;
+  unNumber: string;
+  size?: number;
+  onClick?: () => void;
+}) {
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+
+  const update = useCallback(() => {
+    const el = anchorRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    // Center diamond on the left edge of the card, vertically centered
+    setPos({
+      x: r.left + size / 2 + 14, // shifted right so diamond sits well inside card left edge
+      y: r.top + r.height / 2 - 10, // nudged up so top corner overlaps LOAD button
+    });
+  }, [anchorRef]);
+
+  useEffect(() => {
+    update();
+    window.addEventListener("scroll", update, true);
+    window.addEventListener("resize", update);
+    const ro = new ResizeObserver(update);
+    if (anchorRef.current) ro.observe(anchorRef.current);
+    // Also observe body for layout shifts
+    ro.observe(document.body);
+    return () => {
+      window.removeEventListener("scroll", update, true);
+      window.removeEventListener("resize", update);
+      ro.disconnect();
+    };
+  }, [update, anchorRef]);
+
+  if (!pos || typeof document === "undefined") return null;
+
+  return createPortal(
+    <img
+      src={svgUri}
+      alt={unNumber + " placard"}
+      onClick={onClick}
+      style={{
+        position: "fixed",
+        left: pos.x - size / 2,
+        top: pos.y - size / 2,
+        width: size,
+        height: size,
+        zIndex: 9999,
+        filter: "drop-shadow(0 8px 24px rgba(0,0,0,0.85))",
+        pointerEvents: "auto",
+        cursor: "pointer",
+      }}
+    />,
+    document.body
+  );
+}
+
 export default function CalculatorPage() {
   // ── Auth ───────────────────────────────────────────────────────────────────
   const [authEmail, setAuthEmail] = useState("");
@@ -183,12 +259,7 @@ export default function CalculatorPage() {
   const equipment = useEquipment(authUserId);
   const location = useLocation(authUserId);
 
-  const selectedTerminalTimeZone = useMemo(() => {
-    const tid = String(location.selectedTerminalId ?? "");
-    if (!tid) return null;
-    return (terminals.terminals as any[])?.find((x) => String(x.terminal_id) === tid)?.timezone ?? null;
-    // Note: forward ref resolved below via renamed variable
-  }, []); // placeholder — resolved after terminals hook
+  // selectedTerminalTimeZone removed — use selectedTerminalTimeZoneResolved below
 
   const terminals = useTerminals(
     authUserId,
@@ -201,8 +272,9 @@ export default function CalculatorPage() {
   const selectedTerminalTimeZoneResolved = useMemo(() => {
     const tid = String(location.selectedTerminalId ?? "");
     if (!tid) return null;
-    return (terminals.terminals as any[])?.find((x) => String(x.terminal_id) === tid)?.timezone ?? null;
-  }, [location.selectedTerminalId, terminals.terminals]);
+    // timezone lives in terminalCatalog (from terminals table), not in my_terminals_with_status view
+    return (terminals.terminalCatalog as any[])?.find((x) => String(x.terminal_id) === tid)?.timezone ?? null;
+  }, [location.selectedTerminalId, terminals.terminalCatalog]);
 
   // ── Compartments ───────────────────────────────────────────────────────────
   const [compartments, setCompartments] = useState<CompRow[]>([]);
@@ -232,21 +304,22 @@ export default function CalculatorPage() {
   const [terminalProducts, setTerminalProducts] = useState<ProductRow[]>([]);
   const [terminalProductMetaRows, setTerminalProductMetaRows] = useState<TerminalProductMetaRow[]>([]);
 
-  useEffect(() => {
+  // Extract terminal products fetch as a named callback so it can be called post-load
+  const fetchTerminalProducts = useCallback(async () => {
     if (!location.selectedTerminalId) { setTerminalProducts([]); return; }
-    (async () => {
-      const { data, error } = await supabase
-        .from("terminal_products")
-        .select(`active, last_api, last_api_updated_at, last_temp_f, last_loaded_at,
-          products (product_id, product_name, display_name, description, product_code, button_code, hex_code, api_60, alpha_per_f)`)
-        .eq("terminal_id", location.selectedTerminalId);
-      if (error) { setTerminalProducts([]); return; }
-      const products = (data ?? []).filter((row: any) => row.active !== false)
-        .map((row: any) => row.products ? { ...row.products, last_api: row.last_api ?? null, last_api_updated_at: row.last_api_updated_at ?? null, last_temp_f: row.last_temp_f ?? null, last_loaded_at: row.last_loaded_at ?? null } : null)
-        .filter(Boolean);
-      setTerminalProducts(products as ProductRow[]);
-    })();
+    const { data, error } = await supabase
+      .from("terminal_products")
+      .select(`active, last_api, last_api_updated_at, last_temp_f, last_loaded_at,
+        products (product_id, product_name, display_name, description, product_code, button_code, hex_code, api_60, alpha_per_f, un_number)`)
+      .eq("terminal_id", location.selectedTerminalId);
+    if (error) { setTerminalProducts([]); return; }
+    const products = (data ?? []).filter((row: any) => row.active !== false)
+      .map((row: any) => row.products ? { ...row.products, last_api: row.last_api ?? null, last_api_updated_at: row.last_api_updated_at ?? null, last_temp_f: row.last_temp_f ?? null, last_loaded_at: row.last_loaded_at ?? null } : null)
+      .filter(Boolean);
+    setTerminalProducts(products as ProductRow[]);
   }, [location.selectedTerminalId]);
+
+  useEffect(() => { fetchTerminalProducts(); }, [fetchTerminalProducts]);
 
   useEffect(() => {
     if (!location.selectedTerminalId) { setTerminalProductMetaRows([]); return; }
@@ -263,8 +336,57 @@ export default function CalculatorPage() {
   const [tempF, setTempF] = useState<number>(60);
   const [cgSlider, setCgSlider] = useState<number>(0.5);
   const [compPlan, setCompPlan] = useState<Record<number, CompPlanInput>>({});
+  const [ergModalOpen, setErgModalOpen] = useState(false);
+  const [myLoadsOpen, setMyLoadsOpen]   = useState(false);
+
+  const loadHistory = useLoadHistory(authUserId ?? "");
   const [compHeadspacePct, setCompHeadspacePct] = useState<Record<number, number>>({});
   const [productInputs, setProductInputs] = useState<Record<string, { api?: string; tempF?: number }>>({});
+
+  // Fuel temp prediction — drives temp button border color and pre-fills ProductTempModal
+  const { predictedFuelTempF, confidence: fuelTempConfidence, loading: fuelTempLoading } = useFuelTempPrediction({
+    city: location.selectedCity || null,
+    state: location.selectedState || null,
+    lat: location.locationLat ?? null,
+    lon: location.locationLon ?? null,
+    ambientNowF: location.ambientTempF ?? null,
+    terminalId: location.selectedTerminalId || null,
+  });
+
+  // Auto-apply prediction to the slider when it first arrives.
+  // userAdjustedTempRef = true means the driver has manually moved the slider.
+  // Resets whenever city/state changes so a new terminal gets a fresh auto-apply.
+  const predAppliedForRef = useRef<string>("");
+  const userAdjustedTempRef = useRef<boolean>(false);
+
+  // Mark as user-adjusted whenever tempF changes AFTER a prediction has been applied
+  const prevTempFRef = useRef<number>(tempF);
+  useEffect(() => {
+    if (Math.abs(tempF - prevTempFRef.current) > 0.1) {
+      // Only mark as user-adjusted if a prediction has already been applied
+      if (predAppliedForRef.current !== "") {
+        userAdjustedTempRef.current = true;
+      }
+    }
+    prevTempFRef.current = tempF;
+  }, [tempF]);
+
+  // Reset on city/state change
+  useEffect(() => {
+    predAppliedForRef.current = "";
+    userAdjustedTempRef.current = false;
+    prevTempFRef.current = tempF;
+  }, [location.selectedCity, location.selectedState]);
+
+  // Apply prediction to slider when it arrives — skip if user already adjusted
+  useEffect(() => {
+    if (predictedFuelTempF == null) return;
+    const key = `${location.selectedCity}|${location.selectedState}`;
+    if (predAppliedForRef.current === key) return;
+    if (userAdjustedTempRef.current) return;
+    setTempF(predictedFuelTempF);
+    predAppliedForRef.current = key;
+  }, [predictedFuelTempF, location.selectedCity, location.selectedState]);
 
   // Initialize compPlan entries when compartments change
   useEffect(() => {
@@ -301,7 +423,15 @@ export default function CalculatorPage() {
   const lbsPerGalForProductId = useCallback((productId: string): number | null => {
     const p = terminalProducts.find((x) => x.product_id === productId);
     if (!p || p.api_60 == null || p.alpha_per_f == null) return null;
-    return lbsPerGallonAtTemp(Number(p.api_60), Number(p.alpha_per_f), tempF);
+    // Use driver-observed API (last_api @ last_temp_f) when available — more accurate
+    // than the static api_60 reference. bestLbsPerGallon back-corrects to 60°F first.
+    return bestLbsPerGallon(
+      Number(p.api_60),
+      Number(p.alpha_per_f),
+      tempF,
+      p.last_api     != null ? Number(p.last_api)     : null,
+      p.last_temp_f  != null ? Number(p.last_temp_f)  : null,
+    );
   }, [terminalProducts, tempF]);
 
   // ── Active compartments ────────────────────────────────────────────────────
@@ -325,10 +455,10 @@ export default function CalculatorPage() {
   }, [selectedTrailerId, compartments, terminalProducts, compPlan, tempF]);
 
   // ── Weight limits ──────────────────────────────────────────────────────────
-  const gross = Number(equipment.selectedCombo?.gross_limit_lbs ?? 0);
+  // target_weight = the gross weight the driver is trying to hit (renamed from gross_limit_lbs)
+  const targetWeight = Number((equipment.selectedCombo as any)?.target_weight ?? 0);
   const tare = Number(equipment.selectedCombo?.tare_lbs ?? 0);
-  const buffer = Number((equipment.selectedCombo as any)?.buffer_lbs ?? 0);
-  const allowedLbs = Math.max(0, gross - tare - buffer);
+  const allowedLbs = Math.max(0, targetWeight - tare);  // payload = target - tare
 
   const capacityGallonsActive = useMemo(
     () => activeComps.reduce((s, c) => s + Number(c.maxGallons || 0), 0),
@@ -356,6 +486,17 @@ export default function CalculatorPage() {
 
   const plannedGallonsTotal = planRows.reduce((s, r) => s + r.planned_gallons, 0);
 
+  // Ref for placard diamond portal positioning
+  const placardAnchorRef = useRef<HTMLDivElement | null>(null);
+
+  // ── Plan slots ─────────────────────────────────────────────────────────────
+  // Must be declared BEFORE loadWorkflow so planSlots.refreshLastLoad is defined
+  const planSlots = usePlanSlots({
+    authUserId, selectedTerminalId: location.selectedTerminalId, selectedComboId: equipment.selectedComboId,
+    tempF, cgSlider, compPlan, setCgSlider, setCompPlan,
+    compartmentsLoaded: compartments.length > 0,
+  });
+
   // ── Load workflow ──────────────────────────────────────────────────────────
   const productNameById = useMemo(() => {
     const m = new Map<string, string>();
@@ -364,23 +505,20 @@ export default function CalculatorPage() {
   }, [terminalProducts]);
 
   const loadWorkflow = useLoadWorkflow({
+    authUserId: authUserId ?? null,
     selectedComboId: equipment.selectedComboId,
     selectedTerminalId: location.selectedTerminalId,
     selectedState: location.selectedState,
     selectedCity: location.selectedCity,
     selectedCityId: location.selectedCityId,
-    tare, buffer, cgBias,
+    tare, cgBias,
     ambientTempF: location.ambientTempF,
     tempF, planRows, plannedGallonsTotal, plannedWeightLbs,
     terminalProducts, productNameById,
     productInputs, setProductInputs,
-  });
-
-  // ── Plan slots ─────────────────────────────────────────────────────────────
-  const planSlots = usePlanSlots({
-    authUserId, selectedTerminalId: location.selectedTerminalId, selectedComboId: equipment.selectedComboId,
-    tempF, cgSlider, compPlan, setTempF, setCgSlider, setCompPlan,
-    compartmentsLoaded: compartments.length > 0,
+    onRefreshTerminalProducts: fetchTerminalProducts,
+    onRefreshTerminalAccess: terminals.refreshTerminalAccessForUser,
+    onPostLoadComplete: planSlots.refreshLastLoad,
   });
 
   // ── Terminal filters ───────────────────────────────────────────────────────
@@ -443,6 +581,58 @@ export default function CalculatorPage() {
     }
     return out;
   }, [terminalProductMetaRows]);
+
+  // ── Placard data ──────────────────────────────────────────────────────────
+  const productUnNumberById = useMemo(() => {
+    const rec: Record<string, string | null> = {};
+    for (const p of terminalProducts) {
+      if (p.product_id) rec[p.product_id] = (p as any).un_number ?? null;
+    }
+    return rec;
+  }, [terminalProducts]);
+
+
+  // Residue: for each empty compartment, track the last known product via DB lookup
+  const [residueByComp, setResidueByComp] = useState<Record<number, { product_id: string; un_number: string | null }>>({});
+
+  useEffect(() => {
+    if (!equipment.selectedComboId) { setResidueByComp({}); return; }
+    const emptyComps = Object.entries(compPlan)
+      .filter(([, v]) => v.empty || !v.productId)
+      .map(([k]) => Number(k));
+    if (emptyComps.length === 0) { setResidueByComp({}); return; }
+    planSlots.fetchLastProductPerComp(emptyComps).then(setResidueByComp);
+  }, [compPlan, equipment.selectedComboId]);
+
+  const { placardDef, placardIsResidue } = useMemo(() => {
+    const activeUns = new Set<string>();
+    const residueUns = new Set<string>();
+
+    // Current loaded compartments
+    for (const [, plan] of Object.entries(compPlan)) {
+      if (plan.empty || !plan.productId) continue;
+      const un = productUnNumberById[plan.productId];
+      if (un) activeUns.add(un.toUpperCase());
+    }
+    // Empty compartments — residue from last known product
+    for (const [, residue] of Object.entries(residueByComp)) {
+      if (residue.un_number) residueUns.add(residue.un_number.toUpperCase());
+    }
+
+    const allUns = Array.from(new Set([...activeUns, ...residueUns]));
+    if (allUns.length === 0) return { placardDef: null, placardIsResidue: false };
+
+    const def = worstCasePlacard(allUns);
+    // Residue-driven: the worst-case placard UN comes from a residue comp, not active load
+    const isResidue = !!def && !activeUns.has(def.unNumber.toUpperCase()) && residueUns.has(def.unNumber.toUpperCase());
+    return { placardDef: def, placardIsResidue: isResidue };
+  }, [compPlan, productUnNumberById, residueByComp]);
+
+  const placardSvgUri = useMemo(() => {
+    if (!placardDef) return null;
+    // Large size — card will clip/overflow to fill; showUnNumber=false, shown as card text
+    return svgToDataUri(generatePlacardSvg(placardDef, { width: 160, height: 160 }));
+  }, [placardDef]);
 
   const productButtonCodeById = useMemo(() => {
     const rec: Record<string, string> = {};
@@ -535,23 +725,19 @@ export default function CalculatorPage() {
 
   // ── Snapshot slots JSX (injected into PlannerControls) ────────────────────
   const SnapshotSlots = (
-    <div style={{ marginTop: 10 }}>
-      <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}>Plan slots</div>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+    <div style={{ marginTop: 10, display: "flex", flexDirection: "column", alignItems: "center" }}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
         {planSlots.PLAN_SLOTS.map((n) => {
           const has = !!planSlots.slotHas[n];
           const disabled = !location.selectedTerminalId;
           return (
             <button key={n} type="button" disabled={disabled}
               onClick={(e) => { if (e.shiftKey || !has) planSlots.saveToSlot(n); else planSlots.loadFromSlot(n); }}
-              style={{ borderRadius: 12, padding: "8px 12px", border: "1px solid rgba(255,255,255,0.12)", background: has ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.03)", color: "white", cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.5 : 1, minWidth: 44 }}
+              style={{ borderRadius: 12, padding: "8px 14px", border: "1px solid rgba(255,255,255,0.12)", background: has ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.03)", color: "white", cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.5 : 1, minWidth: 44, fontSize: 15, fontWeight: 700 }}
               title={!location.selectedTerminalId ? "Select a terminal first" : has ? "Tap to load. Shift+Tap to overwrite." : "Tap to save current plan"}
             >{n}</button>
           );
         })}
-      </div>
-      <div style={{ marginTop: 6, fontSize: 12, opacity: 0.6 }}>
-        Tip: Tap an empty number to save. Tap a filled number to load. Hold <strong>Shift</strong> to overwrite.
       </div>
     </div>
   );
@@ -567,21 +753,26 @@ export default function CalculatorPage() {
     planRows.length === 0;
 
   const loadLabel = loadWorkflow.beginLoadBusy ? "Loading…"
-    : loadWorkflow.loadReport ? "LOADED"
+    : loadWorkflow.loadReport ? "RELOAD"
     : loadWorkflow.activeLoadId ? "Load started"
     : "LOAD";
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div style={styles.page}>
-      {/* Equipment header button */}
-      <div style={{ marginBottom: 6 }}>
+      {/* Equipment header + email on same line */}
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 6, gap: 12 }}>
         <button type="button" onClick={() => setEquipOpen(true)}
-          style={{ background: "transparent", border: "none", padding: 0, margin: 0, cursor: "pointer", textAlign: "left", color: equipment.selectedCombo ? "rgba(255,255,255,0.92)" : "rgba(255,255,255,0.45)", fontWeight: 900, fontSize: "clamp(18px, 2.8vw, 28px)", letterSpacing: 0.2, textDecoration: "underline", textUnderlineOffset: 6 }}
+          style={{ background: "transparent", border: "none", padding: 0, margin: 0, cursor: "pointer", textAlign: "left", color: equipment.selectedCombo ? "rgba(255,255,255,0.92)" : "rgba(255,255,255,0.45)", fontWeight: 900, fontSize: "clamp(18px, 2.8vw, 28px)", letterSpacing: 0.2, textDecoration: "none" }}
           aria-label="Select equipment"
         >
           {equipment.equipmentLabel ?? "Select Equipment"}
         </button>
+        {authEmail && (
+          <div style={{ fontSize: 13, color: "rgba(255,255,255,0.45)", fontWeight: 600, letterSpacing: 0.2, whiteSpace: "nowrap", flexShrink: 0 }}>
+            {authEmail}
+          </div>
+        )}
       </div>
 
       <LocationBar
@@ -599,7 +790,6 @@ export default function CalculatorPage() {
         locationSelected={Boolean(location.selectedCity && location.selectedState)}
         terminalSelected={Boolean(location.selectedTerminalId)}
         snapshotSlots={null}
-        authEmail={authEmail}
       />
 
       <PlannerControls
@@ -647,15 +837,14 @@ export default function CalculatorPage() {
 
             {/* Temp Slider */}
             <div style={{ marginTop: 14 }}>
-              <label style={styles.label}>Product Temp (°F)</label>
               <style jsx global>{`
                 input.tempRange, input.cgRange { -webkit-appearance: none; appearance: none; background: transparent; }
                 input.tempRange { height: 40px; }
                 input.cgRange { height: 72px; }
                 input.tempRange:focus, input.cgRange:focus { outline: none; }
-                input.tempRange::-webkit-slider-runnable-track { height: 10px; border-radius: 999px; background: linear-gradient(90deg, rgba(0,194,216,0.26) 0%, rgba(0,194,216,0.26) 45%, rgba(231,70,70,0.24) 55%, rgba(231,70,70,0.24) 100%); border: 1px solid rgba(255,255,255,0.10); }
+                input.tempRange::-webkit-slider-runnable-track { height: 10px; border-radius: 999px; background: linear-gradient(90deg, rgb(0,194,216) 0%, rgb(0,194,216) 45%, #e74646 55%, #e74646 100%); border: 1px solid rgba(255,255,255,0.10); }
                 input.tempRange::-webkit-slider-thumb { -webkit-appearance: none; width: 68px; height: 68px; margin-top: -29px; background: transparent; border: none; }
-                input.tempRange::-moz-range-track { height: 10px; border-radius: 999px; background: linear-gradient(90deg, rgba(0,194,216,0.26) 0%, rgba(0,194,216,0.26) 45%, rgba(231,70,70,0.24) 55%, rgba(231,70,70,0.24) 100%); }
+                input.tempRange::-moz-range-track { height: 10px; border-radius: 999px; background: linear-gradient(90deg, rgb(0,194,216) 0%, rgb(0,194,216) 45%, #e74646 55%, #e74646 100%); }
                 input.tempRange::-moz-range-thumb { width: 34px; height: 34px; background: transparent; border: none; }
                 input.cgRange::-webkit-slider-runnable-track { height: 10px; border-radius: 999px; background: rgba(255,255,255,0.10); border: 1px solid rgba(255,255,255,0.12); }
                 input.cgRange::-webkit-slider-thumb { -webkit-appearance: none; width: 32px; height: 32px; margin-top: -11px; background: transparent; border: none; opacity: 0; }
@@ -676,9 +865,46 @@ export default function CalculatorPage() {
                     </svg>
                   </div>
                 </div>
-                <button type="button" onClick={() => setTempDialOpen(true)} style={styles.smallBtn}>{Math.round(tempF)}°F</button>
+                <button type="button" onClick={() => setTempDialOpen(true)} style={(() => {
+                  // Border color logic:
+                  // - Override (user moved away from prediction): amber
+                  // - Matches prediction, high confidence: green
+                  // - Matches prediction, medium confidence: yellow
+                  // - Matches prediction, low confidence: red/orange
+                  // - No prediction yet: default smallBtn border
+                  const isOverride = predictedFuelTempF != null && Math.abs(tempF - predictedFuelTempF) > 0.5;
+                  const borderColor = isOverride
+                    ? "#fb923c"
+                    : fuelTempConfidence === "high"   ? "#4ade80"
+                    : fuelTempConfidence === "medium"  ? "#fbbf24"
+                    : fuelTempConfidence === "low"     ? "#f87171"
+                    : undefined;
+                  return {
+                    ...styles.smallBtn,
+                    borderColor: borderColor ?? undefined,
+                    boxShadow: borderColor ? `0 0 0 1px ${borderColor}22` : undefined,
+                    transition: "border-color 400ms ease, box-shadow 400ms ease",
+                  };
+                })()}>{Math.round(tempF)}°F</button>
               </div>
-              <ProductTempModal open={tempDialOpen} onClose={() => setTempDialOpen(false)} styles={styles} selectedCity={location.selectedCity} selectedState={location.selectedState} ambientTempLoading={location.ambientTempLoading} ambientTempF={location.ambientTempF} tempF={tempF} setTempF={setTempF} TempDial={TempDial} />
+              <ProductTempModal
+                open={tempDialOpen}
+                onClose={() => setTempDialOpen(false)}
+                styles={styles}
+                selectedCity={location.selectedCity}
+                selectedState={location.selectedState}
+                selectedTerminalId={location.selectedTerminalId}
+                locationLat={location.locationLat}
+                locationLon={location.locationLon}
+                ambientTempLoading={location.ambientTempLoading}
+                ambientTempF={location.ambientTempF}
+                tempF={tempF}
+                setTempF={setTempF}
+                predictedFuelTempF={predictedFuelTempF}
+                fuelTempConfidence={fuelTempConfidence}
+                fuelTempLoading={fuelTempLoading}
+                TempDial={TempDial}
+              />
             </div>
           </div>
         </>
@@ -707,41 +933,166 @@ export default function CalculatorPage() {
         );
 
         return (
-          <div style={{ marginTop: 14, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-            {/* LOAD button */}
-            <button type="button" onClick={loadWorkflow.beginLoadToSupabase} disabled={loadDisabled}
-              style={{ ...cardBase, cursor: loadDisabled ? "not-allowed" : "pointer", alignItems: "center", justifyContent: "center", transition: "transform 120ms ease, filter 120ms ease", filter: loadDisabled ? "grayscale(0.2) brightness(0.9)" : "none" }}
-              onMouseDown={(e) => { if (!(e.currentTarget as HTMLButtonElement).disabled) (e.currentTarget as HTMLButtonElement).style.transform = "scale(0.985)"; }}
-              onMouseUp={(e) => { (e.currentTarget as HTMLButtonElement).style.transform = "scale(1)"; }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.transform = "scale(1)"; }}
-            >
-              <div style={{ fontWeight: 1000, letterSpacing: 0.6, fontSize: "clamp(34px, 6.2vw, 70px)", lineHeight: 1.05, paddingBottom: 6, color: loadReport ? "#67e8f9" : "rgba(255,255,255,0.92)" }}>
-                {loadLabel}
+          // Grid wrapper: position:relative so diamond can be positioned against it
+          <div style={{ marginTop: 14, position: "relative" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+              {/* LOAD button — My Loads strip at top, primary tap starts load */}
+              <div style={{ ...cardBase, padding: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+                {/* My Loads strip — top of card */}
+                <button type="button" onClick={(e) => { e.stopPropagation(); setMyLoadsOpen(true); loadHistory.fetch(); }}
+                  style={{ background: "rgba(255,255,255,0.04)", borderBottom: "1px solid rgba(255,255,255,0.07)", cursor: "pointer", padding: "7px 12px", display: "flex", alignItems: "center", gap: 6, border: "none", borderBottom: "1px solid rgba(255,255,255,0.07)", flexShrink: 0 }}
+                >
+                  {(() => {
+                    const last = loadHistory.rows[0];
+                    if (!last) return <span style={{ fontSize: 11, color: "rgba(255,255,255,0.25)", fontWeight: 600 }}>My Loads ›</span>;
+                    const mins = Math.floor((Date.now() - new Date(last.started_at).getTime()) / 60000);
+                    const ago = mins < 60 ? `${mins}m ago` : mins < 1440 ? `${Math.floor(mins/60)}h ago` : "yesterday";
+                    const gal = last.planned_total_gal != null ? `${Math.round(last.planned_total_gal).toLocaleString()} gal` : "—";
+                    return <><span style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", fontWeight: 700, flex: 1, textAlign: "left" }}>{ago} · {gal}</span><span style={{ fontSize: 11, color: "rgba(255,255,255,0.25)" }}>›</span></>;
+                  })()}
+                </button>
+                {/* Primary tap: LOAD */}
+                <button type="button" onClick={loadWorkflow.beginLoadToSupabase} disabled={loadDisabled}
+                  style={{ flex: 1, background: "transparent", border: "none", cursor: loadDisabled ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "transform 120ms ease, filter 120ms ease", filter: loadDisabled ? "grayscale(0.2) brightness(0.9)" : "none" }}
+                  onMouseDown={(e) => { if (!(e.currentTarget as HTMLButtonElement).disabled) (e.currentTarget as HTMLButtonElement).style.transform = "scale(0.985)"; }}
+                  onMouseUp={(e) => { (e.currentTarget as HTMLButtonElement).style.transform = "scale(1)"; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.transform = "scale(1)"; }}
+                >
+                  <div style={{ fontWeight: 1000, letterSpacing: 0.6, fontSize: "clamp(34px, 6.2vw, 70px)", lineHeight: 1.05, paddingBottom: 6, color: loadReport ? "#67e8f9" : "rgba(255,255,255,0.92)" }}>
+                    {loadLabel}
+                  </div>
+                </button>
               </div>
-            </button>
 
-            {/* Planned / Target / Actual */}
-            <div style={{ ...cardBase, gap: 10 }}>
-              {row("Planned", plannedGalText, bigNum)}
-              <div style={{ display: "grid", gap: 8 }}>
-                {row("Target", targetText)}
-                {row("Actual", actualText)}
+              {/* Planned / Target / Actual */}
+              <div style={{ ...cardBase, gap: 10 }}>
+                {row("Planned", plannedGalText, bigNum)}
+                <div style={{ display: "grid", gap: 8 }}>
+                  {row("Target", targetText)}
+                  {row("Actual", actualText)}
+                </div>
+              </div>
+
+              {/* Placard card — ref used by PlacardDiamond portal for positioning */}
+              <div ref={placardAnchorRef} onClick={() => setErgModalOpen(true)} style={{ cursor: "pointer", ...cardBase, flexDirection: "row", alignItems: "center", paddingLeft: 168, paddingRight: 18, gap: 0 }}>
+                {placardDef ? (() => {
+                  const erg = ERG_DATA[placardDef.unNumber.toUpperCase()] ?? null;
+                  return (
+                  <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", gap: 4 }}>
+                    <div style={{ color: placardIsResidue ? "#ffb400" : "rgba(255,255,255,0.92)", fontWeight: 1000, fontSize: "clamp(20px, 3vw, 30px)", lineHeight: 1.1, letterSpacing: placardIsResidue ? 2 : 1 }}>
+                      {placardIsResidue ? "RESIDUE" : placardDef.unNumber}
+                    </div>
+                    {erg && (
+                      <div style={{ color: "rgba(255,255,255,0.55)", fontSize: 11, fontWeight: 600, lineHeight: 1.35 }}>
+                        {erg.shipping}
+                      </div>
+                    )}
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      {erg && <div style={{ color: "rgba(255,255,255,0.3)", fontSize: 10, fontWeight: 700 }}>ERG #{erg.guide}</div>}
+                      <a
+                        href="https://www.ecfr.gov/current/title-49/subtitle-B/chapter-I/subchapter-C/part-172/section-172.504"
+                        target="_blank" rel="noopener noreferrer"
+                        onClick={e => e.stopPropagation()}
+                        style={{ color: "rgba(255,255,255,0.3)", fontSize: 10, fontWeight: 700, letterSpacing: 0.3, textDecoration: "none" }}
+                        onMouseEnter={(e) => (e.currentTarget.style.color = "rgba(255,255,255,0.6)")}
+                        onMouseLeave={(e) => (e.currentTarget.style.color = "rgba(255,255,255,0.3)")}
+                      >
+                        49 CFR §172.504 ↗
+                      </a>
+                    </div>
+                  </div>
+                  );
+                })() : (
+                  <div style={{ color: "rgba(255,255,255,0.20)", fontWeight: 700, fontSize: 13, letterSpacing: 0.4 }}>
+                    {location.selectedTerminalId ? "No placard required" : "Placard"}
+                  </div>
+                )}
+              </div>
+
+              {/* Over/Under */}
+              <div style={{ ...cardBase, gap: 10 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
+                  <div style={labelStyle}>Over/Under</div>
+                  <div style={{ color: diffColor, fontWeight: 1100, fontSize: "clamp(26px, 4.8vw, 56px)", lineHeight: 1.05, paddingBottom: 6, textAlign: "right", marginLeft: "auto" }}>{diffText}</div>
+                </div>
               </div>
             </div>
 
-            {/* Placard (placeholder) */}
-            <div style={{ ...cardBase, alignItems: "center", justifyContent: "center" }}>
-              <div style={{ color: "rgba(255,255,255,0.45)", fontWeight: 900, letterSpacing: 0.4 }}>Placard</div>
-            </div>
-
-            {/* Over/Under */}
-            <div style={{ ...cardBase, gap: 10 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
-                <div style={labelStyle}>Over/Under</div>
-                <div style={{ color: diffColor, fontWeight: 1100, fontSize: "clamp(26px, 4.8vw, 56px)", lineHeight: 1.05, paddingBottom: 6, textAlign: "right", marginLeft: "auto" }}>{diffText}</div>
-              </div>
-            </div>
+            {/* Diamond rendered via portal — escapes all stacking contexts, adapts to screen size */}
+            {placardSvgUri && placardDef && (
+              <PlacardDiamond
+                anchorRef={placardAnchorRef}
+                svgUri={placardSvgUri}
+                unNumber={placardDef.unNumber}
+                size={190}
+                onClick={() => setErgModalOpen(true)}
+              />
+            )}
           </div>
+        );
+      })()}
+
+      {/* ERG Emergency Info Modal */}
+      {ergModalOpen && placardDef && (() => {
+        const erg = ERG_DATA[placardDef.unNumber.toUpperCase()] ?? null;
+        return createPortal(
+          <div onClick={() => setErgModalOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 10000, background: "rgba(0,0,0,0.8)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+            <div onClick={e => e.stopPropagation()} style={{ background: "#1a1a1a", borderRadius: 20, width: "100%", maxWidth: 460, border: "1px solid rgba(255,255,255,0.1)", overflow: "hidden" }}>
+              {/* Header */}
+              <div style={{ background: placardIsResidue ? "#7c4a00" : "#CC2229", padding: "18px 20px 14px", display: "flex", alignItems: "center", gap: 14 }}>
+                <img src={placardSvgUri!} width={64} height={64} alt="placard" style={{ flexShrink: 0 }} />
+                <div style={{ flex: 1 }}>
+                  {placardIsResidue && (
+                    <div style={{ fontSize: 10, fontWeight: 900, color: "#fbbf24", letterSpacing: 1.5, textTransform: "uppercase", marginBottom: 3 }}>⚠ Residue</div>
+                  )}
+                  <div style={{ fontSize: 22, fontWeight: 900, color: "#fff", letterSpacing: 1 }}>{placardDef.unNumber}</div>
+                  <div style={{ fontSize: 13, color: "rgba(255,255,255,0.85)", fontWeight: 600, marginTop: 2 }}>{erg?.name ?? placardDef.unNumber}</div>
+                  {erg && <div style={{ fontSize: 11, color: "rgba(255,255,255,0.65)", marginTop: 2, lineHeight: 1.3 }}>{erg.shipping}</div>}
+                  {erg && <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", marginTop: 3 }}>ERG Guide #{erg.guide}</div>}
+                </div>
+                <button onClick={() => setErgModalOpen(false)} style={{ background: "rgba(0,0,0,0.25)", border: "none", borderRadius: 50, width: 34, height: 34, color: "#fff", fontSize: 20, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>×</button>
+              </div>
+              {/* Body */}
+              <div style={{ padding: "16px 20px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
+                {erg && <>
+                  <div style={{ background: "rgba(204,34,41,0.1)", border: "1px solid rgba(204,34,41,0.3)", borderRadius: 10, padding: "10px 14px" }}>
+                    <div style={{ fontSize: 10, fontWeight: 900, color: "#CC2229", textTransform: "uppercase", letterSpacing: 1, marginBottom: 5 }}>🔥 Fire / Explosion</div>
+                    <div style={{ fontSize: 14, color: "rgba(255,255,255,0.85)", lineHeight: 1.5 }}>{erg.fire}</div>
+                  </div>
+                  <div style={{ background: "rgba(255,180,0,0.07)", border: "1px solid rgba(255,180,0,0.2)", borderRadius: 10, padding: "10px 14px" }}>
+                    <div style={{ fontSize: 10, fontWeight: 900, color: "#ffb400", textTransform: "uppercase", letterSpacing: 1, marginBottom: 5 }}>⚠ Health</div>
+                    <div style={{ fontSize: 14, color: "rgba(255,255,255,0.85)", lineHeight: 1.5 }}>{erg.health}</div>
+                  </div>
+                  <div style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, padding: "10px 14px" }}>
+                    <div style={{ fontSize: 10, fontWeight: 900, color: "rgba(255,255,255,0.45)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>📍 Initial Isolation</div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <div style={{ flex: 1, background: "rgba(255,255,255,0.05)", borderRadius: 8, padding: "8px 10px" }}>
+                        <div style={{ fontSize: 10, color: "rgba(255,255,255,0.4)", marginBottom: 3 }}>SMALL SPILL</div>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>{erg.isolation_small}</div>
+                      </div>
+                      <div style={{ flex: 1, background: "rgba(255,255,255,0.05)", borderRadius: 8, padding: "8px 10px" }}>
+                        <div style={{ fontSize: 10, color: "rgba(255,255,255,0.4)", marginBottom: 3 }}>LARGE SPILL</div>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>{erg.isolation_large}</div>
+                      </div>
+                    </div>
+                  </div>
+                </>}
+
+                {/* Actions */}
+                <div style={{ display: "flex", gap: 10, marginTop: 2 }}>
+                  <a href="tel:18004249300" style={{ flex: 1, background: "#CC2229", borderRadius: 10, padding: "12px 10px", textAlign: "center", textDecoration: "none" }}>
+                    <div style={{ fontSize: 10, color: "rgba(255,255,255,0.7)", marginBottom: 2 }}>CHEMTREC 24/7</div>
+                    <div style={{ fontSize: 15, fontWeight: 900, color: "#fff" }}>800-424-9300</div>
+                  </a>
+                  <a href={erg ? `https://www.phmsa.dot.gov/sites/phmsa.dot.gov/files/2024-04/ERG2024-WEB.pdf#page=${erg.guide + 138}` : "https://www.phmsa.dot.gov/sites/phmsa.dot.gov/files/2024-04/ERG2024-WEB.pdf"} target="_blank" rel="noopener noreferrer" style={{ flex: 1, background: "rgba(255,255,255,0.06)", borderRadius: 10, padding: "12px 10px", textAlign: "center", textDecoration: "none" }}>
+                    <div style={{ fontSize: 10, color: "rgba(255,255,255,0.45)", marginBottom: 2 }}>FULL ERG GUIDE</div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "rgba(255,255,255,0.8)" }}>{erg ? `Guide #${erg.guide} ↗` : "ERG 2024 ↗"}</div>
+                  </a>
+                </div>
+              </div>
+            </div>
+          </div>,
+          document.body
         );
       })()}
 
@@ -753,6 +1104,20 @@ export default function CalculatorPage() {
         selectedComboId={equipment.selectedComboId ?? ""}
         onSelectComboId={(id) => equipment.setSelectedComboId(id)}
         onRefreshCombos={equipment.fetchCombos}
+      />
+
+      <MyLoadsModal
+        open={myLoadsOpen} onClose={() => setMyLoadsOpen(false)}
+        authUserId={authUserId ?? ""}
+        rows={loadHistory.rows}
+        loading={loadHistory.loading}
+        error={loadHistory.error}
+        linesCache={loadHistory.linesCache}
+        linesLoading={loadHistory.linesLoading}
+        onFetchLines={loadHistory.fetchLines}
+        onRefresh={loadHistory.fetch}
+        terminalCatalog={[]}
+        combos={equipment.combos ?? []}
       />
 
       <LoadingModal

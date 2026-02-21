@@ -28,7 +28,7 @@ export default function LocationBar(props: {
   snapshotSlots: React.ReactNode;
 
   // Auth line
-  authEmail: string | null;
+ 
 }) {
   const {
     styles,
@@ -43,7 +43,7 @@ export default function LocationBar(props: {
     locationSelected,
     terminalSelected,
     snapshotSlots,
-    authEmail,
+    
   } = props;
 
   return (
@@ -65,9 +65,8 @@ export default function LocationBar(props: {
         {snapshotSlots}
       </div>
 
-      <div style={{ ...styles.help, marginTop: 6 }}>
-        Auth: {authEmail ? `Logged in as ${authEmail}` : "NOT logged in"}
-      </div>
+     
+      
     </>
   );
 }
