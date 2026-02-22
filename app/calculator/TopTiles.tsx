@@ -8,7 +8,7 @@ type TileProps = {
   disabled?: boolean;
   selected?: boolean;
   subtitleClassName?: string;
-  placeholderSubtitle?: string; // ✅ new
+  placeholderSubtitle?: string;
 };
 
 function Tile({
@@ -23,12 +23,10 @@ function Tile({
 }: TileProps) {
   const isSelected = !!selected;
 
-  // Card housing is constant.
   const cardClass = disabled
     ? "bg-[#2a2a2a]/70 border-white/5 opacity-60"
     : "bg-[#202020]/90 border-white/10 hover:border-white/20";
 
-  // Icon well is the “switch”
   const iconWellClass = disabled
     ? "bg-[#2a2a2a] border-white/5"
     : isSelected
@@ -43,10 +41,8 @@ function Tile({
 
   const titleClass = disabled ? "text-white/35" : isSelected ? "text-white" : "text-white/80";
 
-  // Default subtitle color (only used when no override is passed)
   const defaultSubtitleClass = disabled ? "text-white/30" : isSelected ? "text-cyan-400" : "text-white/50";
 
-  // ✅ Always render a subtitle row to keep height stable
   const subtitleText =
     subtitle ??
     placeholderSubtitle ??
@@ -65,29 +61,35 @@ function Tile({
         "w-full rounded-2xl text-left overflow-hidden shadow-xl border transition active:scale-[0.99]",
         cardClass,
       ].join(" ")}
+      style={{ height: 72 }}
     >
-      <div className="relative w-full min-h-[68px]">
-        {/* Icon well (left) */}
-        <div className="absolute left-1 top-1 bottom-1">
-          <div
-            className={[
-              "h-full w-16 rounded-xl border flex items-center justify-center transition-colors",
-              iconWellClass,
-            ].join(" ")}
-          >
-            <span className={["text-lg font-bold transition-colors", iconTextClass].join(" ")}>
-              {iconText}
-            </span>
-          </div>
+      {/* Fixed-height inner — icon well and text area both fill the same 72px */}
+      <div style={{ display: "flex", alignItems: "stretch", height: "100%", padding: 4, gap: 0 }}>
+        {/* Icon well — square, fills full card height minus 4px padding each side */}
+        <div
+          className={[
+            "rounded-xl border flex items-center justify-center transition-colors flex-shrink-0",
+            iconWellClass,
+          ].join(" ")}
+          style={{ width: 56, minWidth: 56 }}
+        >
+          <span className={["text-base font-bold transition-colors", iconTextClass].join(" ")}>
+            {iconText}
+          </span>
         </div>
 
-        {/* Text area */}
-        <div className="pl-[84px] pr-3 py-2">
-          <div className={["text-lg font-semibold truncate transition-colors", titleClass].join(" ")}>
+        {/* Text area — takes remaining width, clips gracefully */}
+        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", justifyContent: "center", padding: "0 8px 0 10px" }}>
+          <div
+            className={["font-semibold transition-colors", titleClass].join(" ")}
+            style={{ fontSize: "clamp(12px, 3.5vw, 16px)", lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+          >
             {title}
           </div>
-
-          <div className={["mt-1 text-sm transition-colors", subtitleFinalClass].join(" ")}>
+          <div
+            className={["mt-0.5 transition-colors", subtitleFinalClass].join(" ")}
+            style={{ fontSize: "clamp(10px, 2.8vw, 13px)", lineHeight: 1.25, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+          >
             {subtitleText}
           </div>
         </div>
@@ -120,7 +122,7 @@ export function TopTiles({
   terminalSelected: boolean;
 }) {
   return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+    <div className="grid grid-cols-2 gap-2">
       <Tile
         iconText="SC"
         title={locationTitle}
@@ -144,3 +146,4 @@ export function TopTiles({
     </div>
   );
 }
+

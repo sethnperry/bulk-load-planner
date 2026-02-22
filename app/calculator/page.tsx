@@ -167,25 +167,30 @@ function TempDial({ value, min, max, step, onChange }: TempDialProps) {
 // ── PlacardDiamond portal component ──────────────────────────────────────────
 // Renders the diamond via a React portal into document.body so it's never
 // clipped by any ancestor overflow or stacking context.
-// Uses getBoundingClientRect() on the anchor card + ResizeObserver to stay
-// perfectly positioned across all screen sizes and on scroll/resize.
-function PlacardDiamond({ anchorRef, svgUri, unNumber, size = 150, onClick }: {
+// Size is derived from the anchor card's rendered height so it scales
+// naturally across all screen widths — no hardcoded size needed.
+function PlacardDiamond({ anchorRef, svgUri, unNumber, onClick, hidden }: {
   anchorRef: React.RefObject<HTMLDivElement | null>;
   svgUri: string;
   unNumber: string;
-  size?: number;
   onClick?: () => void;
+  hidden?: boolean;
 }) {
-  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+  const [layout, setLayout] = useState<{ x: number; y: number; size: number } | null>(null);
 
   const update = useCallback(() => {
     const el = anchorRef.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
-    // Center diamond on the left edge of the card, vertically centered
-    setPos({
-      x: r.left + size / 2 + 14, // shifted right so diamond sits well inside card left edge
-      y: r.top + r.height / 2 - 10, // nudged up so top corner overlaps LOAD button
+    // Diamond is 85% of card height, clamped 80–140px — stays within the left padding zone
+    const size = Math.min(140, Math.max(80, Math.round(r.height * 0.85)));
+    setLayout({
+      // Center diamond horizontally in the left-padding zone (paddingLeft = clamp(88,30vw,160))
+      // Use half the paddingLeft as the center point so the diamond fits within it
+      x: r.left + size * 0.5 + 4,
+      // Vertically centered on the card
+      y: r.top + r.height * 0.5,
+      size,
     });
   }, [anchorRef]);
 
@@ -195,7 +200,6 @@ function PlacardDiamond({ anchorRef, svgUri, unNumber, size = 150, onClick }: {
     window.addEventListener("resize", update);
     const ro = new ResizeObserver(update);
     if (anchorRef.current) ro.observe(anchorRef.current);
-    // Also observe body for layout shifts
     ro.observe(document.body);
     return () => {
       window.removeEventListener("scroll", update, true);
@@ -204,7 +208,9 @@ function PlacardDiamond({ anchorRef, svgUri, unNumber, size = 150, onClick }: {
     };
   }, [update, anchorRef]);
 
-  if (!pos || typeof document === "undefined") return null;
+  if (!layout || typeof document === "undefined" || hidden) return null;
+
+  const { x, y, size } = layout;
 
   return createPortal(
     <img
@@ -213,8 +219,8 @@ function PlacardDiamond({ anchorRef, svgUri, unNumber, size = 150, onClick }: {
       onClick={onClick}
       style={{
         position: "fixed",
-        left: pos.x - size / 2,
-        top: pos.y - size / 2,
+        left: x - size / 2,
+        top: y - size / 2,
         width: size,
         height: size,
         zIndex: 9999,
@@ -921,26 +927,26 @@ export default function CalculatorPage() {
         const diffText = diff == null ? "—" : `${diff >= 0 ? "+" : ""}${Math.round(diff).toLocaleString()} lbs`;
         const diffColor = diff == null ? "rgba(255,255,255,0.90)" : diff > 0 ? "#ef4444" : "#4ade80";
 
-        const cardBase: CSSProperties = { borderRadius: 20, border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)", boxShadow: "0 14px 34px rgba(0,0,0,0.40)", padding: 18, minHeight: 132, display: "flex", flexDirection: "column", justifyContent: "center" };
-        const labelStyle: CSSProperties = { color: "rgba(255,255,255,0.55)", fontWeight: 900, fontSize: "clamp(14px, 1.8vw, 18px)" };
-        const bigNum: CSSProperties = { color: "rgba(255,255,255,0.92)", fontWeight: 1000, fontSize: "clamp(22px, 3.8vw, 44px)", lineHeight: 1.05, paddingBottom: 6 };
-        const medNum: CSSProperties = { ...bigNum, fontSize: "clamp(18px, 3.2vw, 40px)" };
+        const cardBase: CSSProperties = { borderRadius: 20, border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)", boxShadow: "0 14px 34px rgba(0,0,0,0.40)", padding: "clamp(12px, 3vw, 18px)" as any, display: "flex", flexDirection: "column", justifyContent: "center" };
+        const labelStyle: CSSProperties = { color: "rgba(255,255,255,0.55)", fontWeight: 900, fontSize: "clamp(11px, 2.8vw, 15px)", whiteSpace: "nowrap" as const };
+        const bigNum: CSSProperties = { color: "rgba(255,255,255,0.92)", fontWeight: 1000, fontSize: "clamp(15px, 4.5vw, 44px)", lineHeight: 1.05, paddingBottom: 4, whiteSpace: "nowrap" as const };
+        const medNum: CSSProperties = { ...bigNum, fontSize: "clamp(13px, 3.8vw, 40px)" };
         const row = (label: string, text: string, numStyle = medNum) => (
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 6, minWidth: 0 }}>
             <div style={labelStyle}>{label}</div>
-            <div style={numStyle}>{text}</div>
+            <div style={{ ...numStyle, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", textAlign: "right" as const }}>{text}</div>
           </div>
         );
 
         return (
           // Grid wrapper: position:relative so diamond can be positioned against it
-          <div style={{ marginTop: 14, position: "relative" }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+          <div style={{ marginTop: 14, position: "relative", width: "100%", boxSizing: "border-box" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, alignItems: "stretch", width: "100%" }}>
               {/* LOAD button — My Loads strip at top, primary tap starts load */}
               <div style={{ ...cardBase, padding: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
                 {/* My Loads strip — top of card */}
                 <button type="button" onClick={(e) => { e.stopPropagation(); setMyLoadsOpen(true); loadHistory.fetch(); }}
-                  style={{ background: "rgba(255,255,255,0.04)", borderBottom: "1px solid rgba(255,255,255,0.07)", cursor: "pointer", padding: "7px 12px", display: "flex", alignItems: "center", gap: 6, border: "none", borderBottom: "1px solid rgba(255,255,255,0.07)", flexShrink: 0 }}
+                  style={{ background: "rgba(255,255,255,0.04)", cursor: "pointer", padding: "7px 12px", display: "flex", alignItems: "center", gap: 6, border: "none", borderBottom: "1px solid rgba(255,255,255,0.07)", flexShrink: 0 }}
                 >
                   {(() => {
                     const last = loadHistory.rows[0];
@@ -958,7 +964,7 @@ export default function CalculatorPage() {
                   onMouseUp={(e) => { (e.currentTarget as HTMLButtonElement).style.transform = "scale(1)"; }}
                   onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.transform = "scale(1)"; }}
                 >
-                  <div style={{ fontWeight: 1000, letterSpacing: 0.6, fontSize: "clamp(34px, 6.2vw, 70px)", lineHeight: 1.05, paddingBottom: 6, color: loadReport ? "#67e8f9" : "rgba(255,255,255,0.92)" }}>
+                  <div style={{ fontWeight: 1000, letterSpacing: 0.6, fontSize: "clamp(28px, 8vw, 70px)", lineHeight: 1.05, paddingBottom: 6, color: loadReport ? "#67e8f9" : "rgba(255,255,255,0.92)" }}>
                     {loadLabel}
                   </div>
                 </button>
@@ -974,26 +980,26 @@ export default function CalculatorPage() {
               </div>
 
               {/* Placard card — ref used by PlacardDiamond portal for positioning */}
-              <div ref={placardAnchorRef} onClick={() => setErgModalOpen(true)} style={{ cursor: "pointer", ...cardBase, flexDirection: "row", alignItems: "center", paddingLeft: 168, paddingRight: 18, gap: 0 }}>
+              <div ref={placardAnchorRef} onClick={() => setErgModalOpen(true)} style={{ cursor: "pointer", ...cardBase, flexDirection: "row", alignItems: "center", paddingLeft: "clamp(76px, 24vw, 130px)", paddingRight: 18, gap: 0 }}>
                 {placardDef ? (() => {
                   const erg = ERG_DATA[placardDef.unNumber.toUpperCase()] ?? null;
                   return (
-                  <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", gap: 4 }}>
-                    <div style={{ color: placardIsResidue ? "#ffb400" : "rgba(255,255,255,0.92)", fontWeight: 1000, fontSize: "clamp(20px, 3vw, 30px)", lineHeight: 1.1, letterSpacing: placardIsResidue ? 2 : 1 }}>
+                  <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", gap: 3, minWidth: 0 }}>
+                    <div style={{ color: placardIsResidue ? "#ffb400" : "rgba(255,255,255,0.92)", fontWeight: 1000, fontSize: "clamp(14px, 4vw, 26px)", lineHeight: 1.1, letterSpacing: placardIsResidue ? 1.5 : 1, whiteSpace: "nowrap" as const }}>
                       {placardIsResidue ? "RESIDUE" : placardDef.unNumber}
                     </div>
                     {erg && (
-                      <div style={{ color: "rgba(255,255,255,0.55)", fontSize: 11, fontWeight: 600, lineHeight: 1.35 }}>
+                      <div style={{ color: "rgba(255,255,255,0.55)", fontSize: "clamp(9px, 2.2vw, 11px)", fontWeight: 600, lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
                         {erg.shipping}
                       </div>
                     )}
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      {erg && <div style={{ color: "rgba(255,255,255,0.3)", fontSize: 10, fontWeight: 700 }}>ERG #{erg.guide}</div>}
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" as const, rowGap: 2 }}>
+                      {erg && <div style={{ color: "rgba(255,255,255,0.3)", fontSize: "clamp(8px, 2vw, 10px)", fontWeight: 700, whiteSpace: "nowrap" as const }}>ERG #{erg.guide}</div>}
                       <a
                         href="https://www.ecfr.gov/current/title-49/subtitle-B/chapter-I/subchapter-C/part-172/section-172.504"
                         target="_blank" rel="noopener noreferrer"
                         onClick={e => e.stopPropagation()}
-                        style={{ color: "rgba(255,255,255,0.3)", fontSize: 10, fontWeight: 700, letterSpacing: 0.3, textDecoration: "none" }}
+                        style={{ color: "rgba(255,255,255,0.3)", fontSize: "clamp(8px, 2vw, 10px)", fontWeight: 700, letterSpacing: 0.3, textDecoration: "none", whiteSpace: "nowrap" as const }}
                         onMouseEnter={(e) => (e.currentTarget.style.color = "rgba(255,255,255,0.6)")}
                         onMouseLeave={(e) => (e.currentTarget.style.color = "rgba(255,255,255,0.3)")}
                       >
@@ -1013,7 +1019,7 @@ export default function CalculatorPage() {
               <div style={{ ...cardBase, gap: 10 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
                   <div style={labelStyle}>Over/Under</div>
-                  <div style={{ color: diffColor, fontWeight: 1100, fontSize: "clamp(26px, 4.8vw, 56px)", lineHeight: 1.05, paddingBottom: 6, textAlign: "right", marginLeft: "auto" }}>{diffText}</div>
+                  <div style={{ color: diffColor, fontWeight: 1100, fontSize: "clamp(16px, 5.5vw, 56px)", lineHeight: 1.05, paddingBottom: 6, textAlign: "right", marginLeft: "auto", whiteSpace: "nowrap" as const }}>{diffText}</div>
                 </div>
               </div>
             </div>
@@ -1024,7 +1030,7 @@ export default function CalculatorPage() {
                 anchorRef={placardAnchorRef}
                 svgUri={placardSvgUri}
                 unNumber={placardDef.unNumber}
-                size={190}
+                hidden={equipOpen || myLoadsOpen || locOpen || termOpen || catalogOpen || compModalOpen || tempDialOpen || tempDial2Open || statePickerOpen || loadWorkflow.loadingOpen || ergModalOpen}
                 onClick={() => setErgModalOpen(true)}
               />
             )}
@@ -1115,7 +1121,7 @@ export default function CalculatorPage() {
         linesCache={loadHistory.linesCache}
         linesLoading={loadHistory.linesLoading}
         onFetchLines={loadHistory.fetchLines}
-        onRefresh={loadHistory.fetch}
+        onFetchRange={loadHistory.fetch}
         terminalCatalog={[]}
         combos={equipment.combos ?? []}
       />

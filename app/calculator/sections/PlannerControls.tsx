@@ -68,15 +68,16 @@ export default function PlannerControls(props: any) {
             style={{
               display: "flex",
               justifyContent: "center",
-              gap: compartments.length >= 5 ? 10 : 18,
+              gap: compartments.length >= 5 ? 6 : 10,
               flexWrap: "nowrap",
+              width: "100%",
             }}
           >
             {(() => {
               const n = compartments.length;
-              const baseW = n === 1 ? 220 : 160;
-              const w = n >= 5 ? 132 : baseW;
-              const h = 330;
+              // Each compartment gets an equal share, with a min of 0 and max driven by flex
+              // Height scales with number of compartments — fewer comps = taller
+              const h = n >= 5 ? "min(280px, 40vw)" : n >= 4 ? "min(300px, 50vw)" : "min(320px, 55vw)";
               const ordered = [...compartments]
                 .slice()
                 .sort((a: any, b: any) => Number(a.comp_number) - Number(b.comp_number))
@@ -124,12 +125,13 @@ export default function PlannerControls(props: any) {
                       setCompModalOpen(true);
                     }}
                     style={{
-                      width: w,
+                      flex: "1 1 0",
+                      minWidth: 0,
                       height: h,
                       borderRadius: 18,
                       background: "rgba(255,255,255,0.06)",
                       border: "1px solid rgba(255,255,255,0.14)",
-                      padding: 14,
+                      padding: "10px 6px 10px",
                       cursor: "pointer",
                       display: "flex",
                       flexDirection: "column",
@@ -141,10 +143,10 @@ export default function PlannerControls(props: any) {
                     {/* Comp number label (amber when at max) */}
                     <div
                       style={{
-                        fontSize: 22,
+                        fontSize: "clamp(16px, 3.5vw, 22px)",
                         fontWeight: 800,
                         letterSpacing: 0.2,
-                        marginBottom: 10,
+                        marginBottom: 8,
                         color: atMax ? "#ffb020" : "rgba(255,255,255,0.72)",
                       }}
                     >
@@ -216,10 +218,11 @@ export default function PlannerControls(props: any) {
                     {/* Product button */}
                     <div
                       style={{
-                        marginTop: 12,
-                        width: 78,
-                        height: 52,
-                        borderRadius: 14,
+                        marginTop: 8,
+                        width: "80%",
+                        minWidth: 0,
+                        height: 44,
+                        borderRadius: 12,
                         backgroundColor: "transparent",
                         border: `2px solid ${isEmpty ? "rgba(180,220,255,0.55)" : codeColor}`,
                         boxShadow: "none",
@@ -227,7 +230,7 @@ export default function PlannerControls(props: any) {
                         alignItems: "center",
                         justifyContent: "center",
                         fontWeight: 800,
-                        fontSize: 20,
+                        fontSize: "clamp(13px, 3.5vw, 20px)",
                         color: isEmpty ? "rgba(180,220,255,0.92)" : codeColor,
                       }}
                     >

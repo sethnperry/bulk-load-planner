@@ -5,6 +5,8 @@ export const styles = {
     padding: 16,
     maxWidth: 1100,
     margin: "0 auto",
+    boxSizing: "border-box",
+    width: "100%",
   } as React.CSSProperties,
 
   section: {
@@ -163,7 +165,6 @@ export const styles = {
 
   sliderWrap: {
     width: "100%",
-    maxWidth: 620,
   } as React.CSSProperties,
 
   sliderLabelRow: {

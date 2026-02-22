@@ -146,9 +146,9 @@ export function useLoadWorkflow({
       );
 
     await Promise.resolve(onRefreshTerminalAccess?.());
-  } catch {
-    // ignore — this is a best-effort refresh
-  }
+  } catch (err) {
+  console.warn("terminal_access refresh failed (non-fatal):", err);
+}
 })();
       }
 
