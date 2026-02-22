@@ -136,14 +136,20 @@ export function useLoadWorkflow({
       // Reset terminal access expiry — driver is actively loading, so re-card them now.
       // begin_load doesn't touch terminal_access, so we do it here.
       if (selectedTerminalId && authUserId) {
-        supabase
-          .from("terminal_access")
-          .upsert(
-            { user_id: authUserId, terminal_id: selectedTerminalId, carded_on: new Date().toISOString().slice(0, 10) },
-            { onConflict: "user_id,terminal_id" }
-          )
-          .then(() => onRefreshTerminalAccess?.())
-          .catch(() => {});
+        (async () => {
+  try {
+    await supabase
+      .from("terminal_access")
+      .upsert(
+        { user_id: authUserId, terminal_id: selectedTerminalId, carded_on: new Date().toISOString() },
+        { onConflict: "user_id,terminal_id" }
+      );
+
+    await Promise.resolve(onRefreshTerminalAccess?.());
+  } catch {
+    // ignore — this is a best-effort refresh
+  }
+})();
       }
 
       // Init per-product inputs
