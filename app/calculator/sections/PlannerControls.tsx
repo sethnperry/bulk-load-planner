@@ -25,6 +25,9 @@ export default function PlannerControls(props: any) {
     compPlan,
     terminalProducts,
 
+    // headspace setter (optional, used by slider + cap input)
+    setCompHeadspacePct,
+
     // setters for modal + plan
     setCompModalComp,
     setCompModalOpen,
@@ -37,6 +40,24 @@ export default function PlannerControls(props: any) {
     // plan slots UI (built in page.tsx)
     snapshotSlots,
   } = props;
+
+  const productsById = React.useMemo(() => {
+    const map = new Map<string, any>();
+    (terminalProducts ?? []).forEach((p: any) => {
+      if (p?.product_id != null) map.set(String(p.product_id), p);
+    });
+    return map;
+  }, [terminalProducts]);
+
+  const getProd = (productId: any) => productsById.get(String(productId ?? ""));
+  const getBtnCode = (p: any) => {
+    const v = (p?.button_code ?? p?.product_code ?? p?.code ?? "PRD").toString().trim();
+    return (v || "PRD").toUpperCase();
+  };
+  const getHex = (p: any) => {
+    const h = (p?.hex_code ?? "").toString().trim();
+    return h || "rgba(255,255,255,0.9)";
+  };
 
   const renderCompStrip = () => {
     const n = Array.isArray(compartments) ? compartments.length : 0;
@@ -63,11 +84,10 @@ export default function PlannerControls(props: any) {
       const sel = compPlan?.[compNumber];
       const isEmpty = !!sel?.empty || !sel?.productId;
 
-      const code = isEmpty ? "MT" : String(sel?.productId ?? "PRD");
+      const prod = !isEmpty ? getProd(sel?.productId) : null;
+      const code = isEmpty ? "MT" : getBtnCode(prod);
       // Color selection (safe fallback)
-      let codeColor = "rgba(255,255,255,0.9)";
-      if (isEmpty) codeColor = "rgba(180,220,255,0.9)";
-      else if (typeof sel?.hex_code === "string" && sel.hex_code.trim()) codeColor = sel.hex_code.trim();
+      const codeColor = isEmpty ? "rgba(180,220,255,0.92)" : getHex(prod);
 
       const atMax = headPct <= 0.000001;
 
@@ -140,7 +160,7 @@ export default function PlannerControls(props: any) {
               height: 44,
               borderRadius: 12,
               backgroundColor: "transparent",
-              border: `2px solid ${isEmpty ? "rgba(180,220,255,0.55)" : codeColor}`,
+              border: `1.5px solid ${isEmpty ? "rgba(180,220,255,0.60)" : codeColor}`,
               boxShadow: "none",
               display: "flex",
               alignItems: "center",
@@ -166,13 +186,201 @@ export default function PlannerControls(props: any) {
     if (compModalComp == null) return null;
 
     const compNumber = Number(compModalComp);
+    const c = (compartments ?? []).find((x: any) => Number(x?.comp_number) === compNumber);
+    const trueMax = Number(c?.max_gallons ?? 0);
+    const headPct = headspacePctForComp?.(compNumber) ?? 0;
+    const effMax = effectiveMaxGallonsForComp?.(compNumber, trueMax) ?? trueMax;
     const sel = compPlan?.[compNumber];
     const isEmpty = !!sel?.empty || !sel?.productId;
+    const planned = plannedGallonsByComp?.[compNumber] ?? 0;
+    const plannedPct = trueMax > 0 ? Math.max(0, Math.min(1, planned / trueMax)) : 0;
+    const capPct = trueMax > 0 ? Math.max(0, Math.min(1, effMax / trueMax)) : 0;
+    const visualTopGap = 0.08;
+    const fillPct = Math.max(0, Math.min(1, Math.min(plannedPct, capPct) * (1 - visualTopGap)));
+
+    const headPctDisplay = Math.round(headPct * 100);
 
     return (
       <div style={{ display: "grid", gap: 12 }}>
-        <div style={{ fontSize: 14, opacity: 0.8 }}>
-          Select product for <strong>Comp {compNumber}</strong>
+        <div style={{ fontSize: 14, opacity: 0.82, lineHeight: 1.35 }}>
+          Adjust headspace to stay safely below the top probe and set the product for compartment {compNumber}.
+        </div>
+
+        {/* Tank + vertical headspace slider (never stacks) */}
+        <div
+          style={{
+            display: "flex",
+            gap: 14,
+            alignItems: "stretch",
+            flexWrap: "nowrap",
+            width: "100%",
+            maxWidth: 560,
+            margin: "0 auto",
+          }}
+        >
+          {/* Tank card */}
+          <div
+            style={{
+              flex: "1 1 auto",
+              minWidth: 0,
+              borderRadius: 18,
+              background: "rgba(255,255,255,0.06)",
+              border: "1px solid rgba(255,255,255,0.14)",
+              padding: 14,
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+              <div style={{ fontSize: 12, fontWeight: 800, opacity: 0.9 }}>Max Volume</div>
+              <div style={{ fontSize: 14, fontWeight: 900 }}>{Math.round(trueMax)} gal</div>
+            </div>
+
+            <div
+              style={{
+                marginTop: 10,
+                height: "min(260px, 52vw)",
+                borderRadius: 16,
+                background: "rgba(255,255,255,0.08)",
+                position: "relative",
+                overflow: "hidden",
+              }}
+            >
+              {/* Headspace tint */}
+              {headPct > 0 && (
+                <div
+                  style={{
+                    position: "absolute",
+                    left: 0,
+                    right: 0,
+                    top: 0,
+                    height: `${Math.max(0, Math.min(1, headPct)) * 100}%`,
+                    background: "rgba(255,160,0,0.18)",
+                    borderBottom: "1px dashed rgba(255,160,0,0.4)",
+                  }}
+                />
+              )}
+              {/* Fill */}
+              <div
+                style={{
+                  position: "absolute",
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  height: `${fillPct * 100}%`,
+                  background: "rgba(185,245,250,0.85)",
+                }}
+              />
+              {/* Simple wave */}
+              {fillPct > 0 && (
+                <svg
+                  width="100%"
+                  height="16"
+                  viewBox="0 0 100 16"
+                  preserveAspectRatio="none"
+                  style={{
+                    position: "absolute",
+                    left: 0,
+                    right: 0,
+                    bottom: `calc(${fillPct * 100}% - 8px)`,
+                    opacity: 0.9,
+                  }}
+                >
+                  <path
+                    d="M0,8 C10,2 20,14 30,8 C40,2 50,14 60,8 C70,2 80,14 90,8 C95,6 98,6 100,8"
+                    fill="none"
+                    stroke="rgba(120,210,220,0.95)"
+                    strokeWidth="2"
+                  />
+                </svg>
+              )}
+              {/* Headspace % label */}
+              {headPct > 0.04 && (
+                <div
+                  style={{
+                    position: "absolute",
+                    top: "50%",
+                    left: 0,
+                    right: 0,
+                    transform: "translateY(-50%)",
+                    textAlign: "center",
+                    fontSize: 11,
+                    fontWeight: 900,
+                    color: "rgba(255,160,0,0.85)",
+                    pointerEvents: "none",
+                  }}
+                >
+                  {headPctDisplay}%
+                </div>
+              )}
+            </div>
+
+            <div style={{ marginTop: 12, fontSize: 12, fontWeight: 800, opacity: 0.85 }}>Capped at</div>
+            <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 8 }}>
+              <input
+                type="number"
+                inputMode="numeric"
+                value={Math.round(effMax)}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  if (!Number.isFinite(v) || trueMax <= 0) return;
+                  const capped = Math.max(0, Math.min(trueMax, v));
+                  const pct = Math.max(0, Math.min(0.95, 1 - capped / trueMax));
+                  setCompHeadspacePct?.((prev: any) => ({ ...prev, [compNumber]: pct }));
+                }}
+                style={{
+                  ...(styles?.input ?? {}),
+                  flex: 1,
+                  minWidth: 0,
+                  height: 46,
+                  borderRadius: 12,
+                }}
+              />
+              <button
+                style={{
+                  ...(styles?.smallBtn ?? {}),
+                  height: 46,
+                  padding: "0 14px",
+                  borderRadius: 12,
+                }}
+                onClick={() => setCompHeadspacePct?.((prev: any) => ({ ...prev, [compNumber]: 0 }))}
+              >
+                Return to max
+              </button>
+            </div>
+          </div>
+
+          {/* Vertical slider */}
+          <div style={{ flex: "0 0 86px", display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
+            <div style={{ fontSize: 12, fontWeight: 800, opacity: 0.82 }}>Headspace</div>
+            <input
+              type="range"
+              min={0}
+              max={30}
+              step={1}
+              value={headPctDisplay}
+              onChange={(e) => {
+                const pct = Number(e.target.value) / 100;
+                setCompHeadspacePct?.((prev: any) => ({ ...prev, [compNumber]: pct }));
+              }}
+              style={{
+                height: 240,
+                width: 36,
+                writingMode: "bt-lr" as any,
+                WebkitAppearance: "slider-vertical" as any,
+                accentColor: "#59d7ff",
+                cursor: "pointer",
+              }}
+            />
+            <div
+              style={{
+                ...(styles?.badge ?? {}),
+                minWidth: 48,
+                textAlign: "center",
+                borderRadius: 999,
+              }}
+            >
+              {headPctDisplay}%
+            </div>
+          </div>
         </div>
 
         {/* MT / Empty */}
@@ -234,14 +442,14 @@ export default function PlannerControls(props: any) {
                       width: 54,
                       height: 44,
                       borderRadius: 12,
-                      border: "1px solid rgba(255,255,255,0.20)",
+                      border: `1.5px solid ${getHex(p)}`,
                       background: "rgba(0,0,0,0.25)",
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
                       fontWeight: 900,
                       letterSpacing: 0.5,
-                      color: "rgba(255,255,255,0.92)",
+                      color: getHex(p),
                       flex: "0 0 auto",
                     }}
                   >
