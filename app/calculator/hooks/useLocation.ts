@@ -2,18 +2,30 @@
 // hooks/useLocation.ts
 // Owns: states/cities catalogs, selected state/city, ambient temp, localStorage persistence.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { normCity, normState } from "../utils/normalize";
 import type { CityRow, StateRow } from "../types";
 
 // ─── Ambient temp cache (module-scope, per tab session) ───────────────────────
 
-const AMBIENT_CACHE = new Map<string, { ts: number; tempF: number; lat?: number | null; lon?: number | null }>();
+type AmbientCacheEntry = { ts: number; tempF: number; lat?: number | null; lon?: number | null };
+
+const AMBIENT_CACHE = new Map<string, AmbientCacheEntry>();
 const AMBIENT_TTL_MS = 15 * 60 * 1000;
 
 function ambientKey(state: string, city: string) {
   return `${normState(state)}|${normCity(city)}`;
+}
+
+function getOpenWeatherKey(): string {
+  const env = process.env as any;
+  return (
+    (env.NEXT_PUBLIC_OPENWEATHER_KEY || "").trim() ||
+    (env.NEXT_PUBLIC_OPENWEATHER_API_KEY || "").trim() ||
+    (env.NEXT_PUBLIC_OPENWEATHER_APIKEY || "").trim() ||
+    ""
+  );
 }
 
 async function fetchAmbientTempF(args: {
@@ -28,36 +40,47 @@ async function fetchAmbientTempF(args: {
   const qState = state.trim();
   if (!qCity || !qState || !apiKey) return null;
 
+  // Try city/state query first
   try {
-    const url = `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(qCity)},${encodeURIComponent(qState)},US&units=imperial&appid=${encodeURIComponent(apiKey)}`;
+    const url = `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(qCity)},${encodeURIComponent(
+      qState
+    )},US&units=imperial&appid=${encodeURIComponent(apiKey)}`;
     const res = await fetch(url, { signal, cache: "no-store" });
     if (res.ok) {
       const json: any = await res.json();
       const temp = Number(json?.main?.temp);
-      // Capture lat/lon from the current weather response
-      if (json?.coord?.lat && json?.coord?.lon) {
+
+      if (json?.coord?.lat != null && json?.coord?.lon != null) {
         onLatLon?.(Number(json.coord.lat), Number(json.coord.lon));
       }
+
       if (Number.isFinite(temp)) return temp;
     }
   } catch {}
 
+  // Fallback: geocode -> weather by lat/lon
   try {
-    const geoUrl = `https://api.openweathermap.org/geo/1.0/direct?q=${encodeURIComponent(qCity)},${encodeURIComponent(qState)},US&limit=1&appid=${encodeURIComponent(apiKey)}`;
+    const geoUrl = `https://api.openweathermap.org/geo/1.0/direct?q=${encodeURIComponent(qCity)},${encodeURIComponent(
+      qState
+    )},US&limit=1&appid=${encodeURIComponent(apiKey)}`;
     const geoRes = await fetch(geoUrl, { signal, cache: "no-store" });
     if (!geoRes.ok) return null;
+
     const geoJson: any = await geoRes.json();
     const item = Array.isArray(geoJson) ? geoJson[0] : null;
+
     const lat = Number(item?.lat);
     const lon = Number(item?.lon);
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
 
-    // Capture lat/lon from geo lookup
     onLatLon?.(lat, lon);
 
-    const wUrl = `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&units=imperial&appid=${encodeURIComponent(apiKey)}`;
+    const wUrl = `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&units=imperial&appid=${encodeURIComponent(
+      apiKey
+    )}`;
     const wRes = await fetch(wUrl, { signal, cache: "no-store" });
     if (!wRes.ok) return null;
+
     const wJson: any = await wRes.json();
     const temp2 = Number(wJson?.main?.temp);
     return Number.isFinite(temp2) ? temp2 : null;
@@ -93,11 +116,14 @@ function readPersistedLocation(key: string): { state: string; city: string; term
 
 function writePersistedLocation(key: string, state: string, city: string, terminalId: string) {
   try {
-    localStorage.setItem(key, JSON.stringify({
-      state: normState(state),
-      city: normCity(city),
-      terminalId: String(terminalId || ""),
-    }));
+    localStorage.setItem(
+      key,
+      JSON.stringify({
+        state: normState(state),
+        city: normCity(city),
+        terminalId: String(terminalId || ""),
+      })
+    );
   } catch {}
 }
 
@@ -161,7 +187,10 @@ export function useLocation(authUserId: string) {
   useEffect(() => {
     (async () => {
       setCitiesError(null);
-      if (!selectedState) { setCitiesCatalog([]); return; }
+      if (!selectedState) {
+        setCitiesCatalog([]);
+        return;
+      }
       setCitiesLoading(true);
       const { data, error } = await supabase
         .from("cities")
@@ -180,7 +209,6 @@ export function useLocation(authUserId: string) {
     })();
   }, [selectedState]);
 
-  // Track when cities have loaded for current state
   useEffect(() => {
     if (!selectedState || citiesLoading) return;
     citiesLoadedForStateRef.current = normState(selectedState);
@@ -251,12 +279,7 @@ export function useLocation(authUserId: string) {
   }, [authUserId, effectiveLocKey, userLocKey, selectedState, selectedCity, selectedTerminalId]);
 
   // ── Ambient temp ──────────────────────────────────────────────────────────
-type AmbientCacheEntry = {
-  ts: number;
-  tempF: number;
-  lat?: number | null;
-  lon?: number | null;
-};
+
   useEffect(() => {
     if (!selectedState || !selectedCity) {
       setAmbientTempF(null);
@@ -266,11 +289,15 @@ type AmbientCacheEntry = {
       return;
     }
 
-    const apiKey = (process.env.NEXT_PUBLIC_OPENWEATHER_KEY || "").trim();
-    if (!apiKey) { setAmbientTempF(null); return; }
+    const apiKey = getOpenWeatherKey();
+    if (!apiKey) {
+      setAmbientTempF(null);
+      setAmbientTempLoading(false);
+      return;
+    }
 
     const cacheKey = ambientKey(selectedState, selectedCity);
-    const cached = AMBIENT_CACHE.get(cacheKey) as AmbientCacheEntry | undefined;
+    const cached = AMBIENT_CACHE.get(cacheKey);
     if (cached && Date.now() - cached.ts < AMBIENT_TTL_MS) {
       setAmbientTempF(cached.tempF);
       if (cached.lat != null) setLocationLat(cached.lat);
@@ -278,32 +305,36 @@ type AmbientCacheEntry = {
       setAmbientTempLoading(false);
       return;
     }
+
     const ac = new AbortController();
     setAmbientTempLoading(true);
 
     (async () => {
       try {
         const temp = await fetchAmbientTempF({
-          state: selectedState, city: selectedCity, apiKey, signal: ac.signal,
+          state: selectedState,
+          city: selectedCity,
+          apiKey,
+          signal: ac.signal,
           onLatLon: (lat, lon) => {
             setLocationLat(lat);
             setLocationLon(lon);
-            // Pre-populate cache entry with lat/lon so the subsequent AMBIENT_CACHE.set picks them up
-            const existing = AMBIENT_CACHE.get(cacheKey) as AmbientCacheEntry | undefined;
-            AMBIENT_CACHE.set(cacheKey, { 
-              ts: existing?.ts ?? 0, 
+
+            const existing = AMBIENT_CACHE.get(cacheKey);
+            AMBIENT_CACHE.set(cacheKey, {
+              ts: existing?.ts ?? 0,
               tempF: existing?.tempF ?? 0,
-              lat, 
-              lon 
+              lat,
+              lon,
             });
           },
         });
+
         if (typeof temp === "number" && Number.isFinite(temp)) {
           setAmbientTempF(temp);
-          // lat/lon already set via onLatLon callback above
-          const entry = AMBIENT_CACHE.get(cacheKey) as AmbientCacheEntry | undefined;
-          AMBIENT_CACHE.set(cacheKey, { 
-            ts: Date.now(), 
+          const entry = AMBIENT_CACHE.get(cacheKey);
+          AMBIENT_CACHE.set(cacheKey, {
+            ts: Date.now(),
             tempF: temp,
             lat: entry?.lat ?? null,
             lon: entry?.lon ?? null,
@@ -322,19 +353,16 @@ type AmbientCacheEntry = {
   }, [selectedState, selectedCity, ambientHeartbeat]);
 
   // ── Ambient temp heartbeat (every 7 minutes) ──────────────────────────────
-  // Re-fetches even if cache is fresh so the UI stays current without reload.
   useEffect(() => {
     if (!selectedState || !selectedCity) return;
-    const apiKey = (process.env.NEXT_PUBLIC_OPENWEATHER_KEY || "").trim();
+    const apiKey = getOpenWeatherKey();
     if (!apiKey) return;
 
-    const HEARTBEAT_MS = 7 * 60 * 1000; // 7 minutes
+    const HEARTBEAT_MS = 7 * 60 * 1000;
 
     const tick = () => {
       const cacheKey = ambientKey(selectedState, selectedCity);
-      // Force expiry so the fetch effect re-runs
       AMBIENT_CACHE.delete(cacheKey);
-      // Trigger re-fetch by nudging a ref — we use a local state bump
       setAmbientHeartbeat((v) => v + 1);
     };
 
@@ -360,16 +388,24 @@ type AmbientCacheEntry = {
   );
 
   return {
-    selectedState, setSelectedState,
-    selectedCity, setSelectedCity,
-    selectedTerminalId, setSelectedTerminalId,
+    selectedState,
+    setSelectedState,
+    selectedCity,
+    setSelectedCity,
+    selectedTerminalId,
+    setSelectedTerminalId,
     selectedCityId,
     locationLabel,
     locationLat,
     locationLon,
-    statesCatalog, statesLoading, statesError,
-    citiesCatalog, citiesLoading, citiesError,
-    ambientTempF, ambientTempLoading,
+    statesCatalog,
+    statesLoading,
+    statesError,
+    citiesCatalog,
+    citiesLoading,
+    citiesError,
+    ambientTempF,
+    ambientTempLoading,
     skipResetRef,
   };
 }

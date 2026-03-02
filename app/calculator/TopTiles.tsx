@@ -33,24 +33,20 @@ function Tile({
     ? "bg-black border-white/20"
     : "bg-[#2a2a2a] border-white/10";
 
-  const iconTextClass = disabled
-    ? "text-white/30"
-    : isSelected
-    ? "text-amber-400"
-    : "text-white/50";
-
+  const iconTextClass = disabled ? "text-white/30" : isSelected ? "text-amber-400" : "text-white/50";
   const titleClass = disabled ? "text-white/35" : isSelected ? "text-white" : "text-white/80";
 
-  const defaultSubtitleClass = disabled ? "text-white/30" : isSelected ? "text-cyan-400" : "text-white/50";
+  const hasSubtitle = typeof subtitle === "string" ? subtitle.trim().length > 0 : subtitle != null;
+
+  const defaultSubtitleClass = disabled ? "text-white/30" : isSelected ? "text-white/70" : "text-white/50";
 
   const subtitleText =
-    subtitle ??
-    placeholderSubtitle ??
-    (disabled ? "Select location first" : "Tap to select");
+    hasSubtitle
+      ? (subtitle as any)
+      : placeholderSubtitle ?? (disabled ? "Select location first" : "Tap to select");
 
   const subtitleFinalClass =
-    subtitleClassName ??
-    (subtitle ? defaultSubtitleClass : disabled ? "text-white/30" : "text-white/40");
+    subtitleClassName ?? (hasSubtitle ? defaultSubtitleClass : disabled ? "text-white/30" : "text-white/40");
 
   return (
     <button
@@ -63,32 +59,48 @@ function Tile({
       ].join(" ")}
       style={{ height: 72 }}
     >
-      {/* Fixed-height inner — icon well and text area both fill the same 72px */}
       <div style={{ display: "flex", alignItems: "stretch", height: "100%", padding: 4, gap: 0 }}>
-        {/* Icon well — square, fills full card height minus 4px padding each side */}
         <div
-          className={[
-            "rounded-xl border flex items-center justify-center transition-colors flex-shrink-0",
-            iconWellClass,
-          ].join(" ")}
+          className={["rounded-xl border flex items-center justify-center transition-colors flex-shrink-0", iconWellClass].join(
+            " "
+          )}
           style={{ width: 56, minWidth: 56 }}
         >
-          <span className={["text-base font-bold transition-colors", iconTextClass].join(" ")}>
-            {iconText}
-          </span>
+          <span className={["text-base font-bold transition-colors", iconTextClass].join(" ")}>{iconText}</span>
         </div>
 
-        {/* Text area — takes remaining width, clips gracefully */}
-        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", justifyContent: "center", padding: "0 8px 0 10px" }}>
+        <div
+          style={{
+            flex: 1,
+            minWidth: 0,
+            display: "flex",
+            flexDirection: "column",
+            justifyContent: "center",
+            padding: "0 8px 0 10px",
+          }}
+        >
           <div
             className={["font-semibold transition-colors", titleClass].join(" ")}
-            style={{ fontSize: "clamp(12px, 3.5vw, 16px)", lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+            style={{
+              fontSize: "clamp(12px, 3.5vw, 16px)",
+              lineHeight: 1.2,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
           >
             {title}
           </div>
+
           <div
             className={["mt-0.5 transition-colors", subtitleFinalClass].join(" ")}
-            style={{ fontSize: "clamp(10px, 2.8vw, 13px)", lineHeight: 1.25, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+            style={{
+              fontSize: "clamp(10px, 2.8vw, 13px)",
+              lineHeight: 1.25,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
           >
             {subtitleText}
           </div>
@@ -121,16 +133,20 @@ export function TopTiles({
   locationSelected: boolean;
   terminalSelected: boolean;
 }) {
+  const ambientHasValue = typeof ambientSubtitle === "string" ? ambientSubtitle.trim().length > 0 : ambientSubtitle != null;
+
   return (
     <div className="grid grid-cols-2 gap-2">
       <Tile
         iconText="SC"
         title={locationTitle}
         subtitle={ambientSubtitle}
+        // Ambient orange (only when we have a real value string)
+        subtitleClassName={locationSelected && ambientHasValue ? "text-amber-400" : undefined}
         onClick={onOpenLocation}
         selected={locationSelected}
         disabled={false}
-        placeholderSubtitle="Tap to select"
+        placeholderSubtitle={locationSelected ? "— ambient" : "Tap to select"}
       />
 
       <Tile
@@ -146,4 +162,3 @@ export function TopTiles({
     </div>
   );
 }
-
