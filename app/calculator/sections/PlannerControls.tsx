@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import React from "react";
 import { FullscreenModal } from "@/lib/ui/FullscreenModal";
@@ -68,6 +68,11 @@ export default function PlannerControls(props: any) {
     return hex.startsWith("#") ? hex : `#${hex}`;
   };
 
+  // Match the cyan/teal used in the plan slot pills (and keep it consistent everywhere).
+  // (Opacity is intentional so it reads like "liquid" on the dark UI.)
+  const PLAN_LIQUID = "rgba(89,215,255,0.62)";
+  const PLAN_WAVE = "rgba(89,215,255,0.95)";
+
   const sortedCompartments = React.useMemo(() => {
     const arr = Array.isArray(compartments) ? [...compartments] : [];
     arr.sort((a: any, b: any) => Number(a?.comp_number ?? 0) - Number(b?.comp_number ?? 0));
@@ -108,6 +113,9 @@ export default function PlannerControls(props: any) {
     const code = isEmpty ? "MT" : getBtnCode(prod);
     const codeColor = isEmpty ? "rgba(180,220,255,0.92)" : getHex(prod);
 
+    const atMax = headPct <= 0.000001; // max capacity when headspace is 0
+    const compNumberColor = atMax ? "rgba(255,170,30,0.95)" : "rgba(255,255,255,0.90)";
+
     const n = sortedCompartments.length;
     const cardHeight = n >= 5 ? "min(280px, 40vw)" : n >= 4 ? "min(300px, 50vw)" : "min(320px, 55vw)";
 
@@ -122,7 +130,7 @@ export default function PlannerControls(props: any) {
             width: "100%",
             maxWidth: 180,
             height: cardHeight,
-            borderRadius: 24,
+            borderRadius: 16,
             background: "rgba(255,255,255,0.04)",
             border: "1px solid rgba(255,255,255,0.10)",
             padding: 12,
@@ -136,21 +144,22 @@ export default function PlannerControls(props: any) {
           }}
         >
           {/* Comp number */}
-          <div style={{ display: "flex", justifyContent: "center", marginTop: 2 }}>
-            <div style={{ fontSize: 34, fontWeight: 800, color: "rgba(255,255,255,0.85)" }}>{compNumber}</div>
+          <div style={{ display: "flex", justifyContent: "center", marginTop: -2 }}>
+            <div style={{ fontSize: 22, fontWeight: 900, color: compNumberColor, lineHeight: 1 }}>{compNumber}</div>
           </div>
 
           {/* Tank area */}
-          <div style={{ flex: "1 1 auto", minHeight: 0, marginTop: 6, display: "flex", justifyContent: "center" }}>
+          <div style={{ flex: "1 1 auto", minHeight: 0, marginTop: 6, display: "flex" }}>
             <div
               style={{
-                width: "min(150px, 92%)",
-                height: "min(150px, 40vw)",
-                borderRadius: 18,
+                width: "100%",
+                height: "min(170px, 44vw)",
+                borderRadius: 14,
                 background: "rgba(255,255,255,0.06)",
                 position: "relative",
                 overflow: "hidden",
                 border: "1px solid rgba(255,255,255,0.10)",
+                marginTop: 6,
               }}
             >
               {/* Headspace tint */}
@@ -176,7 +185,7 @@ export default function PlannerControls(props: any) {
                   right: 0,
                   bottom: 0,
                   height: `${fillPct * 100}%`,
-                  background: "rgba(185,245,250,0.85)",
+                  background: PLAN_LIQUID,
                 }}
               />
 
@@ -198,7 +207,7 @@ export default function PlannerControls(props: any) {
                   <path
                     d="M0,8 C10,2 20,14 30,8 C40,2 50,14 60,8 C70,2 80,14 90,8 C95,6 98,6 100,8"
                     fill="none"
-                    stroke="rgba(120,210,220,0.95)"
+                    stroke={PLAN_WAVE}
                     strokeWidth="2"
                   />
                 </svg>
@@ -213,8 +222,9 @@ export default function PlannerControls(props: any) {
                 width: "min(140px, 86%)",
                 height: 44,
                 borderRadius: 14,
-                border: `1.25px solid ${codeColor}`,
-                background: "rgba(0,0,0,0.40)",
+                // no product-colored border here; color is carried by text only (cleaner like terminal cards)
+                border: "1px solid rgba(255,255,255,0.12)",
+                background: "rgba(0,0,0,0.42)",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
@@ -347,7 +357,7 @@ export default function PlannerControls(props: any) {
                   right: 0,
                   bottom: 0,
                   height: `${fillPct * 100}%`,
-                  background: "rgba(185,245,250,0.85)",
+                  background: PLAN_LIQUID,
                 }}
               />
               {/* Wave */}
@@ -368,7 +378,7 @@ export default function PlannerControls(props: any) {
                   <path
                     d="M0,8 C10,2 20,14 30,8 C40,2 50,14 60,8 C70,2 80,14 90,8 C95,6 98,6 100,8"
                     fill="none"
-                    stroke="rgba(120,210,220,0.95)"
+                    stroke={PLAN_WAVE}
                     strokeWidth="2"
                   />
                 </svg>
