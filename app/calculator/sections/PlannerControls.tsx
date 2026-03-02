@@ -7,7 +7,8 @@ import { FullscreenModal } from "@/lib/ui/FullscreenModal";
  * PlannerControls
  * - Owns NO state.
  * - Receives everything via props from page.tsx
- * - Pure UI extraction to shrink page.tsx safely.
+ * - Only compartment strip cards are customized per your spec.
+ * - Modal structure/layout preserved; only modal fluid color set to match teal.
  */
 export default function PlannerControls(props: any) {
   const {
@@ -36,31 +37,37 @@ export default function PlannerControls(props: any) {
     compModalOpen,
     compModalComp,
 
-    // NEW: plan slots UI (built in page.tsx)
+    // plan slots UI (built in page.tsx)
     snapshotSlots,
   } = props;
 
   // ---- Helpers (must exist; used across strip + modal) ----
 
   const getProd = (productId: any) => {
-    const pid = (productId ?? "").toString();
+    const pid = String(productId ?? "").trim();
     if (!pid) return null;
 
     const list = Array.isArray(terminalProducts) ? terminalProducts : [];
+
+    // Try common shapes:
+    // - terminal_products row: { product_id, ... joined: products: { ... } }
+    // - products row: { id, ... }
     return (
-      list.find((p: any) => String(p?.product_id ?? p?.id ?? "") === pid) ??
-      list.find((p: any) => String(p?.products?.id ?? p?.product?.id ?? "") === pid) ??
+      list.find((p: any) => String(p?.product_id ?? "") === pid) ??
+      list.find((p: any) => String(p?.id ?? "") === pid) ??
+      list.find((p: any) => String(p?.products?.id ?? "") === pid) ??
+      list.find((p: any) => String(p?.product?.id ?? "") === pid) ??
       null
     );
   };
 
-  // Support both shapes: terminal_products rows may include joined product under `products` or `product`.
   const getBtnCode = (p: any) => {
     const raw = (
       p?.button_code ??
       p?.product_code ??
       p?.code ??
       p?.products?.button_code ??
+      p?.products?.product_code ??
       p?.product?.button_code ??
       ""
     )
@@ -72,15 +79,16 @@ export default function PlannerControls(props: any) {
   const getHex = (p: any) => {
     const raw = (
       p?.hex_code ??
-      p?.products?.hex_code ??
-      p?.product?.hex_code ??
       p?.color ??
+      p?.products?.hex_code ??
       p?.products?.color ??
+      p?.product?.hex_code ??
+      p?.product?.color ??
       ""
     )
       .toString()
       .trim();
-    return raw ? raw : "rgba(255,255,255,0.85)";
+    return raw ? raw : "rgba(255,255,255,0.88)";
   };
 
   const getName = (p: any) =>
@@ -97,37 +105,43 @@ export default function PlannerControls(props: any) {
       .toString()
       .trim() || "Product";
 
-  const getSub = (p: any) => (p?.description ?? p?.products?.description ?? p?.product?.description ?? "").toString().trim();
+  const getSub = (p: any) =>
+    (p?.description ?? p?.products?.description ?? p?.product?.description ?? "").toString().trim();
 
-  // ---- Compartment strip cards (ONLY UI area we are modifying) ----
+  // ---- Compartment strip cards (ONLY UI we modify) ----
 
   const renderCompStrip = () => {
     const list = Array.isArray(compartments) ? compartments : [];
     const n = list.length;
 
-    // Height scales with number of compartments - fewer comps = taller
     const h = n >= 5 ? "min(280px, 40vw)" : n >= 4 ? "min(300px, 50vw)" : "min(320px, 55vw)";
+
     const ordered = [...list]
       .slice()
       .sort((a: any, b: any) => Number(a?.comp_number ?? a?.compNumber ?? 0) - Number(b?.comp_number ?? b?.compNumber ?? 0))
       .reverse();
 
     // Must match plan-slot teal (no light cyan)
-    const fluidFill = "rgba(45, 212, 191, 0.84)"; // teal
-    const fluidWave = "rgba(45, 212, 191, 0.95)"; // teal
+    const fluidFill = "rgba(45, 212, 191, 0.84)";
+    const fluidWave = "rgba(45, 212, 191, 0.95)";
+
+    // Headspace tint (so it shows in main planner too)
+    const headTint = "rgba(245, 158, 11, 0.20)";
+    const headLine = "rgba(245, 158, 11, 0.55)";
 
     return ordered.map((c: any) => {
       const compNumber = Number(c?.comp_number ?? c?.compNumber ?? 0);
       const trueMax = Number(c?.max_gallons ?? 0);
 
-      const headPct = (headspacePctForComp?.(compNumber) ?? 0) as number;
-      const effMax = (effectiveMaxGallonsForComp?.(compNumber, trueMax) ?? trueMax) as number;
+      const headPctRaw = Number(headspacePctForComp?.(compNumber) ?? 0);
+      const headPct = Math.max(0, Math.min(0.95, Number.isFinite(headPctRaw) ? headPctRaw : 0));
+
+      const effMax = Number(effectiveMaxGallonsForComp?.(compNumber, trueMax) ?? trueMax);
       const planned = Number(plannedGallonsByComp?.[compNumber] ?? 0);
 
       const plannedPct = trueMax > 0 ? Math.max(0, Math.min(1, planned / trueMax)) : 0;
       const capPct = trueMax > 0 ? Math.max(0, Math.min(1, effMax / trueMax)) : 0;
 
-      // Slight visual top gap so fill never visually kisses top border
       const visualTopGap = 0.06;
       const fillPct = Math.max(0, Math.min(1, Math.min(plannedPct, capPct) * (1 - visualTopGap)));
 
@@ -137,21 +151,18 @@ export default function PlannerControls(props: any) {
       const prod = !isEmpty ? getProd(sel?.productId) : null;
       const code = isEmpty ? "MT" : getBtnCode(prod);
 
-      // "Max capacity" = no headspace
-      const atMax = (headPct as number) <= 0.000001;
+      const atMax = headPct <= 0.000001;
 
-      // Text-only product identification (no border color)
       const codeColor = isEmpty ? "rgba(180, 220, 255, 0.92)" : getHex(prod);
-
-      // Comp number: smaller + tight to top border; orange ONLY when headspace=0
       const compNumColor = atMax ? "#fbbf24" : "rgba(255,255,255,0.92)";
 
-      // Badge must be full-width bottom tab
+      // Badge is a full-width bottom tab. Make it opaque enough that fluid never looks like it starts below it.
       const badgeH = 74;
+      const badgeBg = "rgba(0,0,0,0.78)";
 
       return (
         <div
-          key={String(c?.id ?? `${compNumber}`)}
+          key={String(c?.id ?? compNumber)}
           style={{
             display: "flex",
             flexDirection: "column",
@@ -184,7 +195,7 @@ export default function PlannerControls(props: any) {
               overflow: "hidden",
             }}
           >
-            {/* Comp number (tight to top) */}
+            {/* Comp number: smaller, tight to top; orange only at max capacity */}
             <div
               style={{
                 paddingTop: 2,
@@ -196,10 +207,10 @@ export default function PlannerControls(props: any) {
                 lineHeight: 1,
               }}
             >
-              {c?.comp_number ?? c?.compNumber}
+              {c?.comp_number ?? c?.compNumber ?? compNumber}
             </div>
 
-            {/* Fluid area (no inner capsule). Fluid starts exactly above badge. */}
+            {/* Fluid area (no inner capsule). Badge is OVERLAID at bottom; fluid bottoms out at badge top. */}
             <div
               style={{
                 flex: "1 1 auto",
@@ -209,25 +220,49 @@ export default function PlannerControls(props: any) {
                 background: "rgba(255,255,255,0.05)",
               }}
             >
-              {/* Fill */}
+              {/* Headspace (now visible on main planner) */}
+              {headPct > 0 && (
+                <>
+                  <div
+                    style={{
+                      position: "absolute",
+                      left: 0,
+                      right: 0,
+                      top: 0,
+                      height: `${Math.max(0, Math.min(1, headPct)) * 100}%`,
+                      background: headTint,
+                      pointerEvents: "none",
+                    }}
+                  />
+                  <div
+                    style={{
+                      position: "absolute",
+                      left: 0,
+                      right: 0,
+                      top: `${Math.max(0, Math.min(1, headPct)) * 100}%`,
+                      borderTop: `1px dashed ${headLine}`,
+                      pointerEvents: "none",
+                    }}
+                  />
+                </>
+              )}
+
+              {/* Fill: MUST start exactly above bottom badge */}
               <div
                 style={{
                   position: "absolute",
                   left: 0,
                   right: 0,
-
-                  // Start at bottom of fluid area, which sits directly above badge
-                  bottom: 0,
-
+                  bottom: badgeH, // critical: start above badge
                   height: `${fillPct * 100}%`,
                   background: fluidFill,
 
-                  // Clean vertical walls, slight bottom rounding only
+                  // Clean vertical walls; slight bottom rounding only
                   borderRadius: "0 0 8px 8px",
                 }}
               />
 
-              {/* Wave: flat-ish top with slight wave */}
+              {/* Wave: flat-ish with slight wave */}
               {fillPct > 0 && (
                 <svg
                   width="100%"
@@ -238,7 +273,7 @@ export default function PlannerControls(props: any) {
                     position: "absolute",
                     left: 0,
                     right: 0,
-                    bottom: `calc(${fillPct * 100}% - 7px)`,
+                    bottom: `calc(${badgeH}px + ${fillPct * 100}% - 7px)`,
                     opacity: 0.9,
                     pointerEvents: "none",
                   }}
@@ -252,7 +287,7 @@ export default function PlannerControls(props: any) {
                 </svg>
               )}
 
-              {/* Bottom badge tab (full width, no border, not floating) */}
+              {/* Bottom Badge: full width tab, opaque enough so fluid doesn't show through */}
               <div
                 style={{
                   position: "absolute",
@@ -260,7 +295,7 @@ export default function PlannerControls(props: any) {
                   right: 0,
                   bottom: 0,
                   height: badgeH,
-                  background: "rgba(0,0,0,0.55)",
+                  background: badgeBg,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
@@ -290,19 +325,21 @@ export default function PlannerControls(props: any) {
     });
   };
 
-  // ---- Modal (structure/layout must remain exactly as it was; only fluid color changed) ----
+  // ---- Modal (structure/layout preserved; only fluid color set to teal) ----
 
   const renderCompModal = () => {
     const compNumber = Number(compModalComp);
     if (!Number.isFinite(compNumber)) {
-      return <div style={{ ...styles?.help }}>Select a compartment.</div>;
+      return <div style={{ ...(styles?.help ?? {}) }}>Select a compartment.</div>;
     }
 
     const list = Array.isArray(compartments) ? compartments : [];
     const c = list.find((x: any) => Number(x?.comp_number ?? x?.compNumber ?? 0) === compNumber);
     const trueMax = Number(c?.max_gallons ?? 0);
 
-    const headPct = Number(headspacePctForComp?.(compNumber) ?? 0);
+    const headPctRaw = Number(headspacePctForComp?.(compNumber) ?? 0);
+    const headPct = Math.max(0, Math.min(0.95, Number.isFinite(headPctRaw) ? headPctRaw : 0));
+
     const effMax = Number(effectiveMaxGallonsForComp?.(compNumber, trueMax) ?? trueMax);
 
     const sel = compPlan?.[compNumber];
@@ -311,6 +348,7 @@ export default function PlannerControls(props: any) {
     const planned = Number(plannedGallonsByComp?.[compNumber] ?? 0);
     const plannedPct = trueMax > 0 ? Math.max(0, Math.min(1, planned / trueMax)) : 0;
     const capPct = trueMax > 0 ? Math.max(0, Math.min(1, effMax / trueMax)) : 0;
+
     const visualTopGap = 0.08;
     const fillPct = Math.max(0, Math.min(1, Math.min(plannedPct, capPct) * (1 - visualTopGap)));
 
@@ -318,7 +356,7 @@ export default function PlannerControls(props: any) {
     const headPctClamped = Math.max(0, Math.min(0.3, Number.isFinite(headPct) ? headPct : 0));
     const headPctDisplay = Math.round(headPctClamped * 100);
 
-    // ONLY allowed modal change: fluid color (match plan-slot teal)
+    // ONLY allowed modal change: fluid color (match teal)
     const modalFluidFill = "rgba(45, 212, 191, 0.84)";
     const modalFluidWave = "rgba(45, 212, 191, 0.95)";
 
@@ -377,7 +415,7 @@ export default function PlannerControls(props: any) {
                 />
               )}
 
-              {/* Fill (color change allowed) */}
+              {/* Fill (teal) */}
               <div
                 style={{
                   position: "absolute",
@@ -389,7 +427,7 @@ export default function PlannerControls(props: any) {
                 }}
               />
 
-              {/* Wave (color change allowed) */}
+              {/* Wave (teal) */}
               {fillPct > 0 && (
                 <svg
                   width="100%"
@@ -540,7 +578,9 @@ export default function PlannerControls(props: any) {
             </button>
 
             {(Array.isArray(terminalProducts) ? terminalProducts : []).map((p: any) => {
-              const selected = !isEmpty && String(sel?.productId ?? "") === String(p?.product_id ?? p?.id ?? "");
+              const pid = String(p?.product_id ?? p?.id ?? "");
+              const selected = !isEmpty && String(sel?.productId ?? "") === pid;
+
               const btnCode = getBtnCode(p);
               const btnColor = getHex(p);
               const name = getName(p);
@@ -548,7 +588,7 @@ export default function PlannerControls(props: any) {
 
               return (
                 <button
-                  key={String(p?.product_id ?? p?.id ?? name)}
+                  key={pid || name}
                   style={{
                     textAlign: "left",
                     padding: 14,
@@ -561,7 +601,7 @@ export default function PlannerControls(props: any) {
                   onClick={() => {
                     setCompPlan?.((prev: any) => ({
                       ...prev,
-                      [compNumber]: { empty: false, productId: p.product_id ?? p.id },
+                      [compNumber]: { empty: false, productId: p?.product_id ?? p?.id },
                     }));
                     setCompModalOpen?.(false);
                     setCompModalComp?.(null);
@@ -576,7 +616,6 @@ export default function PlannerControls(props: any) {
                         borderRadius: 12,
                         backgroundColor: "transparent",
                         border: `1.5px solid ${btnColor}`,
-                        boxShadow: "none",
                         display: "flex",
                         alignItems: "center",
                         justifyContent: "center",
@@ -607,25 +646,16 @@ export default function PlannerControls(props: any) {
   const hasComps = Array.isArray(compartments) && compartments.length > 0;
 
   return (
-    <section style={{ ...styles.section, border: "none", background: "transparent", padding: 0 }}>
-      {!selectedTrailerId && <div style={styles.help}>Select equipment to load compartments.</div>}
-      {compError && <div style={styles.error}>Error loading compartments: {compError}</div>}
+    <section style={{ ...(styles?.section ?? {}), border: "none", background: "transparent", padding: 0 }}>
+      {!selectedTrailerId && <div style={styles?.help}>Select equipment to load compartments.</div>}
+      {compError && <div style={styles?.error}>Error loading compartments: {compError}</div>}
 
       {/* Plan slots (centered above compartments) */}
       {selectedTrailerId && snapshotSlots ? (
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "center",
-            marginTop: 8,
-            marginBottom: 10,
-          }}
-        >
-          {snapshotSlots}
-        </div>
+        <div style={{ display: "flex", justifyContent: "center", marginTop: 8, marginBottom: 10 }}>{snapshotSlots}</div>
       ) : null}
 
-      {/* Driver compartment strip (primary interface) */}
+      {/* Compartment strip */}
       {selectedTrailerId && !compLoading && !compError && hasComps && (
         <div style={{ marginTop: 14 }}>
           <div
@@ -642,9 +672,7 @@ export default function PlannerControls(props: any) {
         </div>
       )}
 
-      {selectedTrailerId && !compLoading && !compError && !hasComps && (
-        <div style={styles.help}>No compartments found for this trailer.</div>
-      )}
+      {selectedTrailerId && !compLoading && !compError && !hasComps && <div style={styles?.help}>No compartments found for this trailer.</div>}
 
       <FullscreenModal
         open={!!compModalOpen}
