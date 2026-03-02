@@ -49,9 +49,6 @@ export default function PlannerControls(props: any) {
 
     const list = Array.isArray(terminalProducts) ? terminalProducts : [];
 
-    // Try common shapes:
-    // - terminal_products row: { product_id, ... joined: products: { ... } }
-    // - products row: { id, ... }
     return (
       list.find((p: any) => String(p?.product_id ?? "") === pid) ??
       list.find((p: any) => String(p?.id ?? "") === pid) ??
@@ -156,7 +153,7 @@ export default function PlannerControls(props: any) {
       const codeColor = isEmpty ? "rgba(180, 220, 255, 0.92)" : getHex(prod);
       const compNumColor = atMax ? "#fbbf24" : "rgba(255,255,255,0.92)";
 
-      // Badge is a full-width bottom tab. Make it opaque enough that fluid never looks like it starts below it.
+      // Badge is a full-width bottom tab.
       const badgeH = 74;
       const badgeBg = "rgba(0,0,0,0.78)";
 
@@ -180,15 +177,10 @@ export default function PlannerControls(props: any) {
               width: "100%",
               maxWidth: 180,
               height: h,
-
-              // Less rounded corners (subtle radius)
               borderRadius: 10,
-
-              // Dark background
               background: "rgba(0,0,0,0.32)",
               border: "1px solid rgba(255,255,255,0.10)",
               boxSizing: "border-box",
-
               display: "flex",
               flexDirection: "column",
               cursor: "pointer",
@@ -220,7 +212,7 @@ export default function PlannerControls(props: any) {
                 background: "rgba(255,255,255,0.05)",
               }}
             >
-              {/* Headspace (now visible on main planner) */}
+              {/* Headspace (visible on main planner) */}
               {headPct > 0 && (
                 <>
                   <div
@@ -247,47 +239,70 @@ export default function PlannerControls(props: any) {
                 </>
               )}
 
-              {/* Fill: MUST start exactly above bottom badge */}
+              {/* Fill: starts exactly above bottom badge */}
               <div
                 style={{
                   position: "absolute",
                   left: 0,
                   right: 0,
-                  bottom: badgeH, // critical: start above badge
+                  bottom: badgeH,
                   height: `${fillPct * 100}%`,
                   background: fluidFill,
-
-                  // Clean vertical walls; slight bottom rounding only
                   borderRadius: "0 0 8px 8px",
                 }}
               />
 
-              {/* Wave: flat-ish with slight wave */}
+              {/* TOP LEVEL: make the fluid surface clearly visible (like modal) */}
               {fillPct > 0 && (
-                <svg
-                  width="100%"
-                  height="14"
-                  viewBox="0 0 100 14"
-                  preserveAspectRatio="none"
-                  style={{
-                    position: "absolute",
-                    left: 0,
-                    right: 0,
-                    bottom: `calc(${badgeH}px + ${fillPct * 100}% - 7px)`,
-                    opacity: 0.9,
-                    pointerEvents: "none",
-                  }}
-                >
-                  <path
-                    d="M0,7 C10,4 20,10 30,7 C40,4 50,10 60,7 C70,4 80,10 90,7 C95,6 98,6 100,7"
-                    fill="none"
-                    stroke={fluidWave}
-                    strokeWidth="2"
+                <>
+                  {/* subtle surface highlight band */}
+                  <div
+                    style={{
+                      position: "absolute",
+                      left: 0,
+                      right: 0,
+                      height: 6,
+                      bottom: `calc(${badgeH}px + ${fillPct * 100}% - 3px)`,
+                      background: "linear-gradient(to bottom, rgba(0,0,0,0.22), rgba(0,0,0,0))",
+                      pointerEvents: "none",
+                    }}
                   />
-                </svg>
+                  {/* wave stroke with a dark under-stroke for contrast */}
+                  <svg
+                    width="100%"
+                    height="14"
+                    viewBox="0 0 100 14"
+                    preserveAspectRatio="none"
+                    style={{
+                      position: "absolute",
+                      left: 0,
+                      right: 0,
+                      bottom: `calc(${badgeH}px + ${fillPct * 100}% - 7px)`,
+                      opacity: 0.95,
+                      pointerEvents: "none",
+                    }}
+                  >
+                    {/* under-stroke (contrast) */}
+                    <path
+                      d="M0,7 C10,4 20,10 30,7 C40,4 50,10 60,7 C70,4 80,10 90,7 C95,6 98,6 100,7"
+                      fill="none"
+                      stroke="rgba(0,0,0,0.35)"
+                      strokeWidth="3"
+                      strokeLinecap="round"
+                    />
+                    {/* teal stroke */}
+                    <path
+                      d="M0,7 C10,4 20,10 30,7 C40,4 50,10 60,7 C70,4 80,10 90,7 C95,6 98,6 100,7"
+                      fill="none"
+                      stroke={fluidWave}
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                </>
               )}
 
-              {/* Bottom Badge: full width tab, opaque enough so fluid doesn't show through */}
+              {/* Bottom Badge: full width tab */}
               <div
                 style={{
                   position: "absolute",
