@@ -18,12 +18,14 @@ function ambientKey(state: string, city: string) {
   return `${normState(state)}|${normCity(city)}`;
 }
 
+// IMPORTANT: Client-side env vars must be NEXT_PUBLIC_*.
+// Support the common OpenWeather key names without changing any other logic.
 function getOpenWeatherKey(): string {
   const env = process.env as any;
   return (
-    (env.NEXT_PUBLIC_OPENWEATHER_KEY || "").trim() ||
-    (env.NEXT_PUBLIC_OPENWEATHER_API_KEY || "").trim() ||
-    (env.NEXT_PUBLIC_OPENWEATHER_APIKEY || "").trim() ||
+    String(env.NEXT_PUBLIC_OPENWEATHER_KEY ?? "").trim() ||
+    String(env.NEXT_PUBLIC_OPENWEATHER_API_KEY ?? "").trim() ||
+    String(env.NEXT_PUBLIC_OPENWEATHER_APIKEY ?? "").trim() ||
     ""
   );
 }
@@ -40,39 +42,35 @@ async function fetchAmbientTempF(args: {
   const qState = state.trim();
   if (!qCity || !qState || !apiKey) return null;
 
-  // Try city/state query first
   try {
-    const url = `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(qCity)},${encodeURIComponent(
-      qState
-    )},US&units=imperial&appid=${encodeURIComponent(apiKey)}`;
+    const url = `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(
+      qCity
+    )},${encodeURIComponent(qState)},US&units=imperial&appid=${encodeURIComponent(apiKey)}`;
     const res = await fetch(url, { signal, cache: "no-store" });
     if (res.ok) {
       const json: any = await res.json();
       const temp = Number(json?.main?.temp);
-
+      // Capture lat/lon from the current weather response
       if (json?.coord?.lat != null && json?.coord?.lon != null) {
         onLatLon?.(Number(json.coord.lat), Number(json.coord.lon));
       }
-
       if (Number.isFinite(temp)) return temp;
     }
   } catch {}
 
-  // Fallback: geocode -> weather by lat/lon
   try {
-    const geoUrl = `https://api.openweathermap.org/geo/1.0/direct?q=${encodeURIComponent(qCity)},${encodeURIComponent(
-      qState
-    )},US&limit=1&appid=${encodeURIComponent(apiKey)}`;
+    const geoUrl = `https://api.openweathermap.org/geo/1.0/direct?q=${encodeURIComponent(
+      qCity
+    )},${encodeURIComponent(qState)},US&limit=1&appid=${encodeURIComponent(apiKey)}`;
     const geoRes = await fetch(geoUrl, { signal, cache: "no-store" });
     if (!geoRes.ok) return null;
-
     const geoJson: any = await geoRes.json();
     const item = Array.isArray(geoJson) ? geoJson[0] : null;
-
     const lat = Number(item?.lat);
     const lon = Number(item?.lon);
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
 
+    // Capture lat/lon from geo lookup
     onLatLon?.(lat, lon);
 
     const wUrl = `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&units=imperial&appid=${encodeURIComponent(
@@ -80,7 +78,6 @@ async function fetchAmbientTempF(args: {
     )}`;
     const wRes = await fetch(wUrl, { signal, cache: "no-store" });
     if (!wRes.ok) return null;
-
     const wJson: any = await wRes.json();
     const temp2 = Number(wJson?.main?.temp);
     return Number.isFinite(temp2) ? temp2 : null;
@@ -162,7 +159,6 @@ export function useLocation(authUserId: string) {
   const effectiveLocKey = authUserId ? userLocKey : ANON_LOC_KEY;
 
   // ── Fetch states ──────────────────────────────────────────────────────────
-
   useEffect(() => {
     (async () => {
       setStatesError(null);
@@ -183,7 +179,6 @@ export function useLocation(authUserId: string) {
   }, []);
 
   // ── Fetch cities when state changes ──────────────────────────────────────
-
   useEffect(() => {
     (async () => {
       setCitiesError(null);
@@ -209,13 +204,13 @@ export function useLocation(authUserId: string) {
     })();
   }, [selectedState]);
 
+  // Track when cities have loaded for current state
   useEffect(() => {
     if (!selectedState || citiesLoading) return;
     citiesLoadedForStateRef.current = normState(selectedState);
   }, [selectedState, citiesLoading, citiesCatalog]);
 
   // ── Reset city/terminal on state change ───────────────────────────────────
-
   useEffect(() => {
     if (skipResetRef.current) return;
     setSelectedCity("");
@@ -228,7 +223,6 @@ export function useLocation(authUserId: string) {
   }, [selectedCity]);
 
   // ── Restore persisted location ────────────────────────────────────────────
-
   useEffect(() => {
     if (userTouchedRef.current) return;
     if (hydratedForKeyRef.current === effectiveLocKey) return;
@@ -268,7 +262,6 @@ export function useLocation(authUserId: string) {
   }, [selectedState, selectedCity, selectedTerminalId]);
 
   // ── Persist on change ─────────────────────────────────────────────────────
-
   useEffect(() => {
     if (hydratedForKeyRef.current !== effectiveLocKey) return;
     if (hydratingRef.current) return;
@@ -279,7 +272,6 @@ export function useLocation(authUserId: string) {
   }, [authUserId, effectiveLocKey, userLocKey, selectedState, selectedCity, selectedTerminalId]);
 
   // ── Ambient temp ──────────────────────────────────────────────────────────
-
   useEffect(() => {
     if (!selectedState || !selectedCity) {
       setAmbientTempF(null);
@@ -319,7 +311,6 @@ export function useLocation(authUserId: string) {
           onLatLon: (lat, lon) => {
             setLocationLat(lat);
             setLocationLon(lon);
-
             const existing = AMBIENT_CACHE.get(cacheKey);
             AMBIENT_CACHE.set(cacheKey, {
               ts: existing?.ts ?? 0,
@@ -355,10 +346,11 @@ export function useLocation(authUserId: string) {
   // ── Ambient temp heartbeat (every 7 minutes) ──────────────────────────────
   useEffect(() => {
     if (!selectedState || !selectedCity) return;
+
     const apiKey = getOpenWeatherKey();
     if (!apiKey) return;
 
-    const HEARTBEAT_MS = 7 * 60 * 1000;
+    const HEARTBEAT_MS = 7 * 60 * 1000; // 7 minutes
 
     const tick = () => {
       const cacheKey = ambientKey(selectedState, selectedCity);
@@ -371,7 +363,6 @@ export function useLocation(authUserId: string) {
   }, [selectedState, selectedCity]);
 
   // ── Derived ───────────────────────────────────────────────────────────────
-
   const selectedCityId = useMemo<string | null>(() => {
     if (!selectedState || !selectedCity) return null;
     const st = normState(selectedState);
