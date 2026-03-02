@@ -139,6 +139,7 @@ export default function PlannerControls(props: any) {
       const plannedPct = trueMax > 0 ? Math.max(0, Math.min(1, planned / trueMax)) : 0;
       const capPct = trueMax > 0 ? Math.max(0, Math.min(1, effMax / trueMax)) : 0;
 
+      // visual breathing room at the very top so level doesn't "kiss" border
       const visualTopGap = 0.06;
       const fillPct = Math.max(0, Math.min(1, Math.min(plannedPct, capPct) * (1 - visualTopGap)));
 
@@ -156,6 +157,15 @@ export default function PlannerControls(props: any) {
       // Badge is a full-width bottom tab.
       const badgeH = 74;
       const badgeBg = "rgba(0,0,0,0.78)";
+
+      // IMPORTANT:
+      // The fluid/headspace region is only the area ABOVE the badge.
+      // So all level math must be applied to (100% - badgeH) — same behavior as modal.
+      const vars: React.CSSProperties = {
+        // CSS variables for calc math
+        ["--fillPct" as any]: String(fillPct),
+        ["--headPct" as any]: String(headPct),
+      };
 
       return (
         <div
@@ -202,9 +212,10 @@ export default function PlannerControls(props: any) {
               {c?.comp_number ?? c?.compNumber ?? compNumber}
             </div>
 
-            {/* Fluid area (no inner capsule). Badge is OVERLAID at bottom; fluid bottoms out at badge top. */}
+            {/* Fluid area (no inner capsule). Badge is OVERLAID at bottom; levels computed ABOVE badge. */}
             <div
               style={{
+                ...vars,
                 flex: "1 1 auto",
                 minHeight: 0,
                 position: "relative",
@@ -212,7 +223,7 @@ export default function PlannerControls(props: any) {
                 background: "rgba(255,255,255,0.05)",
               }}
             >
-              {/* Headspace (visible on main planner) */}
+              {/* Headspace (applies only to area above badge) */}
               {headPct > 0 && (
                 <>
                   <div
@@ -221,7 +232,7 @@ export default function PlannerControls(props: any) {
                       left: 0,
                       right: 0,
                       top: 0,
-                      height: `${Math.max(0, Math.min(1, headPct)) * 100}%`,
+                      height: `calc((100% - ${badgeH}px) * var(--headPct))`,
                       background: headTint,
                       pointerEvents: "none",
                     }}
@@ -231,7 +242,7 @@ export default function PlannerControls(props: any) {
                       position: "absolute",
                       left: 0,
                       right: 0,
-                      top: `${Math.max(0, Math.min(1, headPct)) * 100}%`,
+                      top: `calc((100% - ${badgeH}px) * var(--headPct))`,
                       borderTop: `1px dashed ${headLine}`,
                       pointerEvents: "none",
                     }}
@@ -239,35 +250,33 @@ export default function PlannerControls(props: any) {
                 </>
               )}
 
-              {/* Fill: starts exactly above bottom badge */}
+              {/* Fill: height computed against area above badge, bottom anchored to badge top */}
               <div
                 style={{
                   position: "absolute",
                   left: 0,
                   right: 0,
                   bottom: badgeH,
-                  height: `${fillPct * 100}%`,
+                  height: `calc((100% - ${badgeH}px) * var(--fillPct))`,
                   background: fluidFill,
                   borderRadius: "0 0 8px 8px",
                 }}
               />
 
-              {/* TOP LEVEL: make the fluid surface clearly visible (like modal) */}
+              {/* Surface highlight + wave positioned at true fluid top (like modal) */}
               {fillPct > 0 && (
                 <>
-                  {/* subtle surface highlight band */}
                   <div
                     style={{
                       position: "absolute",
                       left: 0,
                       right: 0,
                       height: 6,
-                      bottom: `calc(${badgeH}px + ${fillPct * 100}% - 3px)`,
+                      bottom: `calc(${badgeH}px + (100% - ${badgeH}px) * var(--fillPct) - 3px)`,
                       background: "linear-gradient(to bottom, rgba(0,0,0,0.22), rgba(0,0,0,0))",
                       pointerEvents: "none",
                     }}
                   />
-                  {/* wave stroke with a dark under-stroke for contrast */}
                   <svg
                     width="100%"
                     height="14"
@@ -277,7 +286,7 @@ export default function PlannerControls(props: any) {
                       position: "absolute",
                       left: 0,
                       right: 0,
-                      bottom: `calc(${badgeH}px + ${fillPct * 100}% - 7px)`,
+                      bottom: `calc(${badgeH}px + (100% - ${badgeH}px) * var(--fillPct) - 7px)`,
                       opacity: 0.95,
                       pointerEvents: "none",
                     }}
