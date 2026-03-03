@@ -1346,6 +1346,31 @@ function TerminalGroup({ cityState, terminals, onEdit }: {
 }
 
 // ─────────────────────────────────────────────────────────────
+// US state → default IANA timezone
+// ─────────────────────────────────────────────────────────────
+const STATE_TIMEZONES: Record<string, string> = {
+  AL:"America/Chicago",AK:"America/Anchorage",AZ:"America/Phoenix",AR:"America/Chicago",
+  CA:"America/Los_Angeles",CO:"America/Denver",CT:"America/New_York",DE:"America/New_York",
+  FL:"America/New_York",GA:"America/New_York",HI:"Pacific/Honolulu",ID:"America/Denver",
+  IL:"America/Chicago",IN:"America/Indiana/Indianapolis",IA:"America/Chicago",KS:"America/Chicago",
+  KY:"America/New_York",LA:"America/Chicago",ME:"America/New_York",MD:"America/New_York",
+  MA:"America/New_York",MI:"America/Detroit",MN:"America/Chicago",MS:"America/Chicago",
+  MO:"America/Chicago",MT:"America/Denver",NE:"America/Chicago",NV:"America/Los_Angeles",
+  NH:"America/New_York",NJ:"America/New_York",NM:"America/Denver",NY:"America/New_York",
+  NC:"America/New_York",ND:"America/Chicago",OH:"America/New_York",OK:"America/Chicago",
+  OR:"America/Los_Angeles",PA:"America/New_York",RI:"America/New_York",SC:"America/New_York",
+  SD:"America/Chicago",TN:"America/Chicago",TX:"America/Chicago",UT:"America/Denver",
+  VT:"America/New_York",VA:"America/New_York",WA:"America/Los_Angeles",WV:"America/New_York",
+  WI:"America/Chicago",WY:"America/Denver",DC:"America/New_York",
+};
+
+const US_STATES = [
+  "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA",
+  "ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK",
+  "OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY","DC",
+];
+
+// ─────────────────────────────────────────────────────────────
 // TerminalModal — add/edit terminal with product assignment
 // ─────────────────────────────────────────────────────────────
 
@@ -1359,8 +1384,40 @@ function TerminalModal({ terminal, companyId, allProducts, onClose, onDone }: {
   const [city,        setCity]        = useState(terminal?.city ?? "");
   const [state,       setState]       = useState(terminal?.state ?? "");
   const [timezone,    setTimezone]    = useState(terminal?.timezone ?? "");
-  const [renewalDays, setRenewalDays] = useState(String(terminal?.renewal_days ?? ""));
+  const [renewalDays, setRenewalDays] = useState(String(terminal?.renewal_days ?? "90"));
   const [active,      setActive]      = useState(terminal?.active ?? true);
+
+  // City list for selected state, loaded from Supabase cities table
+  const [citiesForState, setCitiesForState] = useState<{ city_id: string; city_name: string }[]>([]);
+  const [cityId, setCityId] = useState<string | null>(terminal?.city_id ?? null);
+
+  // Load cities when state changes
+  useEffect(() => {
+    if (!state) { setCitiesForState([]); return; }
+    supabase.from("cities")
+      .select("city_id, city_name")
+      .eq("state_code", state)
+      .eq("active", true)
+      .order("city_name")
+      .then(({ data }) => setCitiesForState(data ?? []));
+  }, [state]);
+
+  // Auto-set timezone when state changes (only if user hasn't manually overridden)
+  const handleStateChange = (newState: string) => {
+    setState(newState);
+    const tz = STATE_TIMEZONES[newState];
+    if (tz) setTimezone(tz);
+    // Reset city when state changes
+    setCity("");
+    setCityId(null);
+  };
+
+  // When city selection changes, find the city_id
+  const handleCityChange = (newCity: string) => {
+    setCity(newCity);
+    const found = citiesForState.find(c => c.city_name === newCity);
+    setCityId(found?.city_id ?? null);
+  };
 
   // Products assigned — just an ordered list of product_ids (duplicates allowed)
   const [assigned, setAssigned] = useState<string[]>(
@@ -1388,23 +1445,27 @@ function TerminalModal({ terminal, companyId, allProducts, onClose, onDone }: {
 
   async function save() {
     if (!name.trim()) { setErr("Terminal name is required."); return; }
+    if (!cityId && city.trim()) {
+      // city typed manually but not in list — still allow, city_id will be null
+    }
     setSaving(true); setErr(null);
     try {
       let tid = terminal?.terminal_id;
+      const payload = {
+        terminal_name: name.trim(),
+        city: city.trim() || null,
+        state: state.trim() || null,
+        city_id: cityId ?? null,
+        timezone: timezone.trim() || null,
+        renewal_days: renewalDays ? parseInt(renewalDays) : null,
+        active,
+      };
       if (isNew) {
-        const { data: newT, error: tErr } = await supabase.from("terminals").insert({
-          terminal_name: name.trim(), city: city.trim() || null, state: state.trim() || null,
-          timezone: timezone.trim() || null,
-          renewal_days: renewalDays ? parseInt(renewalDays) : null, active,
-        }).select("terminal_id").single();
+        const { data: newT, error: tErr } = await supabase.from("terminals").insert(payload).select("terminal_id").single();
         if (tErr) throw tErr;
         tid = newT.terminal_id;
       } else {
-        const { error: tErr } = await supabase.from("terminals").update({
-          terminal_name: name.trim(), city: city.trim() || null, state: state.trim() || null,
-          timezone: timezone.trim() || null,
-          renewal_days: renewalDays ? parseInt(renewalDays) : null, active,
-        }).eq("terminal_id", tid!);
+        const { error: tErr } = await supabase.from("terminals").update(payload).eq("terminal_id", tid!);
         if (tErr) throw tErr;
       }
 
@@ -1430,6 +1491,14 @@ function TerminalModal({ terminal, companyId, allProducts, onClose, onDone }: {
     onDone();
   }
 
+  const sel = (val: string, onChange: (v: string) => void, opts: string[], ph = "") => (
+    <select value={val} onChange={e => onChange(e.target.value)}
+      style={{ ...css.input, ...sm }}>
+      <option value="">{ph}</option>
+      {opts.map(o => <option key={o} value={o}>{o}</option>)}
+    </select>
+  );
+
   const ti = (val: string, set: (v: string) => void, ph = "", type = "text") => (
     <input type={type} value={val} onChange={e => set(e.target.value)} placeholder={ph}
       style={{ ...css.input, ...sm }} />
@@ -1445,10 +1514,24 @@ function TerminalModal({ terminal, companyId, allProducts, onClose, onDone }: {
           <label style={{ ...css.label, fontSize: 10 }}>Terminal Name</label>
           {ti(name, setName, "e.g. Port Tampa Bay Terminal")}
         </div>
-        <div><label style={{ ...css.label, fontSize: 10 }}>City</label>{ti(city, setCity, "Tampa")}</div>
-        <div><label style={{ ...css.label, fontSize: 10 }}>State</label>{ti(state, setState, "FL")}</div>
-        <div><label style={{ ...css.label, fontSize: 10 }}>Timezone</label>{ti(timezone, setTimezone, "America/New_York")}</div>
-        <div><label style={{ ...css.label, fontSize: 10 }}>Renewal Days</label>{ti(renewalDays, setRenewalDays, "90", "number")}</div>
+        <div style={{ gridColumn: "1 / 3" }}>
+          <label style={{ ...css.label, fontSize: 10 }}>State</label>
+          {sel(state, handleStateChange, US_STATES, "Select state…")}
+        </div>
+        <div>
+          <label style={{ ...css.label, fontSize: 10 }}>Renewal Days</label>
+          {ti(renewalDays, setRenewalDays, "90", "number")}
+        </div>
+        <div style={{ gridColumn: "1 / -1" }}>
+          <label style={{ ...css.label, fontSize: 10 }}>City</label>
+          {citiesForState.length > 0
+            ? sel(city, handleCityChange, citiesForState.map(c => c.city_name), "Select city…")
+            : ti(city, (v) => { setCity(v); setCityId(null); }, "City name")}
+        </div>
+        <div style={{ gridColumn: "1 / -1" }}>
+          <label style={{ ...css.label, fontSize: 10 }}>Timezone (auto-set from state)</label>
+          {ti(timezone, setTimezone, "America/New_York")}
+        </div>
       </div>
       <div style={{ fontSize: 11, color: T.muted, marginBottom: 10, lineHeight: 1.5 }}>
         <strong style={{ color: T.text }}>Active</strong> = terminal appears in the planner.
@@ -1458,9 +1541,10 @@ function TerminalModal({ terminal, companyId, allProducts, onClose, onDone }: {
       <hr style={css.divider} />
 
       {/* ── Products ── */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
         <SubSectionTitle>Products at This Terminal</SubSectionTitle>
-        <button type="button" style={{ ...css.btn("subtle"), fontSize: 11, padding: "2px 10px" }}
+        <button type="button"
+          style={{ ...css.btn("subtle"), fontSize: 12, padding: "8px 16px", minHeight: 36 }}
           onClick={() => { setCatalogOpen(v => !v); setCatalogSearch(""); }}>
           {catalogOpen ? "Close Catalog" : "+ Add from Catalog"}
         </button>

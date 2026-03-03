@@ -780,14 +780,48 @@ export default function CalculatorPage() {
         {planSlots.PLAN_SLOTS.map((n) => {
           const has = !!planSlots.slotHas[n];
           const disabled = !location.selectedTerminalId;
+
+          // Long-press to save, tap to load (mobile-friendly)
+          let pressTimer: ReturnType<typeof setTimeout> | null = null;
+          let didLongPress = false;
+
+          const onPressStart = () => {
+            if (disabled) return;
+            didLongPress = false;
+            pressTimer = setTimeout(() => {
+              didLongPress = true;
+              planSlots.saveToSlot(n);
+            }, 600);
+          };
+          const onPressEnd = () => {
+            if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+          };
+          const onTap = () => {
+            if (disabled || didLongPress) return;
+            if (has) planSlots.loadFromSlot(n);
+            else planSlots.saveToSlot(n);
+          };
+
           return (
             <button key={n} type="button" disabled={disabled}
-              onClick={(e) => { if (e.shiftKey || !has) planSlots.saveToSlot(n); else planSlots.loadFromSlot(n); }}
-              style={{ borderRadius: 12, padding: "8px 14px", border: "1px solid rgba(255,255,255,0.12)", background: has ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.03)", color: "white", cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.5 : 1, minWidth: 44, fontSize: 15, fontWeight: 700 }}
-              title={!location.selectedTerminalId ? "Select a terminal first" : has ? "Tap to load. Shift+Tap to overwrite." : "Tap to save current plan"}
+              onPointerDown={onPressStart}
+              onPointerUp={onPressEnd}
+              onPointerLeave={onPressEnd}
+              onClick={onTap}
+              style={{
+                borderRadius: 12, padding: "10px 16px",
+                border: has ? "1px solid rgba(255,255,255,0.22)" : "1px solid rgba(255,255,255,0.10)",
+                background: has ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.03)",
+                color: "white", cursor: disabled ? "not-allowed" : "pointer",
+                opacity: disabled ? 0.5 : 1, minWidth: 48, fontSize: 16, fontWeight: 700,
+              }}
+              title={!location.selectedTerminalId ? "Select a terminal first" : has ? "Tap to load · Hold to save" : "Tap to save current plan"}
             >{n}</button>
           );
         })}
+      </div>
+      <div style={{ marginTop: 5, fontSize: 11, color: "rgba(255,255,255,0.3)", letterSpacing: 0.2 }}>
+        TAP to load · HOLD to save
       </div>
     </div>
   );
