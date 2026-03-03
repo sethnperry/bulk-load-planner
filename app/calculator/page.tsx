@@ -46,6 +46,7 @@ import LoadingModal from "./modals/LoadingModal";
 import MyLoadsModal from "./modals/MyLoadsModal";
 import ProductTempModal from "./modals/ProductTempModal";
 import TempDialModal from "./modals/TempDialModal";
+import CompartmentModal from "./modals/CompartmentModal";
 
 // ── UI ─────────────────────────────────────────────────────────────────────────
 import { styles } from "./ui/styles";
@@ -850,11 +851,22 @@ export default function CalculatorPage() {
         terminalProducts={terminalProducts}
         setCompModalComp={setCompModalComp}
         setCompModalOpen={setCompModalOpen}
-        setCompPlan={setCompPlan}
-        setCompHeadspacePct={setCompHeadspacePct}
-        compModalOpen={compModalOpen}
-        compModalComp={compModalComp}
         snapshotSlots={SnapshotSlots}
+      />
+
+      <CompartmentModal
+        open={compModalOpen}
+        compNumber={compModalComp}
+        compartments={compartments}
+        headspacePctForComp={headspacePctForComp}
+        effectiveMaxGallonsForComp={effectiveMaxGallonsForComp}
+        compPlan={compPlan}
+        plannedGallonsByComp={plannedGallonsByComp}
+        terminalProducts={terminalProducts}
+        styles={styles}
+        setCompHeadspacePct={setCompHeadspacePct}
+        setCompPlan={setCompPlan}
+        onClose={() => { setCompModalOpen(false); setCompModalComp(null); }}
       />
 
       {location.selectedTerminalId && (
