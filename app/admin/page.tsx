@@ -665,10 +665,25 @@ function TruckModal({ truck, companyId, onClose, onDone }: {
   }
 
   async function deleteTruck() {
-    if (!confirm("Delete this truck?")) return; setSaving(true);
-    await supabase.from("truck_other_permits").delete().eq("truck_id", truck!.truck_id);
-    await supabase.from("trucks").delete().eq("truck_id", truck!.truck_id);
-    onDone();
+    if (!confirm("Permanently delete this truck? This cannot be undone.")) return;
+    setSaving(true); setErr(null);
+    try {
+      const tid = truck!.truck_id;
+      // Delete child records first
+      const { error: opErr } = await supabase.from("truck_other_permits").delete().eq("truck_id", tid);
+      if (opErr) throw opErr;
+      // Delete combos referencing this truck
+      const { error: cErr } = await supabase.from("equipment_combos").delete().eq("truck_id", tid);
+      if (cErr) throw cErr;
+      // Delete the truck — include company_id so RLS policy is satisfied
+      const { error: tErr } = await supabase.from("trucks").delete()
+        .eq("truck_id", tid).eq("company_id", companyId);
+      if (tErr) throw tErr;
+      onDone();
+    } catch (e: any) {
+      setErr(e?.message ?? "Delete failed.");
+      setSaving(false);
+    }
   }
 
   function addOtherPermit()    { setOtherPermits(p => [...p, { label: "", expiration_date: "" }]); }
@@ -922,10 +937,25 @@ function TrailerModal({ trailer, companyId, onClose, onDone }: {
   }
 
   async function deleteTrailer() {
-    if (!confirm("Delete this trailer?")) return; setSaving(true);
-    await supabase.from("trailer_compartments").delete().eq("trailer_id", trailer!.trailer_id);
-    await supabase.from("trailers").delete().eq("trailer_id", trailer!.trailer_id);
-    onDone();
+    if (!confirm("Permanently delete this trailer? This cannot be undone.")) return;
+    setSaving(true); setErr(null);
+    try {
+      const tid = trailer!.trailer_id;
+      // Delete child records first
+      const { error: compErr } = await supabase.from("trailer_compartments").delete().eq("trailer_id", tid);
+      if (compErr) throw compErr;
+      // Delete combos referencing this trailer
+      const { error: cErr } = await supabase.from("equipment_combos").delete().eq("trailer_id", tid);
+      if (cErr) throw cErr;
+      // Delete the trailer — include company_id so RLS policy is satisfied
+      const { error: tErr } = await supabase.from("trailers").delete()
+        .eq("trailer_id", tid).eq("company_id", companyId);
+      if (tErr) throw tErr;
+      onDone();
+    } catch (e: any) {
+      setErr(e?.message ?? "Delete failed.");
+      setSaving(false);
+    }
   }
 
   const ti = (val: string, set: (v: string) => void, ph = "", type = "text") => (
