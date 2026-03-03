@@ -131,10 +131,9 @@ export default function CompartmentModal({
               }}
               style={{
                 flex: 1,
-                writingMode: "vertical-lr",
-                direction: "rtl",
+                writingMode: "vertical-lr" as const,
+                direction: "rtl" as const,
                 WebkitAppearance: "slider-vertical",
-                appearance: "slider-vertical",
                 width: 36,
                 accentColor: "#fbbf24",
                 cursor: "pointer",
