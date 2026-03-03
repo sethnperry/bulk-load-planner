@@ -991,8 +991,8 @@ export default function CalculatorPage() {
 
         return (
           // Grid wrapper: position:relative so diamond can be positioned against it
-          <div style={{ marginTop: 14, position: "relative", width: "100%", boxSizing: "border-box" }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, alignItems: "stretch", width: "100%" }}>
+          <div style={{ marginTop: 14, position: "relative", width: "100%", boxSizing: "border-box", overflow: "hidden" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 10, alignItems: "stretch", width: "100%" }}>
               {/* LOAD button — My Loads strip at top, primary tap starts load */}
               <div style={{ ...cardBase, padding: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
                 {/* My Loads strip — top of card */}
@@ -1031,26 +1031,26 @@ export default function CalculatorPage() {
               </div>
 
               {/* Placard card — ref used by PlacardDiamond portal for positioning */}
-              <div ref={placardAnchorRef} onClick={() => setErgModalOpen(true)} style={{ cursor: "pointer", ...cardBase, flexDirection: "row", alignItems: "center", paddingLeft: "clamp(76px, 24vw, 130px)", paddingRight: 18, gap: 0 }}>
+              <div ref={placardAnchorRef} onClick={() => setErgModalOpen(true)} style={{ cursor: "pointer", ...cardBase, flexDirection: "row", alignItems: "center", paddingLeft: "clamp(68px, 21vw, 118px)", paddingRight: 12, gap: 0, overflow: "hidden" }}>
                 {placardDef ? (() => {
                   const erg = ERG_DATA[placardDef.unNumber.toUpperCase()] ?? null;
                   return (
-                  <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", gap: 3, minWidth: 0 }}>
-                    <div style={{ color: placardIsResidue ? "#ffb400" : "rgba(255,255,255,0.92)", fontWeight: 1000, fontSize: "clamp(14px, 4vw, 26px)", lineHeight: 1.1, letterSpacing: placardIsResidue ? 1.5 : 1, whiteSpace: "nowrap" as const }}>
+                  <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", gap: 2, minWidth: 0, flex: 1, textAlign: "right" as const }}>
+                    <div style={{ color: placardIsResidue ? "#ffb400" : "rgba(255,255,255,0.92)", fontWeight: 1000, fontSize: "clamp(11px, 3vw, 20px)", lineHeight: 1.1, letterSpacing: placardIsResidue ? 1 : 0.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
                       {placardIsResidue ? "RESIDUE" : placardDef.unNumber}
                     </div>
                     {erg && (
-                      <div style={{ color: "rgba(255,255,255,0.55)", fontSize: "clamp(9px, 2.2vw, 11px)", fontWeight: 600, lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
+                      <div style={{ color: "rgba(255,255,255,0.55)", fontSize: "clamp(7px, 1.7vw, 9px)", fontWeight: 600, lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
                         {erg.shipping}
                       </div>
                     )}
-                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" as const, rowGap: 2 }}>
-                      {erg && <div style={{ color: "rgba(255,255,255,0.3)", fontSize: "clamp(8px, 2vw, 10px)", fontWeight: 700, whiteSpace: "nowrap" as const }}>ERG #{erg.guide}</div>}
+                    <div style={{ display: "flex", alignItems: "center", gap: 4, justifyContent: "flex-end" as const, flexWrap: "nowrap" as const }}>
+                      {erg && <div style={{ color: "rgba(255,255,255,0.3)", fontSize: "clamp(7px, 1.5vw, 9px)", fontWeight: 700, whiteSpace: "nowrap" as const }}>ERG #{erg.guide}</div>}
                       <a
                         href="https://www.ecfr.gov/current/title-49/subtitle-B/chapter-I/subchapter-C/part-172/section-172.504"
                         target="_blank" rel="noopener noreferrer"
                         onClick={e => e.stopPropagation()}
-                        style={{ color: "rgba(255,255,255,0.3)", fontSize: "clamp(8px, 2vw, 10px)", fontWeight: 700, letterSpacing: 0.3, textDecoration: "none", whiteSpace: "nowrap" as const }}
+                        style={{ color: "rgba(255,255,255,0.3)", fontSize: "clamp(7px, 1.5vw, 9px)", fontWeight: 700, letterSpacing: 0.3, textDecoration: "none", whiteSpace: "nowrap" as const }}
                         onMouseEnter={(e) => (e.currentTarget.style.color = "rgba(255,255,255,0.6)")}
                         onMouseLeave={(e) => (e.currentTarget.style.color = "rgba(255,255,255,0.3)")}
                       >
@@ -1060,7 +1060,7 @@ export default function CalculatorPage() {
                   </div>
                   );
                 })() : (
-                  <div style={{ color: "rgba(255,255,255,0.20)", fontWeight: 700, fontSize: 13, letterSpacing: 0.4 }}>
+                  <div style={{ color: "rgba(255,255,255,0.20)", fontWeight: 700, fontSize: 12, letterSpacing: 0.4, flex: 1, textAlign: "right" as const }}>
                     {location.selectedTerminalId ? "No placard required" : "Placard"}
                   </div>
                 )}

@@ -147,45 +147,43 @@ export default function CompartmentModal({
             flex: 1,
             display: "flex",
             flexDirection: "column",
-            gap: 8,
+            gap: 7,
             paddingTop: 4,
             minWidth: 0,
           }}>
             <div style={{ fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.7)" }}>Headspace</div>
-            <div style={{ fontSize: 11, opacity: 0.5, marginBottom: 2 }}>Cap (gallons)</div>
-            <div style={{ display: "flex", gap: 6 }}>
-              <input
-                type="number"
-                inputMode="numeric"
-                value={capInputVal !== null ? capInputVal : Math.round(effMax)}
-                onFocus={(e) => {
-                  setCapInputVal(Math.round(effMax));
-                  setTimeout(() => (e.target as HTMLInputElement).select(), 0);
-                }}
-                onChange={(e) => {
-                  const raw = e.target.value;
-                  const v = Number(raw);
-                  setCapInputVal(raw === "" ? 0 : v);
-                  if (!Number.isFinite(v) || trueMax <= 0 || raw === "") return;
-                  const capped = Math.max(0, Math.min(trueMax, v));
-                  const pct = Math.max(0, Math.min(0.95, 1 - capped / trueMax));
-                  setCompHeadspacePct((prev: any) => ({ ...prev, [compNumber]: pct }));
-                }}
-                onBlur={() => setCapInputVal(null)}
-                style={{ ...styles.input, flex: 1, minWidth: 0 }}
-              />
-              <button
-                style={{ ...styles.smallBtn, flexShrink: 0 }}
-                onClick={() => {
-                  setCapInputVal(null);
-                  setCompHeadspacePct((prev: any) => ({ ...prev, [compNumber]: 0 }));
-                }}
-              >
-                Max
-              </button>
-            </div>
-            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.28)", lineHeight: 1.4, marginTop: 4 }}>
-              Set headspace to load safely below the top probe.{"\n"}0% fills to compartment max.
+            <div style={{ fontSize: 11, opacity: 0.5 }}>Cap (gal)</div>
+            <input
+              type="number"
+              inputMode="numeric"
+              value={capInputVal !== null ? capInputVal : Math.round(effMax)}
+              onFocus={(e) => {
+                setCapInputVal(Math.round(effMax));
+                setTimeout(() => (e.target as HTMLInputElement).select(), 0);
+              }}
+              onChange={(e) => {
+                const raw = e.target.value;
+                const v = Number(raw);
+                setCapInputVal(raw === "" ? 0 : v);
+                if (!Number.isFinite(v) || trueMax <= 0 || raw === "") return;
+                const capped = Math.max(0, Math.min(trueMax, v));
+                const pct = Math.max(0, Math.min(0.95, 1 - capped / trueMax));
+                setCompHeadspacePct((prev: any) => ({ ...prev, [compNumber]: pct }));
+              }}
+              onBlur={() => setCapInputVal(null)}
+              style={{ ...styles.input, width: "7ch", boxSizing: "border-box" as const, flexShrink: 0 }}
+            />
+            <button
+              style={{ ...styles.smallBtn, width: "7ch", textAlign: "center" as const, flexShrink: 0 }}
+              onClick={() => {
+                setCapInputVal(null);
+                setCompHeadspacePct((prev: any) => ({ ...prev, [compNumber]: 0 }));
+              }}
+            >
+              Max
+            </button>
+            <div style={{ fontSize: 10, color: "rgba(255,255,255,0.25)", lineHeight: 1.4, marginTop: 2 }}>
+              0% = fill to max
             </div>
           </div>
         </div>
@@ -202,22 +200,23 @@ export default function CompartmentModal({
                 border: "1px solid rgba(255,255,255,0.14)",
                 background: isEmpty ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.05)",
                 color: "white", cursor: "pointer",
+                width: "100%", boxSizing: "border-box" as const, overflow: "hidden",
               }}
               onClick={() => {
                 setCompPlan((prev: any) => ({ ...prev, [compNumber]: { empty: true, productId: "" } }));
                 onClose();
               }}
             >
-              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
                 <div style={{
                   width: 52, height: 42, borderRadius: 11, flexShrink: 0,
                   border: "1px solid rgba(180,220,255,0.9)", background: "rgba(0,0,0,0.35)",
                   display: "flex", alignItems: "center", justifyContent: "center",
                   fontWeight: 900, fontSize: 14, letterSpacing: 0.5, color: "rgba(180,220,255,0.9)",
                 }}>MT</div>
-                <div>
-                  <div style={{ fontWeight: 800 }}>MT (Empty)</div>
-                  <div style={{ opacity: 0.6, fontSize: 13 }}>Leave this compartment empty</div>
+                <div style={{ minWidth: 0, overflow: "hidden" }}>
+                  <div style={{ fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>MT (Empty)</div>
+                  <div style={{ opacity: 0.6, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Leave this compartment empty</div>
                 </div>
               </div>
             </button>
@@ -236,6 +235,7 @@ export default function CompartmentModal({
                     border: "1px solid rgba(255,255,255,0.14)",
                     background: selected ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.05)",
                     color: "white", cursor: "pointer",
+                    width: "100%", boxSizing: "border-box" as const, overflow: "hidden",
                   }}
                   onClick={() => {
                     setCompPlan((prev: any) => ({ ...prev, [compNumber]: { empty: false, productId: p.product_id } }));
@@ -243,7 +243,7 @@ export default function CompartmentModal({
                   }}
                   title={name}
                 >
-                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
                     <div style={{
                       width: 52, height: 42, borderRadius: 11, flexShrink: 0,
                       backgroundColor: "transparent", border: `2px solid ${btnColor}`,
@@ -252,9 +252,9 @@ export default function CompartmentModal({
                     }}>
                       {btnCode}
                     </div>
-                    <div style={{ minWidth: 0 }}>
+                    <div style={{ minWidth: 0, flex: 1, overflow: "hidden" }}>
                       <div style={{ fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</div>
-                      <div style={{ opacity: 0.6, fontSize: 13, lineHeight: 1.3 }}>{sub || "\u00A0"}</div>
+                      <div style={{ opacity: 0.6, fontSize: 13, lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sub || "\u00A0"}</div>
                     </div>
                   </div>
                 </button>
