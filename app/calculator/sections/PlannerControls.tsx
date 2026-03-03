@@ -34,15 +34,34 @@ function CompModalBody({
   const fillPct = Math.max(0, Math.min(1, Math.min(plannedPct, capPct) * (1 - visualTopGap)));
 
   return (
-    <div style={{ display: "grid", gap: 16 }}>
-      <div style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
-        {/* Tank visual */}
-        <div style={{ flex: "0 0 auto", width: "min(140px, 38vw)", borderRadius: 16, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.14)", padding: 10 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, opacity: 0.7 }}>Max</div>
-            <div style={{ fontSize: 12, fontWeight: 800 }}>{Math.round(trueMax)} gal</div>
+    <div style={{ display: "grid", gap: 14 }}>
+
+      {/* Row 1: full-width headspace slider */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.6)", whiteSpace: "nowrap" }}>Headspace</div>
+        <input type="range" min={0} max={30} step={1}
+          value={Math.round(headPct * 100)}
+          onChange={(e) => {
+            const pct = Number(e.target.value) / 100;
+            setCompHeadspacePct((prev: any) => ({ ...prev, [compNumber]: pct }));
+          }}
+          style={{ flex: 1, height: 36, accentColor: "#fbbf24", cursor: "pointer" }}
+        />
+        <div style={{ ...styles.badge, minWidth: 38, textAlign: "center", flexShrink: 0, color: headPct > 0 ? "#fbbf24" : undefined }}>
+          {Math.round(headPct * 100)}%
+        </div>
+      </div>
+
+      {/* Row 2: tank visual + right-side controls */}
+      <div style={{ display: "flex", gap: 12, alignItems: "stretch" }}>
+
+        {/* Tank visual — fixed narrow width */}
+        <div style={{ flex: "0 0 auto", width: "min(110px, 28vw)", borderRadius: 14, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.14)", padding: 8 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, opacity: 0.6 }}>Max</div>
+            <div style={{ fontSize: 11, fontWeight: 800 }}>{Math.round(trueMax)}</div>
           </div>
-          <div style={{ height: "min(200px, 46vw)", borderRadius: 12, background: "rgba(255,255,255,0.08)", position: "relative", overflow: "hidden" }}>
+          <div style={{ height: "min(160px, 38vw)", borderRadius: 10, background: "rgba(255,255,255,0.08)", position: "relative", overflow: "hidden" }}>
             {headPct > 0 && (
               <div style={{ position: "absolute", left: 0, right: 0, top: 0, height: `${Math.max(0, Math.min(1, headPct)) * 100}%`, background: "rgba(255,160,0,0.18)", borderBottom: "1px dashed rgba(255,160,0,0.4)" }} />
             )}
@@ -52,36 +71,22 @@ function CompModalBody({
                 <path d="M0,8 C10,2 20,14 30,8 C40,2 50,14 60,8 C70,2 80,14 90,8 C95,6 98,6 100,8" fill="none" stroke="rgba(120,210,220,0.95)" strokeWidth="2" />
               </svg>
             )}
-            {headPct > 0.04 && (
+            {headPct > 0.06 && (
               <div style={{ position: "absolute", top: "50%", left: 0, right: 0, transform: `translateY(calc(-50% + ${(headPct * -0.5) * 100}%))`, textAlign: "center", fontSize: 10, fontWeight: 800, color: "rgba(255,160,0,0.85)", pointerEvents: "none" }}>
                 {Math.round(headPct * 100)}%
               </div>
             )}
           </div>
-          <div style={{ marginTop: 8, display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-            <div style={{ fontSize: 10, opacity: 0.6 }}>Capped</div>
-            <div style={{ fontSize: 12, fontWeight: 800, color: headPct > 0 ? "#fbbf24" : "rgba(255,255,255,0.85)" }}>{Math.round(effMax)} gal</div>
+          <div style={{ marginTop: 6, display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+            <div style={{ fontSize: 9, opacity: 0.6 }}>Cap</div>
+            <div style={{ fontSize: 11, fontWeight: 800, color: headPct > 0 ? "#fbbf24" : "rgba(255,255,255,0.85)" }}>{Math.round(effMax)}</div>
           </div>
         </div>
 
-        {/* Headspace controls */}
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 12, paddingTop: 4 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: "rgba(255,255,255,0.75)" }}>Headspace</div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <input type="range" min={0} max={30} step={1}
-              value={Math.round(headPct * 100)}
-              onChange={(e) => {
-                const pct = Number(e.target.value) / 100;
-                setCompHeadspacePct((prev: any) => ({ ...prev, [compNumber]: pct }));
-              }}
-              style={{ flex: 1, height: 36, accentColor: "#fbbf24", cursor: "pointer" }}
-            />
-            <div style={{ ...styles.badge, minWidth: 38, textAlign: "center", color: headPct > 0 ? "#fbbf24" : undefined }}>
-              {Math.round(headPct * 100)}%
-            </div>
-          </div>
+        {/* Right side: cap input + max button + hint — fills remaining width */}
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 8, justifyContent: "space-between" }}>
           <div>
-            <div style={{ fontSize: 11, opacity: 0.55, marginBottom: 4 }}>Set cap (gallons)</div>
+            <div style={{ fontSize: 11, opacity: 0.55, marginBottom: 6 }}>Set cap (gallons)</div>
             <div style={{ display: "flex", gap: 8 }}>
               <input
                 type="number"
@@ -101,7 +106,7 @@ function CompModalBody({
                   setCompHeadspacePct((prev: any) => ({ ...prev, [compNumber]: pct }));
                 }}
                 onBlur={() => setCapInputVal(null)}
-                style={{ ...styles.input, flex: 1 }}
+                style={{ ...styles.input, flex: 1, minWidth: 0 }}
               />
               <button style={{ ...styles.smallBtn, flexShrink: 0 }}
                 onClick={() => { setCapInputVal(null); setCompHeadspacePct((prev: any) => ({ ...prev, [compNumber]: 0 })); }}>
@@ -109,8 +114,8 @@ function CompModalBody({
               </button>
             </div>
           </div>
-          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", lineHeight: 1.4 }}>
-            Set headspace to load safely below the top probe. 0% = fill to compartment max.
+          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.30)", lineHeight: 1.45 }}>
+            Set headspace to load safely below the top probe. 0% fills to compartment max.
           </div>
         </div>
       </div>
