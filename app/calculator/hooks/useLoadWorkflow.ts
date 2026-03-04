@@ -256,6 +256,29 @@ export function useLoadWorkflow({
         product_updates,
       });
 
+// Fallback: persist "last observed" API/temp for this terminal's products
+// so the next time the Loading modal opens, it won't say "No previous API recorded".
+// (Non-fatal if RLS blocks it — RPC should ideally do this server-side.)
+try {
+  if (selectedTerminalId && product_updates.length > 0) {
+    const rows = product_updates.map((u) => ({
+      terminal_id: selectedTerminalId,
+      product_id: u.product_id,
+      last_api: u.api,
+      last_temp_f: u.temp_f,
+      updated_at: new Date().toISOString(),
+    }));
+
+    const { error } = await supabase
+      .from("terminal_products")
+      .upsert(rows, { onConflict: "terminal_id,product_id" });
+
+    if (error) console.warn("terminal_products upsert failed (non-fatal):", error);
+  }
+} catch (e) {
+  console.warn("terminal_products upsert threw (non-fatal):", e);
+}
+
       const plannedGross = computePlannedGrossLbs();
       const actualGross =
         Number.isFinite(tare) && Number.isFinite(actualPayloadLbs)
