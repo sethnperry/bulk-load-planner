@@ -134,16 +134,19 @@ function EquipmentDetailsModal({
   target,
   claimedByName,
   forceInUse,
+  companyId,
 }: {
   open: boolean;
   onClose: () => void;
   target: DetailTarget | null;
   claimedByName?: string | null;
   forceInUse?: boolean;
+  companyId?: string | null;
 }) {
   const c = target?.combo;
   const truck = target?.truck;
   const trailer = target?.trailer;
+  const companyIdSafe = String((c as any)?.company_id ?? companyId ?? "");
   const [fullTruck, setFullTruck] = useState<AdminTruck | null>(null);
   const [fullTrailer, setFullTrailer] = useState<AdminTrailer | null>(null);
   const [otherPermits, setOtherPermits] = useState<AdminOtherPermit[]>([]);
@@ -303,7 +306,7 @@ function EquipmentDetailsModal({
       {truckEditOpen && (
         <AdminTruckModal
           truck={fullTruck}
-          companyId={String((c as any).company_id ?? "")}
+          companyId={companyIdSafe}
           onClose={() => setTruckEditOpen(false)}
           onDone={() => { setTruckEditOpen(false); void reloadDetails(); }}
         />
@@ -311,7 +314,7 @@ function EquipmentDetailsModal({
       {trailerEditOpen && (
         <AdminTrailerModal
           trailer={fullTrailer}
-          companyId={String((c as any).company_id ?? "")}
+          companyId={companyIdSafe}
           onClose={() => setTrailerEditOpen(false)}
           onDone={() => { setTrailerEditOpen(false); void reloadDetails(); }}
         />
@@ -1666,6 +1669,7 @@ export default function EquipmentModal({
         open={detailsOpen}
         onClose={() => { setDetailsOpen(false); setDetailsTarget(null); }}
         target={detailsTarget}
+        companyId={companyId}
         forceInUse={Boolean(detailsTarget?.combo && String(detailsTarget.combo.combo_id) === String(selectedComboId))}
         claimedByName={detailsTarget?.combo
           ? (String(detailsTarget.combo.combo_id) === String(selectedComboId)

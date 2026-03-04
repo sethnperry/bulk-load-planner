@@ -627,6 +627,7 @@ function TruckModal({ truck, companyId, onClose, onDone }: {
 
   async function save() {
     if (!name.trim()) { setErr("Truck name is required."); return; }
+    if (!companyId || !String(companyId).trim()) { setErr(\"Missing company id (cannot save). Close and reopen Equipment Details, or ask your admin to assign you to a company.\"); return; }
     setSaving(true); setErr(null);
     const payload: any = {
       truck_name: name.trim(), vin_number: vin || null, make: make || null, model: model || null,
@@ -892,6 +893,7 @@ function TrailerModal({ trailer, companyId, onClose, onDone }: {
 
   async function save() {
     if (!name.trim()) { setErr("Trailer name is required."); return; }
+    if (!companyId || !String(companyId).trim()) { setErr(\"Missing company id (cannot save). Close and reopen Equipment Details, or ask your admin to assign you to a company.\"); return; }
     if (comps.some(c => !c.max_gallons || c.max_gallons <= 0)) { setErr("All compartments need max gallons > 0."); return; }
     setSaving(true); setErr(null);
     const payload: any = {
