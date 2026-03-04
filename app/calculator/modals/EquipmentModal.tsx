@@ -88,6 +88,148 @@ type Props = {
 
 type View = "list" | "new_tare" | "confirm_target";
 
+type DetailTarget = {
+  combo: ComboRow;
+  truck?: TruckRow | null;
+  trailer?: TrailerRow | null;
+};
+
+function formatWhen(ts?: string | null) {
+  if (!ts) return "";
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleString(undefined, {
+    month: "2-digit",
+    day: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function DetailField({ label, value }: { label: string; value?: React.ReactNode }) {
+  if (value === undefined || value === null || value === "") return null;
+  return (
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        gap: 12,
+        padding: "10px 0",
+        borderTop: "1px solid rgba(255,255,255,0.06)",
+      }}
+    >
+      <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 13, fontWeight: 800 }}>{label}</div>
+      <div style={{ color: "rgba(255,255,255,0.86)", fontSize: 14, fontWeight: 800, textAlign: "right" }}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function EquipmentDetailsModal({
+  open,
+  onClose,
+  target,
+  claimedByName,
+}: {
+  open: boolean;
+  onClose: () => void;
+  target: DetailTarget | null;
+  claimedByName?: string | null;
+}) {
+  const c = target?.combo;
+  const truck = target?.truck;
+  const trailer = target?.trailer;
+  if (!c) return null;
+
+  const tare = Number(c.tare_lbs ?? 0);
+  const gross = Number(c.gross_limit_lbs ?? 0);
+  const buffer = Number(c.buffer_lbs ?? 0);
+  const label = `${truck?.truck_name ?? c.truck_id ?? "—"} / ${trailer?.trailer_name ?? c.trailer_id ?? "—"}`;
+  const inUse = Boolean(c.claimed_by);
+
+  return (
+    <ModalShell open={open} onClose={onClose} title="Equipment Details">
+      <div
+        style={{
+          borderRadius: 18,
+          border: "1px solid rgba(255,255,255,0.10)",
+          background: "rgba(255,255,255,0.04)",
+          padding: 16,
+          marginTop: 6,
+          boxShadow: "0 10px 24px rgba(0,0,0,0.35)",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12 }}>
+          <div style={{ fontSize: 22, fontWeight: 950, letterSpacing: 0.2 }}>{label}</div>
+          {inUse && (
+            <div style={{ color: "rgba(234,179,8,0.95)", fontWeight: 900, fontSize: 13, whiteSpace: "nowrap" }}>
+              In use · {claimedByName ?? "Someone"}
+            </div>
+          )}
+        </div>
+        {(tare > 0 || gross > 0 || buffer > 0) && (
+          <div style={{ marginTop: 10, color: "rgba(255,255,255,0.50)", fontWeight: 800, fontSize: 13 }}>
+            {tare > 0 && <span>Tare {tare.toLocaleString()} lbs</span>}
+            {gross > 0 && <span>{tare > 0 ? " · " : ""}Gross limit {gross.toLocaleString()} lbs</span>}
+            {buffer > 0 && (
+              <span>{tare > 0 || gross > 0 ? " · " : ""}Buffer {buffer.toLocaleString()} lbs</span>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div style={{ height: 14 }} />
+
+      <div style={{ ...S.sectionHeader, marginTop: 0 }}>Truck</div>
+      <div
+        style={{
+          borderRadius: 18,
+          border: "1px solid rgba(255,255,255,0.08)",
+          background: "rgba(0,0,0,0.25)",
+          padding: "4px 14px",
+        }}
+      >
+        <DetailField label="Unit" value={truck?.truck_name ?? c.truck_id ?? "—"} />
+        <DetailField label="Region" value={truck?.region ?? ""} />
+        <DetailField label="Status" value={truck?.status_code ?? ""} />
+        <DetailField label="Location" value={truck?.status_location ?? ""} />
+        <DetailField label="Notes" value={truck?.status_notes ?? ""} />
+        <DetailField label="Updated" value={formatWhen(truck?.status_updated_at)} />
+      </div>
+
+      <div style={{ height: 14 }} />
+
+      <div style={S.sectionHeader}>Trailer</div>
+      <div
+        style={{
+          borderRadius: 18,
+          border: "1px solid rgba(255,255,255,0.08)",
+          background: "rgba(0,0,0,0.25)",
+          padding: "4px 14px",
+        }}
+      >
+        <DetailField label="Unit" value={trailer?.trailer_name ?? c.trailer_id ?? "—"} />
+        <DetailField label="Region" value={trailer?.region ?? ""} />
+        <DetailField label="Status" value={trailer?.status_code ?? ""} />
+        <DetailField label="Location" value={trailer?.status_location ?? ""} />
+        <DetailField label="Notes" value={trailer?.status_notes ?? ""} />
+        <DetailField label="Updated" value={formatWhen(trailer?.status_updated_at)} />
+      </div>
+
+      <div style={{ height: 18 }} />
+      <button
+        type="button"
+        style={{ ...S.btn, ...S.btnPrimary, width: "100%", padding: "14px 18px", borderRadius: 16, fontSize: 16 }}
+        onClick={onClose}
+      >
+        Close
+      </button>
+    </ModalShell>
+  );
+}
+
 // ─── Star button ──────────────────────────────────────────────────────────────
 
 function StarBtn({
@@ -750,6 +892,10 @@ export default function EquipmentModal({
   const [fleetOpen, setFleetOpen] = useState(false);
   const [companyId, setCompanyId] = useState<string | null>(null);
 
+  // Details view (tap a card)
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [detailsTarget, setDetailsTarget] = useState<DetailTarget | null>(null);
+
   // Decouple flow
   const [decoupleOpen, setDecoupleOpen]       = useState(false);
   const [decoupleComboPending, setDecoupleComboPending] = useState<{
@@ -980,6 +1126,13 @@ export default function EquipmentModal({
     const t  = trucks.find((x) => String(x.truck_id)    === String(c.truck_id))?.truck_name;
     const tr = trailers.find((x) => String(x.trailer_id) === String(c.trailer_id))?.trailer_name;
     return [t, tr].filter(Boolean).join(" / ") || "Unknown equipment";
+  }
+
+  function openDetails(c: ComboRow) {
+    const truck = trucks.find((x) => String(x.truck_id) === String(c.truck_id)) ?? null;
+    const trailer = trailers.find((x) => String(x.trailer_id) === String(c.trailer_id)) ?? null;
+    setDetailsTarget({ combo: c, truck, trailer });
+    setDetailsOpen(true);
   }
 
   // ── Actions ────────────────────────────────────────────────────────────────
@@ -1228,7 +1381,20 @@ export default function EquipmentModal({
                 : inUse ? { ...S.row, ...S.rowInUse } : S.row;
 
               return (
-                <div key={cid} style={rowStyle}>
+                <div
+                  key={cid}
+                  style={{ ...rowStyle, cursor: "pointer" }}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => openDetails(c)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      openDetails(c);
+                    }
+                  }}
+                  title="Tap to view details"
+                >
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={S.rowName}>{label}</div>
                     {tare > 0 && <div style={S.rowSub}>Tare {tare.toLocaleString()} lbs</div>}
@@ -1246,17 +1412,34 @@ export default function EquipmentModal({
                       title="Remove from my equipment"
                     />
                     {inUse && (
-                      <button type="button" style={{ ...S.btn, ...S.btnSlipSeat, opacity: busy ? 0.55 : 1 }} onClick={() => handleSlipSeat(cid)} disabled={busy}>
+                      <button
+                        type="button"
+                        style={{ ...S.btn, ...S.btnSlipSeat, opacity: busy ? 0.55 : 1 }}
+                        onClick={(e) => { e.stopPropagation(); handleSlipSeat(cid); }}
+                        disabled={busy}
+                      >
                         {busy ? "…" : "SLIP SEAT"}
                       </button>
                     )}
                     {(mine || (sel && !c.claimed_by)) && (
-                      <button type="button" style={{ ...S.btn, ...S.btnDecouple, opacity: busy ? 0.55 : 1 }} onClick={() => handleDecouple(cid)} disabled={busy}>
+                      <button
+                        type="button"
+                        style={{ ...S.btn, ...S.btnDecouple, opacity: busy ? 0.55 : 1 }}
+                        onClick={(e) => { e.stopPropagation(); handleDecouple(cid); }}
+                        disabled={busy}
+                      >
                         {busy ? "…" : "DECOUPLE"}
                       </button>
                     )}
                     {!mine && !inUse && !(sel && !c.claimed_by) && (
-                      <button type="button" style={{ ...S.btn, ...S.btnPrimary }} onClick={() => handleClaim(cid)} disabled={busy}>SELECT</button>
+                      <button
+                        type="button"
+                        style={{ ...S.btn, ...S.btnPrimary }}
+                        onClick={(e) => { e.stopPropagation(); handleClaim(cid); }}
+                        disabled={busy}
+                      >
+                        SELECT
+                      </button>
                     )}
                   </div>
                 </div>
@@ -1313,6 +1496,13 @@ export default function EquipmentModal({
           onDecoupled={handleDecoupled}
         />
       )}
+
+      <EquipmentDetailsModal
+        open={detailsOpen}
+        onClose={() => { setDetailsOpen(false); setDetailsTarget(null); }}
+        target={detailsTarget}
+        claimedByName={detailsTarget?.combo ? getClaimedByName(detailsTarget.combo) : null}
+      />
     </>
   );
 }
