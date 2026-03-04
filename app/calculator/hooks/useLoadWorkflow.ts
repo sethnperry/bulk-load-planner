@@ -265,10 +265,20 @@ try {
     const rows = product_updates.map((u) => ({
       terminal_id: selectedTerminalId,
       product_id: u.product_id,
+
+      // values
       last_api: u.api,
-      last_api_updated_at: now,
       last_temp_f: u.temp_f,
-      last_temp_updated_at: now,
+
+      // timestamps (these ARE the real column names in your table)
+      last_api_updated_at: now,
+      last_loaded_at: now,
+      last_updated_at: now,
+
+      // optional but useful for traceability (exists in your table)
+      last_updated_by_load_id: activeLoadId,
+
+      // keep your normal row-updated timestamp too
       updated_at: now,
     }));
 
