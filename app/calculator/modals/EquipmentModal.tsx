@@ -194,8 +194,8 @@ function EquipmentDetailsModal({
         }
       }
 
-      setFullTruck(t);
-      setFullTrailer(tr);
+      setFullTruck(t ? ({ ...(t as any), in_use_by_name: (combo.claimed_by ? (claimedByName ?? (t as any).in_use_by_name) : (t as any).in_use_by_name) } as any) : null);
+      setFullTrailer(tr ? ({ ...(tr as any), in_use_by_name: (combo.claimed_by ? (claimedByName ?? (tr as any).in_use_by_name) : (tr as any).in_use_by_name) } as any) : null);
       setOtherPermits((permitsRes.data ?? []).map((r: any) => ({
         permit_id: r.permit_id,
         label: r.label ?? "",
@@ -233,21 +233,33 @@ function EquipmentDetailsModal({
           boxShadow: "0 10px 24px rgba(0,0,0,0.35)",
         }}
       >
-        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12 }}>
-          <div style={{ fontSize: 22, fontWeight: 950, letterSpacing: 0.2 }}>{label}</div>
-          {inUse && (
-            <div style={{ color: "rgba(234,179,8,0.95)", fontWeight: 900, fontSize: 13, whiteSpace: "nowrap" }}>
-              In use · {claimedByName ?? "Someone"}
-            </div>
-          )}
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+          <div style={{ fontSize: 28, fontWeight: 950, letterSpacing: 0.2, lineHeight: 1.05 }}>{label}</div>
         </div>
+
         {(tare > 0 || targetW > 0 || buffer > 0) && (
-          <div style={{ marginTop: 10, color: "rgba(255,255,255,0.50)", fontWeight: 800, fontSize: 13 }}>
-            {tare > 0 && <span>Tare {tare.toLocaleString()} lbs</span>}
-            {targetW > 0 && <span>{tare > 0 ? " · " : ""}Target {targetW.toLocaleString()} lbs</span>}
-            {buffer > 0 && (
-              <span>{tare > 0 || targetW > 0 ? " · " : ""}Buffer {buffer.toLocaleString()} lbs</span>
+          <div style={{ marginTop: 10 }}>
+            {tare > 0 && (
+              <div style={{ color: "rgba(255,255,255,0.45)", fontWeight: 800, fontSize: 14 }}>
+                Tare {tare.toLocaleString()} lbs
+              </div>
             )}
+            {targetW > 0 && (
+              <div style={{ marginTop: 6, color: "rgba(255,255,255,0.45)", fontWeight: 800, fontSize: 14 }}>
+                Target {targetW.toLocaleString()} lbs
+              </div>
+            )}
+            {buffer > 0 && (
+              <div style={{ marginTop: 6, color: "rgba(255,255,255,0.45)", fontWeight: 800, fontSize: 14 }}>
+                Buffer {buffer.toLocaleString()} lbs
+              </div>
+            )}
+          </div>
+        )}
+
+        {inUse && (
+          <div style={{ marginTop: 10, color: "rgba(234,179,8,0.95)", fontWeight: 900, fontSize: 16 }}>
+            In use · {claimedByName ?? "Someone"}
           </div>
         )}
       </div>
@@ -304,14 +316,7 @@ function EquipmentDetailsModal({
           onDone={() => { setTrailerEditOpen(false); void reloadDetails(); }}
         />
       )}
-<div style={{ height: 18 }} />
-      <button
-        type="button"
-        style={{ ...S.btn, ...S.btnPrimary, width: "100%", padding: "14px 18px", borderRadius: 16, fontSize: 16 }}
-        onClick={onClose}
-      >
-        Close
-      </button>
+
     </ModalShell>
   );
 }
