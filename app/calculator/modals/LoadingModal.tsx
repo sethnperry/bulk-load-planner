@@ -219,9 +219,11 @@ useEffect(() => {
                   }}
                 >
                   <div style={{ fontWeight: 800 }}>
-                    Comp {x.comp} — {productNameById.get(x.productId) ?? x.productId}
-                  </div>
-                  <div style={{ color: "rgba(255,255,255,0.70)", fontWeight: 800 }}>{Math.round(x.gallons)} gal</div>
+  C{x.comp} — {productNameById.get(x.productId) ?? x.productId}
+</div>
+                  <div style={{ color: "rgba(255,255,255,0.70)", fontWeight: 800 }}>
+  {Math.round(x.gallons)}
+</div>
                 </div>
               ))}
             </div>
@@ -316,7 +318,7 @@ useEffect(() => {
 }) ?? "No previous API recorded"}
                         </div>
                       </div>
-                      <div style={{ color: "rgba(255,255,255,0.60)", fontWeight: 700, fontSize: 12, flexShrink: 0 }}>{Math.round(g.gallons)} gal</div>
+                      <div style={{ color: "rgba(255,255,255,0.60)", fontWeight: 700, fontSize: 12, flexShrink: 0 }}>{Math.round(g.gallons)}</div>
                     </div>
                     {/* Bottom row: API input + temp button side by side */}
                     <div style={{ display: "flex", gap: 8 }}>
