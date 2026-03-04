@@ -133,11 +133,13 @@ function EquipmentDetailsModal({
   onClose,
   target,
   claimedByName,
+  forceInUse,
 }: {
   open: boolean;
   onClose: () => void;
   target: DetailTarget | null;
   claimedByName?: string | null;
+  forceInUse?: boolean;
 }) {
   const c = target?.combo;
   const truck = target?.truck;
@@ -217,7 +219,7 @@ function EquipmentDetailsModal({
   const targetW = Number(c.target_weight ?? 0);
   const buffer = Number(c.buffer_lbs ?? 0);
   const label = `${truck?.truck_name ?? c.truck_id ?? "—"} / ${trailer?.trailer_name ?? c.trailer_id ?? "—"}`;
-  const inUse = Boolean(c.claimed_by);
+  const inUse = Boolean(c.claimed_by) || Boolean(forceInUse);
 
   return (
     <ModalShell open={open} onClose={onClose} title="Equipment Details">
@@ -312,6 +314,12 @@ function EquipmentDetailsModal({
       </button>
     </ModalShell>
   );
+}
+
+// Merge in authoritative combo fields fetched directly from equipment_combos.
+// (The parent list may omit newer columns like target_weight.)
+function mergeCombo(base: ComboRow, meta?: Partial<ComboRow> | null): ComboRow {
+  return meta ? ({ ...base, ...meta } as ComboRow) : base;
 }
 
 // ─── Star button ──────────────────────────────────────────────────────────────
@@ -424,7 +432,7 @@ const S = {
   rowSub: {
     marginTop: 4,
     color: "rgba(255,255,255,0.50)",
-    fontSize: 13,
+    fontSize: 12,
   },
   rowMineBadge: {
     marginTop: 4,
@@ -998,6 +1006,10 @@ export default function EquipmentModal({
 
   const [profileNames, setProfileNames] = useState<Record<string, string>>({});
 
+  // Authoritative combo fields from equipment_combos (target_weight, claimed_by, etc.)
+  const [comboMeta, setComboMeta] = useState<Record<string, Partial<ComboRow>>>({});
+  const [myDisplayName, setMyDisplayName] = useState<string | null>(null);
+
   // Primary equipment (starred)
   const [primaryTruckIds, setPrimaryTruckIds] = useState<Set<string>>(new Set());
   const [primaryTrailerIds, setPrimaryTrailerIds] = useState<Set<string>>(new Set());
@@ -1053,6 +1065,54 @@ export default function EquipmentModal({
     setProfileNames((prev) => ({ ...prev, ...map }));
   }, []);
 
+  // Ensure we always have target_weight/claimed_by even if the parent query omitted fields.
+  const hydrateCombosFromDb = useCallback(async () => {
+    if (!open) return;
+    const ids = Array.from(new Set((combos ?? []).map((c) => String(c.combo_id)).filter(Boolean)));
+    if (!ids.length) return;
+
+    try {
+      const { data, error } = await supabase
+        .from("equipment_combos")
+        .select("combo_id, tare_lbs, target_weight, buffer_lbs, claimed_by, claimed_at, company_id, truck_id, trailer_id")
+        .in("combo_id", ids);
+      if (error) throw error;
+
+      const map: Record<string, Partial<ComboRow>> = {};
+      for (const r of data ?? []) {
+        const id = String((r as any).combo_id);
+        map[id] = {
+          tare_lbs: (r as any).tare_lbs ?? null,
+          target_weight: (r as any).target_weight ?? null,
+          buffer_lbs: (r as any).buffer_lbs ?? null,
+          claimed_by: (r as any).claimed_by ?? null,
+          claimed_at: (r as any).claimed_at ?? null,
+          company_id: (r as any).company_id ?? null,
+          truck_id: (r as any).truck_id ?? null,
+          trailer_id: (r as any).trailer_id ?? null,
+        };
+      }
+      setComboMeta((prev) => ({ ...prev, ...map }));
+    } catch {
+      // non-fatal
+    }
+  }, [open, combos]);
+
+  const loadMyDisplayName = useCallback(async () => {
+    if (!open || !authUserId) return;
+    try {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("display_name")
+        .eq("user_id", authUserId)
+        .maybeSingle();
+      if (error) throw error;
+      setMyDisplayName((data as any)?.display_name ?? null);
+    } catch {
+      // non-fatal
+    }
+  }, [open, authUserId]);
+
   useEffect(() => {
     if (open) {
       setView("list");
@@ -1076,8 +1136,10 @@ export default function EquipmentModal({
       })();
       loadEquipment();
       loadPrimaryEquipment();
+      hydrateCombosFromDb();
+      loadMyDisplayName();
     }
-  }, [open, loadEquipment, loadPrimaryEquipment]);
+  }, [open, loadEquipment, loadPrimaryEquipment, hydrateCombosFromDb, loadMyDisplayName]);
 
   useEffect(() => {
     const ids = (combos ?? []).map((c) => String(c.claimed_by ?? "")).filter((id) => id && id !== (authUserId ?? ""));
@@ -1218,9 +1280,10 @@ export default function EquipmentModal({
   }
 
   function openDetails(c: ComboRow) {
-    const truck = trucks.find((x) => String(x.truck_id) === String(c.truck_id)) ?? null;
-    const trailer = trailers.find((x) => String(x.trailer_id) === String(c.trailer_id)) ?? null;
-    setDetailsTarget({ combo: c, truck, trailer });
+    const cm = mergeCombo(c, comboMeta[String(c.combo_id)]);
+    const truck = trucks.find((x) => String(x.truck_id) === String(cm.truck_id)) ?? null;
+    const trailer = trailers.find((x) => String(x.trailer_id) === String(cm.trailer_id)) ?? null;
+    setDetailsTarget({ combo: cm, truck, trailer });
     setDetailsOpen(true);
   }
 
@@ -1460,11 +1523,18 @@ export default function EquipmentModal({
           <div style={{ marginTop: 6 }}>
             {myEquipmentCombos.map((c) => {
               const cid     = String(c.combo_id);
-              const mine    = isMine(c);
-              const inUse   = isInUse(c);
+              const cm      = mergeCombo(c, comboMeta[cid]);
+              const mine    = isMine(cm);
+              const inUse   = isInUse(cm);
               const sel     = isSelected(cid);
-              const label   = comboDisplayLabel(c);
-              const tare    = Number(c.tare_lbs ?? 0);
+              const label   = comboDisplayLabel(cm);
+              const tare    = Number(cm.tare_lbs ?? 0);
+              const targetW = Number(cm.target_weight ?? 0);
+
+              const showInUse = inUse || sel;
+              const inUseName = inUse
+                ? getClaimedByName(cm)
+                : (myDisplayName ?? "You");
 
               const rowStyle = mine ? { ...S.row, ...S.rowMine }
                 : inUse ? { ...S.row, ...S.rowInUse } : S.row;
@@ -1487,9 +1557,10 @@ export default function EquipmentModal({
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={S.rowName}>{label}</div>
                     {tare > 0 && <div style={S.rowSub}>Tare {tare.toLocaleString()} lbs</div>}
-                    {mine && sel  && <div style={S.rowMineBadge}>Selected</div>}
-                    {mine && !sel && <div style={S.rowMineBadge}>Claimed by you</div>}
-                    {inUse && <div style={S.rowInUseBadge}>In use by {getClaimedByName(c)}</div>}
+                    {targetW > 0 && <div style={S.rowSub}>Target {targetW.toLocaleString()} lbs</div>}
+                    {showInUse && (
+                      <div style={S.rowInUseBadge}>In use · {inUseName}</div>
+                    )}
                   </div>
 
                   {/* Star pinned top-right; action button below */}
@@ -1590,7 +1661,12 @@ export default function EquipmentModal({
         open={detailsOpen}
         onClose={() => { setDetailsOpen(false); setDetailsTarget(null); }}
         target={detailsTarget}
-        claimedByName={detailsTarget?.combo ? getClaimedByName(detailsTarget.combo) : null}
+        forceInUse={Boolean(detailsTarget?.combo && String(detailsTarget.combo.combo_id) === String(selectedComboId))}
+        claimedByName={detailsTarget?.combo
+          ? (String(detailsTarget.combo.combo_id) === String(selectedComboId)
+              ? (myDisplayName ?? "You")
+              : getClaimedByName(detailsTarget.combo))
+          : null}
       />
     </>
   );
