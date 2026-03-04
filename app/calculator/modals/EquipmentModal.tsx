@@ -16,7 +16,7 @@
  *
  * Schema:
  *   equipment_combos: combo_id, combo_name, truck_id, trailer_id,
- *                     tare_lbs, gross_limit_lbs, buffer_lbs,
+ *                     tare_lbs, target_weight, buffer_lbs,
  *                     active, claimed_by, claimed_at, company_id
  *   trucks:           truck_id, truck_name, active, company_id, region
  *   trailers:         trailer_id, trailer_name, cg_max, active, company_id, region
@@ -38,7 +38,7 @@ export type ComboRow = {
   truck_id?: string | null;
   trailer_id?: string | null;
   tare_lbs?: number | null;
-  gross_limit_lbs?: number | null;
+  target_weight?: number | null;
   buffer_lbs?: number | null;
   active?: boolean | null;
   claimed_by?: string | null;
@@ -214,7 +214,7 @@ function EquipmentDetailsModal({
   if (!c) return null;
 
   const tare = Number(c.tare_lbs ?? 0);
-  const gross = Number(c.gross_limit_lbs ?? 0);
+  const targetW = Number(c.target_weight ?? 0);
   const buffer = Number(c.buffer_lbs ?? 0);
   const label = `${truck?.truck_name ?? c.truck_id ?? "—"} / ${trailer?.trailer_name ?? c.trailer_id ?? "—"}`;
   const inUse = Boolean(c.claimed_by);
@@ -239,12 +239,12 @@ function EquipmentDetailsModal({
             </div>
           )}
         </div>
-        {(tare > 0 || gross > 0 || buffer > 0) && (
+        {(tare > 0 || targetW > 0 || buffer > 0) && (
           <div style={{ marginTop: 10, color: "rgba(255,255,255,0.50)", fontWeight: 800, fontSize: 13 }}>
             {tare > 0 && <span>Tare {tare.toLocaleString()} lbs</span>}
-            {gross > 0 && <span>{tare > 0 ? " · " : ""}Gross limit {gross.toLocaleString()} lbs</span>}
+            {targetW > 0 && <span>{tare > 0 ? " · " : ""}Target {targetW.toLocaleString()} lbs</span>}
             {buffer > 0 && (
-              <span>{tare > 0 || gross > 0 ? " · " : ""}Buffer {buffer.toLocaleString()} lbs</span>
+              <span>{tare > 0 || targetW > 0 ? " · " : ""}Buffer {buffer.toLocaleString()} lbs</span>
             )}
           </div>
         )}
@@ -629,7 +629,7 @@ function FleetModal({
     // Fetch all active combos — manual join (no FK assumption)
     const { data: comboData, error: comboErr } = await supabase
       .from("equipment_combos")
-      .select("combo_id, combo_name, truck_id, trailer_id, tare_lbs, claimed_by, claimed_at, active, company_id")
+      .select("combo_id, combo_name, truck_id, trailer_id, tare_lbs, target_weight, claimed_by, claimed_at, active, company_id")
       .eq("active", true)
       .eq("company_id", activeCompanyId)
       .order("combo_name", { ascending: true });
@@ -674,6 +674,7 @@ function FleetModal({
       truck_id:        r.truck_id   ?? null,
       trailer_id:      r.trailer_id ?? null,
       tare_lbs:        r.tare_lbs   ?? null,
+      target_weight:   (r as any).target_weight ?? null,
       claimed_by:      r.claimed_by ?? null,
       claimed_at:      r.claimed_at ?? null,
       active:          r.active,
@@ -788,11 +789,15 @@ function FleetModal({
                 {Number(c.tare_lbs ?? 0) > 0 && (
                   <div style={S.rowSub}>Tare {Number(c.tare_lbs).toLocaleString()} lbs</div>
                 )}
+                {Number((c as any).target_weight ?? 0) > 0 && (
+                  <div style={S.rowSub}>Target {Number((c as any).target_weight).toLocaleString()} lbs</div>
+                )}
                 {c.truck_region && (
                   <div style={{ ...S.rowSub, fontSize: 12 }}>{c.truck_region}</div>
                 )}
-                {mine && <div style={S.rowMineBadge}>{isCurrentlySelected ? "Selected" : "Claimed by you"}</div>}
-                {inUse && <div style={S.rowInUseBadge}>In use by {c.claimed_by_name}</div>}
+                {inUse && (
+                  <div style={S.rowMineBadge}>In use · {c.claimed_by_name ?? "Someone"}</div>
+                )}
               </div>
 
               {/* Right: star top + action button below */}
