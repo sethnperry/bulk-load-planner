@@ -256,17 +256,20 @@ export function useLoadWorkflow({
         product_updates,
       });
 
-// Fallback: persist "last observed" API/temp for this terminal's products
-// so the next time the Loading modal opens, it won't say "No previous API recorded".
-// (Non-fatal if RLS blocks it — RPC should ideally do this server-side.)
+// Fallback: persist "last observed" API/temp so LoadingModal can show previous API on reload
+// (Non-fatal if RLS blocks it)
 try {
   if (selectedTerminalId && product_updates.length > 0) {
+    const now = new Date().toISOString();
+
     const rows = product_updates.map((u) => ({
       terminal_id: selectedTerminalId,
       product_id: u.product_id,
       last_api: u.api,
+      last_api_updated_at: now,
       last_temp_f: u.temp_f,
-      updated_at: new Date().toISOString(),
+      last_temp_updated_at: now,
+      updated_at: now,
     }));
 
     const { error } = await supabase

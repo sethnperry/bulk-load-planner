@@ -309,7 +309,11 @@ useEffect(() => {
                           {name}
                         </div>
                         <div style={{ marginTop: 2, color: "rgba(255,255,255,0.50)", fontSize: 11 }}>
-                          {fmtUpdatedOnLine({ updatedAt: lastInfo?.last_api_updated_at, timeZone: terminalTimeZone ?? null }) ?? "No previous API recorded"}
+                         {fmtLastApiLine_({
+  lastApi: lastInfo?.last_api,
+  lastApiUpdatedAt: lastInfo?.last_api_updated_at,
+  timeZone: terminalTimeZone ?? null,
+}) ?? "No previous API recorded"}
                         </div>
                       </div>
                       <div style={{ color: "rgba(255,255,255,0.60)", fontWeight: 700, fontSize: 12, flexShrink: 0 }}>{Math.round(g.gallons)} gal</div>
