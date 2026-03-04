@@ -28,6 +28,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { supabase } from "@/lib/supabase/client";
 import { FullscreenModal } from "@/lib/ui/FullscreenModal";
 import DecoupleModal from "./DecoupleModal";
+import { TruckCard as AdminTruckCard, TrailerCard as AdminTrailerCard, TruckModal as AdminTruckModal, TrailerModal as AdminTrailerModal, type Truck as AdminTruck, type Trailer as AdminTrailer, type OtherPermit as AdminOtherPermit } from "@/lib/ui/driver/EquipmentDetails";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -141,6 +142,75 @@ function EquipmentDetailsModal({
   const c = target?.combo;
   const truck = target?.truck;
   const trailer = target?.trailer;
+  const [fullTruck, setFullTruck] = useState<AdminTruck | null>(null);
+  const [fullTrailer, setFullTrailer] = useState<AdminTrailer | null>(null);
+  const [otherPermits, setOtherPermits] = useState<AdminOtherPermit[]>([]);
+  const [loadingDetails, setLoadingDetails] = useState(false);
+  const [detailsErr, setDetailsErr] = useState<string | null>(null);
+
+  const [truckEditOpen, setTruckEditOpen] = useState(false);
+  const [trailerEditOpen, setTrailerEditOpen] = useState(false);
+
+  const reloadDetails = useCallback(async () => {
+    if (!target?.combo) return;
+    const combo = target.combo;
+    const truckId = String(combo.truck_id ?? "");
+    const trailerId = String(combo.trailer_id ?? "");
+    if (!truckId && !trailerId) return;
+
+    setLoadingDetails(true);
+    setDetailsErr(null);
+    try {
+      const truckSel = "truck_id, truck_name, active, vin_number, make, model, year, region, local_area, status_code, status_location, in_use_by, reg_expiration_date, reg_enforcement_date, inspection_shop, inspection_issue_date, inspection_expiration_date, ifta_expiration_date, ifta_enforcement_date, phmsa_expiration_date, alliance_expiration_date, fleet_ins_expiration_date, hazmat_lic_expiration_date, inner_bridge_expiration_date, notes";
+      const trailerSel = "trailer_id, trailer_name, active, vin_number, make, model, year, cg_max, region, local_area, status_code, status_location, in_use_by, last_load_config, trailer_reg_expiration_date, trailer_reg_enforcement_date, trailer_inspection_shop, trailer_inspection_issue_date, trailer_inspection_expiration_date, tank_v_expiration_date, tank_k_expiration_date, tank_l_expiration_date, tank_t_expiration_date, tank_i_expiration_date, tank_p_expiration_date, tank_uc_expiration_date, notes";
+
+      const [truckRes, trailerRes, permitsRes] = await Promise.all([
+        truckId ? supabase.from("trucks").select(truckSel).eq("truck_id", truckId).maybeSingle() : Promise.resolve({ data: null, error: null } as any),
+        trailerId ? supabase.from("trailers").select(trailerSel).eq("trailer_id", trailerId).maybeSingle() : Promise.resolve({ data: null, error: null } as any),
+        truckId ? supabase.from("truck_other_permits").select("permit_id, label, expiration_date").eq("truck_id", truckId).order("created_at") : Promise.resolve({ data: [], error: null } as any),
+      ]);
+
+      if (truckRes.error) throw truckRes.error;
+      if (trailerRes.error) throw trailerRes.error;
+      if (permitsRes.error) throw permitsRes.error;
+
+      const t: AdminTruck | null = truckRes.data ? (truckRes.data as any) : null;
+      let tr: AdminTrailer | null = trailerRes.data ? (trailerRes.data as any) : null;
+
+      if (tr) {
+        const { data: comps, error: compsErr } = await supabase
+          .from("trailer_compartments")
+          .select("comp_number, max_gallons, position")
+          .eq("trailer_id", tr.trailer_id)
+          .order("position");
+        if (!compsErr && comps) {
+          (tr as any).compartments = comps.map((r: any) => ({
+            comp_number: Number(r.comp_number),
+            max_gallons: Number(r.max_gallons),
+            position: Number(r.position),
+          }));
+        }
+      }
+
+      setFullTruck(t);
+      setFullTrailer(tr);
+      setOtherPermits((permitsRes.data ?? []).map((r: any) => ({
+        permit_id: r.permit_id,
+        label: r.label ?? "",
+        expiration_date: r.expiration_date ?? "",
+      })));
+    } catch (e: any) {
+      setDetailsErr(e?.message ?? "Failed to load equipment details.");
+    } finally {
+      setLoadingDetails(false);
+    }
+  }, [target?.combo]);
+
+  useEffect(() => {
+    if (!open) return;
+    void reloadDetails();
+  }, [open, reloadDetails]);
+
   if (!c) return null;
 
   const tare = Number(c.tare_lbs ?? 0);
@@ -182,43 +252,57 @@ function EquipmentDetailsModal({
 
       <div style={{ height: 14 }} />
 
+      
+      {/* Driver details (copied from admin Truck/Trailer cards) */}
+      {detailsErr && (
+        <div style={{ ...S.err, marginTop: 8 }}>{detailsErr}</div>
+      )}
+
       <div style={{ ...S.sectionHeader, marginTop: 0 }}>Truck</div>
-      <div
-        style={{
-          borderRadius: 18,
-          border: "1px solid rgba(255,255,255,0.08)",
-          background: "rgba(0,0,0,0.25)",
-          padding: "4px 14px",
-        }}
-      >
-        <DetailField label="Unit" value={truck?.truck_name ?? c.truck_id ?? "—"} />
-        <DetailField label="Region" value={truck?.region ?? ""} />
-        <DetailField label="Status" value={truck?.status_code ?? ""} />
-        <DetailField label="Location" value={truck?.status_location ?? ""} />
-        <DetailField label="Notes" value={truck?.status_notes ?? ""} />
-        <DetailField label="Updated" value={formatWhen(truck?.status_updated_at)} />
-      </div>
+      {loadingDetails ? (
+        <div style={S.sub}>Loading truck…</div>
+      ) : fullTruck ? (
+        <AdminTruckCard
+          truck={fullTruck}
+          otherPermits={otherPermits}
+          onEdit={() => setTruckEditOpen(true)}
+        />
+      ) : (
+        <div style={S.sub}>No truck details.</div>
+      )}
 
       <div style={{ height: 14 }} />
 
       <div style={S.sectionHeader}>Trailer</div>
-      <div
-        style={{
-          borderRadius: 18,
-          border: "1px solid rgba(255,255,255,0.08)",
-          background: "rgba(0,0,0,0.25)",
-          padding: "4px 14px",
-        }}
-      >
-        <DetailField label="Unit" value={trailer?.trailer_name ?? c.trailer_id ?? "—"} />
-        <DetailField label="Region" value={trailer?.region ?? ""} />
-        <DetailField label="Status" value={trailer?.status_code ?? ""} />
-        <DetailField label="Location" value={trailer?.status_location ?? ""} />
-        <DetailField label="Notes" value={trailer?.status_notes ?? ""} />
-        <DetailField label="Updated" value={formatWhen(trailer?.status_updated_at)} />
-      </div>
+      {loadingDetails ? (
+        <div style={S.sub}>Loading trailer…</div>
+      ) : fullTrailer ? (
+        <AdminTrailerCard
+          trailer={fullTrailer}
+          onEdit={() => setTrailerEditOpen(true)}
+        />
+      ) : (
+        <div style={S.sub}>No trailer details.</div>
+      )}
 
-      <div style={{ height: 18 }} />
+      {/* Edit modals */}
+      {truckEditOpen && (
+        <AdminTruckModal
+          truck={fullTruck}
+          companyId={String((c as any).company_id ?? "")}
+          onClose={() => setTruckEditOpen(false)}
+          onDone={() => { setTruckEditOpen(false); void reloadDetails(); }}
+        />
+      )}
+      {trailerEditOpen && (
+        <AdminTrailerModal
+          trailer={fullTrailer}
+          companyId={String((c as any).company_id ?? "")}
+          onClose={() => setTrailerEditOpen(false)}
+          onDone={() => { setTrailerEditOpen(false); void reloadDetails(); }}
+        />
+      )}
+<div style={{ height: 18 }} />
       <button
         type="button"
         style={{ ...S.btn, ...S.btnPrimary, width: "100%", padding: "14px 18px", borderRadius: 16, fontSize: 16 }}
