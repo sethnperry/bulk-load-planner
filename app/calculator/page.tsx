@@ -622,15 +622,19 @@ export default function CalculatorPage() {
     ? (isPastISO_(terminalDisplayISO!) ? "text-red-500" : "text-white/50") : undefined;
 
   // ── lastProductInfoById ────────────────────────────────────────────────────
-  const lastProductInfoById = useMemo(() => {
-    const out: Record<string, { last_api: number | null; last_api_updated_at: string | null }> = {};
-    for (const tp of terminalProductMetaRows) {
-      const pid = String(tp.product_id ?? "");
-      if (!pid) continue;
-      out[pid] = { last_api: tp.last_api ?? null, last_api_updated_at: tp.last_api_updated_at ?? null };
-    }
-    return out;
-  }, [terminalProductMetaRows]);
+// IMPORTANT: derive from `terminalProducts` because that list is refreshed after LOADED.
+const lastProductInfoById = useMemo(() => {
+  const out: Record<string, { last_api: number | null; last_api_updated_at: string | null }> = {};
+  for (const p of terminalProducts) {
+    const pid = String((p as any).product_id ?? "");
+    if (!pid) continue;
+    out[pid] = {
+      last_api: (p as any).last_api ?? null,
+      last_api_updated_at: (p as any).last_api_updated_at ?? null,
+    };
+  }
+  return out;
+}, [terminalProducts]);
 
   // ── Placard data ──────────────────────────────────────────────────────────
   const productUnNumberById = useMemo(() => {
