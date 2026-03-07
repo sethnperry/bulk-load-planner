@@ -166,8 +166,8 @@ function EquipmentDetailsModal({
     setLoadingDetails(true);
     setDetailsErr(null);
     try {
-      const truckSel = "truck_id, truck_name, active, vin_number, plate_number, make, model, year, region, local_area, status_code, status_location, in_use_by, reg_expiration_date, reg_enforcement_date, inspection_shop, inspection_issue_date, inspection_expiration_date, ifta_expiration_date, ifta_enforcement_date, phmsa_expiration_date, alliance_expiration_date, fleet_ins_expiration_date, hazmat_lic_expiration_date, inner_bridge_expiration_date, notes";
-      const trailerSel = "trailer_id, trailer_name, active, vin_number, plate_number, make, model, year, cg_max, region, local_area, status_code, status_location, in_use_by, last_load_config, trailer_reg_expiration_date, trailer_reg_enforcement_date, trailer_inspection_shop, trailer_inspection_issue_date, trailer_inspection_expiration_date, tank_v_expiration_date, tank_k_expiration_date, tank_l_expiration_date, tank_t_expiration_date, tank_i_expiration_date, tank_p_expiration_date, tank_uc_expiration_date, notes";
+      const truckSel = "truck_id, truck_name, active, vin_number, make, model, year, region, local_area, status_code, status_location, in_use_by, reg_expiration_date, reg_enforcement_date, inspection_shop, inspection_issue_date, inspection_expiration_date, ifta_expiration_date, ifta_enforcement_date, phmsa_expiration_date, alliance_expiration_date, fleet_ins_expiration_date, hazmat_lic_expiration_date, inner_bridge_expiration_date, notes";
+      const trailerSel = "trailer_id, trailer_name, active, vin_number, make, model, year, cg_max, region, local_area, status_code, status_location, in_use_by, last_load_config, trailer_reg_expiration_date, trailer_reg_enforcement_date, trailer_inspection_shop, trailer_inspection_issue_date, trailer_inspection_expiration_date, tank_v_expiration_date, tank_k_expiration_date, tank_l_expiration_date, tank_t_expiration_date, tank_i_expiration_date, tank_p_expiration_date, tank_uc_expiration_date, notes";
 
       const [truckRes, trailerRes, permitsRes] = await Promise.all([
         truckId ? supabase.from("trucks").select(truckSel).eq("truck_id", truckId).maybeSingle() : Promise.resolve({ data: null, error: null } as any),
@@ -281,6 +281,7 @@ function EquipmentDetailsModal({
       ) : fullTruck ? (
         <AdminTruckCard
           truck={fullTruck}
+          companyId={companyIdSafe}
           otherPermits={otherPermits}
           onEdit={() => setTruckEditOpen(true)}
         />
@@ -296,6 +297,7 @@ function EquipmentDetailsModal({
       ) : fullTrailer ? (
         <AdminTrailerCard
           trailer={fullTrailer}
+          companyId={companyIdSafe}
           onEdit={() => setTrailerEditOpen(true)}
         />
       ) : (

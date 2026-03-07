@@ -4,6 +4,12 @@ import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { T, css, fmtDate, expiryColor, daysUntil } from "@/lib/ui/driver/tokens";
 import { Modal, Field, FieldRow, Banner, SubSectionTitle } from "@/lib/ui/driver/primitives";
+import {
+  AttachmentIndicator, DocHubModal, DocPreviewModal,
+  useAttachments, getCategoryLabel,
+  TRUCK_CATEGORIES, TRAILER_CATEGORIES,
+  type EquipmentType, type AttachmentGroup,
+} from "@/lib/ui/driver/DocHub";
 
 // Types
 // ─────────────────────────────────────────────────────────────
@@ -116,119 +122,14 @@ function fmtExpiryInline(dateStr: string | null | undefined, days: number | null
   } catch { return dateStr; }
 }
 
+
 // ─────────────────────────────────────────────────────────────
-// AttachmentBtn — tap to attach, preview, replace/remove
-// Works on mobile (camera sheet) and desktop (file picker)
+// PermitRow — read-only row with paperclip indicator
 // ─────────────────────────────────────────────────────────────
 
-function AttachmentBtn() {
-  const [file, setFile] = useState<File | null>(null);
-  const [preview, setPreview] = useState<string | null>(null);
-  const [showPreview, setShowPreview] = useState(false);
-  const inputRef = React.useRef<HTMLInputElement>(null);
-
-  function handleFile(f: File | null) {
-    if (!f) return;
-    setFile(f);
-    if (f.type.startsWith("image/")) {
-      const reader = new FileReader();
-      reader.onload = e => setPreview(e.target?.result as string);
-      reader.readAsDataURL(f);
-    } else {
-      setPreview(null); // PDF/doc — no image preview
-    }
-  }
-
-  function openPicker() {
-    if (file) { setShowPreview(true); return; }
-    inputRef.current?.click();
-  }
-
-  function remove(e: React.MouseEvent) {
-    e.stopPropagation();
-    setFile(null); setPreview(null); setShowPreview(false);
-    if (inputRef.current) inputRef.current.value = "";
-  }
-
-  const hasFile = !!file;
-
-  return (
-    <>
-      {/* Hidden file input — accept=* so iOS shows camera+files sheet */}
-      <input
-        ref={inputRef}
-        type="file"
-        accept="image/*,application/pdf,.pdf,.doc,.docx,.xls,.xlsx"
-        capture={undefined}  // Don't force camera — let browser/OS show the full share sheet
-        style={{ display: "none" }}
-        onChange={e => handleFile(e.target.files?.[0] ?? null)}
-      />
-
-      <button
-        type="button"
-        title={hasFile ? `Attached: ${file!.name}` : "Attach file"}
-        style={{
-          background: "none", border: "none", cursor: "pointer",
-          padding: "0 2px", lineHeight: 1, display: "flex", alignItems: "center",
-          color: hasFile ? T.accent : T.muted, fontSize: 13,
-          WebkitTapHighlightColor: "transparent",
-          minWidth: 22, minHeight: 22, justifyContent: "center",
-        }}
-        onClick={openPicker}
-      >
-        📎
-      </button>
-
-      {/* Preview overlay */}
-      {showPreview && file && (
-        <div
-          style={{ position: "fixed", inset: 0, zIndex: 2000, background: "rgba(0,0,0,0.85)",
-            display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}
-          onClick={() => setShowPreview(false)}
-        >
-          <div
-            style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12,
-              padding: 16, maxWidth: 480, width: "100%", maxHeight: "80vh", overflow: "auto" }}
-            onClick={e => e.stopPropagation()}
-          >
-            <div style={{ fontWeight: 700, fontSize: 13, color: T.text, marginBottom: 8,
-              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
-              {file.name}
-            </div>
-            {preview
-              ? <img src={preview} alt="attachment" style={{ width: "100%", borderRadius: 8, marginBottom: 12 }} />
-              : <div style={{ color: T.muted, fontSize: 12, marginBottom: 12, padding: "20px 0", textAlign: "center" as const }}>
-                  📄 {file.name}
-                </div>
-            }
-            <div style={{ display: "flex", gap: 8 }}>
-              <button
-                type="button"
-                style={{ ...css.btn("subtle"), flex: 1, textAlign: "center" as const }}
-                onClick={() => { setShowPreview(false); inputRef.current?.click(); }}
-              >Replace</button>
-              <button
-                type="button"
-                style={{ ...css.btn("danger"), flex: 1, textAlign: "center" as const }}
-                onClick={remove}
-              >Remove</button>
-              <button
-                type="button"
-                style={{ ...css.btn("ghost"), flex: 1, textAlign: "center" as const }}
-                onClick={() => setShowPreview(false)}
-              >Close</button>
-            </div>
-          </div>
-        </div>
-      )}
-    </>
-  );
-}
-
-
-
-function PermitRow({ label, date, enforcement, extra }: {
+function PermitRow({ label, date, enforcement, extra, category, hasDoc, onDocOpen }: {
   label: string; date: string | null; enforcement?: string | null; extra?: React.ReactNode;
+  category?: string; hasDoc?: boolean; onDocOpen?: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const days    = daysUntil(date);
@@ -251,6 +152,9 @@ function PermitRow({ label, date, enforcement, extra }: {
           color: date ? color : T.muted, whiteSpace: "nowrap" as const, flexShrink: 0 }}>
           {date ? fmtExpiryInline(date, days) : "—"}
         </span>
+        {category !== undefined && (
+          <AttachmentIndicator hasDoc={hasDoc ?? false} onOpen={() => onDocOpen?.()} />
+        )}
         {hasExtra && (
           <span style={{ color: T.muted, fontSize: 9, flexShrink: 0,
             transform: expanded ? "rotate(180deg)" : "none", transition: "transform 150ms", display: "inline-block" }}>▼</span>
@@ -291,9 +195,8 @@ function PermitEditRow({ label, expVal, onExpChange, enfVal, onEnfChange, extra 
         >{label}</span>
         <input type="date" value={expVal} onChange={e => onExpChange(e.target.value)}
           style={{ ...css.input, ...sm, flex: 1, minWidth: 0 }} />
-        {/* 📎 · ☑ · ▼ */}
+        {/* ☑ · ▼ */}
         <div style={{ display: "flex", alignItems: "center", gap: 2, flexShrink: 0 }}>
-          <AttachmentBtn />
           <input type="checkbox" checked={checked} onChange={e => setChecked(e.target.checked)}
             style={{ width: 13, height: 13, accentColor: T.accent, cursor: "pointer", margin: "0 2px" }} />
           <button type="button" title="Details"
@@ -368,13 +271,18 @@ function CompartmentEditor({ comps, onChange }: { comps: Compartment[]; onChange
 // TruckCard — collapsed + expanded permit view
 // ─────────────────────────────────────────────────────────────
 
-function TruckCard({ truck, onEdit, otherPermits }: { truck: Truck; onEdit: () => void; otherPermits?: OtherPermit[] }) {
+function TruckCard({ truck, companyId, onEdit, otherPermits }: {
+  truck: Truck; companyId: string; onEdit: () => void; otherPermits?: OtherPermit[]
+}) {
   const [open, setOpen] = useState(false);
+  const [hubOpen, setHubOpen]       = useState(false);
+  const [previewGroup, setPreviewGroup] = useState<AttachmentGroup | null>(null);
+
+  const { hasDoc, groups, reload } = useAttachments("truck", truck.truck_id, companyId);
 
   const statusColor = truck.status_code === "OOS" || truck.status_code === "MAINT" ? T.danger
     : truck.status_code === "AVAIL" ? T.success : T.muted;
 
-  // Collect all permit dates to find soonest expiry
   const allDates = [
     truck.reg_expiration_date, truck.inspection_expiration_date,
     truck.ifta_expiration_date, truck.phmsa_expiration_date,
@@ -390,7 +298,13 @@ function TruckCard({ truck, onEdit, otherPermits }: { truck: Truck; onEdit: () =
   const warnBadge = soonestDays != null && soonestDays <= 30;
   const badgeColor = expiryColor(soonestDays);
 
+  function openDocForCategory(cat: string) {
+    const g = groups.find(g => g.category === cat);
+    if (g) setPreviewGroup(g);
+  }
+
   return (
+    <>
     <div style={{ ...css.card, padding: 0, marginBottom: 8, overflow: "hidden" }}>
       {/* Header row — tap anywhere to expand */}
       <div
@@ -401,7 +315,6 @@ function TruckCard({ truck, onEdit, otherPermits }: { truck: Truck; onEdit: () =
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" as const }}>
             <span style={{ fontWeight: 800, fontSize: 16, color: T.text }}>{truck.truck_name}</span>
-            {/* Status badge */}
             {truck.status_code && (
               <span style={{
                 fontSize: 10, fontWeight: 900, padding: "2px 6px", borderRadius: 4,
@@ -410,7 +323,6 @@ function TruckCard({ truck, onEdit, otherPermits }: { truck: Truck; onEdit: () =
                 color: statusColor, letterSpacing: 0.5,
               }}>{truck.status_code}</span>
             )}
-            {/* Expiry warning badge */}
             {warnBadge && (
               <span style={{ fontSize: 10, fontWeight: 900, padding: "2px 6px", borderRadius: 4,
                 background: "rgba(220,60,40,0.15)", color: badgeColor, letterSpacing: 0.3 }}>
@@ -433,8 +345,12 @@ function TruckCard({ truck, onEdit, otherPermits }: { truck: Truck; onEdit: () =
           )}
         </div>
         <div style={{ display: "flex", flexDirection: "column" as const, alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
-          <button type="button" style={{ ...css.btn("subtle"), padding: "4px 12px", fontSize: 11 }}
-            onClick={e => { e.stopPropagation(); onEdit(); }}>Edit</button>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button type="button" style={{ ...css.btn("subtle"), padding: "4px 10px", fontSize: 11 }}
+              onClick={e => { e.stopPropagation(); setHubOpen(true); }}>📎 Docs</button>
+            <button type="button" style={{ ...css.btn("subtle"), padding: "4px 12px", fontSize: 11 }}
+              onClick={e => { e.stopPropagation(); onEdit(); }}>Edit</button>
+          </div>
           <span style={{ fontSize: 10, color: T.muted, transform: open ? "rotate(180deg)" : "none",
             transition: "transform 150ms", display: "inline-block" }}>▼</span>
         </div>
@@ -445,14 +361,12 @@ function TruckCard({ truck, onEdit, otherPermits }: { truck: Truck; onEdit: () =
         <div style={{ borderTop: `1px solid ${T.border}`, padding: "10px 12px 10px" }}
           onClick={e => e.stopPropagation()}>
 
-          {/* Spec line */}
           {(truck.make || truck.model || truck.year) && (
             <div style={{ fontSize: 12, color: T.muted, marginBottom: 10 }}>
               {[truck.year, truck.make, truck.model].filter(Boolean).join(" ")}
             </div>
           )}
 
-          {/* Notes */}
           {truck.notes && (
             <div style={{ fontSize: 12, color: "rgba(255,255,255,0.60)", background: "rgba(255,255,255,0.04)",
               borderRadius: 8, padding: "8px 10px", marginBottom: 10, lineHeight: 1.5,
@@ -462,26 +376,49 @@ function TruckCard({ truck, onEdit, otherPermits }: { truck: Truck; onEdit: () =
           )}
 
           <SubSectionTitle>Permit Book</SubSectionTitle>
-          <PermitRow label="Registration"               date={truck.reg_expiration_date}         enforcement={truck.reg_enforcement_date} />
+          <PermitRow label="Registration"               date={truck.reg_expiration_date}         enforcement={truck.reg_enforcement_date}
+            category="registration"      hasDoc={hasDoc("registration")}      onDocOpen={() => openDocForCategory("registration")} />
           <PermitRow label="Annual Inspection"           date={truck.inspection_expiration_date}
+            category="annual_inspection" hasDoc={hasDoc("annual_inspection")} onDocOpen={() => openDocForCategory("annual_inspection")}
             extra={(truck.inspection_shop || truck.inspection_issue_date) ? (
               <div style={{ fontSize: 11, color: T.muted }}>
                 {[truck.inspection_shop, truck.inspection_issue_date && `Issued ${fmtDate(truck.inspection_issue_date)}`].filter(Boolean).join(" · ")}
               </div>
             ) : null}
           />
-          <PermitRow label="IFTA Permit + Decals"       date={truck.ifta_expiration_date}        enforcement={truck.ifta_enforcement_date} />
-          <PermitRow label="PHMSA HazMat Permit"        date={truck.phmsa_expiration_date} />
-          <PermitRow label="Alliance HazMat Permit"     date={truck.alliance_expiration_date} />
-          <PermitRow label="Fleet Insurance Cab Card"   date={truck.fleet_ins_expiration_date} />
-          <PermitRow label="HazMat Transportation Lic"  date={truck.hazmat_lic_expiration_date} />
-          <PermitRow label="Inner Bridge Permit"        date={truck.inner_bridge_expiration_date} />
+          <PermitRow label="IFTA Permit + Decals"       date={truck.ifta_expiration_date}        enforcement={truck.ifta_enforcement_date}
+            category="ifta"              hasDoc={hasDoc("ifta")}              onDocOpen={() => openDocForCategory("ifta")} />
+          <PermitRow label="PHMSA HazMat Permit"        date={truck.phmsa_expiration_date}
+            category="phmsa_hazmat"      hasDoc={hasDoc("phmsa_hazmat")}      onDocOpen={() => openDocForCategory("phmsa_hazmat")} />
+          <PermitRow label="Alliance HazMat Permit"     date={truck.alliance_expiration_date}
+            category="alliance_hazmat"   hasDoc={hasDoc("alliance_hazmat")}   onDocOpen={() => openDocForCategory("alliance_hazmat")} />
+          <PermitRow label="Fleet Insurance Cab Card"   date={truck.fleet_ins_expiration_date}
+            category="fleet_insurance"   hasDoc={hasDoc("fleet_insurance")}   onDocOpen={() => openDocForCategory("fleet_insurance")} />
+          <PermitRow label="HazMat Transportation Lic"  date={truck.hazmat_lic_expiration_date}
+            category="hazmat_lic"        hasDoc={hasDoc("hazmat_lic")}        onDocOpen={() => openDocForCategory("hazmat_lic")} />
+          <PermitRow label="Inner Bridge Permit"        date={truck.inner_bridge_expiration_date}
+            category="inner_bridge"      hasDoc={hasDoc("inner_bridge")}      onDocOpen={() => openDocForCategory("inner_bridge")} />
           {(otherPermits ?? []).map((p, i) => (
-            <PermitRow key={i} label={p.label || "Other Permit"} date={p.expiration_date || null} />
+            <PermitRow key={i} label={p.label || "Other Permit"} date={p.expiration_date || null}
+              category="other" hasDoc={hasDoc("other")} onDocOpen={() => openDocForCategory("other")} />
           ))}
         </div>
       )}
     </div>
+
+    {hubOpen && (
+      <DocHubModal
+        equipmentType="truck"
+        equipmentId={truck.truck_id}
+        equipmentName={truck.truck_name}
+        companyId={companyId}
+        onClose={() => { setHubOpen(false); reload(); }}
+      />
+    )}
+    {previewGroup && (
+      <DocPreviewModal group={previewGroup} onClose={() => setPreviewGroup(null)} />
+    )}
+    </>
   );
 }
 
@@ -489,8 +426,18 @@ function TruckCard({ truck, onEdit, otherPermits }: { truck: Truck; onEdit: () =
 // TrailerCard — collapsed + expanded
 // ─────────────────────────────────────────────────────────────
 
-function TrailerCard({ trailer, onEdit }: { trailer: Trailer; onEdit: () => void }) {
+function TrailerCard({ trailer, companyId, onEdit }: { trailer: Trailer; companyId: string; onEdit: () => void }) {
   const [open, setOpen] = useState(false);
+  const [hubOpen, setHubOpen]           = useState(false);
+  const [previewGroup, setPreviewGroup] = useState<AttachmentGroup | null>(null);
+
+  const { hasDoc, groups, reload } = useAttachments("trailer", trailer.trailer_id, companyId);
+
+  function openDocForCategory(cat: string) {
+    const g = groups.find(g => g.category === cat);
+    if (g) setPreviewGroup(g);
+  }
+
   const comps = trailer.compartments ?? [];
   const totalGal = comps.reduce((s, c) => s + c.max_gallons, 0);
   const compSummary = comps.length > 0
@@ -520,6 +467,7 @@ function TrailerCard({ trailer, onEdit }: { trailer: Trailer; onEdit: () => void
   const badgeColor = expiryColor(soonestDays);
 
   return (
+    <>
     <div style={{ ...css.card, padding: 0, marginBottom: 8, overflow: "hidden" }}>
       {/* Header row */}
       <div
@@ -561,8 +509,12 @@ function TrailerCard({ trailer, onEdit }: { trailer: Trailer; onEdit: () => void
           )}
         </div>
         <div style={{ display: "flex", flexDirection: "column" as const, alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
-          <button type="button" style={{ ...css.btn("subtle"), padding: "4px 12px", fontSize: 11 }}
-            onClick={e => { e.stopPropagation(); onEdit(); }}>Edit</button>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button type="button" style={{ ...css.btn("subtle"), padding: "4px 10px", fontSize: 11 }}
+              onClick={e => { e.stopPropagation(); setHubOpen(true); }}>📎 Docs</button>
+            <button type="button" style={{ ...css.btn("subtle"), padding: "4px 12px", fontSize: 11 }}
+              onClick={e => { e.stopPropagation(); onEdit(); }}>Edit</button>
+          </div>
           <span style={{ fontSize: 10, color: T.muted, transform: open ? "rotate(180deg)" : "none",
             transition: "transform 150ms", display: "inline-block" }}>▼</span>
         </div>
@@ -594,8 +546,10 @@ function TrailerCard({ trailer, onEdit }: { trailer: Trailer; onEdit: () => void
           )}
 
           <SubSectionTitle>Permit Book</SubSectionTitle>
-          <PermitRow label="Trailer Registration"  date={trailer.trailer_reg_expiration_date} enforcement={trailer.trailer_reg_enforcement_date} />
+          <PermitRow label="Trailer Registration"  date={trailer.trailer_reg_expiration_date} enforcement={trailer.trailer_reg_enforcement_date}
+            category="trailer_registration" hasDoc={hasDoc("trailer_registration")} onDocOpen={() => openDocForCategory("trailer_registration")} />
           <PermitRow label="Annual Inspection"      date={trailer.trailer_inspection_expiration_date}
+            category="annual_inspection"    hasDoc={hasDoc("annual_inspection")}    onDocOpen={() => openDocForCategory("annual_inspection")}
             extra={(trailer.trailer_inspection_shop || trailer.trailer_inspection_issue_date) ? (
               <div style={{ fontSize: 11, color: T.muted }}>
                 {[trailer.trailer_inspection_shop, trailer.trailer_inspection_issue_date && `Issued ${fmtDate(trailer.trailer_inspection_issue_date)}`].filter(Boolean).join(" · ")}
@@ -605,19 +559,34 @@ function TrailerCard({ trailer, onEdit }: { trailer: Trailer; onEdit: () => void
 
           {tankDates.length > 0 && <SubSectionTitle>Tank Inspections</SubSectionTitle>}
           {[
-            { label: "V — Annual External Visual",   date: trailer.tank_v_expiration_date },
-            { label: "K — Annual Leakage Test",      date: trailer.tank_k_expiration_date },
-            { label: "L — Annual Lining Inspection", date: trailer.tank_l_expiration_date },
-            { label: "T — 2yr Thickness Test",       date: trailer.tank_t_expiration_date },
-            { label: "I — 5yr Internal Visual",      date: trailer.tank_i_expiration_date },
-            { label: "P — 5yr Pressure Test",        date: trailer.tank_p_expiration_date },
-            { label: "UC — 5yr Upper Coupler",       date: trailer.tank_uc_expiration_date },
+            { label: "V — Annual External Visual",   date: trailer.tank_v_expiration_date,  cat: "tank_v"  },
+            { label: "K — Annual Leakage Test",      date: trailer.tank_k_expiration_date,  cat: "tank_k"  },
+            { label: "L — Annual Lining Inspection", date: trailer.tank_l_expiration_date,  cat: "tank_l"  },
+            { label: "T — 2yr Thickness Test",       date: trailer.tank_t_expiration_date,  cat: "tank_t"  },
+            { label: "I — 5yr Internal Visual",      date: trailer.tank_i_expiration_date,  cat: "tank_i"  },
+            { label: "P — 5yr Pressure Test",        date: trailer.tank_p_expiration_date,  cat: "tank_p"  },
+            { label: "UC — 5yr Upper Coupler",       date: trailer.tank_uc_expiration_date, cat: "tank_uc" },
           ].filter(r => !!r.date).map(r => (
-            <PermitRow key={r.label} label={r.label} date={r.date} />
+            <PermitRow key={r.cat} label={r.label} date={r.date}
+              category={r.cat} hasDoc={hasDoc(r.cat)} onDocOpen={() => openDocForCategory(r.cat)} />
           ))}
         </div>
       )}
     </div>
+
+    {hubOpen && (
+      <DocHubModal
+        equipmentType="trailer"
+        equipmentId={trailer.trailer_id}
+        equipmentName={trailer.trailer_name}
+        companyId={companyId}
+        onClose={() => { setHubOpen(false); reload(); }}
+      />
+    )}
+    {previewGroup && (
+      <DocPreviewModal group={previewGroup} onClose={() => setPreviewGroup(null)} />
+    )}
+    </>
   );
 }
 
@@ -942,9 +911,8 @@ function TankEditRow({ label, dateVal, onDateChange, onRemove }: {
         >{label}</span>
         <input type="date" value={dateVal} onChange={e => onDateChange(e.target.value)}
           style={{ ...css.input, ...sm, width: 130, flexShrink: 0 }} />
-        {/* 📎 · ☑ · ▼ on RIGHT */}
+        {/* ☑ · ▼ on RIGHT */}
         <div style={{ display: "flex", alignItems: "center", gap: 2, flexShrink: 0 }}>
-          <AttachmentBtn />
           <input type="checkbox" checked={checked} onChange={e => setChecked(e.target.checked)}
             style={{ width: 13, height: 13, accentColor: T.accent, cursor: "pointer", margin: "0 2px" }} />
           <button type="button"
@@ -1213,3 +1181,4 @@ function TrailerModal({ trailer, companyId, onClose, onDone }: {
 
 export type { Truck, Trailer, OtherPermit, Compartment };
 export { TruckCard, TrailerCard, TruckModal, TrailerModal };
+

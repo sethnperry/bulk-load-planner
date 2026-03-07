@@ -1020,7 +1020,7 @@ export default function AdminPage() {
               </select>
             </div>
             {filteredTrucks.length === 0 && <div style={{ ...css.card, color: T.muted, fontSize: 13 }}>No trucks match your filter.</div>}
-            {filteredTrucks.map(t => <TruckCard key={t.truck_id} truck={t} onEdit={() => setTruckModal(t)} otherPermits={truckOtherPermits[t.truck_id]} />)}
+            {filteredTrucks.map(t => <TruckCard key={t.truck_id} truck={t} companyId={companyId!} onEdit={() => setTruckModal(t)} otherPermits={truckOtherPermits[t.truck_id]} />)}
           </>
         )}
       </section>
@@ -1049,7 +1049,7 @@ export default function AdminPage() {
               </select>
             </div>
             {filteredTrailers.length === 0 && <div style={{ ...css.card, color: T.muted, fontSize: 13 }}>No trailers match your filter.</div>}
-            {filteredTrailers.map(t => <TrailerCard key={t.trailer_id} trailer={t} onEdit={() => setTrailerModal(t)} />)}
+            {filteredTrailers.map(t => <TrailerCard key={t.trailer_id} trailer={t} companyId={companyId!} onEdit={() => setTrailerModal(t)} />)}
           </>
         )}
       </section>
