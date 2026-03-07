@@ -139,9 +139,9 @@ function PermitRow({ label, date, enforcement, extra, category, hasDoc, onDocOpe
   const hasExtra = !!(enforcement || extra);
 
   return (
-    <div style={{ borderBottom: `1px solid ${T.border}22`, marginBottom: 2 }}>
+    <div style={{ borderBottom: `1px solid ${T.border}18`, marginBottom: 0 }}>
       <div
-        style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 36,
+        style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 30,
           cursor: hasExtra ? "pointer" : "default", userSelect: "none" as const }}
         onClick={() => hasExtra && setExpanded(v => !v)}
       >
@@ -267,10 +267,17 @@ function TruckCard({ truck, companyId, onEdit, otherPermits }: {
   truck: Truck; companyId: string; onEdit: () => void; otherPermits?: OtherPermit[]
 }) {
   const [open, setOpen] = useState(false);
-  const [hubOpen, setHubOpen]       = useState(false);
+  const [hubOpen, setHubOpen]           = useState(false);
   const [previewGroup, setPreviewGroup] = useState<AttachmentGroup | null>(null);
 
   const { hasDoc, groups, reload } = useAttachments("truck", truck.truck_id, companyId);
+
+  // Reload attachment state whenever card is expanded (catches uploads done while collapsed)
+  const prevOpen = React.useRef(false);
+  useEffect(() => {
+    if (open && !prevOpen.current) reload();
+    prevOpen.current = open;
+  }, [open, reload]);
 
   const statusColor = truck.status_code === "OOS" || truck.status_code === "MAINT" ? T.danger
     : truck.status_code === "AVAIL" ? T.success : T.muted;
@@ -283,11 +290,10 @@ function TruckCard({ truck, companyId, onEdit, otherPermits }: {
     ...(otherPermits ?? []).map(p => p.expiration_date || null),
   ].filter(Boolean) as string[];
   const soonestDays = allDates.reduce<number | null>((min, d) => {
-    const n = daysUntil(d);
-    if (n == null) return min;
+    const n = daysUntil(d); if (n == null) return min;
     return min == null ? n : Math.min(min, n);
   }, null);
-  const warnBadge = soonestDays != null && soonestDays <= 30;
+  const warnBadge  = soonestDays != null && soonestDays <= 30;
   const badgeColor = expiryColor(soonestDays);
 
   function openDocForCategory(cat: string) {
@@ -298,44 +304,40 @@ function TruckCard({ truck, companyId, onEdit, otherPermits }: {
   return (
     <>
     <div style={{ ...css.card, padding: 0, marginBottom: 8, overflow: "hidden" }}>
-      {/* Header row — tap anywhere to expand */}
+
+      {/* ── Collapsed header ── */}
       <div
         onClick={() => setOpen(v => !v)}
-        style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
-          padding: "12px 12px 8px", cursor: "pointer", userSelect: "none" as const, gap: 10 }}
+        style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between",
+          padding: "12px 12px 10px", cursor: "pointer", userSelect: "none" as const, gap: 10 }}
       >
+        {/* LEFT: unit + status + region/local + status location */}
         <div style={{ minWidth: 0, flex: 1 }}>
+          {/* Row 1: unit name + status badge */}
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" as const }}>
             <span style={{ fontWeight: 800, fontSize: 16, color: T.text }}>{truck.truck_name}</span>
             {truck.status_code && (
-              <span style={{
-                fontSize: 10, fontWeight: 900, padding: "2px 6px", borderRadius: 4,
+              <span style={{ fontSize: 10, fontWeight: 900, padding: "2px 6px", borderRadius: 4,
                 background: statusColor === T.danger ? "rgba(220,60,40,0.18)"
                   : statusColor === T.success ? "rgba(40,180,80,0.13)" : "rgba(255,255,255,0.07)",
-                color: statusColor, letterSpacing: 0.5,
-              }}>{truck.status_code}</span>
-            )}
-            {warnBadge && (
-              <span style={{ fontSize: 10, fontWeight: 900, padding: "2px 6px", borderRadius: 4,
-                background: "rgba(220,60,40,0.15)", color: badgeColor, letterSpacing: 0.3 }}>
-                ⚠ {soonestDays! < 0 ? "EXPIRED" : soonestDays === 0 ? "EXP TODAY" : `EXP ${soonestDays}d`}
-              </span>
+                color: statusColor, letterSpacing: 0.5 }}>{truck.status_code}</span>
             )}
           </div>
-          <div style={{ display: "flex", gap: 10, marginTop: 3, flexWrap: "wrap" as const }}>
-            {(truck.region || truck.local_area) && (
-              <span style={{ fontSize: 11, color: T.muted }}>{[truck.region, truck.local_area].filter(Boolean).join(" · ")}</span>
-            )}
-            {truck.status_location && (
-              <span style={{ fontSize: 11, color: T.muted }}>📍 {truck.status_location}</span>
-            )}
-          </div>
-          {(truck.vin_number || truck.plate_number) && (
-            <div style={{ fontSize: 11, color: T.muted, marginTop: 2, letterSpacing: 0.3 }}>
-              {[truck.vin_number, truck.plate_number && `Plate ${truck.plate_number}`].filter(Boolean).join(" · ")}
+          {/* Row 2: region · local area — tight to unit name */}
+          {(truck.region || truck.local_area) && (
+            <div style={{ fontSize: 11, color: T.muted, marginTop: 2 }}>
+              {[truck.region, truck.local_area].filter(Boolean).join(" · ")}
+            </div>
+          )}
+          {/* Row 3: status location — full width */}
+          {truck.status_location && (
+            <div style={{ fontSize: 11, color: T.muted, marginTop: 1 }}>
+              📍 {truck.status_location}
             </div>
           )}
         </div>
+
+        {/* RIGHT: Docs + Edit buttons, then expiry badge, then chevron */}
         <div style={{ display: "flex", flexDirection: "column" as const, alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
           <div style={{ display: "flex", gap: 6 }}>
             <button type="button" style={{ ...css.btn("subtle"), padding: "4px 10px", fontSize: 11 }}
@@ -343,25 +345,45 @@ function TruckCard({ truck, companyId, onEdit, otherPermits }: {
             <button type="button" style={{ ...css.btn("subtle"), padding: "4px 12px", fontSize: 11 }}
               onClick={e => { e.stopPropagation(); onEdit(); }}>Edit</button>
           </div>
+          {warnBadge && (
+            <span style={{ fontSize: 10, fontWeight: 900, padding: "2px 6px", borderRadius: 4,
+              background: "rgba(220,60,40,0.15)", color: badgeColor, letterSpacing: 0.3, textAlign: "right" as const }}>
+              ⚠ {soonestDays! < 0 ? "EXPIRED" : soonestDays === 0 ? "EXP TODAY" : `EXP ${soonestDays}d`}
+            </span>
+          )}
           <span style={{ fontSize: 10, color: T.muted, transform: open ? "rotate(180deg)" : "none",
             transition: "transform 150ms", display: "inline-block" }}>▼</span>
         </div>
       </div>
 
-      {/* Expanded detail section */}
+      {/* ── Expanded section ── */}
       {open && (
-        <div style={{ borderTop: `1px solid ${T.border}`, padding: "10px 12px 10px" }}
+        <div style={{ borderTop: `1px solid ${T.border}`, padding: "10px 12px" }}
           onClick={e => e.stopPropagation()}>
 
-          {(truck.make || truck.model || truck.year) && (
-            <div style={{ fontSize: 12, color: T.muted, marginBottom: 10 }}>
-              {[truck.year, truck.make, truck.model].filter(Boolean).join(" ")}
+          {/* Identification block */}
+          <div style={{ marginBottom: 8 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.8, textTransform: "uppercase" as const,
+              color: T.muted, marginBottom: 4 }}>Identification</div>
+            <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", columnGap: 12, rowGap: 1 }}>
+              {truck.year || truck.make || truck.model ? <>
+                <span style={{ fontSize: 11, color: T.muted }}>Vehicle</span>
+                <span style={{ fontSize: 11, color: T.text }}>{[truck.year, truck.make, truck.model].filter(Boolean).join(" ")}</span>
+              </> : null}
+              {truck.vin_number ? <>
+                <span style={{ fontSize: 11, color: T.muted }}>VIN</span>
+                <span style={{ fontSize: 11, color: T.text, wordBreak: "break-all" as const }}>{truck.vin_number}</span>
+              </> : null}
+              {truck.plate_number ? <>
+                <span style={{ fontSize: 11, color: T.muted }}>Plate</span>
+                <span style={{ fontSize: 11, color: T.text }}>{truck.plate_number}</span>
+              </> : null}
             </div>
-          )}
+          </div>
 
           {truck.notes && (
             <div style={{ fontSize: 12, color: "rgba(255,255,255,0.60)", background: "rgba(255,255,255,0.04)",
-              borderRadius: 8, padding: "8px 10px", marginBottom: 10, lineHeight: 1.5,
+              borderRadius: 8, padding: "8px 10px", marginBottom: 8, lineHeight: 1.5,
               borderLeft: `3px solid ${T.accent}40` }}>
               {truck.notes}
             </div>
@@ -400,16 +422,12 @@ function TruckCard({ truck, companyId, onEdit, otherPermits }: {
 
     {hubOpen && (
       <DocHubModal
-        equipmentType="truck"
-        equipmentId={truck.truck_id}
-        equipmentName={truck.truck_name}
-        companyId={companyId}
+        equipmentType="truck" equipmentId={truck.truck_id}
+        equipmentName={truck.truck_name} companyId={companyId}
         onClose={() => { setHubOpen(false); reload(); }}
       />
     )}
-    {previewGroup && (
-      <DocPreviewModal group={previewGroup} onClose={() => setPreviewGroup(null)} />
-    )}
+    {previewGroup && <DocPreviewModal group={previewGroup} onClose={() => setPreviewGroup(null)} />}
     </>
   );
 }
@@ -424,6 +442,13 @@ function TrailerCard({ trailer, companyId, onEdit }: { trailer: Trailer; company
   const [previewGroup, setPreviewGroup] = useState<AttachmentGroup | null>(null);
 
   const { hasDoc, groups, reload } = useAttachments("trailer", trailer.trailer_id, companyId);
+
+  // Reload attachment state whenever card is expanded
+  const prevOpen = React.useRef(false);
+  useEffect(() => {
+    if (open && !prevOpen.current) reload();
+    prevOpen.current = open;
+  }, [open, reload]);
 
   function openDocForCategory(cat: string) {
     const g = groups.find(g => g.category === cat);
@@ -451,55 +476,49 @@ function TrailerCard({ trailer, companyId, onEdit }: { trailer: Trailer; company
     ...tankDates,
   ].filter(Boolean) as string[];
   const soonestDays = allDates.reduce<number | null>((min, d) => {
-    const n = daysUntil(d);
-    if (n == null) return min;
+    const n = daysUntil(d); if (n == null) return min;
     return min == null ? n : Math.min(min, n);
   }, null);
-  const warnBadge = soonestDays != null && soonestDays <= 30;
+  const warnBadge  = soonestDays != null && soonestDays <= 30;
   const badgeColor = expiryColor(soonestDays);
 
   return (
     <>
     <div style={{ ...css.card, padding: 0, marginBottom: 8, overflow: "hidden" }}>
-      {/* Header row */}
+
+      {/* ── Collapsed header ── */}
       <div
         onClick={() => setOpen(v => !v)}
-        style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
-          padding: "12px 12px 8px", cursor: "pointer", userSelect: "none" as const, gap: 10 }}
+        style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between",
+          padding: "12px 12px 10px", cursor: "pointer", userSelect: "none" as const, gap: 10 }}
       >
+        {/* LEFT: unit + status + region/local + status location + comp summary */}
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" as const }}>
             <span style={{ fontWeight: 800, fontSize: 16, color: T.text }}>{trailer.trailer_name}</span>
             {trailer.status_code && (
-              <span style={{
-                fontSize: 10, fontWeight: 900, padding: "2px 6px", borderRadius: 4,
+              <span style={{ fontSize: 10, fontWeight: 900, padding: "2px 6px", borderRadius: 4,
                 background: statusColor === T.danger ? "rgba(220,60,40,0.18)"
                   : statusColor === T.success ? "rgba(40,180,80,0.13)" : "rgba(255,255,255,0.07)",
-                color: statusColor, letterSpacing: 0.5,
-              }}>{trailer.status_code}</span>
-            )}
-            {warnBadge && (
-              <span style={{ fontSize: 10, fontWeight: 900, padding: "2px 6px", borderRadius: 4,
-                background: "rgba(220,60,40,0.15)", color: badgeColor, letterSpacing: 0.3 }}>
-                ⚠ {soonestDays! < 0 ? "EXPIRED" : soonestDays === 0 ? "EXP TODAY" : `EXP ${soonestDays}d`}
-              </span>
+                color: statusColor, letterSpacing: 0.5 }}>{trailer.status_code}</span>
             )}
           </div>
-          <div style={{ display: "flex", gap: 10, marginTop: 3, flexWrap: "wrap" as const }}>
-            {(trailer.region || trailer.local_area) && (
-              <span style={{ fontSize: 11, color: T.muted }}>{[trailer.region, trailer.local_area].filter(Boolean).join(" · ")}</span>
-            )}
-            {trailer.status_location && (
-              <span style={{ fontSize: 11, color: T.muted }}>📍 {trailer.status_location}</span>
-            )}
-          </div>
-          {compSummary && <div style={{ fontSize: 11, color: T.muted, marginTop: 2 }}>{compSummary}</div>}
-          {(trailer.vin_number || trailer.plate_number) && (
-            <div style={{ fontSize: 11, color: T.muted, marginTop: 1, letterSpacing: 0.3 }}>
-              {[trailer.vin_number, trailer.plate_number && `Plate ${trailer.plate_number}`].filter(Boolean).join(" · ")}
+          {(trailer.region || trailer.local_area) && (
+            <div style={{ fontSize: 11, color: T.muted, marginTop: 2 }}>
+              {[trailer.region, trailer.local_area].filter(Boolean).join(" · ")}
             </div>
           )}
+          {trailer.status_location && (
+            <div style={{ fontSize: 11, color: T.muted, marginTop: 1 }}>
+              📍 {trailer.status_location}
+            </div>
+          )}
+          {compSummary && (
+            <div style={{ fontSize: 11, color: T.muted, marginTop: 1 }}>{compSummary}</div>
+          )}
         </div>
+
+        {/* RIGHT: Docs + Edit, expiry badge, chevron */}
         <div style={{ display: "flex", flexDirection: "column" as const, alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
           <div style={{ display: "flex", gap: 6 }}>
             <button type="button" style={{ ...css.btn("subtle"), padding: "4px 10px", fontSize: 11 }}
@@ -507,31 +526,55 @@ function TrailerCard({ trailer, companyId, onEdit }: { trailer: Trailer; company
             <button type="button" style={{ ...css.btn("subtle"), padding: "4px 12px", fontSize: 11 }}
               onClick={e => { e.stopPropagation(); onEdit(); }}>Edit</button>
           </div>
+          {warnBadge && (
+            <span style={{ fontSize: 10, fontWeight: 900, padding: "2px 6px", borderRadius: 4,
+              background: "rgba(220,60,40,0.15)", color: badgeColor, letterSpacing: 0.3, textAlign: "right" as const }}>
+              ⚠ {soonestDays! < 0 ? "EXPIRED" : soonestDays === 0 ? "EXP TODAY" : `EXP ${soonestDays}d`}
+            </span>
+          )}
           <span style={{ fontSize: 10, color: T.muted, transform: open ? "rotate(180deg)" : "none",
             transition: "transform 150ms", display: "inline-block" }}>▼</span>
         </div>
       </div>
 
-      {/* Expanded section */}
+      {/* ── Expanded section ── */}
       {open && (
-        <div style={{ borderTop: `1px solid ${T.border}`, padding: "10px 12px 10px" }}
+        <div style={{ borderTop: `1px solid ${T.border}`, padding: "10px 12px" }}
           onClick={e => e.stopPropagation()}>
 
-          {(trailer.make || trailer.model || trailer.year) && (
-            <div style={{ fontSize: 12, color: T.muted, marginBottom: 6 }}>
-              {[trailer.year, trailer.make, trailer.model].filter(Boolean).join(" ")}
+          {/* Identification block */}
+          <div style={{ marginBottom: 8 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.8, textTransform: "uppercase" as const,
+              color: T.muted, marginBottom: 4 }}>Identification</div>
+            <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", columnGap: 12, rowGap: 1 }}>
+              {(trailer.year || trailer.make || trailer.model) ? <>
+                <span style={{ fontSize: 11, color: T.muted }}>Vehicle</span>
+                <span style={{ fontSize: 11, color: T.text }}>{[trailer.year, trailer.make, trailer.model].filter(Boolean).join(" ")}</span>
+              </> : null}
+              {trailer.vin_number ? <>
+                <span style={{ fontSize: 11, color: T.muted }}>VIN</span>
+                <span style={{ fontSize: 11, color: T.text, wordBreak: "break-all" as const }}>{trailer.vin_number}</span>
+              </> : null}
+              {trailer.plate_number ? <>
+                <span style={{ fontSize: 11, color: T.muted }}>Plate</span>
+                <span style={{ fontSize: 11, color: T.text }}>{trailer.plate_number}</span>
+              </> : null}
+              {trailer.cg_max ? <>
+                <span style={{ fontSize: 11, color: T.muted }}>Max Weight</span>
+                <span style={{ fontSize: 11, color: T.text }}>{trailer.cg_max.toLocaleString()} lbs</span>
+              </> : null}
             </div>
-          )}
+          </div>
 
           {trailer.last_load_config && (
-            <div style={{ fontSize: 12, color: T.muted, marginBottom: 8 }}>
+            <div style={{ fontSize: 11, color: T.muted, marginBottom: 8 }}>
               Last loaded: {trailer.last_load_config}
             </div>
           )}
 
           {trailer.notes && (
             <div style={{ fontSize: 12, color: "rgba(255,255,255,0.60)", background: "rgba(255,255,255,0.04)",
-              borderRadius: 8, padding: "8px 10px", marginBottom: 10, lineHeight: 1.5,
+              borderRadius: 8, padding: "8px 10px", marginBottom: 8, lineHeight: 1.5,
               borderLeft: `3px solid ${T.accent}40` }}>
               {trailer.notes}
             </div>
@@ -551,13 +594,13 @@ function TrailerCard({ trailer, companyId, onEdit }: { trailer: Trailer; company
 
           {tankDates.length > 0 && <SubSectionTitle>Tank Inspections</SubSectionTitle>}
           {[
-            { label: "V — Annual External Visual",   date: trailer.tank_v_expiration_date,  cat: "tank_v"  },
-            { label: "K — Annual Leakage Test",      date: trailer.tank_k_expiration_date,  cat: "tank_k"  },
-            { label: "L — Annual Lining Inspection", date: trailer.tank_l_expiration_date,  cat: "tank_l"  },
-            { label: "T — 2yr Thickness Test",       date: trailer.tank_t_expiration_date,  cat: "tank_t"  },
-            { label: "I — 5yr Internal Visual",      date: trailer.tank_i_expiration_date,  cat: "tank_i"  },
-            { label: "P — 5yr Pressure Test",        date: trailer.tank_p_expiration_date,  cat: "tank_p"  },
-            { label: "UC — 5yr Upper Coupler",       date: trailer.tank_uc_expiration_date, cat: "tank_uc" },
+            { label: "V — External Visual",   date: trailer.tank_v_expiration_date,  cat: "tank_v"  },
+            { label: "K — Leakage Test",      date: trailer.tank_k_expiration_date,  cat: "tank_k"  },
+            { label: "L — Lining Inspection", date: trailer.tank_l_expiration_date,  cat: "tank_l"  },
+            { label: "T — Thickness Test",    date: trailer.tank_t_expiration_date,  cat: "tank_t"  },
+            { label: "I — Internal Visual",   date: trailer.tank_i_expiration_date,  cat: "tank_i"  },
+            { label: "P — Pressure Test",     date: trailer.tank_p_expiration_date,  cat: "tank_p"  },
+            { label: "UC — Upper Coupler",    date: trailer.tank_uc_expiration_date, cat: "tank_uc" },
           ].filter(r => !!r.date).map(r => (
             <PermitRow key={r.cat} label={r.label} date={r.date}
               category={r.cat} hasDoc={hasDoc(r.cat)} onDocOpen={() => openDocForCategory(r.cat)} />
@@ -568,16 +611,12 @@ function TrailerCard({ trailer, companyId, onEdit }: { trailer: Trailer; company
 
     {hubOpen && (
       <DocHubModal
-        equipmentType="trailer"
-        equipmentId={trailer.trailer_id}
-        equipmentName={trailer.trailer_name}
-        companyId={companyId}
+        equipmentType="trailer" equipmentId={trailer.trailer_id}
+        equipmentName={trailer.trailer_name} companyId={companyId}
         onClose={() => { setHubOpen(false); reload(); }}
       />
     )}
-    {previewGroup && (
-      <DocPreviewModal group={previewGroup} onClose={() => setPreviewGroup(null)} />
-    )}
+    {previewGroup && <DocPreviewModal group={previewGroup} onClose={() => setPreviewGroup(null)} />}
     </>
   );
 }

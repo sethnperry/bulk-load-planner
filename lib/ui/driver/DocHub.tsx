@@ -71,8 +71,9 @@ export function useAttachments(
   equipmentId: string | null,
   companyId: string | null,
 ) {
-  const [groups, setGroups] = useState<AttachmentGroup[]>([]);
+  const [groups, setGroups]   = useState<AttachmentGroup[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loaded, setLoaded]   = useState(false);
 
   const load = useCallback(async () => {
     if (!equipmentType || !equipmentId || !companyId) { setGroups([]); return; }
@@ -88,7 +89,6 @@ export function useAttachments(
     setLoading(false);
     if (!data) return;
 
-    // Group by category
     const map = new Map<string, AttachmentGroup>();
     for (const row of data as AttachmentRecord[]) {
       if (!map.has(row.category)) {
@@ -97,14 +97,14 @@ export function useAttachments(
       map.get(row.category)!.pages.push(row);
     }
     setGroups(Array.from(map.values()));
+    setLoaded(true);
   }, [equipmentType, equipmentId, companyId]);
 
   useEffect(() => { load(); }, [load]);
 
-  // Quick set of categories that have at least one doc
   const hasDoc = useCallback((category: string) => groups.some(g => g.category === category), [groups]);
 
-  return { groups, loading, reload: load, hasDoc };
+  return { groups, loading, loaded, reload: load, hasDoc };
 }
 
 // ─────────────────────────────────────────────────────────────
