@@ -20,9 +20,9 @@ type Truck = {
   region: string | null; local_area: string | null;
   status_code: string | null; status_location: string | null; in_use_by: string | null;
   in_use_by_name?: string | null;
-  reg_expiration_date: string | null; reg_enforcement_date: string | null;
+  reg_expiration_date: string | null; reg_enforcement_date: string | null; reg_notes: string | null;
   inspection_shop: string | null; inspection_issue_date: string | null; inspection_expiration_date: string | null;
-  ifta_expiration_date: string | null; ifta_enforcement_date: string | null;
+  ifta_expiration_date: string | null; ifta_enforcement_date: string | null; ifta_notes: string | null;
   phmsa_expiration_date: string | null; alliance_expiration_date: string | null;
   fleet_ins_expiration_date: string | null; hazmat_lic_expiration_date: string | null;
   inner_bridge_expiration_date: string | null;
@@ -38,7 +38,7 @@ type Trailer = {
   status_code: string | null; status_location: string | null; in_use_by: string | null;
   in_use_by_name?: string | null; last_load_config: string | null;
   compartments?: Compartment[];
-  trailer_reg_expiration_date: string | null; trailer_reg_enforcement_date: string | null;
+  trailer_reg_expiration_date: string | null; trailer_reg_enforcement_date: string | null; trailer_reg_notes: string | null;
   trailer_inspection_shop: string | null; trailer_inspection_issue_date: string | null;
   trailer_inspection_expiration_date: string | null;
   tank_v_expiration_date: string | null; tank_k_expiration_date: string | null;
@@ -175,13 +175,14 @@ function PermitRow({ label, date, enforcement, extra, category, hasDoc, onDocOpe
 // Tap label to reveal enforcement date + notes (if applicable)
 // ─────────────────────────────────────────────────────────────
 
-function PermitEditRow({ label, expVal, onExpChange, enfVal, onEnfChange, extra }: {
+function PermitEditRow({ label, expVal, onExpChange, enfVal, onEnfChange, notesVal, onNotesChange, extra }: {
   label: string;
   expVal: string; onExpChange: (v: string) => void;
   enfVal?: string; onEnfChange?: (v: string) => void;
+  notesVal?: string; onNotesChange?: (v: string) => void;
   extra?: React.ReactNode;
 }) {
-  const hasDetails = onEnfChange !== undefined || !!extra;
+  // Always expandable — every row can have notes
   const [open, setOpen] = useState(false);
 
   return (
@@ -190,20 +191,18 @@ function PermitEditRow({ label, expVal, onExpChange, enfVal, onEnfChange, extra 
         <span
           style={{ fontSize: 11, color: T.muted, width: 148, flexShrink: 0, overflow: "hidden",
             textOverflow: "ellipsis", whiteSpace: "nowrap" as const,
-            cursor: hasDetails ? "pointer" : "default", userSelect: "none" as const }}
-          onClick={() => hasDetails && setOpen(v => !v)}
+            cursor: "pointer", userSelect: "none" as const }}
+          onClick={() => setOpen(v => !v)}
         >
           {label}
-          {hasDetails && (
-            <span style={{ marginLeft: 4, fontSize: 8, color: T.muted, display: "inline-block",
-              transform: open ? "rotate(180deg)" : "none", transition: "transform 150ms" }}>▼</span>
-          )}
+          <span style={{ marginLeft: 4, fontSize: 8, color: T.muted, display: "inline-block",
+            transform: open ? "rotate(180deg)" : "none", transition: "transform 150ms" }}>▼</span>
         </span>
         <input type="date" value={expVal} onChange={e => onExpChange(e.target.value)}
           style={{ ...css.input, ...sm, flex: 1, minWidth: 0 }} />
       </div>
       {open && (
-        <div style={{ paddingLeft: 4, paddingTop: 5, display: "flex", flexDirection: "column" as const, gap: 5, paddingBottom: 4 }}>
+        <div style={{ paddingLeft: 4, paddingTop: 5, display: "flex", flexDirection: "column" as const, gap: 5, paddingBottom: 6 }}>
           {onEnfChange !== undefined && (
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <span style={{ fontSize: 10, color: T.muted, width: 148, flexShrink: 0 }}>Enforcement Date</span>
@@ -212,6 +211,16 @@ function PermitEditRow({ label, expVal, onExpChange, enfVal, onEnfChange, extra 
             </div>
           )}
           {extra}
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
+            <span style={{ fontSize: 10, color: T.muted, width: 148, flexShrink: 0, paddingTop: 6 }}>Notes</span>
+            <textarea
+              value={notesVal ?? ""} onChange={e => onNotesChange?.(e.target.value)}
+              placeholder="Issuing agency, account #, notes…"
+              rows={2}
+              style={{ ...css.input, ...sm, flex: 1, minWidth: 0, fontSize: 11,
+                resize: "vertical" as const, lineHeight: 1.4 }}
+            />
+          </div>
         </div>
       )}
     </div>
@@ -280,7 +289,8 @@ function TruckCard({ truck, companyId, onEdit, otherPermits }: {
   }, [open, reload]);
 
   const statusColor = truck.status_code === "OOS" || truck.status_code === "MAINT" ? T.danger
-    : truck.status_code === "AVAIL" ? T.success : T.muted;
+    : truck.status_code === "AVAIL" ? T.success
+    : truck.status_code === "COUPLED" ? T.info : T.muted;
 
   const allDates = [
     truck.reg_expiration_date, truck.inspection_expiration_date,
@@ -317,7 +327,8 @@ function TruckCard({ truck, companyId, onEdit, otherPermits }: {
             {truck.status_code && (
               <span style={{ fontSize: 10, fontWeight: 900, padding: "2px 6px", borderRadius: 4,
                 background: statusColor === T.danger ? "rgba(220,60,40,0.18)"
-                  : statusColor === T.success ? "rgba(40,180,80,0.13)" : "rgba(255,255,255,0.07)",
+                  : statusColor === T.success ? "rgba(40,180,80,0.13)"
+                  : statusColor === T.info ? "rgba(91,168,245,0.15)" : "rgba(255,255,255,0.07)",
                 color: statusColor, letterSpacing: 0.5 }}>{truck.status_code}</span>
             )}
           </div>
@@ -342,8 +353,8 @@ function TruckCard({ truck, companyId, onEdit, otherPermits }: {
             {[truck.region, truck.local_area].filter(Boolean).join(" · ")}
           </div>
         )}
-        {/* Row 4: status location — spans full card width */}
-        {truck.status_location && (
+        {/* Row 4: status location — hidden when COUPLED (managed via combo) */}
+        {truck.status_location && truck.status_code !== "COUPLED" && (
           <div style={{ fontSize: 11, color: T.muted, marginTop: 1,
             whiteSpace: "nowrap" as const, overflow: "hidden", textOverflow: "ellipsis" }}>
             📍 {truck.status_location}
@@ -452,7 +463,8 @@ function TrailerCard({ trailer, companyId, onEdit }: { trailer: Trailer; company
     : null;
 
   const statusColor = trailer.status_code === "OOS" || trailer.status_code === "MAINT" ? T.danger
-    : trailer.status_code === "AVAIL" ? T.success : T.muted;
+    : trailer.status_code === "AVAIL" ? T.success
+    : trailer.status_code === "COUPLED" ? T.info : T.muted;
 
   const tankDates = [
     trailer.tank_v_expiration_date, trailer.tank_k_expiration_date,
@@ -488,7 +500,8 @@ function TrailerCard({ trailer, companyId, onEdit }: { trailer: Trailer; company
             {trailer.status_code && (
               <span style={{ fontSize: 10, fontWeight: 900, padding: "2px 6px", borderRadius: 4,
                 background: statusColor === T.danger ? "rgba(220,60,40,0.18)"
-                  : statusColor === T.success ? "rgba(40,180,80,0.13)" : "rgba(255,255,255,0.07)",
+                  : statusColor === T.success ? "rgba(40,180,80,0.13)"
+                  : statusColor === T.info ? "rgba(91,168,245,0.15)" : "rgba(255,255,255,0.07)",
                 color: statusColor, letterSpacing: 0.5 }}>{trailer.status_code}</span>
             )}
           </div>
@@ -513,8 +526,8 @@ function TrailerCard({ trailer, companyId, onEdit }: { trailer: Trailer; company
             {[trailer.region, trailer.local_area].filter(Boolean).join(" · ")}
           </div>
         )}
-        {/* Row 4: status location — spans full card width */}
-        {trailer.status_location && (
+        {/* Row 4: status location — hidden when COUPLED (managed via combo) */}
+        {trailer.status_location && trailer.status_code !== "COUPLED" && (
           <div style={{ fontSize: 11, color: T.muted, marginTop: 1,
             whiteSpace: "nowrap" as const, overflow: "hidden", textOverflow: "ellipsis" }}>
             📍 {trailer.status_location}
@@ -726,7 +739,7 @@ function TruckModal({ truck, companyId, onClose, onDone }: {
       ifta_expiration_date: iftaExp || null, ifta_enforcement_date: iftaEnf || null,
       phmsa_expiration_date: phmsaExp || null, alliance_expiration_date: alliExp || null,
       fleet_ins_expiration_date: fleetExp || null, hazmat_lic_expiration_date: hazLicExp || null,
-      inner_bridge_expiration_date: ibExp || null, notes: notes || null,
+      inner_bridge_expiration_date: ibExp || null, reg_notes: regNotes || null, ifta_notes: iftaNotes || null, notes: notes || null,
     };
     let truckId = truck?.truck_id;
     if (isNew) {
@@ -780,7 +793,6 @@ function TruckModal({ truck, companyId, onClose, onDone }: {
       {err && <Banner msg={err} type="error" />}
 
       {/* ── Identification ── */}
-      <SubSectionTitle>Identification</SubSectionTitle>
       {/* Row 1: Unit · VIN · Plate */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "6px 10px", marginBottom: 6 }}>
         <div><label style={{ ...css.label, fontSize: 10 }}>Unit #</label>{ti(name, setName, "e.g. T-101")}</div>
@@ -802,20 +814,25 @@ function TruckModal({ truck, companyId, onClose, onDone }: {
           <select value={status} onChange={e => setStatus(e.target.value)} style={{ ...css.select, ...sm, width: "100%" }}>
             <option value="">— Select —</option>
             <option value="AVAIL">AVAIL — Available</option>
-            <option value="PARK">PARK — Parked</option>
+            <option value="COUPLED">COUPLED — Hooked to trailer</option>
             <option value="BOBTAIL">BOBTAIL — Bobtailing</option>
+            <option value="PARK">PARK — Parked</option>
             <option value="MAINT">MAINT — Maintenance ⚠</option>
             <option value="INSP">INSP — Inspection</option>
             <option value="OOS">OOS — Out of Service ⚠</option>
           </select>
         </div>
       </div>
-      {/* Row 4: Status Location — full width */}
+      {/* Row 4: Status Location — read-only when COUPLED, editable otherwise */}
       <div style={{ marginBottom: 10 }}>
         <label style={{ ...css.label, fontSize: 10 }}>Status Location</label>
-        {ti(statusLoc, setStatusLoc, "e.g. Yard 1")}
+        {status === "COUPLED"
+          ? <div style={{ ...css.input, ...sm, color: T.muted, cursor: "not-allowed", opacity: 0.6 }}>
+              {statusLoc || "—"} <span style={{ fontSize: 10, marginLeft: 6 }}>(set via combo)</span>
+            </div>
+          : ti(statusLoc, setStatusLoc, "e.g. Yard 1")
+        }
       </div>
-      {/* Active note — inline with label, no checkbox in identification grid */}
       <div style={{ fontSize: 11, color: T.muted, marginBottom: 10, lineHeight: 1.5 }}>
         <strong style={{ color: T.text }}>Active</strong> = unit appears in fleet lists and can be coupled.{" "}
         <strong style={{ color: T.text }}>Status</strong> = physical/operational state. A unit can be Active but Parked.
@@ -825,8 +842,7 @@ function TruckModal({ truck, companyId, onClose, onDone }: {
       <hr style={css.divider} />
 
       {/* ── Permit Book ── */}
-      <SubSectionTitle>Permit Book</SubSectionTitle>
-      <PermitEditRow label="Registration"              expVal={regExp}   onExpChange={setRegExp}   enfVal={regEnf}   onEnfChange={setRegEnf} />
+      <PermitEditRow label="Registration"              expVal={regExp}   onExpChange={setRegExp}   enfVal={regEnf}   onEnfChange={setRegEnf}   notesVal={regNotes}  onNotesChange={setRegNotes} />
       <PermitEditRow label="Annual Inspection"          expVal={insExp}   onExpChange={setInsExp}
         extra={
           <div style={{ display: "flex", gap: 6 }}>
@@ -837,7 +853,7 @@ function TruckModal({ truck, companyId, onClose, onDone }: {
           </div>
         }
       />
-      <PermitEditRow label="IFTA Permits + Decals"     expVal={iftaExp}  onExpChange={setIftaExp}  enfVal={iftaEnf}  onEnfChange={setIftaEnf} />
+      <PermitEditRow label="IFTA Permits + Decals"     expVal={iftaExp}  onExpChange={setIftaExp}  enfVal={iftaEnf}  onEnfChange={setIftaEnf} notesVal={iftaNotes} onNotesChange={setIftaNotes} />
       <PermitEditRow label="PHMSA HazMat Permit"       expVal={phmsaExp} onExpChange={setPhmsaExp} />
       <PermitEditRow label="Alliance HazMat Permit"    expVal={alliExp}  onExpChange={setAlliExp} />
       <PermitEditRow label="Fleet Insurance Cab Card"  expVal={fleetExp} onExpChange={setFleetExp} />
@@ -848,7 +864,7 @@ function TruckModal({ truck, companyId, onClose, onDone }: {
 
       {/* ── Other Permits ── */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-        <SubSectionTitle>Other Permits</SubSectionTitle>
+        <span style={{ fontSize: 11, color: T.muted, fontWeight: 600, letterSpacing: 0.4 }}>OTHER PERMITS</span>
         <button type="button" onClick={addOtherPermit} style={{ ...css.btn("subtle"), fontSize: 11, padding: "2px 10px" }}>+ Add</button>
       </div>
       {otherPermits.length === 0 && (
@@ -941,6 +957,7 @@ function TrailerModal({ trailer, companyId, onClose, onDone }: {
   const [trInsShop,  setTrInsShop]  = useState(trailer?.trailer_inspection_shop ?? "");
   const [trInsIssue, setTrInsIssue] = useState(trailer?.trailer_inspection_issue_date ?? "");
   const [trInsExp,   setTrInsExp]   = useState(trailer?.trailer_inspection_expiration_date ?? "");
+  const [trRegNotes, setTrRegNotes] = useState((trailer as any)?.trailer_reg_notes ?? "");
   // Tank inspections — dynamic list seeded from saved dates
   type TankKey = "v" | "k" | "l" | "t" | "i" | "p" | "uc";
   const TANK_DEFS: { key: TankKey; label: string }[] = [
@@ -976,7 +993,7 @@ function TrailerModal({ trailer, companyId, onClose, onDone }: {
       status_code: status || null, status_location: statusLoc || null, active, company_id: companyId,
       trailer_reg_expiration_date: trRegExp || null, trailer_reg_enforcement_date: trRegEnf || null,
       trailer_inspection_shop: trInsShop || null, trailer_inspection_issue_date: trInsIssue || null,
-      trailer_inspection_expiration_date: trInsExp || null,
+      trailer_inspection_expiration_date: trInsExp || null, trailer_reg_notes: trRegNotes || null,
       tank_v_expiration_date:  tanks.find(t => t.key === "v")?.date  || null,
       tank_k_expiration_date:  tanks.find(t => t.key === "k")?.date  || null,
       tank_l_expiration_date:  tanks.find(t => t.key === "l")?.date  || null,
@@ -1031,7 +1048,6 @@ function TrailerModal({ trailer, companyId, onClose, onDone }: {
       {err && <Banner msg={err} type="error" />}
 
       {/* ── Identification ── */}
-      <SubSectionTitle>Identification</SubSectionTitle>
       {/* Row 1: Unit · VIN · Plate */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "6px 10px", marginBottom: 6 }}>
         <div><label style={{ ...css.label, fontSize: 10 }}>Unit #</label>{ti(name, setName, "e.g. 3151")}</div>
@@ -1053,8 +1069,9 @@ function TrailerModal({ trailer, companyId, onClose, onDone }: {
           <select value={status} onChange={e => setStatus(e.target.value)} style={{ ...css.select, ...sm, width: "100%" }}>
             <option value="">— Select —</option>
             <option value="AVAIL">AVAIL — Available</option>
-            <option value="PARK">PARK — Parked / Stored</option>
+            <option value="COUPLED">COUPLED — Hooked to truck</option>
             <option value="LOAD">LOAD — Loaded / Staged</option>
+            <option value="PARK">PARK — Parked / Stored</option>
             <option value="CLEAN">CLEAN — Cleaning / Purge</option>
             <option value="MAINT">MAINT — Maintenance ⚠</option>
             <option value="INSP">INSP — Inspection</option>
@@ -1062,10 +1079,15 @@ function TrailerModal({ trailer, companyId, onClose, onDone }: {
           </select>
         </div>
       </div>
-      {/* Row 4: Status Location — full width */}
+      {/* Row 4: Status Location — read-only when COUPLED */}
       <div style={{ marginBottom: 10 }}>
         <label style={{ ...css.label, fontSize: 10 }}>Status Location</label>
-        {ti(statusLoc, setStatusLoc, "e.g. Yard 1")}
+        {status === "COUPLED"
+          ? <div style={{ ...css.input, ...sm, color: T.muted, cursor: "not-allowed", opacity: 0.6 }}>
+              {statusLoc || "—"} <span style={{ fontSize: 10, marginLeft: 6 }}>(set via combo)</span>
+            </div>
+          : ti(statusLoc, setStatusLoc, "e.g. Yard 1")
+        }
       </div>
       <div style={{ fontSize: 11, color: T.muted, marginBottom: 10, lineHeight: 1.5 }}>
         <strong style={{ color: T.text }}>Active</strong> = unit appears in fleet lists and can be coupled.{" "}
@@ -1083,8 +1105,7 @@ function TrailerModal({ trailer, companyId, onClose, onDone }: {
       <hr style={css.divider} />
 
       {/* ── Permit Book ── */}
-      <SubSectionTitle>Permit Book</SubSectionTitle>
-      <PermitEditRow label="Trailer Registration" expVal={trRegExp} onExpChange={setTrRegExp} enfVal={trRegEnf} onEnfChange={setTrRegEnf} />
+      <PermitEditRow label="Trailer Registration" expVal={trRegExp} onExpChange={setTrRegExp} enfVal={trRegEnf} onEnfChange={setTrRegEnf} notesVal={trRegNotes} onNotesChange={setTrRegNotes} />
       <PermitEditRow label="Annual Inspection"    expVal={trInsExp} onExpChange={setTrInsExp}
         extra={
           <div style={{ display: "flex", gap: 6 }}>
@@ -1100,7 +1121,7 @@ function TrailerModal({ trailer, companyId, onClose, onDone }: {
 
       {/* ── Tank Inspections — dynamic ── */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-        <SubSectionTitle>Tank Inspections</SubSectionTitle>
+        <span style={{ fontSize: 11, color: T.muted, fontWeight: 600, letterSpacing: 0.4 }}>TANK INSPECTIONS</span>
         <div style={{ position: "relative" as const }}>
           <button type="button" onClick={() => setTankAddOpen(v => !v)}
             style={{ ...css.btn("subtle"), fontSize: 11, padding: "2px 10px" }}>+ Add</button>
