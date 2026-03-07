@@ -139,9 +139,9 @@ function PermitRow({ label, date, enforcement, extra, category, hasDoc, onDocOpe
   const hasExtra = !!(enforcement || extra);
 
   return (
-    <div style={{ borderBottom: `1px solid ${T.border}18`, marginBottom: 0 }}>
+    <div style={{ borderBottom: `1px solid ${T.border}12` }}>
       <div
-        style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 30,
+        style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 26,
           cursor: hasExtra ? "pointer" : "default", userSelect: "none" as const }}
         onClick={() => hasExtra && setExpanded(v => !v)}
       >
@@ -329,9 +329,10 @@ function TruckCard({ truck, companyId, onEdit, otherPermits }: {
               {[truck.region, truck.local_area].filter(Boolean).join(" · ")}
             </div>
           )}
-          {/* Row 3: status location — full width */}
+          {/* Row 3: status location — full width, no wrap */}
           {truck.status_location && (
-            <div style={{ fontSize: 11, color: T.muted, marginTop: 1 }}>
+            <div style={{ fontSize: 11, color: T.muted, marginTop: 1,
+              whiteSpace: "nowrap" as const, overflow: "hidden", textOverflow: "ellipsis" }}>
               📍 {truck.status_location}
             </div>
           )}
@@ -351,8 +352,6 @@ function TruckCard({ truck, companyId, onEdit, otherPermits }: {
               ⚠ {soonestDays! < 0 ? "EXPIRED" : soonestDays === 0 ? "EXP TODAY" : `EXP ${soonestDays}d`}
             </span>
           )}
-          <span style={{ fontSize: 10, color: T.muted, transform: open ? "rotate(180deg)" : "none",
-            transition: "transform 150ms", display: "inline-block" }}>▼</span>
         </div>
       </div>
 
@@ -361,24 +360,20 @@ function TruckCard({ truck, companyId, onEdit, otherPermits }: {
         <div style={{ borderTop: `1px solid ${T.border}`, padding: "10px 12px" }}
           onClick={e => e.stopPropagation()}>
 
-          {/* Identification block */}
-          <div style={{ marginBottom: 8 }}>
-            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.8, textTransform: "uppercase" as const,
-              color: T.muted, marginBottom: 4 }}>Identification</div>
-            <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", columnGap: 12, rowGap: 1 }}>
-              {truck.year || truck.make || truck.model ? <>
-                <span style={{ fontSize: 11, color: T.muted }}>Vehicle</span>
-                <span style={{ fontSize: 11, color: T.text }}>{[truck.year, truck.make, truck.model].filter(Boolean).join(" ")}</span>
-              </> : null}
-              {truck.vin_number ? <>
-                <span style={{ fontSize: 11, color: T.muted }}>VIN</span>
-                <span style={{ fontSize: 11, color: T.text, wordBreak: "break-all" as const }}>{truck.vin_number}</span>
-              </> : null}
-              {truck.plate_number ? <>
-                <span style={{ fontSize: 11, color: T.muted }}>Plate</span>
-                <span style={{ fontSize: 11, color: T.text }}>{truck.plate_number}</span>
-              </> : null}
-            </div>
+          {/* Identification */}
+          <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", columnGap: 12, rowGap: 1, marginBottom: 8 }}>
+            {(truck.year || truck.make || truck.model) ? <>
+              <span style={{ fontSize: 11, color: T.muted }}>Vehicle</span>
+              <span style={{ fontSize: 11, color: T.text }}>{[truck.year, truck.make, truck.model].filter(Boolean).join(" ")}</span>
+            </> : null}
+            {truck.vin_number ? <>
+              <span style={{ fontSize: 11, color: T.muted }}>VIN</span>
+              <span style={{ fontSize: 11, color: T.text, wordBreak: "break-all" as const }}>{truck.vin_number}</span>
+            </> : null}
+            {truck.plate_number ? <>
+              <span style={{ fontSize: 11, color: T.muted }}>Plate</span>
+              <span style={{ fontSize: 11, color: T.text }}>{truck.plate_number}</span>
+            </> : null}
           </div>
 
           {truck.notes && (
@@ -388,8 +383,7 @@ function TruckCard({ truck, companyId, onEdit, otherPermits }: {
               {truck.notes}
             </div>
           )}
-
-          <SubSectionTitle>Permit Book</SubSectionTitle>
+          <div style={{ borderTop: `1px solid ${T.border}22`, marginBottom: 4, marginTop: 2 }} />
           <PermitRow label="Registration"               date={truck.reg_expiration_date}         enforcement={truck.reg_enforcement_date}
             category="registration"      hasDoc={hasDoc("registration")}      onDocOpen={() => openDocForCategory("registration")} />
           <PermitRow label="Annual Inspection"           date={truck.inspection_expiration_date}
@@ -509,16 +503,14 @@ function TrailerCard({ trailer, companyId, onEdit }: { trailer: Trailer; company
             </div>
           )}
           {trailer.status_location && (
-            <div style={{ fontSize: 11, color: T.muted, marginTop: 1 }}>
+            <div style={{ fontSize: 11, color: T.muted, marginTop: 1,
+              whiteSpace: "nowrap" as const, overflow: "hidden", textOverflow: "ellipsis" }}>
               📍 {trailer.status_location}
             </div>
           )}
-          {compSummary && (
-            <div style={{ fontSize: 11, color: T.muted, marginTop: 1 }}>{compSummary}</div>
-          )}
         </div>
 
-        {/* RIGHT: Docs + Edit, expiry badge, chevron */}
+        {/* RIGHT: Docs + Edit, expiry badge */}
         <div style={{ display: "flex", flexDirection: "column" as const, alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
           <div style={{ display: "flex", gap: 6 }}>
             <button type="button" style={{ ...css.btn("subtle"), padding: "4px 10px", fontSize: 11 }}
@@ -532,8 +524,6 @@ function TrailerCard({ trailer, companyId, onEdit }: { trailer: Trailer; company
               ⚠ {soonestDays! < 0 ? "EXPIRED" : soonestDays === 0 ? "EXP TODAY" : `EXP ${soonestDays}d`}
             </span>
           )}
-          <span style={{ fontSize: 10, color: T.muted, transform: open ? "rotate(180deg)" : "none",
-            transition: "transform 150ms", display: "inline-block" }}>▼</span>
         </div>
       </div>
 
@@ -542,30 +532,25 @@ function TrailerCard({ trailer, companyId, onEdit }: { trailer: Trailer; company
         <div style={{ borderTop: `1px solid ${T.border}`, padding: "10px 12px" }}
           onClick={e => e.stopPropagation()}>
 
-          {/* Identification block */}
-          <div style={{ marginBottom: 8 }}>
-            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.8, textTransform: "uppercase" as const,
-              color: T.muted, marginBottom: 4 }}>Identification</div>
-            <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", columnGap: 12, rowGap: 1 }}>
-              {(trailer.year || trailer.make || trailer.model) ? <>
-                <span style={{ fontSize: 11, color: T.muted }}>Vehicle</span>
-                <span style={{ fontSize: 11, color: T.text }}>{[trailer.year, trailer.make, trailer.model].filter(Boolean).join(" ")}</span>
-              </> : null}
-              {trailer.vin_number ? <>
-                <span style={{ fontSize: 11, color: T.muted }}>VIN</span>
-                <span style={{ fontSize: 11, color: T.text, wordBreak: "break-all" as const }}>{trailer.vin_number}</span>
-              </> : null}
-              {trailer.plate_number ? <>
-                <span style={{ fontSize: 11, color: T.muted }}>Plate</span>
-                <span style={{ fontSize: 11, color: T.text }}>{trailer.plate_number}</span>
-              </> : null}
-              {trailer.cg_max ? <>
-                <span style={{ fontSize: 11, color: T.muted }}>Max Weight</span>
-                <span style={{ fontSize: 11, color: T.text }}>{trailer.cg_max.toLocaleString()} lbs</span>
-              </> : null}
-            </div>
+          {/* Identification */}
+          <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", columnGap: 12, rowGap: 1, marginBottom: 8 }}>
+            {(trailer.year || trailer.make || trailer.model) ? <>
+              <span style={{ fontSize: 11, color: T.muted }}>Vehicle</span>
+              <span style={{ fontSize: 11, color: T.text }}>{[trailer.year, trailer.make, trailer.model].filter(Boolean).join(" ")}</span>
+            </> : null}
+            {trailer.vin_number ? <>
+              <span style={{ fontSize: 11, color: T.muted }}>VIN</span>
+              <span style={{ fontSize: 11, color: T.text, wordBreak: "break-all" as const }}>{trailer.vin_number}</span>
+            </> : null}
+            {trailer.plate_number ? <>
+              <span style={{ fontSize: 11, color: T.muted }}>Plate</span>
+              <span style={{ fontSize: 11, color: T.text }}>{trailer.plate_number}</span>
+            </> : null}
           </div>
 
+          {compSummary && (
+            <div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>{compSummary}</div>
+          )}
           {trailer.last_load_config && (
             <div style={{ fontSize: 11, color: T.muted, marginBottom: 8 }}>
               Last loaded: {trailer.last_load_config}
@@ -580,7 +565,7 @@ function TrailerCard({ trailer, companyId, onEdit }: { trailer: Trailer; company
             </div>
           )}
 
-          <SubSectionTitle>Permit Book</SubSectionTitle>
+          <div style={{ borderTop: `1px solid ${T.border}22`, marginBottom: 6, marginTop: 2 }} />
           <PermitRow label="Trailer Registration"  date={trailer.trailer_reg_expiration_date} enforcement={trailer.trailer_reg_enforcement_date}
             category="trailer_registration" hasDoc={hasDoc("trailer_registration")} onDocOpen={() => openDocForCategory("trailer_registration")} />
           <PermitRow label="Annual Inspection"      date={trailer.trailer_inspection_expiration_date}
@@ -592,7 +577,7 @@ function TrailerCard({ trailer, companyId, onEdit }: { trailer: Trailer; company
             ) : null}
           />
 
-          {tankDates.length > 0 && <SubSectionTitle>Tank Inspections</SubSectionTitle>}
+          {tankDates.length > 0 && <div style={{ borderTop: `1px solid ${T.border}22`, marginBottom: 4, marginTop: 4 }} />}
           {[
             { label: "V — External Visual",   date: trailer.tank_v_expiration_date,  cat: "tank_v"  },
             { label: "K — Leakage Test",      date: trailer.tank_k_expiration_date,  cat: "tank_k"  },
