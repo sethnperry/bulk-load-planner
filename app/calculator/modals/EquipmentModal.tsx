@@ -1820,6 +1820,7 @@ export default function EquipmentModal({
           trailerId={decoupleComboPending.trailerId}
           truckName={decoupleComboPending.truckName}
           trailerName={decoupleComboPending.trailerName}
+          companyId={companyId ?? null}
           uncoupledTrucks={uncoupledTrucks.map(t => ({ id: t.truck_id, name: t.truck_name }))}
           uncoupledTrailers={uncoupledTrailers.map(t => ({ id: t.trailer_id, name: t.trailer_name }))}
           onDecoupled={handleDecoupled}

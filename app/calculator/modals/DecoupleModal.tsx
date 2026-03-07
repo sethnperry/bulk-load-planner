@@ -1,1844 +1,885 @@
 "use client";
+// modals/DecoupleModal.tsx
 
-/**
- * EquipmentModal — v5
- *
- * Changes from v4:
- *  1. Star moved inline next to action button on coupled cards
- *  2. "Browse fleet →" link moved ABOVE uncoupled section
- *  3. Region dropdown added above truck/trailer selects
- *  4. couple_combo RPC now auto-resolves company_id (fix_couple_combo_rpc.sql)
- *  5. Fleet modal title → "Coupled Fleet"
- *  6. Fleet region filter now fetches regions from trucks table directly (not
- *     derived from combo results), so Northeast + Southeast both appear
- *  7. Main modal shows ONLY starred combos. Fleet modal shows ALL coupled combos.
- *     Star in Fleet → adds to main list. Star in main → removes from main list.
- *
- * Schema:
- *   equipment_combos: combo_id, combo_name, truck_id, trailer_id,
- *                     tare_lbs, target_weight, buffer_lbs,
- *                     active, claimed_by, claimed_at, company_id
- *   trucks:           truck_id, truck_name, active, company_id, region
- *   trailers:         trailer_id, trailer_name, cg_max, active, company_id, region
- *   profiles:         user_id, display_name
- *   user_primary_trucks:   user_id, truck_id, created_at
- *   user_primary_trailers: user_id, trailer_id, created_at
- */
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { supabase } from "@/lib/supabase/client";
+import React, { useState, useCallback, useRef, useEffect } from "react";
 import { FullscreenModal } from "@/lib/ui/FullscreenModal";
-import DecoupleModal from "./DecoupleModal";
-import { TruckCard as AdminTruckCard, TrailerCard as AdminTrailerCard, TruckModal as AdminTruckModal, TrailerModal as AdminTrailerModal, type Truck as AdminTruck, type Trailer as AdminTrailer, type OtherPermit as AdminOtherPermit } from "@/lib/ui/driver/EquipmentDetails";
+import { supabase } from "@/lib/supabase/client";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// ─── Status codes ─────────────────────────────────────────────────────────────
 
-export type ComboRow = {
-  combo_id: string;
-  combo_name?: string | null;
-  truck_id?: string | null;
-  trailer_id?: string | null;
-  tare_lbs?: number | null;
-  target_weight?: number | null;
-  buffer_lbs?: number | null;
-  active?: boolean | null;
-  claimed_by?: string | null;
-  claimed_at?: string | null;
-  company_id?: string | null;
-  combo_status_code?: string | null;
-  combo_status_location?: string | null;
+export type TruckStatus   = "AVAIL" | "PARK" | "BOBTAIL" | "MAINT" | "INSP" | "OOS";
+export type TrailerStatus = "AVAIL" | "PARK" | "MAINT" | "INSP" | "CLEAN" | "LOAD" | "OOS";
+
+const TRUCK_STATUSES: { code: TruckStatus; label: string; sub: string; warn?: boolean }[] = [
+  { code: "BOBTAIL", label: "Bobtailing",      sub: "Truck is moving without a trailer" },
+  { code: "AVAIL",   label: "Available",       sub: "Ready to couple and run" },
+  { code: "PARK",    label: "Parked",          sub: "Stored, no known issues" },
+  { code: "MAINT",   label: "Maintenance",     sub: "Down for repairs — do not couple", warn: true },
+  { code: "INSP",    label: "Inspection",      sub: "Under DOT or internal inspection" },
+  { code: "OOS",     label: "Out of Service",  sub: "Deadlined — do not operate", warn: true },
+];
+
+const TRAILER_STATUSES: { code: TrailerStatus; label: string; sub: string; warn?: boolean }[] = [
+  { code: "AVAIL",  label: "Available",        sub: "Ready to couple and load" },
+  { code: "PARK",   label: "Parked / Stored",  sub: "No issues, available when needed" },
+  { code: "LOAD",   label: "Loaded / Staged",  sub: "Product on board, awaiting driver" },
+  { code: "CLEAN",  label: "Cleaning / Purge", sub: "Being cleaned or purged" },
+  { code: "MAINT",  label: "Maintenance",      sub: "Down for repairs — do not couple", warn: true },
+  { code: "INSP",   label: "Inspection",       sub: "Under DOT or internal inspection" },
+  { code: "OOS",    label: "Out of Service",   sub: "Deadlined — do not use", warn: true },
+];
+
+// ─── Shared styles ────────────────────────────────────────────────────────────
+
+const D = {
+  label: {
+    fontSize: 12, fontWeight: 800, letterSpacing: 0.5,
+    color: "rgba(255,255,255,0.45)", textTransform: "uppercase",
+    marginBottom: 6, display: "block",
+  } as React.CSSProperties,
+  input: {
+    width: "100%", borderRadius: 8, padding: "10px 12px",
+    border: "1px solid rgba(255,255,255,0.14)",
+    background: "rgba(0,0,0,0.35)", color: "rgba(255,255,255,0.92)",
+    fontSize: 14, outline: "none", boxSizing: "border-box",
+  } as React.CSSProperties,
+  inputErr: {
+    border: "1px solid rgba(248,113,113,0.55)",
+    backgroundColor: "rgba(180,30,30,0.15)",
+  } as React.CSSProperties,
+  select: {
+    width: "100%", borderRadius: 8, padding: "10px 12px",
+    border: "1px solid rgba(255,255,255,0.14)",
+    backgroundColor: "rgba(0,0,0,0.40)", color: "rgba(255,255,255,0.92)",
+    fontSize: 14, outline: "none", boxSizing: "border-box",
+    appearance: "none",
+    backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='rgba(255,255,255,0.4)' stroke-width='1.8' fill='none' stroke-linecap='round'/%3E%3C/svg%3E")`,
+    backgroundRepeat: "no-repeat",
+    backgroundPosition: "right 14px center",
+    paddingRight: 36,
+  } as React.CSSProperties,
+  textarea: {
+    width: "100%", borderRadius: 12, padding: "12px 14px",
+    border: "1px solid rgba(255,255,255,0.14)",
+    background: "rgba(0,0,0,0.35)", color: "rgba(255,255,255,0.92)",
+    fontSize: 14, outline: "none", boxSizing: "border-box",
+    resize: "vertical", minHeight: 72,
+  } as React.CSSProperties,
+  btn: {
+    borderRadius: 8, padding: "10px 16px", fontWeight: 900,
+    fontSize: 13, letterSpacing: 0.5, cursor: "pointer",
+    border: "1px solid rgba(255,255,255,0.14)",
+    background: "rgba(255,255,255,0.09)",
+    color: "rgba(255,255,255,0.92)", whiteSpace: "nowrap",
+  } as React.CSSProperties,
+  btnPrimary: {
+    background: "rgba(255,255,255,0.13)",
+    border: "1px solid rgba(255,255,255,0.22)",
+  } as React.CSSProperties,
+  btnDestructive: {
+    background: "rgba(180,50,20,0.22)",
+    border: "1px solid rgba(220,80,40,0.40)",
+    color: "rgba(255,180,140,0.95)",
+  } as React.CSSProperties,
+  err: {
+    borderRadius: 12, padding: "10px 14px",
+    background: "rgba(180,40,40,0.18)",
+    border: "1px solid rgba(180,40,40,0.32)",
+    color: "rgba(255,255,255,0.88)", fontSize: 13, marginBottom: 12,
+  } as React.CSSProperties,
+  divider: { height: 1, background: "rgba(255,255,255,0.08)", margin: "16px 0 20px" },
+  sectionTitle: {
+    fontSize: 11, fontWeight: 800, letterSpacing: 0.8,
+    color: "rgba(255,255,255,0.35)", textTransform: "uppercase",
+    marginBottom: 6,
+  } as React.CSSProperties,
 };
 
-type TruckRow = {
-  truck_id: string;
-  truck_name: string;
-  active: boolean | null;
-  region?: string | null;
-  status_code?: string | null;
-  status_location?: string | null;
-  status_notes?: string | null;
-  status_updated_at?: string | null;
-};
+// ─── Sub-components ───────────────────────────────────────────────────────────
 
-type TrailerRow = {
-  trailer_id: string;
-  trailer_name: string;
-  active: boolean | null;
-  region?: string | null;
-  status_code?: string | null;
-  status_location?: string | null;
-  status_notes?: string | null;
-  status_updated_at?: string | null;
-};
-
-type FleetCombo = ComboRow & {
-  truck_name?: string | null;
-  trailer_name?: string | null;
-  truck_region?: string | null;
-  claimed_by_name?: string | null;
-};
-
-type Props = {
-  open: boolean;
-  onClose: () => void;
-  authUserId: string | null;
-  combos: ComboRow[];
-  combosLoading: boolean;
-  combosError: string | null;
-  selectedComboId: string;
-  onSelectComboId: (id: string) => void;
-  onRefreshCombos: () => void;
-};
-
-type View = "list" | "new_tare" | "confirm_target";
-
-type DetailTarget = {
-  combo: ComboRow;
-  truck?: TruckRow | null;
-  trailer?: TrailerRow | null;
-};
-
-function formatWhen(ts?: string | null) {
-  if (!ts) return "";
-  const d = new Date(ts);
-  if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleString(undefined, {
-    month: "2-digit",
-    day: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function DetailField({ label, value }: { label: string; value?: React.ReactNode }) {
-  if (value === undefined || value === null || value === "") return null;
+function BackBtn({ onClick }: { onClick: () => void }) {
   return (
-    <div
-      style={{
-        display: "flex",
-        justifyContent: "space-between",
-        gap: 12,
-        padding: "10px 0",
-        borderTop: "1px solid rgba(255,255,255,0.06)",
-      }}
-    >
-      <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 13, fontWeight: 800 }}>{label}</div>
-      <div style={{ color: "rgba(255,255,255,0.86)", fontSize: 14, fontWeight: 800, textAlign: "right" }}>
-        {value}
-      </div>
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────
-// PlannerComboEditModal — edit tare / target on existing combo
-// Truck and trailer are read-only; no unit swapping here.
-// ─────────────────────────────────────────────────────────────
-function PlannerComboEditModal({ combo, truckName, trailerName, onClose, onDone }: {
-  combo: ComboRow;
-  truckName: string;
-  trailerName: string;
-  onClose: () => void;
-  onDone: () => void;
-}) {
-  const [tareLbs,   setTareLbs]   = useState(String(combo.tare_lbs ?? ""));
-  const [target,    setTarget]    = useState(String((combo as any).target_weight ?? "80000"));
-  const [status,    setStatus]    = useState((combo as any).combo_status_code ?? "AVAIL");
-  const [statusLoc, setStatusLoc] = useState((combo as any).combo_status_location ?? "");
-  const [err,       setErr]       = useState<string | null>(null);
-  const [saving,    setSaving]    = useState(false);
-
-  async function save() {
-    if (!tareLbs || parseFloat(tareLbs) <= 0) { setErr("Tare weight is required."); return; }
-    setSaving(true); setErr(null);
-    const { error } = await supabase.from("equipment_combos")
-      .update({ tare_lbs: parseFloat(tareLbs), target_weight: parseFloat(target) || null,
-        combo_status_code: status || null, combo_status_location: statusLoc || null })
-      .eq("combo_id", combo.combo_id);
-    if (error) { setErr(error.message); setSaving(false); return; }
-    onDone();
-  }
-
-  return (
-    <ModalShell open onClose={onClose} title="Edit Combo">
-      {err && <div style={{ background: "rgba(220,60,40,0.18)", border: "1px solid rgba(220,60,40,0.4)",
-        borderRadius: 8, padding: "10px 14px", fontSize: 13, color: "#f87171", marginBottom: 12 }}>{err}</div>}
-
-      {/* Read-only names */}
-      <div style={{ borderRadius: 14, border: "1px solid rgba(255,255,255,0.10)",
-        background: "rgba(255,255,255,0.04)", padding: "12px 16px", marginBottom: 16 }}>
-        <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: 0.2, marginBottom: 2, color: "#fff" }}>
-          {truckName} / {trailerName}
-        </div>
-        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)" }}>To change units, decouple and create a new combo.</div>
-      </div>
-
-      {/* Tare + Target inputs */}
-      <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.5)", letterSpacing: 0.5, marginBottom: 4 }}>TARE WEIGHT (LBS)</div>
-          <input type="number" value={tareLbs} onChange={e => setTareLbs(e.target.value)} placeholder="e.g. 34000"
-            style={{ width: "100%", boxSizing: "border-box" as const, background: "rgba(255,255,255,0.06)",
-              border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: "10px 12px",
-              fontSize: 15, color: "#fff", outline: "none" }} />
-        </div>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.5)", letterSpacing: 0.5, marginBottom: 4 }}>TARGET GROSS (LBS)</div>
-          <input type="number" value={target} onChange={e => setTarget(e.target.value)} placeholder="e.g. 80000"
-            style={{ width: "100%", boxSizing: "border-box" as const, background: "rgba(255,255,255,0.06)",
-              border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: "10px 12px",
-              fontSize: 15, color: "#fff", outline: "none" }} />
-        </div>
-      </div>
-
-      {/* Status + Location */}
-      <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.5)", letterSpacing: 0.5, marginBottom: 4 }}>STATUS</div>
-          <select value={status} onChange={e => setStatus(e.target.value)}
-            style={{ width: "100%", boxSizing: "border-box" as const, background: "#1a1a1a",
-              border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: "10px 12px",
-              fontSize: 14, color: "#fff", outline: "none" }}>
-            <option value="AVAIL">AVAIL — Available</option>
-            <option value="PARK">PARK — Parked</option>
-            <option value="MAINT">MAINT — Maintenance</option>
-            <option value="INSP">INSP — Inspection</option>
-            <option value="OOS">OOS — Out of Service</option>
-          </select>
-        </div>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.5)", letterSpacing: 0.5, marginBottom: 4 }}>STATUS LOCATION</div>
-          <input value={statusLoc} onChange={e => setStatusLoc(e.target.value)} placeholder="e.g. Yard 1"
-            style={{ width: "100%", boxSizing: "border-box" as const, background: "rgba(255,255,255,0.06)",
-              border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: "10px 12px",
-              fontSize: 15, color: "#fff", outline: "none" }} />
-        </div>
-      </div>
-
-      <div style={{ display: "flex", gap: 8 }}>
-        <button type="button" onClick={onClose}
-          style={{ flex: 1, padding: "12px 0", borderRadius: 10, border: "1px solid rgba(255,255,255,0.15)",
-            background: "transparent", color: "rgba(255,255,255,0.75)", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
-          Cancel
-        </button>
-        <button type="button" onClick={save} disabled={saving}
-          style={{ flex: 1, padding: "12px 0", borderRadius: 10, border: "none",
-            background: saving ? "rgba(234,179,8,0.5)" : "rgba(234,179,8,0.95)",
-            color: "#1a1a1a", fontSize: 14, fontWeight: 900, cursor: saving ? "not-allowed" : "pointer" }}>
-          {saving ? "Saving…" : "Save"}
-        </button>
-      </div>
-    </ModalShell>
-  );
-}
-
-function EquipmentDetailsModal({
-  open,
-  onClose,
-  target,
-  claimedByName,
-  forceInUse,
-  companyId,
-}: {
-  open: boolean;
-  onClose: () => void;
-  target: DetailTarget | null;
-  claimedByName?: string | null;
-  forceInUse?: boolean;
-  companyId?: string | null;
-}) {
-  const c = target?.combo;
-  const truck = target?.truck;
-  const trailer = target?.trailer;
-  const companyIdSafe = (c as any)?.company_id ?? companyId ?? null;
-  const [fullTruck, setFullTruck] = useState<AdminTruck | null>(null);
-  const [fullTrailer, setFullTrailer] = useState<AdminTrailer | null>(null);
-  const [otherPermits, setOtherPermits] = useState<AdminOtherPermit[]>([]);
-  const [loadingDetails, setLoadingDetails] = useState(false);
-  const [detailsErr, setDetailsErr] = useState<string | null>(null);
-
-  const [truckEditOpen,   setTruckEditOpen]   = useState(false);
-  const [trailerEditOpen, setTrailerEditOpen] = useState(false);
-  const [comboEditOpen,   setComboEditOpen]   = useState(false);
-
-  const reloadDetails = useCallback(async () => {
-    if (!target?.combo) return;
-    const combo = target.combo;
-    const truckId = String(combo.truck_id ?? "");
-    const trailerId = String(combo.trailer_id ?? "");
-    if (!truckId && !trailerId) return;
-
-    setLoadingDetails(true);
-    setDetailsErr(null);
-    try {
-      const truckSel = "truck_id, truck_name, active, vin_number, plate_number, make, model, year, region, local_area, status_code, status_location, in_use_by, reg_expiration_date, reg_enforcement_date, reg_notes, inspection_shop, inspection_issue_date, inspection_expiration_date, inspection_enforcement_date, inspection_notes, ifta_expiration_date, ifta_enforcement_date, ifta_notes, phmsa_expiration_date, phmsa_enforcement_date, phmsa_notes, alliance_expiration_date, alliance_enforcement_date, alliance_notes, fleet_ins_expiration_date, fleet_ins_enforcement_date, fleet_ins_notes, hazmat_lic_expiration_date, hazmat_lic_enforcement_date, hazmat_lic_notes, inner_bridge_expiration_date, inner_bridge_enforcement_date, inner_bridge_notes, notes";
-      const trailerSel = "trailer_id, trailer_name, active, vin_number, plate_number, make, model, year, cg_max, region, local_area, status_code, status_location, in_use_by, last_load_config, trailer_reg_expiration_date, trailer_reg_enforcement_date, trailer_reg_notes, trailer_inspection_shop, trailer_inspection_issue_date, trailer_inspection_expiration_date, trailer_inspection_enforcement_date, trailer_inspection_notes, tank_v_expiration_date, tank_k_expiration_date, tank_l_expiration_date, tank_t_expiration_date, tank_i_expiration_date, tank_p_expiration_date, tank_uc_expiration_date, tank_v_notes, tank_k_notes, tank_l_notes, tank_t_notes, tank_i_notes, tank_p_notes, tank_uc_notes, notes";
-
-      const [truckRes, trailerRes, permitsRes] = await Promise.all([
-        truckId ? supabase.from("trucks").select(truckSel).eq("truck_id", truckId).maybeSingle() : Promise.resolve({ data: null, error: null } as any),
-        trailerId ? supabase.from("trailers").select(trailerSel).eq("trailer_id", trailerId).maybeSingle() : Promise.resolve({ data: null, error: null } as any),
-        truckId ? supabase.from("truck_other_permits").select("permit_id, label, expiration_date").eq("truck_id", truckId).order("created_at") : Promise.resolve({ data: [], error: null } as any),
-      ]);
-
-      if (truckRes.error) throw truckRes.error;
-      if (trailerRes.error) throw trailerRes.error;
-      if (permitsRes.error) throw permitsRes.error;
-
-      const t: AdminTruck | null = truckRes.data ? (truckRes.data as any) : null;
-      let tr: AdminTrailer | null = trailerRes.data ? (trailerRes.data as any) : null;
-
-      if (tr) {
-        const { data: comps, error: compsErr } = await supabase
-          .from("trailer_compartments")
-          .select("comp_number, max_gallons, position")
-          .eq("trailer_id", tr.trailer_id)
-          .order("position");
-        if (!compsErr && comps) {
-          (tr as any).compartments = comps.map((r: any) => ({
-            comp_number: Number(r.comp_number),
-            max_gallons: Number(r.max_gallons),
-            position: Number(r.position),
-          }));
-        }
-      }
-
-      setFullTruck(t ? ({ ...(t as any), in_use_by_name: (combo.claimed_by ? (claimedByName ?? (t as any).in_use_by_name) : (t as any).in_use_by_name) } as any) : null);
-      setFullTrailer(tr ? ({ ...(tr as any), in_use_by_name: (combo.claimed_by ? (claimedByName ?? (tr as any).in_use_by_name) : (tr as any).in_use_by_name) } as any) : null);
-      setOtherPermits((permitsRes.data ?? []).map((r: any) => ({
-        permit_id: r.permit_id,
-        label: r.label ?? "",
-        expiration_date: r.expiration_date ?? "",
-      })));
-    } catch (e: any) {
-      setDetailsErr(e?.message ?? "Failed to load equipment details.");
-    } finally {
-      setLoadingDetails(false);
-    }
-  }, [target?.combo]);
-
-  useEffect(() => {
-    if (!open) return;
-    void reloadDetails();
-  }, [open, reloadDetails]);
-
-  if (!c) return null;
-
-  const tare = Number(c.tare_lbs ?? 0);
-  const targetW = Number(c.target_weight ?? 0);
-  const buffer = Number(c.buffer_lbs ?? 0);
-  const label = `${truck?.truck_name ?? c.truck_id ?? "—"} / ${trailer?.trailer_name ?? c.trailer_id ?? "—"}`;
-  const inUse = Boolean(c.claimed_by) || Boolean(forceInUse);
-
-  return (
-    <ModalShell open={open} onClose={onClose} title="Equipment Details">
-      <div
-        style={{
-          borderRadius: 18,
-          border: "1px solid rgba(255,255,255,0.10)",
-          background: "rgba(255,255,255,0.04)",
-          padding: 16,
-          marginTop: 6,
-          boxShadow: "0 10px 24px rgba(0,0,0,0.35)",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
-          <div style={{ fontSize: 28, fontWeight: 950, letterSpacing: 0.2, lineHeight: 1.05 }}>{label}</div>
-        </div>
-
-        {(tare > 0 || targetW > 0 || buffer > 0) && (
-          <div style={{ marginTop: 10 }}>
-            {tare > 0 && (
-              <div style={{ color: "rgba(255,255,255,0.45)", fontWeight: 800, fontSize: 14 }}>
-                Tare {tare.toLocaleString()} lbs
-              </div>
-            )}
-            {targetW > 0 && (
-              <div style={{ marginTop: 6, color: "rgba(255,255,255,0.45)", fontWeight: 800, fontSize: 14 }}>
-                Target {targetW.toLocaleString()} lbs
-              </div>
-            )}
-            {buffer > 0 && (
-              <div style={{ marginTop: 6, color: "rgba(255,255,255,0.45)", fontWeight: 800, fontSize: 14 }}>
-                Buffer {buffer.toLocaleString()} lbs
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Combo status badge */}
-        {(() => {
-          const sc = (c as any).combo_status_code;
-          if (!sc) return null;
-          const sColor = sc === "OOS" || sc === "MAINT" ? "#f87171" : sc === "AVAIL" ? "#4ade80" : "rgba(255,255,255,0.5)";
-          const sBg    = sc === "OOS" || sc === "MAINT" ? "rgba(220,60,40,0.18)" : sc === "AVAIL" ? "rgba(40,180,80,0.13)" : "rgba(255,255,255,0.07)";
-          return (
-            <div style={{ marginTop: 8 }}>
-              <span style={{ fontSize: 11, fontWeight: 900, padding: "3px 8px", borderRadius: 5,
-                background: sBg, color: sColor, letterSpacing: 0.5 }}>{sc}</span>
-              {(c as any).combo_status_location && (
-                <span style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginLeft: 8 }}>
-                  📍 {(c as any).combo_status_location}
-                </span>
-              )}
-            </div>
-          );
-        })()}
-        {inUse && (
-          <div style={{ marginTop: 8, color: "rgba(234,179,8,0.95)", fontWeight: 900, fontSize: 16 }}>
-            In use · {claimedByName ?? "Someone"}
-          </div>
-        )}
-        {/* Edit Combo button */}
-        <button
-          type="button"
-          onClick={() => setComboEditOpen(true)}
-          style={{ marginTop: 12, padding: "6px 14px", fontSize: 12, fontWeight: 700,
-            background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.15)",
-            borderRadius: 8, color: "rgba(255,255,255,0.75)", cursor: "pointer",
-            WebkitTapHighlightColor: "transparent" }}
-        >
-          Edit Combo
-        </button>
-      </div>
-
-      <div style={{ height: 14 }} />
-
-      
-      {/* Driver details (copied from admin Truck/Trailer cards) */}
-      {detailsErr && (
-        <div style={{ ...S.err, marginTop: 8 }}>{detailsErr}</div>
-      )}
-
-      <div style={{ ...S.sectionHeader, marginTop: 0 }}>Truck</div>
-      {loadingDetails ? (
-        <div style={S.sub}>Loading truck…</div>
-      ) : fullTruck ? (
-        <AdminTruckCard
-          truck={fullTruck}
-          otherPermits={otherPermits}
-          companyId={companyIdSafe}
-          onEdit={() => setTruckEditOpen(true)}
-        />
-      ) : (
-        <div style={S.sub}>No truck details.</div>
-      )}
-
-      <div style={{ height: 14 }} />
-
-      <div style={S.sectionHeader}>Trailer</div>
-      {loadingDetails ? (
-        <div style={S.sub}>Loading trailer…</div>
-      ) : fullTrailer ? (
-        <AdminTrailerCard
-          trailer={fullTrailer}
-          companyId={companyIdSafe}
-          onEdit={() => setTrailerEditOpen(true)}
-        />
-      ) : (
-        <div style={S.sub}>No trailer details.</div>
-      )}
-
-      {/* Edit modals */}
-      {truckEditOpen && (
-        <AdminTruckModal
-          truck={fullTruck}
-          companyId={companyIdSafe}
-          onClose={() => setTruckEditOpen(false)}
-          onDone={() => { setTruckEditOpen(false); void reloadDetails(); }}
-        />
-      )}
-      {trailerEditOpen && (
-        <AdminTrailerModal
-          trailer={fullTrailer}
-          companyId={companyIdSafe}
-          onClose={() => setTrailerEditOpen(false)}
-          onDone={() => { setTrailerEditOpen(false); void reloadDetails(); }}
-        />
-      )}
-      {comboEditOpen && c && (
-        <PlannerComboEditModal
-          combo={c}
-          truckName={truck?.truck_name ?? String(c.truck_id)}
-          trailerName={trailer?.trailer_name ?? String(c.trailer_id)}
-          onClose={() => setComboEditOpen(false)}
-          onDone={() => { setComboEditOpen(false); void reloadDetails(); }}
-        />
-      )}
-
-    </ModalShell>
-  );
-}
-
-// Merge in authoritative combo fields fetched directly from equipment_combos.
-// (The parent list may omit newer columns like target_weight.)
-function mergeCombo(base: ComboRow, meta?: Partial<ComboRow> | null): ComboRow {
-  return meta ? ({ ...base, ...meta } as ComboRow) : base;
-}
-
-// ─── Star button ──────────────────────────────────────────────────────────────
-
-function StarBtn({
-  active,
-  busy,
-  onToggle,
-  title,
-}: {
-  active: boolean;
-  busy: boolean;
-  onToggle: () => void;
-  title?: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={(e) => { e.stopPropagation(); onToggle(); }}
-      disabled={busy}
-      title={title ?? (active ? "Remove from my equipment" : "Add to my equipment")}
-      style={{
-        background: "none",
-        border: "none",
-        padding: "2px 4px",
-        color: active ? "rgba(234,179,8,0.95)" : "rgba(255,255,255,0.22)",
-        fontSize: 18,
-        cursor: busy ? "not-allowed" : "pointer",
-        flexShrink: 0,
-        transition: "color 120ms ease",
-        opacity: busy ? 0.5 : 1,
-        lineHeight: 1,
-      }}
-    >
-      {active ? "★" : "☆"}
+    <button type="button" onClick={onClick}
+      style={{ ...D.btn, background: "transparent", border: "none", padding: "0 0 16px", fontSize: 13, color: "rgba(255,255,255,0.45)" }}>
+      ← Back
     </button>
   );
 }
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
+function ScenarioCard({ emoji, title, sub, onClick }: {
+  emoji: string; title: string; sub: string; onClick: () => void;
+}) {
+  return (
+    <button type="button" onClick={onClick} style={{
+      padding: "12px 14px", borderRadius: 10, cursor: "pointer",
+      textAlign: "left" as const, border: "1px solid rgba(255,255,255,0.12)",
+      background: "rgba(255,255,255,0.05)", transition: "all 120ms ease", width: "100%",
+    }}>
+      <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 3, display: "flex", alignItems: "center", gap: 8 }}><span>{emoji}</span><span>{title}</span></div>
+      <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", lineHeight: 1.4 }}>{sub}</div>
+    </button>
+  );
+}
 
-const S = {
-  sectionHeader: {
-    fontSize: 16,
-    fontWeight: 700 as const,
-    color: "rgba(255,255,255,0.35)",
-    letterSpacing: 0.8,
-    textTransform: "uppercase" as const,
-    margin: "8px 0 4px",
-  },
-  sub: {
-    color: "rgba(255,255,255,0.45)",
-    fontSize: 13,
-    marginBottom: 14,
-    lineHeight: 1.5,
-  },
-  err: {
-    borderRadius: 16,
-    padding: 14,
-    background: "rgba(180,40,40,0.18)",
-    border: "1px solid rgba(180,40,40,0.32)",
-    color: "rgba(255,255,255,0.92)",
-    fontWeight: 700,
-    marginBottom: 16,
-    fontSize: 13,
-    lineHeight: 1.5,
-  } as React.CSSProperties,
-  info: {
-    borderRadius: 16,
-    padding: 14,
-    background: "rgba(40,80,180,0.14)",
-    border: "1px solid rgba(64,140,255,0.22)",
-    color: "rgba(200,220,255,0.88)",
-    fontSize: 14,
-    lineHeight: 1.5,
-    marginBottom: 16,
-    fontWeight: 700 as const,
-  } as React.CSSProperties,
-  divider: {
-    height: 1,
-    background: "rgba(255,255,255,0.08)",
-    margin: "20px 0",
-  },
-  row: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 10,
-    padding: "10px 12px",
-    borderRadius: 12,
-    border: "1px solid rgba(255,255,255,0.10)",
-    background: "rgba(255,255,255,0.05)",
-    boxShadow: "0 6px 16px rgba(0,0,0,0.32)",
-    marginBottom: 10,
-  } as React.CSSProperties,
-  rowMine: {
-    background: "rgba(32,88,170,0.22)",
-    border: "1px solid rgba(64,140,255,0.22)",
-  } as React.CSSProperties,
-  rowInUse: {
-    background: "rgba(80,40,10,0.22)",
-    border: "1px solid rgba(180,100,30,0.28)",
-  } as React.CSSProperties,
-  rowName: {
-    fontSize: 16,
-    fontWeight: 900 as const,
-    letterSpacing: 0.2,
-    lineHeight: 1.2,
-  },
-  rowSub: {
-    marginTop: 4,
-    color: "rgba(255,255,255,0.50)",
-    fontSize: 12,
-  },
-  rowMineBadge: {
-    marginTop: 4,
-    color: "rgba(100,200,255,0.85)",
-    fontSize: 13,
-    fontWeight: 700 as const,
-  },
-  rowInUseBadge: {
-    marginTop: 4,
-    color: "rgba(255,170,80,0.90)",
-    fontSize: 13,
-    fontWeight: 700 as const,
-  },
-  btn: {
-    borderRadius: 10,
-    padding: "8px 14px",
-    fontWeight: 900 as const,
-    fontSize: 13,
-    letterSpacing: 0.5,
-    border: "1px solid rgba(255,255,255,0.14)",
-    background: "rgba(255,255,255,0.09)",
-    color: "rgba(255,255,255,0.92)",
-    cursor: "pointer",
-    whiteSpace: "nowrap" as const,
-    flexShrink: 0,
-  } as React.CSSProperties,
-  btnPrimary: {
-    background: "rgba(255,255,255,0.13)",
-    border: "1px solid rgba(255,255,255,0.20)",
-  } as React.CSSProperties,
-  btnDecouple: {
-    background: "rgba(180,80,20,0.18)",
-    border: "1px solid rgba(220,120,40,0.35)",
-    color: "rgba(255,190,120,0.95)",
-  } as React.CSSProperties,
-  btnSlipSeat: {
-    background: "rgba(120,60,160,0.22)",
-    border: "1px solid rgba(180,100,220,0.35)",
-    color: "rgba(210,160,255,0.95)",
-  } as React.CSSProperties,
-  select: {
-    width: "100%",
-    borderRadius: 14,
-    padding: "12px 14px",
-    border: "1px solid rgba(255,255,255,0.14)",
-    background: "rgba(0,0,0,0.40)",
-    color: "rgba(255,255,255,0.92)",
-    fontSize: 16,
-    outline: "none",
-    marginBottom: 12,
-    appearance: "none" as const,
-    backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='rgba(255,255,255,0.4)' stroke-width='1.8' fill='none' stroke-linecap='round'/%3E%3C/svg%3E")`,
-    backgroundRepeat: "no-repeat" as const,
-    backgroundPosition: "right 14px center",
-    paddingRight: 36,
-  } as React.CSSProperties,
-  label: {
-    fontSize: 13,
-    fontWeight: 700 as const,
-    color: "rgba(255,255,255,0.55)",
-    marginBottom: 6,
-    display: "block",
-  },
-  input: {
-    width: "100%",
-    borderRadius: 14,
-    padding: "12px 14px",
-    border: "1px solid rgba(255,255,255,0.14)",
-    background: "rgba(0,0,0,0.28)",
-    color: "rgba(255,255,255,0.92)",
-    fontSize: 18,
-    fontWeight: 700 as const,
-    outline: "none",
-    boxSizing: "border-box" as const,
-  } as React.CSSProperties,
-  linkBtn: {
-    background: "none",
-    border: "none",
-    color: "rgba(100,180,255,0.85)",
-    fontSize: 14,
-    fontWeight: 700 as const,
-    cursor: "pointer",
-    padding: 0,
-    textDecoration: "underline",
-    textUnderlineOffset: 3,
-    letterSpacing: 0.2,
-  } as React.CSSProperties,
+function FieldLabel({ children }: { children: React.ReactNode }) {
+  return <label style={D.label}>{children}</label>;
+}
+
+function LocationField({ value, onChange, onGeoTag, geoLoading, isError }: {
+  value: string; onChange: (v: string) => void;
+  onGeoTag: () => void; geoLoading: boolean; isError?: boolean;
+}) {
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+        <FieldLabel>Location *</FieldLabel>
+        <button type="button" onClick={onGeoTag} disabled={geoLoading} style={{
+          fontSize: 11, fontWeight: 800, letterSpacing: 0.4,
+          color: geoLoading ? "rgba(255,255,255,0.30)" : "#67e8f9",
+          background: "none", border: "none", cursor: geoLoading ? "default" : "pointer", padding: 0,
+        }}>
+          {geoLoading ? "Getting location…" : "📍 Use my location"}
+        </button>
+      </div>
+      <input type="text" placeholder="e.g. Bay 4, North lot, Shop dock 2"
+        value={value} onChange={(e) => onChange(e.target.value)}
+        style={{ ...D.input, ...(isError ? D.inputErr : {}) }} />
+      <div style={{ fontSize: 11, color: isError ? "#f87171" : "rgba(255,255,255,0.28)", marginTop: 4 }}>
+        {isError ? "Please enter a location before continuing." : "Be specific — yard name, bay number, or street address."}
+      </div>
+    </div>
+  );
+}
+
+function useGeoTag(onResult: (location: string, lat: number, lon: number) => void) {
+  const [geoLoading, setGeoLoading] = useState(false);
+  // Keep a ref to the latest onResult so the trigger callback is always stable
+  const onResultRef = useRef(onResult);
+  useEffect(() => { onResultRef.current = onResult; });
+
+  const trigger = useCallback(() => {
+    if (!navigator.geolocation) return;
+    setGeoLoading(true);
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const { latitude: lat, longitude: lon } = pos.coords;
+        try {
+          const res  = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`, { headers: { "Accept-Language": "en" } });
+          const data = await res.json();
+          const addr = data?.address ?? {};
+          const parts = [
+            addr.house_number && addr.road ? `${addr.house_number} ${addr.road}` : addr.road,
+            addr.city || addr.town || addr.village || addr.county,
+            addr.state,
+          ].filter(Boolean);
+          const shortAddr = parts.length >= 2 ? parts.join(", ") : data?.display_name ?? `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+          onResultRef.current(shortAddr, lat, lon);
+        } catch { onResultRef.current(`${lat.toFixed(5)}, ${lon.toFixed(5)}`, lat, lon); }
+        setGeoLoading(false);
+      },
+      () => setGeoLoading(false),
+      { timeout: 8000, enableHighAccuracy: true }
+    );
+  }, []); // stable — never recreated
+  return { geoLoading, trigger };
+}
+
+function StatusPicker<T extends string>({ options, value, onChange }: {
+  options: { code: T; label: string; sub: string; warn?: boolean }[];
+  value: T; onChange: (v: T) => void;
+}) {
+  return (
+    <div style={{ display: "grid", gap: 7 }}>
+      {options.map((o) => {
+        const sel = value === o.code;
+        return (
+          <button key={o.code} type="button" onClick={() => onChange(o.code)} style={{
+            display: "flex", alignItems: "center", gap: 10, padding: "7px 10px",
+            borderRadius: 8, cursor: "pointer", textAlign: "left" as const,
+            border: sel ? (o.warn ? "1px solid rgba(220,80,40,0.55)" : "1px solid rgba(64,180,255,0.45)") : "1px solid rgba(255,255,255,0.10)",
+            background: sel ? (o.warn ? "rgba(180,50,20,0.20)" : "rgba(32,100,200,0.18)") : "rgba(255,255,255,0.04)",
+            transition: "all 120ms ease",
+          }}>
+            <div style={{
+              flexShrink: 0, width: 60, textAlign: "center" as const,
+              fontSize: 10, fontWeight: 900, letterSpacing: 1, padding: "3px 0", borderRadius: 5,
+              background: sel ? (o.warn ? "rgba(220,80,40,0.25)" : "rgba(64,180,255,0.18)") : "rgba(255,255,255,0.08)",
+              color: sel ? (o.warn ? "#fb923c" : "#67e8f9") : "rgba(255,255,255,0.50)",
+            }}>{o.code}</div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 13, fontWeight: 800, color: o.warn && sel ? "#fb923c" : "rgba(255,255,255,0.88)" }}>{o.label}</div>
+              <div style={{ fontSize: 11, color: "rgba(255,255,255,0.38)", marginTop: 1 }}>{o.sub}</div>
+            </div>
+            {sel && <div style={{ flexShrink: 0, fontSize: 14, color: o.warn ? "#fb923c" : "#67e8f9" }}>✓</div>}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function SummaryRow({ label, code, location, notes }: { label: string; code: string; location: string; notes: string }) {
+  const allStatuses = [...TRUCK_STATUSES, ...TRAILER_STATUSES];
+  const def = allStatuses.find((s) => s.code === code);
+  const isWarn = def?.warn;
+  return (
+    <div style={{ padding: "9px 11px", borderRadius: 8, marginBottom: 8,
+      border: isWarn ? "1px solid rgba(220,80,40,0.35)" : "1px solid rgba(255,255,255,0.10)",
+      background: isWarn ? "rgba(180,50,20,0.12)" : "rgba(255,255,255,0.04)" }}>
+      <div style={{ fontSize: 10, fontWeight: 800, color: "rgba(255,255,255,0.35)", letterSpacing: 0.5, textTransform: "uppercase" as const, marginBottom: 4 }}>{label}</div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
+        <span style={{ fontSize: 10, fontWeight: 900, letterSpacing: 0.8, padding: "2px 7px", borderRadius: 5,
+          background: isWarn ? "rgba(220,80,40,0.20)" : "rgba(255,255,255,0.10)",
+          color: isWarn ? "#fb923c" : "rgba(255,255,255,0.75)" }}>{code}</span>
+        <span style={{ fontSize: 13, fontWeight: 700, color: isWarn ? "#fb923c" : "rgba(255,255,255,0.75)" }}>{def?.label ?? code}</span>
+      </div>
+      {location && <div style={{ fontSize: 12, color: "rgba(255,255,255,0.50)" }}>📍 {location}</div>}
+      {notes    && <div style={{ fontSize: 12, color: "rgba(255,255,255,0.38)", marginTop: 2 }}>{notes}</div>}
+    </div>
+  );
+}
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+type Scenario = "swap_truck" | "swap_trailer" | "drop_trailer" | "park_both" | null;
+type Step     = "scenario" | "details" | "confirm";
+
+type UnitRow = { id: string; name: string };
+
+type Props = {
+  open: boolean;
+  onClose: () => void;
+  comboId: string;
+  truckId: string;
+  trailerId: string;
+  truckName: string;
+  trailerName: string;
+  companyId: string | null;
+  uncoupledTrucks: UnitRow[];
+  uncoupledTrailers: UnitRow[];
+  onDecoupled: (newComboId?: string) => void;
 };
 
-// ─── Shared modal shell ───────────────────────────────────────────────────────
+// ─── Main modal ───────────────────────────────────────────────────────────────
 
-function ModalShell({
-  open, onClose, title, children,
-}: {
-  open: boolean;
-  onClose: () => void;
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <FullscreenModal open={open} onClose={onClose} title={title} footer={null}>
-      <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#000" }}>
-        <div style={{ flex: 1, overflowY: "auto", padding: "0 16px 8px" }}>
-          {children}
-        </div>
-        <div style={{
-          padding: "12px 16px 20px",
-          borderTop: "1px solid rgba(255,255,255,0.07)",
-          background: "#000",
-          flexShrink: 0,
-        }}>
-          <button
-            type="button"
-            onClick={onClose}
-            style={{
-              width: "100%", borderRadius: 18, padding: "15px 18px",
-              fontWeight: 900, fontSize: 17,
-              border: "1px solid rgba(255,255,255,0.14)",
-              background: "rgba(255,255,255,0.09)",
-              color: "rgba(255,255,255,0.92)", cursor: "pointer",
-            }}
-          >
-            Done
-          </button>
-        </div>
-      </div>
-    </FullscreenModal>
-  );
-}
+export default function DecoupleModal({
+  open, onClose, comboId, truckId, trailerId, truckName, trailerName,
+  companyId, uncoupledTrucks, uncoupledTrailers, onDecoupled,
+}: Props) {
+  const [step,     setStep]     = useState<Step>("scenario");
+  const [scenario, setScenario] = useState<Scenario>(null);
+  const [busy,     setBusy]     = useState(false);
+  const [err,      setErr]      = useState<string | null>(null);
+  const [reviewAttempted, setReviewAttempted] = useState(false);
 
-// ─── Fleet Modal ──────────────────────────────────────────────────────────────
+  // Shared location (used by park_both)
+  const [sharedLocation, setSharedLocation] = useState("");
+  const [sharedLat,      setSharedLat]      = useState<number | null>(null);
+  const [sharedLon,      setSharedLon]      = useState<number | null>(null);
 
-function FleetModal({
-  open, onClose, authUserId, companyId,
-  onSlipSeat, onClaim, selectedComboId,
-  primaryTruckIds, primaryTrailerIds,
-  onTogglePrimary, onToggleTruck, onToggleTrailer,
-  uncoupledTrucks, uncoupledTrailers, coupleRegions,
-  onTryCouple,
-  pickRegion,    setPickRegion,
-  pickTruckId,   setPickTruckId,
-  pickTrailerId, setPickTrailerId,
-  coupleBusy,
-}: {
-  open: boolean;
-  onClose: () => void;
-  authUserId: string | null;
-  companyId: string | null;
-  onSlipSeat: (comboId: string, truckId?: string, trailerId?: string) => Promise<void>;
-  onClaim: (comboId: string, truckId?: string, trailerId?: string) => Promise<void>;
-  selectedComboId: string;
-  primaryTruckIds: Set<string>;
-  primaryTrailerIds: Set<string>;
-  onTogglePrimary: (c: FleetCombo) => Promise<void>;
-  onToggleTruck: (truckId: string) => Promise<void>;
-  onToggleTrailer: (trailerId: string) => Promise<void>;
-  uncoupledTrucks: TruckRow[];
-  uncoupledTrailers: TrailerRow[];
-  coupleRegions: string[];
-  onTryCouple: () => void;
-  onCoupleDone: () => void;
-  pickRegion: string;    setPickRegion: (v: string) => void;
-  pickTruckId: string;   setPickTruckId: (v: string) => void;
-  pickTrailerId: string; setPickTrailerId: (v: string) => void;
-  coupleBusy: boolean;
-}) {
-  const [fleetCombos, setFleetCombos] = useState<FleetCombo[]>([]);
-  const [allRegions, setAllRegions] = useState<string[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [regionFilter, setRegionFilter] = useState("all");
-  const [busyId, setBusyId] = useState<string | null>(null);
-  const [starBusy, setStarBusy] = useState(false);
+  // Truck fields
+  const [truckStatus,   setTruckStatus]   = useState("PARK");
+  const [truckLocation, setTruckLocation] = useState("");
+  const [truckLat,      setTruckLat]      = useState<number | null>(null);
+  const [truckLon,      setTruckLon]      = useState<number | null>(null);
+  const [truckNotes,    setTruckNotes]    = useState("");
 
-  const loadFleet = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  // Trailer fields
+  const [trailerStatus,   setTrailerStatus]   = useState("PARK");
+  const [trailerLocation, setTrailerLocation] = useState("");
+  const [trailerLat,      setTrailerLat]      = useState<number | null>(null);
+  const [trailerLon,      setTrailerLon]      = useState<number | null>(null);
+  const [trailerNotes,    setTrailerNotes]    = useState("");
 
-    // Use passed companyId if available; otherwise resolve it directly here
-    let activeCompanyId = companyId;
-    if (!activeCompanyId) {
-      const { data: u } = await supabase.auth.getUser();
-      if (!u.user) {
-        setError("Not logged in.");
-        setLoading(false);
-        return;
+  // New unit pickers (for swap scenarios)
+  const [newTruckId,   setNewTruckId]   = useState("");
+  const [newTrailerId, setNewTrailerId] = useState("");
+
+  function reset() {
+    setStep("scenario"); setScenario(null); setBusy(false); setErr(null);
+    setReviewAttempted(false);
+    setNeedsTare(false); setNewTareLbs("");
+    setSharedLocation(""); setSharedLat(null); setSharedLon(null);
+    setTruckStatus("PARK"); setTruckLocation(""); setTruckLat(null); setTruckLon(null); setTruckNotes("");
+    setTrailerStatus("PARK"); setTrailerLocation(""); setTrailerLat(null); setTrailerLon(null); setTrailerNotes("");
+    setNewTruckId(""); setNewTrailerId("");
+  }
+
+  function handleClose() { reset(); onClose(); }
+
+  function pickScenario(s: Scenario) {
+    setScenario(s);
+    setReviewAttempted(false);
+    if (s === "drop_trailer") { setTrailerStatus("PARK"); setTruckStatus("BOBTAIL"); }
+    if (s === "swap_truck")   { setTruckStatus("PARK"); setTrailerStatus("AVAIL"); }
+    if (s === "swap_trailer") { setTrailerStatus("PARK"); setTruckStatus("AVAIL"); }
+    if (s === "park_both")    { setTruckStatus("PARK"); setTrailerStatus("PARK"); }
+    setStep("details");
+  }
+
+  // ── Geo hooks per field ──
+  const truckGeo = useGeoTag((loc, lat, lon) => { setTruckLocation(loc); setTruckLat(lat); setTruckLon(lon); });
+  const trailerGeo = useGeoTag((loc, lat, lon) => { setTrailerLocation(loc); setTrailerLat(lat); setTrailerLon(lon); });
+  const sharedGeo = useGeoTag((loc, lat, lon) => { setSharedLocation(loc); setSharedLat(lat); setSharedLon(lon); });
+
+  // ── Validation per scenario ──
+  function canProceed(): boolean {
+    switch (scenario) {
+      case "drop_trailer":  return trailerLocation.trim().length > 0;
+      case "swap_truck":    return truckLocation.trim().length > 0 && newTruckId.length > 0;
+      case "swap_trailer":  return trailerLocation.trim().length > 0 && newTrailerId.length > 0;
+      case "park_both":     return sharedLocation.trim().length > 0;
+      default: return false;
+    }
+  }
+
+  // ── Submit ──
+  const [needsTare,  setNeedsTare]  = useState(false);
+  const [newTareLbs, setNewTareLbs] = useState("");
+
+  async function handleConfirm() {
+    if (busy) return;
+    setErr(null); setBusy(true);
+    try {
+      // On tare retry, decouple already happened — skip straight to recouple
+      if (!needsTare) {
+        const finalTruckStatus   = scenario === "drop_trailer" ? "BOBTAIL" : truckStatus;
+        const finalTrailerStatus = trailerStatus;
+        const finalTruckLoc   = scenario === "park_both" ? sharedLocation : truckLocation;
+        const finalTruckLat   = scenario === "park_both" ? sharedLat : truckLat;
+        const finalTruckLon   = scenario === "park_both" ? sharedLon : truckLon;
+        const finalTrailerLoc = scenario === "park_both" ? sharedLocation : trailerLocation;
+        const finalTrailerLat = scenario === "park_both" ? sharedLat : trailerLat;
+        const finalTrailerLon = scenario === "park_both" ? sharedLon : trailerLon;
+
+        const { error } = await supabase.rpc("decouple_combo", {
+          p_combo_id:         comboId,
+          p_scenario:         scenario!,
+          p_truck_status:     finalTruckStatus,
+          p_truck_location:   finalTruckLoc.trim() || null,
+          p_truck_lat:        finalTruckLat,
+          p_truck_lon:        finalTruckLon,
+          p_truck_notes:      truckNotes.trim() || null,
+          p_trailer_status:   finalTrailerStatus,
+          p_trailer_location: finalTrailerLoc.trim() || null,
+          p_trailer_lat:      finalTrailerLat,
+          p_trailer_lon:      finalTrailerLon,
+          p_trailer_notes:    trailerNotes.trim() || null,
+        });
+        if (error) throw error;
+
+        // Write status/location directly — decouple_combo RPC doesn't update truck/trailer rows
+        await Promise.all([
+          supabase.from("trucks").update({
+            status_code:     finalTruckStatus,
+            status_location: finalTruckLoc.trim() || null,
+          }).eq("truck_id", truckId).eq("company_id", companyId),
+          supabase.from("trailers").update({
+            status_code:     finalTrailerStatus,
+            status_location: finalTrailerLoc.trim() || null,
+          }).eq("trailer_id", trailerId).eq("company_id", companyId),
+        ]);
       }
-      const { data: s } = await supabase
-        .from("user_settings")
-        .select("active_company_id")
-        .eq("user_id", u.user.id)
-        .maybeSingle();
-      activeCompanyId = (s?.active_company_id as string | null) ?? null;
+
+      // For swap scenarios, recouple with the new unit (runs on first attempt and tare retry)
+      let newComboId: string | undefined;
+
+      if (scenario === "swap_truck" && newTruckId) {
+        const tare = newTareLbs ? Number(newTareLbs) : undefined;
+        if (needsTare) {
+          if (!tare || !Number.isFinite(tare) || tare <= 0) {
+            throw new Error("Enter a valid tare weight to continue.");
+          }
+        }
+        const params: Record<string, any> = { p_truck_id: newTruckId, p_trailer_id: trailerId };
+        if (tare && tare > 0) params.p_tare_lbs = tare;
+        const { data: coupleData, error: coupleErr } = await supabase.rpc("couple_combo", params);
+        if (coupleErr) {
+          if (coupleErr.message?.toLowerCase().includes("tare") || coupleErr.message?.toLowerCase().includes("historical") || coupleErr.message?.toLowerCase().includes("provide")) {
+            setNeedsTare(true);
+            throw new Error("This is a new truck/trailer pairing. Enter the tare weight from a certified scale ticket.");
+          }
+          throw coupleErr;
+        }
+        newComboId = String((coupleData as any)?.combo_id ?? "");
+        // Auto-claim the new combo so it's selected in the planner
+        if (newComboId) {
+          await supabase.rpc("claim_combo", { p_combo_id: newComboId });
+        }
+      }
+
+      if (scenario === "swap_trailer" && newTrailerId) {
+        const tare = newTareLbs ? Number(newTareLbs) : undefined;
+        if (needsTare) {
+          if (!tare || !Number.isFinite(tare) || tare <= 0) {
+            throw new Error("Enter a valid tare weight to continue.");
+          }
+        }
+        const params: Record<string, any> = { p_truck_id: truckId, p_trailer_id: newTrailerId };
+        if (tare && tare > 0) params.p_tare_lbs = tare;
+        const { data: coupleData, error: coupleErr } = await supabase.rpc("couple_combo", params);
+        if (coupleErr) {
+          if (coupleErr.message?.toLowerCase().includes("tare") || coupleErr.message?.toLowerCase().includes("historical") || coupleErr.message?.toLowerCase().includes("provide")) {
+            setNeedsTare(true);
+            throw new Error("This is a new truck/trailer pairing. Enter the tare weight from a certified scale ticket.");
+          }
+          throw coupleErr;
+        }
+        newComboId = String((coupleData as any)?.combo_id ?? "");
+        // Auto-claim the new combo so it's selected in the planner
+        if (newComboId) {
+          await supabase.rpc("claim_combo", { p_combo_id: newComboId });
+        }
+      }
+
+      onDecoupled(newComboId);
+      reset();
+    } catch (e: any) {
+      setErr(e?.message ?? "Failed to decouple.");
+    } finally {
+      setBusy(false);
     }
+  }
 
-    if (!activeCompanyId) {
-      setError("No active company selected. Ask your admin to assign you to a company.");
-      setLoading(false);
-      return;
-    }
+  // ─────────────────────────────────────────────────────────────────────────
+  // ── STEP: SCENARIO ────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
 
-    // Fetch all active combos — manual join (no FK assumption)
-    const { data: comboData, error: comboErr } = await supabase
-      .from("equipment_combos")
-      .select("combo_id, combo_name, truck_id, trailer_id, tare_lbs, target_weight, claimed_by, claimed_at, active, company_id, combo_status_code, combo_status_location")
-      .eq("active", true)
-      .eq("company_id", activeCompanyId)
-      .order("combo_name", { ascending: true });
-
-    if (comboErr) { setError(comboErr.message); setLoading(false); return; }
-
-    const rows = comboData ?? [];
-
-    const truckIds   = Array.from(new Set(rows.map((r: any) => r.truck_id).filter(Boolean)));
-    const trailerIds = Array.from(new Set(rows.map((r: any) => r.trailer_id).filter(Boolean)));
-    const claimedIds = Array.from(new Set(rows.map((r: any) => r.claimed_by).filter(Boolean)));
-
-    const [{ data: truckData }, { data: trailerData }, { data: profileData }] =
-      await Promise.all([
-        truckIds.length > 0
-          ? supabase.from("trucks").select("truck_id, truck_name, region").eq("company_id", activeCompanyId).in("truck_id", truckIds)
-          : Promise.resolve({ data: [] }),
-        trailerIds.length > 0
-          ? supabase.from("trailers").select("trailer_id, trailer_name").eq("company_id", activeCompanyId).in("trailer_id", trailerIds)
-          : Promise.resolve({ data: [] }),
-        claimedIds.length > 0
-          ? supabase.from("profiles").select("user_id, display_name").in("user_id", claimedIds)
-          : Promise.resolve({ data: [] }),
-      ]);
-
-    const truckMap: Record<string, { name: string; region: string | null }> = {};
-    for (const t of truckData ?? []) {
-      truckMap[String((t as any).truck_id)] = { name: (t as any).truck_name, region: (t as any).region ?? null };
-    }
-    const trailerMap: Record<string, string> = {};
-    for (const t of trailerData ?? []) {
-      trailerMap[String((t as any).trailer_id)] = (t as any).trailer_name;
-    }
-    const nameMap: Record<string, string> = {};
-    for (const p of profileData ?? []) {
-      if ((p as any).user_id) nameMap[(p as any).user_id] = (p as any).display_name ?? "Unknown";
-    }
-
-    const fleet: FleetCombo[] = rows.map((r: any) => ({
-      combo_id:        String(r.combo_id),
-      combo_name:      r.combo_name ?? null,
-      truck_id:        r.truck_id   ?? null,
-      trailer_id:      r.trailer_id ?? null,
-      tare_lbs:        r.tare_lbs   ?? null,
-      target_weight:   (r as any).target_weight ?? null,
-      claimed_by:      r.claimed_by ?? null,
-      claimed_at:      r.claimed_at ?? null,
-      active:          r.active,
-      company_id:      r.company_id ?? null,
-      truck_name:      r.truck_id   ? truckMap[r.truck_id]?.name   ?? null : null,
-      trailer_name:    r.trailer_id ? trailerMap[r.trailer_id]     ?? null : null,
-      truck_region:    r.truck_id   ? truckMap[r.truck_id]?.region ?? null : null,
-      claimed_by_name: r.claimed_by ? (nameMap[r.claimed_by] ?? "Someone") : null,
-    }));
-
-    setFleetCombos(fleet);
-    setLoading(false);
-  }, [companyId]);
-
-  // Fix #6: fetch all regions directly from trucks table, not derived from combos
-  const loadRegions = useCallback(async () => {
-    const { data } = await supabase
-      .from("trucks")
-      .select("region")
-      .eq("active", true)
-      .not("region", "is", null);
-    const vals = Array.from(
-      new Set((data ?? []).map((r: any) => r.region).filter(Boolean))
-    ).sort() as string[];
-    setAllRegions(vals);
-  }, []);
-
-  useEffect(() => {
-    if (open) {
-      loadFleet();
-      loadRegions();
-      setRegionFilter("all");
-    }
-  }, [open, loadFleet, loadRegions]);
-
-  const filtered = useMemo(() =>
-    regionFilter === "all"
-      ? fleetCombos
-      : regionFilter === ""
-      ? fleetCombos.filter((c) => !c.truck_region)
-      : fleetCombos.filter((c) => c.truck_region === regionFilter),
-    [fleetCombos, regionFilter]
+  const scenarioStep = (
+    <div style={{ display: "grid", gap: 10 }}>
+      <div style={{ fontSize: 14, color: "rgba(255,255,255,0.50)", marginBottom: 4, lineHeight: 1.55 }}>
+        In order to decouple{" "}
+        <strong style={{ color: "rgba(255,255,255,0.85)" }}>{truckName} / {trailerName}</strong>,
+        please choose an action and update the status.
+      </div>
+      <ScenarioCard emoji="🔄" title="Swap the truck"
+        sub="Switching to a different power unit. Keeping the same trailer to couple with a new truck at this location."
+        onClick={() => pickScenario("swap_truck")} />
+      <ScenarioCard emoji="🔁" title="Swap the trailer"
+        sub="Switching to a different trailer. Keeping the same power unit to couple with a new trailer at this location."
+        onClick={() => pickScenario("swap_trailer")} />
+      <ScenarioCard emoji="🔓" title="Drop the trailer"
+        sub="I'm bobtailing away. The trailer stays at this location."
+        onClick={() => pickScenario("drop_trailer")} />
+      <ScenarioCard emoji="🅿️" title="Park both units"
+        sub="Drop the trailer, park the truck and take the Nike express."
+        onClick={() => pickScenario("park_both")} />
+    </div>
   );
 
-  function fleetLabel(c: FleetCombo): string {
-    if (c.combo_name) return c.combo_name;
-    return [c.truck_name, c.trailer_name].filter(Boolean).join(" / ") || "Unknown";
-  }
+  // ─────────────────────────────────────────────────────────────────────────
+  // ── STEP: DETAILS — branches per scenario ────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
 
-  const isMine    = (c: FleetCombo) => authUserId && String(c.claimed_by ?? "") === String(authUserId);
-  const isInUse   = (c: FleetCombo) => c.claimed_by && !isMine(c);
-  const isStarred = (c: FleetCombo) => Boolean(c.truck_id && primaryTruckIds.has(String(c.truck_id)));
+  const scenarioColors: Record<NonNullable<Scenario>, string> = {
+    swap_truck:    "#fbbf24",
+    swap_trailer:  "#a78bfa",
+    drop_trailer:  "#67e8f9",
+    park_both:     "#86efac",
+  };
+  const scenarioLabels: Record<NonNullable<Scenario>, string> = {
+    swap_truck:   "🔄 Swap the truck",
+    swap_trailer: "🔁 Swap the trailer",
+    drop_trailer: "🚚 Drop the trailer",
+    park_both:    "🅿️ Park both units",
+  };
 
-  async function handleFleetSlipSeat(c: FleetCombo) {
-    const comboId = String(c.combo_id);
-    setBusyId(comboId);
-    try { await onSlipSeat(comboId, String(c.truck_id ?? ""), String(c.trailer_id ?? "")); await loadFleet(); }
-    finally { setBusyId(null); }
-  }
+  let detailsBody: React.ReactNode = null;
 
-  async function handleToggleStar(c: FleetCombo) {
-    setBusyId(String(c.combo_id));
-    try { await onTogglePrimary(c); }
-    finally { setBusyId(null); }
-  }
-
-  return (
-    <ModalShell open={open} onClose={onClose} title="Fleet">
-      {/* Region filter */}
-      <div style={{ marginTop: 10, marginBottom: 4 }}>
-        <div style={{ fontSize: 13, color: "rgba(255,255,255,0.45)", marginBottom: 6 }}>
-          {loading ? "Loading…" : `${filtered.length} combo${filtered.length !== 1 ? "s" : ""}${regionFilter !== "all" ? ` · ${regionFilter || "Unassigned"}` : " · All regions"}`}
+  // ── SWAP TRUCK: park old truck (location + status + notes), pick new truck, recouple
+  if (scenario === "swap_truck") {
+    detailsBody = (
+      <>
+        <div style={{ fontSize: 13, color: "rgba(255,255,255,0.45)", marginBottom: 16, lineHeight: 1.5 }}>
+          Park <strong style={{ color: "rgba(255,255,255,0.75)" }}>{truckName}</strong> and
+          select the new truck to couple with <strong style={{ color: "rgba(255,255,255,0.75)" }}>{trailerName}</strong>.
+          The trailer's status stays unchanged.
         </div>
-        <select
-          style={{ ...S.select, marginBottom: 16 }}
-          value={regionFilter}
-          onChange={(e) => setRegionFilter(e.target.value)}
-        >
-          <option value="all">All regions</option>
-          {allRegions.map((r) => (
-            <option key={r} value={r}>{r}</option>
-          ))}
-          {fleetCombos.some((c) => !c.truck_region) && (
-            <option value="">Unassigned</option>
-          )}
-        </select>
-      </div>
 
-      <div style={S.sectionHeader}>Coupled Equipment</div>
+        {/* Old truck — location + status + notes */}
+        <div style={D.sectionTitle}>Parking {truckName}</div>
+        <LocationField value={truckLocation} onChange={setTruckLocation}
+          onGeoTag={truckGeo.trigger} geoLoading={truckGeo.geoLoading}
+          isError={reviewAttempted && !truckLocation.trim()} />
+        <div style={{ marginBottom: 14 }}>
+          <FieldLabel>Truck status</FieldLabel>
+          <StatusPicker
+            options={TRUCK_STATUSES.filter(s => s.code !== "BOBTAIL") as any}
+            value={truckStatus as TruckStatus}
+            onChange={(v) => setTruckStatus(v)}
+          />
+        </div>
+        <div style={{ marginBottom: 16 }}>
+          <FieldLabel>Notes (optional)</FieldLabel>
+          <textarea style={D.textarea} placeholder="Repair ticket #, contact, ETA…"
+            value={truckNotes} onChange={(e) => setTruckNotes(e.target.value)} />
+        </div>
 
-      {loading ? (
-        <div style={S.sub}>Loading fleet…</div>
-      ) : error ? (
-        <div style={S.err}>{error}</div>
-      ) : filtered.length === 0 ? (
-        <div style={S.sub}>No coupled equipment found.</div>
-      ) : (
-        filtered.map((c) => {
-          const cid      = String(c.combo_id);
-          const mine     = isMine(c);
-          const inUse    = isInUse(c);
-          const starred  = isStarred(c);
-          const isBusy   = busyId === cid;
-          const isCurrentlySelected = String(selectedComboId) === cid;
+        <div style={D.divider} />
 
-          const rowStyle = { ...(mine ? { ...S.row, ...S.rowMine } : inUse ? { ...S.row, ...S.rowInUse } : S.row), position: 'relative' as const };
-
-          return (
-            <div key={cid} style={rowStyle}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={S.rowName}>{fleetLabel(c)}</div>
-                {Number(c.tare_lbs ?? 0) > 0 && (
-                  <div style={S.rowSub}>Tare {Number(c.tare_lbs).toLocaleString()} lbs</div>
-                )}
-                {Number((c as any).target_weight ?? 0) > 0 && (
-                  <div style={S.rowSub}>Target {Number((c as any).target_weight).toLocaleString()} lbs</div>
-                )}
-                {c.truck_region && (
-                  <div style={{ ...S.rowSub, fontSize: 12 }}>{c.truck_region}</div>
-                )}
-                {inUse && (
-                  <div style={S.rowMineBadge}>In use · {c.claimed_by_name ?? "Someone"}</div>
-                )}
-              </div>
-
-              {/* Right: star top + action button below */}
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6, flexShrink: 0 }}>
-                <StarBtn
-                  active={starred}
-                  busy={isBusy}
-                  onToggle={() => handleToggleStar(c)}
-                  title={starred ? "Remove from my equipment" : "Add to my equipment"}
-                />
-                {!mine && !inUse && (
-                  <button
-                    type="button"
-                    style={{ ...S.btn, ...S.btnPrimary, opacity: isBusy ? 0.5 : 1 }}
-                    onClick={async () => { await onClaim(cid, String(c.truck_id ?? ""), String(c.trailer_id ?? "")); onClose(); }}
-                    disabled={isBusy}
-                  >
-                    SELECT
-                  </button>
-                )}
-                {inUse && (
-                  <button
-                    type="button"
-                    style={{ ...S.btn, ...S.btnSlipSeat, opacity: isBusy ? 0.5 : 1 }}
-                    onClick={() => handleFleetSlipSeat(c)}
-                    disabled={isBusy}
-                  >
-                    {isBusy ? "…" : "SLIP SEAT"}
-                  </button>
-                )}
-                {mine && !isCurrentlySelected && (
-                  <button
-                    type="button"
-                    style={{ ...S.btn, ...S.btnPrimary, opacity: isBusy ? 0.5 : 1 }}
-                    onClick={async () => { await onClaim(cid, String(c.truck_id ?? ""), String(c.trailer_id ?? "")); onClose(); }}
-                    disabled={isBusy}
-                  >
-                    SELECT
-                  </button>
-                )}
-              </div>
+        {/* New truck picker */}
+        <div style={D.sectionTitle}>New truck</div>
+        <div style={{ marginBottom: 4 }}>
+          <FieldLabel>Select truck to couple</FieldLabel>
+          <select style={{ ...D.select, ...(reviewAttempted && !newTruckId ? D.inputErr : {}) }}
+            value={newTruckId} onChange={(e) => setNewTruckId(e.target.value)}>
+            <option value="">Select truck…</option>
+            {uncoupledTrucks.map((t) => (
+              <option key={t.id} value={t.id}>{t.name}</option>
+            ))}
+          </select>
+          {uncoupledTrucks.length === 0 && (
+            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", marginTop: 4 }}>
+              No uncoupled trucks available.
             </div>
-          );
-        })
-      )}
+          )}
+        </div>
+      </>
+    );
+  }
 
-      {/* ── Couple equipment ─────────────────────────────────────────────── */}
-      <div style={S.divider} />
-      <div style={S.sectionHeader}>Uncoupled Equipment</div>
-      <div style={S.sub}>Pick a truck and trailer to couple them. If they've been paired before, the last known tare weight is restored automatically.</div>
+  // ── SWAP TRAILER: park old trailer (location + status + notes), pick new trailer, recouple
+  if (scenario === "swap_trailer") {
+    detailsBody = (
+      <>
+        <div style={{ fontSize: 13, color: "rgba(255,255,255,0.45)", marginBottom: 16, lineHeight: 1.5 }}>
+          Park <strong style={{ color: "rgba(255,255,255,0.75)" }}>{trailerName}</strong> and
+          select the new trailer to couple with <strong style={{ color: "rgba(255,255,255,0.75)" }}>{truckName}</strong>.
+          The truck's status stays unchanged.
+        </div>
 
-      <div>
-        <label style={S.label}>Region</label>
-        <select style={S.select} value={pickRegion}
-          onChange={(e) => { setPickRegion(e.target.value); setPickTruckId(""); setPickTrailerId(""); }}
-          disabled={coupleBusy}>
-          <option value="">All regions</option>
-          {coupleRegions.map((r) => <option key={r} value={r}>{r}</option>)}
-        </select>
+        {/* Old trailer — location + status + notes */}
+        <div style={D.sectionTitle}>Parking {trailerName}</div>
+        <LocationField value={trailerLocation} onChange={setTrailerLocation}
+          onGeoTag={trailerGeo.trigger} geoLoading={trailerGeo.geoLoading}
+          isError={reviewAttempted && !trailerLocation.trim()} />
+        <div style={{ marginBottom: 14 }}>
+          <FieldLabel>Trailer status</FieldLabel>
+          <StatusPicker
+            options={TRAILER_STATUSES as any}
+            value={trailerStatus as TrailerStatus}
+            onChange={(v) => setTrailerStatus(v)}
+          />
+        </div>
+        <div style={{ marginBottom: 16 }}>
+          <FieldLabel>Notes (optional)</FieldLabel>
+          <textarea style={D.textarea} placeholder="Repair ticket #, contact, ETA…"
+            value={trailerNotes} onChange={(e) => setTrailerNotes(e.target.value)} />
+        </div>
+
+        <div style={D.divider} />
+
+        {/* New trailer picker */}
+        <div style={D.sectionTitle}>New trailer</div>
+        <div style={{ marginBottom: 4 }}>
+          <FieldLabel>Select trailer to couple</FieldLabel>
+          <select style={{ ...D.select, ...(reviewAttempted && !newTrailerId ? D.inputErr : {}) }}
+            value={newTrailerId} onChange={(e) => setNewTrailerId(e.target.value)}>
+            <option value="">Select trailer…</option>
+            {uncoupledTrailers.map((t) => (
+              <option key={t.id} value={t.id}>{t.name}</option>
+            ))}
+          </select>
+          {uncoupledTrailers.length === 0 && (
+            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", marginTop: 4 }}>
+              No uncoupled trailers available.
+            </div>
+          )}
+        </div>
+      </>
+    );
+  }
+
+  // ── DROP TRAILER: STUD the trailer only (truck is bobtailing away)
+  if (scenario === "drop_trailer") {
+    detailsBody = (
+      <>
+        <div style={{ fontSize: 13, color: "rgba(255,255,255,0.45)", marginBottom: 16, lineHeight: 1.5 }}>
+          Set the status for <strong style={{ color: "rgba(255,255,255,0.75)" }}>{trailerName}</strong> so
+          others know where it is and whether it's available.
+          <strong style={{ color: "#67e8f9" }}> {truckName}</strong> will be marked <strong style={{ color: "#67e8f9" }}>BOBTAIL</strong> automatically.
+        </div>
+
+        <div style={D.sectionTitle}>Trailer status — {trailerName}</div>
+        <LocationField value={trailerLocation} onChange={setTrailerLocation}
+          onGeoTag={trailerGeo.trigger} geoLoading={trailerGeo.geoLoading}
+          isError={reviewAttempted && !trailerLocation.trim()} />
+        <div style={{ marginBottom: 14 }}>
+          <FieldLabel>Status</FieldLabel>
+          <StatusPicker
+            options={TRAILER_STATUSES as any}
+            value={trailerStatus as TrailerStatus}
+            onChange={(v) => setTrailerStatus(v)}
+          />
+        </div>
+        <div style={{ marginBottom: 4 }}>
+          <FieldLabel>Notes (optional)</FieldLabel>
+          <textarea style={D.textarea} placeholder="Loaded? Empty? Repair needed? ETA pickup…"
+            value={trailerNotes} onChange={(e) => setTrailerNotes(e.target.value)} />
+        </div>
+      </>
+    );
+  }
+
+  // ── PARK BOTH: one shared location, one reason per unit
+  if (scenario === "park_both") {
+    detailsBody = (
+      <>
+        <div style={{ fontSize: 13, color: "rgba(255,255,255,0.45)", marginBottom: 16, lineHeight: 1.5 }}>
+          Both units are being parked at the same location.
+          Enter the location once, then add a reason for each unit.
+        </div>
+
+        {/* Shared location */}
+        <div style={D.sectionTitle}>Location (both units)</div>
+        <LocationField value={sharedLocation} onChange={setSharedLocation}
+          onGeoTag={sharedGeo.trigger} geoLoading={sharedGeo.geoLoading}
+          isError={reviewAttempted && !sharedLocation.trim()} />
+
+        <div style={D.divider} />
+
+        {/* Truck status + reason */}
+        <div style={D.sectionTitle}>Truck — {truckName}</div>
+        <div style={{ marginBottom: 14 }}>
+          <FieldLabel>Status</FieldLabel>
+          <StatusPicker
+            options={TRUCK_STATUSES.filter(s => s.code !== "BOBTAIL") as any}
+            value={truckStatus as TruckStatus}
+            onChange={(v) => setTruckStatus(v)}
+          />
+        </div>
+        <div style={{ marginBottom: 16 }}>
+          <FieldLabel>Reason / Notes (optional)</FieldLabel>
+          <textarea style={D.textarea} placeholder="Why is this truck being parked? Repair ticket, end of shift, etc."
+            value={truckNotes} onChange={(e) => setTruckNotes(e.target.value)} />
+        </div>
+
+        <div style={D.divider} />
+
+        {/* Trailer status + reason */}
+        <div style={D.sectionTitle}>Trailer — {trailerName}</div>
+        <div style={{ marginBottom: 14 }}>
+          <FieldLabel>Status</FieldLabel>
+          <StatusPicker
+            options={TRAILER_STATUSES as any}
+            value={trailerStatus as TrailerStatus}
+            onChange={(v) => setTrailerStatus(v)}
+          />
+        </div>
+        <div style={{ marginBottom: 4 }}>
+          <FieldLabel>Reason / Notes (optional)</FieldLabel>
+          <textarea style={D.textarea} placeholder="Empty? Loaded? Scheduled for cleaning? Inspection pending?"
+            value={trailerNotes} onChange={(e) => setTrailerNotes(e.target.value)} />
+        </div>
+      </>
+    );
+  }
+
+  const detailsStep = scenario ? (
+    <div>
+      <BackBtn onClick={() => setStep("scenario")} />
+      <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: 0.5,
+        color: scenarioColors[scenario], textTransform: "uppercase" as const, marginBottom: 14 }}>
+        {scenarioLabels[scenario]}
       </div>
 
-      <div>
-        <label style={S.label}>Truck</label>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 0 }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <select style={{ ...S.select, marginBottom: 0 }} value={pickTruckId}
-              onChange={(e) => setPickTruckId(e.target.value)} disabled={coupleBusy}>
-              <option value="">Select truck…</option>
-              {(pickRegion ? uncoupledTrucks.filter(t => t.region === pickRegion) : uncoupledTrucks).map((t) => (
-                <option key={t.truck_id} value={t.truck_id}>
-                  {primaryTruckIds.has(String(t.truck_id)) ? "★ " : ""}
-                  {["OOS","MAINT"].includes(t.status_code ?? "") ? "⚠ " : ""}
-                  {t.truck_name}
-                  {t.status_code && t.status_code !== "AVAIL" ? ` — ${t.status_code}` : ""}
-                </option>
-              ))}
-            </select>
+      {detailsBody}
+
+      {err && <div style={{ ...D.err, marginTop: 12 }}>{err}</div>}
+
+      {/* Validation messages — only shown after first tap attempt */}
+      {reviewAttempted && !canProceed() && (() => {
+        const msgs: string[] = [];
+        if (scenario === "swap_truck")   { if (!truckLocation.trim()) msgs.push("Truck location is required"); if (!newTruckId) msgs.push("Select a new truck"); }
+        if (scenario === "swap_trailer") { if (!trailerLocation.trim()) msgs.push("Trailer location is required"); if (!newTrailerId) msgs.push("Select a new trailer"); }
+        if (scenario === "drop_trailer") { if (!trailerLocation.trim()) msgs.push("Trailer location is required"); }
+        if (scenario === "park_both")    { if (!sharedLocation.trim()) msgs.push("Location is required"); }
+        return (
+          <div style={{ marginTop: 10, display: "grid", gap: 4 }}>
+            {msgs.map((m, i) => (
+              <div key={i} style={{ fontSize: 12, fontWeight: 700, color: "#f87171",
+                display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ fontSize: 14 }}>⚠</span> {m}
+              </div>
+            ))}
           </div>
-          {pickTruckId && (
-            <StarBtn
-              active={primaryTruckIds.has(pickTruckId)}
-              busy={starBusy}
-              onToggle={async () => { setStarBusy(true); try { await onToggleTruck(pickTruckId); } finally { setStarBusy(false); } }}
-              title={primaryTruckIds.has(pickTruckId) ? "Remove truck from my equipment" : "Star this truck"}
-            />
-          )}
-        </div>
-        {pickTruckId && (() => {
-          const truck = uncoupledTrucks.find(t => t.truck_id === pickTruckId);
-          if (!truck) return null;
-          const code = truck.status_code ?? "AVAIL";
-          const isWarn = ["OOS","MAINT"].includes(code);
-          if (["AVAIL","BOBTAIL"].includes(code)) return null;
-          return (
-            <div style={{ padding: "10px 12px", borderRadius: 10, marginTop: 8, marginBottom: 10,
-              border: isWarn ? "1px solid rgba(220,80,40,0.45)" : "1px solid rgba(255,185,0,0.25)",
-              background: isWarn ? "rgba(180,50,20,0.18)" : "rgba(255,185,0,0.07)" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ fontSize: 10, fontWeight: 900, padding: "2px 7px", borderRadius: 5,
-                  background: isWarn ? "rgba(220,80,40,0.25)" : "rgba(255,185,0,0.18)",
-                  color: isWarn ? "#fb923c" : "#fbbf24" }}>{code}</span>
-                {isWarn && <span style={{ fontSize: 12, fontWeight: 800, color: "#fb923c" }}>⚠ Do not couple until cleared</span>}
-              </div>
-              {truck.status_location && <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginTop: 4 }}>📍 {truck.status_location}</div>}
-            </div>
-          );
-        })()}
-      </div>
-
-      <div>
-        <label style={S.label}>Trailer</label>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 0 }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <select style={{ ...S.select, marginBottom: 0 }} value={pickTrailerId}
-              onChange={(e) => setPickTrailerId(e.target.value)} disabled={coupleBusy}>
-              <option value="">Select trailer…</option>
-              {(pickRegion ? uncoupledTrailers.filter(t => t.region === pickRegion) : uncoupledTrailers).map((t) => (
-                <option key={t.trailer_id} value={t.trailer_id}>
-                  {primaryTrailerIds.has(String(t.trailer_id)) ? "★ " : ""}
-                  {["OOS","MAINT"].includes(t.status_code ?? "") ? "⚠ " : ""}
-                  {t.trailer_name}
-                  {t.status_code && t.status_code !== "AVAIL" ? ` — ${t.status_code}` : ""}
-                </option>
-              ))}
-            </select>
-          </div>
-          {pickTrailerId && (
-            <StarBtn
-              active={primaryTrailerIds.has(pickTrailerId)}
-              busy={starBusy}
-              onToggle={async () => { setStarBusy(true); try { await onToggleTrailer(pickTrailerId); } finally { setStarBusy(false); } }}
-              title={primaryTrailerIds.has(pickTrailerId) ? "Remove trailer from my equipment" : "Star this trailer"}
-            />
-          )}
-        </div>
-        {pickTrailerId && (() => {
-          const trailer = uncoupledTrailers.find(t => t.trailer_id === pickTrailerId);
-          if (!trailer) return null;
-          const code = trailer.status_code ?? "AVAIL";
-          const isWarn = ["OOS","MAINT"].includes(code);
-          if (code === "AVAIL") return null;
-          return (
-            <div style={{ padding: "10px 12px", borderRadius: 10, marginTop: 8, marginBottom: 10,
-              border: isWarn ? "1px solid rgba(220,80,40,0.45)" : "1px solid rgba(255,185,0,0.25)",
-              background: isWarn ? "rgba(180,50,20,0.18)" : "rgba(255,185,0,0.07)" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ fontSize: 10, fontWeight: 900, padding: "2px 7px", borderRadius: 5,
-                  background: isWarn ? "rgba(220,80,40,0.25)" : "rgba(255,185,0,0.18)",
-                  color: isWarn ? "#fb923c" : "#fbbf24" }}>{code}</span>
-                {isWarn && <span style={{ fontSize: 12, fontWeight: 800, color: "#fb923c" }}>⚠ Do not couple until cleared</span>}
-              </div>
-              {trailer.status_location && <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginTop: 4 }}>📍 {trailer.status_location}</div>}
-            </div>
-          );
-        })()}
-      </div>
+        );
+      })()}
 
       <button type="button"
-        style={{ ...S.btn, ...S.btnPrimary, width: "100%", padding: "14px 18px", borderRadius: 18,
-          fontSize: 17, textAlign: "center" as const, marginTop: 4,
-          opacity: (coupleBusy || !pickTruckId || !pickTrailerId) ? 0.45 : 1 }}
-        onClick={onTryCouple} disabled={coupleBusy || !pickTruckId || !pickTrailerId}>
-        {coupleBusy ? "Working…" : "COUPLE"}
+        onClick={() => {
+          setReviewAttempted(true);
+          if (!canProceed()) return;
+          setErr(null);
+          setStep("confirm");
+        }}
+        style={{
+          ...D.btn, ...D.btnPrimary, width: "100%", textAlign: "center" as const,
+          padding: "14px 0", fontSize: 15, marginTop: 14,
+          opacity: reviewAttempted && !canProceed() ? 0.5 : 1,
+          transform: reviewAttempted && !canProceed() ? "scale(0.98)" : "scale(1)",
+          transition: "opacity 150ms ease, transform 150ms ease",
+          borderColor: reviewAttempted && !canProceed() ? "rgba(248,113,113,0.35)" : undefined,
+        }}>
+        Review & Confirm →
       </button>
-
-      <div style={{ height: 16 }} />
-    </ModalShell>
-  );
-}
-
-// ─── Main Component ───────────────────────────────────────────────────────────
-
-export default function EquipmentModal({
-  open, onClose, authUserId,
-  combos, combosLoading, combosError,
-  selectedComboId, onSelectComboId, onRefreshCombos,
-}: Props) {
-  const [view, setView] = useState<View>("list");
-  const [localErr, setLocalErr] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [fleetOpen, setFleetOpen] = useState(false);
-  const [companyId, setCompanyId] = useState<string | null>(null);
-
-  // Details view (tap a card)
-  const [detailsOpen, setDetailsOpen] = useState(false);
-  const [detailsTarget, setDetailsTarget] = useState<DetailTarget | null>(null);
-
-  // Decouple flow
-  const [decoupleOpen, setDecoupleOpen]       = useState(false);
-  const [decoupleComboPending, setDecoupleComboPending] = useState<{
-    comboId: string; truckId: string; trailerId: string; truckName: string; trailerName: string;
-  } | null>(null);
-
-  const [trucks, setTrucks] = useState<TruckRow[]>([]);
-  const [trailers, setTrailers] = useState<TrailerRow[]>([]);
-  const [allRegions, setAllRegions] = useState<string[]>([]);
-  const [equipLoading, setEquipLoading] = useState(false);
-
-  const [profileNames, setProfileNames] = useState<Record<string, string>>({});
-
-  // Authoritative combo fields from equipment_combos (target_weight, claimed_by, etc.)
-  const [comboMeta, setComboMeta] = useState<Record<string, Partial<ComboRow>>>({});
-  const [myDisplayName, setMyDisplayName] = useState<string | null>(null);
-
-  // Primary equipment (starred)
-  const [primaryTruckIds, setPrimaryTruckIds] = useState<Set<string>>(new Set());
-  const [primaryTrailerIds, setPrimaryTrailerIds] = useState<Set<string>>(new Set());
-  const [primaryBusy, setPrimaryBusy] = useState(false);
-  // Refs so toggle callbacks always read current values without stale closures
-  const primaryTruckIdsRef   = useRef<Set<string>>(new Set());
-  const primaryTrailerIdsRef = useRef<Set<string>>(new Set());
-  useEffect(() => { primaryTruckIdsRef.current   = primaryTruckIds;   }, [primaryTruckIds]);
-  useEffect(() => { primaryTrailerIdsRef.current = primaryTrailerIds; }, [primaryTrailerIds]);
-
-  // Pickers
-  const [pickRegion, setPickRegion] = useState("");
-  const [pickTruckId, setPickTruckId] = useState("");
-  const [pickTrailerId, setPickTrailerId] = useState("");
-  const [newTareLbs,    setNewTareLbs]    = useState("");
-  const [newTargetLbs,  setNewTargetLbs]  = useState("80000");
-
-  // ── Loaders ────────────────────────────────────────────────────────────────
-
-  const loadEquipment = useCallback(async () => {
-    setEquipLoading(true);
-    const [{ data: truckData }, { data: trailerData }, { data: regionData }] =
-      await Promise.all([
-        supabase.from("trucks").select("truck_id, truck_name, active, region, status_code, status_location, status_notes, status_updated_at").eq("active", true).order("truck_name"),
-        supabase.from("trailers").select("trailer_id, trailer_name, active, region, status_code, status_location, status_notes, status_updated_at").eq("active", true).order("trailer_name"),
-        supabase.from("trucks").select("region").eq("active", true).not("region", "is", null),
-      ]);
-    setTrucks((truckData ?? []) as TruckRow[]);
-    setTrailers((trailerData ?? []) as TrailerRow[]);
-    const regions = Array.from(new Set((regionData ?? []).map((r: any) => r.region).filter(Boolean))).sort() as string[];
-    setAllRegions(regions);
-    setEquipLoading(false);
-  }, []);
-
-  const loadPrimaryEquipment = useCallback(async () => {
-    if (!authUserId) return;
-    const [{ data: pt }, { data: ptr }] = await Promise.all([
-      supabase.from("user_primary_trucks").select("truck_id").eq("user_id", authUserId),
-      supabase.from("user_primary_trailers").select("trailer_id").eq("user_id", authUserId),
-    ]);
-    setPrimaryTruckIds(new Set((pt ?? []).map((r: any) => String(r.truck_id))));
-    setPrimaryTrailerIds(new Set((ptr ?? []).map((r: any) => String(r.trailer_id))));
-  }, [authUserId]);
-
-  const loadProfileNames = useCallback(async (userIds: string[]) => {
-    const unique = Array.from(new Set(userIds.filter(Boolean)));
-    if (!unique.length) return;
-    const { data } = await supabase.from("profiles").select("user_id, display_name").in("user_id", unique);
-    const map: Record<string, string> = {};
-    for (const row of data ?? []) {
-      if ((row as any).user_id) map[String((row as any).user_id)] = (row as any).display_name ?? "Someone";
-    }
-    setProfileNames((prev) => ({ ...prev, ...map }));
-  }, []);
-
-  // Ensure we always have target_weight/claimed_by even if the parent query omitted fields.
-  const hydrateCombosFromDb = useCallback(async () => {
-    if (!open) return;
-    const ids = Array.from(new Set((combos ?? []).map((c) => String(c.combo_id)).filter(Boolean)));
-    if (!ids.length) return;
-
-    try {
-      const { data, error } = await supabase
-        .from("equipment_combos")
-        .select("combo_id, tare_lbs, target_weight, buffer_lbs, claimed_by, claimed_at, company_id, truck_id, trailer_id")
-        .in("combo_id", ids);
-      if (error) throw error;
-
-      const map: Record<string, Partial<ComboRow>> = {};
-      for (const r of data ?? []) {
-        const id = String((r as any).combo_id);
-        map[id] = {
-          tare_lbs: (r as any).tare_lbs ?? null,
-          target_weight: (r as any).target_weight ?? null,
-          buffer_lbs: (r as any).buffer_lbs ?? null,
-          claimed_by: (r as any).claimed_by ?? null,
-          claimed_at: (r as any).claimed_at ?? null,
-          company_id: (r as any).company_id ?? null,
-          truck_id: (r as any).truck_id ?? null,
-          trailer_id: (r as any).trailer_id ?? null,
-        };
-      }
-      setComboMeta((prev) => ({ ...prev, ...map }));
-    } catch {
-      // non-fatal
-    }
-  }, [open, combos]);
-
-  const loadMyDisplayName = useCallback(async () => {
-    if (!open || !authUserId) return;
-    try {
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("display_name")
-        .eq("user_id", authUserId)
-        .maybeSingle();
-      if (error) throw error;
-      setMyDisplayName((data as any)?.display_name ?? null);
-    } catch {
-      // non-fatal
-    }
-  }, [open, authUserId]);
-
-  useEffect(() => {
-    if (open) {
-      setView("list");
-      setLocalErr(null);
-      setBusy(false);
-      setPickRegion("");
-      setPickTruckId("");
-      setPickTrailerId("");
-      setNewTareLbs("");
-      // Resolve company ID once so FleetModal doesn't re-fetch user_settings independently
-      (async () => {
-        const { data: u } = await supabase.auth.getUser();
-        if (u.user) {
-          const { data: s } = await supabase
-            .from("user_settings")
-            .select("active_company_id")
-            .eq("user_id", u.user.id)
-            .maybeSingle();
-          setCompanyId((s?.active_company_id as string | null) ?? null);
-        }
-      })();
-      loadEquipment();
-      loadPrimaryEquipment();
-      hydrateCombosFromDb();
-      loadMyDisplayName();
-    }
-  }, [open, loadEquipment, loadPrimaryEquipment, hydrateCombosFromDb, loadMyDisplayName]);
-
-  useEffect(() => {
-    const ids = (combos ?? []).map((c) => String(c.claimed_by ?? "")).filter((id) => id && id !== (authUserId ?? ""));
-    if (ids.length) loadProfileNames(ids);
-  }, [combos, authUserId, loadProfileNames]);
-
-  // ── Primary equipment toggle (shared by main + fleet) ─────────────────────
-
-  const togglePrimaryTruck = useCallback(async (truckId: string) => {
-    if (!authUserId) return;
-    const isStarred = primaryTruckIdsRef.current.has(truckId);
-    setPrimaryTruckIds((prev) => { const n = new Set(prev); isStarred ? n.delete(truckId) : n.add(truckId); return n; });
-    if (isStarred) {
-      await supabase.from("user_primary_trucks").delete().eq("user_id", authUserId).eq("truck_id", truckId);
-    } else {
-      await supabase.from("user_primary_trucks").upsert({ user_id: authUserId, truck_id: truckId }, { onConflict: "user_id,truck_id" });
-    }
-  }, [authUserId]);
-
-  const togglePrimaryTrailer = useCallback(async (trailerId: string) => {
-    if (!authUserId) return;
-    const isStarred = primaryTrailerIdsRef.current.has(trailerId);
-    setPrimaryTrailerIds((prev) => { const n = new Set(prev); isStarred ? n.delete(trailerId) : n.add(trailerId); return n; });
-    if (isStarred) {
-      await supabase.from("user_primary_trailers").delete().eq("user_id", authUserId).eq("trailer_id", trailerId);
-    } else {
-      await supabase.from("user_primary_trailers").upsert({ user_id: authUserId, trailer_id: trailerId }, { onConflict: "user_id,trailer_id" });
-    }
-  }, [authUserId]);
-
-  // Toggle both truck + trailer in same direction
-  const toggleComboPrimary = useCallback(async (c: ComboRow | FleetCombo) => {
-    setPrimaryBusy(true);
-    try {
-      const truckId   = String(c.truck_id   ?? "");
-      const trailerId = String(c.trailer_id ?? "");
-      if (truckId)   await togglePrimaryTruck(truckId);
-      if (trailerId) await togglePrimaryTrailer(trailerId);
-    } finally {
-      setPrimaryBusy(false);
-    }
-  }, [togglePrimaryTruck, togglePrimaryTrailer]);
-
-  // ── Derived ────────────────────────────────────────────────────────────────
-
-  const coupledCombos = useMemo(
-    () => (combos ?? []).filter((c) => c.truck_id && c.trailer_id && c.active !== false),
-    [combos]
-  );
-
-  // My Equipment: starred OR currently claimed by me OR actively selected
-  const myEquipmentCombos = useMemo(
-    () => coupledCombos.filter((c) => {
-      const isStarred  = c.truck_id && primaryTruckIds.has(String(c.truck_id));
-      const isMine     = authUserId && String(c.claimed_by ?? "") === String(authUserId);
-      const isSelected = String(c.combo_id) === String(selectedComboId);
-      return isStarred || isMine || isSelected;
-    }),
-    [coupledCombos, primaryTruckIds, authUserId, selectedComboId]
-  );
-
-  const coupledTruckIds = useMemo(
-    () => new Set(coupledCombos.map((c) => String(c.truck_id))),
-    [coupledCombos]
-  );
-  const coupledTrailerIds = useMemo(
-    () => new Set(coupledCombos.map((c) => String(c.trailer_id))),
-    [coupledCombos]
-  );
-
-  const uncoupledTrucks = useMemo(
-    () => trucks.filter((t) => !coupledTruckIds.has(String(t.truck_id))),
-    [trucks, coupledTruckIds]
-  );
-  const uncoupledTrailers = useMemo(
-    () => trailers.filter((t) => !coupledTrailerIds.has(String(t.trailer_id))),
-    [trailers, coupledTrailerIds]
-  );
-
-  // Filter uncoupled by selected region, then sort starred first
-  const filteredUncoupledTrucks = useMemo(() => {
-    const base = pickRegion ? uncoupledTrucks.filter((t) => t.region === pickRegion) : uncoupledTrucks;
-    return [...base].sort((a, b) => {
-      const as_ = primaryTruckIds.has(String(a.truck_id));
-      const bs_ = primaryTruckIds.has(String(b.truck_id));
-      if (as_ !== bs_) return as_ ? -1 : 1;
-      return a.truck_name.localeCompare(b.truck_name);
-    });
-  }, [uncoupledTrucks, pickRegion, primaryTruckIds]);
-
-  const filteredUncoupledTrailers = useMemo(() => {
-    const base = pickRegion ? uncoupledTrailers.filter((t) => t.region === pickRegion) : uncoupledTrailers;
-    return [...base].sort((a, b) => {
-      const as_ = primaryTrailerIds.has(String(a.trailer_id));
-      const bs_ = primaryTrailerIds.has(String(b.trailer_id));
-      if (as_ !== bs_) return as_ ? -1 : 1;
-      return a.trailer_name.localeCompare(b.trailer_name);
-    });
-  }, [uncoupledTrailers, pickRegion, primaryTrailerIds]);
-
-  // Starred-first sorted lists for FleetModal dropdowns (no region pre-filter — FleetModal handles that)
-  const sortedUncoupledTrucks = useMemo(() =>
-    [...uncoupledTrucks].sort((a, b) => {
-      const as_ = primaryTruckIds.has(String(a.truck_id));
-      const bs_ = primaryTruckIds.has(String(b.truck_id));
-      if (as_ !== bs_) return as_ ? -1 : 1;
-      return a.truck_name.localeCompare(b.truck_name);
-    }),
-  [uncoupledTrucks, primaryTruckIds]);
-
-  const sortedUncoupledTrailers = useMemo(() =>
-    [...uncoupledTrailers].sort((a, b) => {
-      const as_ = primaryTrailerIds.has(String(a.trailer_id));
-      const bs_ = primaryTrailerIds.has(String(b.trailer_id));
-      if (as_ !== bs_) return as_ ? -1 : 1;
-      return a.trailer_name.localeCompare(b.trailer_name);
-    }),
-  [uncoupledTrailers, primaryTrailerIds]);
-
-  const isMine     = (c: ComboRow) => authUserId && String(c.claimed_by ?? "") === String(authUserId);
-  const isInUse    = (c: ComboRow) => c.claimed_by && !isMine(c);
-  const isSelected = useCallback(
-    (id: string) => String(selectedComboId || "") === String(id || ""),
-    [selectedComboId]
-  );
-
-  function getClaimedByName(c: ComboRow) {
-    if (!c.claimed_by) return "Someone";
-    return profileNames[String(c.claimed_by)] ?? "Someone";
-  }
-
-  function comboDisplayLabel(c: ComboRow): string {
-    const name = String(c.combo_name ?? "").trim();
-    if (name) return name;
-    const t  = trucks.find((x) => String(x.truck_id)    === String(c.truck_id))?.truck_name;
-    const tr = trailers.find((x) => String(x.trailer_id) === String(c.trailer_id))?.trailer_name;
-    return [t, tr].filter(Boolean).join(" / ") || "Unknown equipment";
-  }
-
-  function openDetails(c: ComboRow) {
-    const cm = mergeCombo(c, comboMeta[String(c.combo_id)]);
-    const truck = trucks.find((x) => String(x.truck_id) === String(cm.truck_id)) ?? null;
-    const trailer = trailers.find((x) => String(x.trailer_id) === String(cm.trailer_id)) ?? null;
-    setDetailsTarget({ combo: cm, truck, trailer });
-    setDetailsOpen(true);
-  }
-
-  // ── Actions ────────────────────────────────────────────────────────────────
-
-
-  // Claim an unclaimed combo — server releases any previous hold atomically
-  async function handleClaim(comboId: string, truckId?: string, trailerId?: string) {
-    if (busy) return;
-    setBusy(true); setLocalErr(null);
-    try {
-      const { error } = await supabase.rpc("claim_combo", { p_combo_id: comboId });
-      if (error) throw error;
-      onSelectComboId(comboId);
-      await onRefreshCombos();
-    } catch (e: any) { setLocalErr(e?.message ?? "Failed to claim equipment."); }
-    finally { setBusy(false); }
-  }
-  function handleDecouple(comboId: string) {
-    const combo = coupledCombos.find((c) => String(c.combo_id) === comboId);
-    const truckId     = String(combo?.truck_id   ?? "");
-    const trailerId   = String(combo?.trailer_id ?? "");
-    const truckName   = trucks.find((t)   => String(t.truck_id)   === truckId)?.truck_name   ?? truckId   ?? "Truck";
-    const trailerName = trailers.find((t) => String(t.trailer_id) === trailerId)?.trailer_name ?? trailerId ?? "Trailer";
-    setDecoupleComboPending({ comboId, truckId, trailerId, truckName, trailerName });
-    setDecoupleOpen(true);
-  }
-
-  async function handleDecoupled(newComboId?: string) {
-    setDecoupleOpen(false);
-    const wasSelected = isSelected(decoupleComboPending?.comboId ?? "");
-    const pendingTruckId    = decoupleComboPending?.truckId;
-    const pendingTrailerId  = decoupleComboPending?.trailerId;
-    setDecoupleComboPending(null);
-    // Restore AVAIL on both units when fully decoupled (not a swap)
-    if (!newComboId && pendingTruckId && pendingTrailerId) {
-      await Promise.all([
-        supabase.from("trucks").update({ status_code: "AVAIL" }).eq("truck_id", pendingTruckId),
-        supabase.from("trailers").update({ status_code: "AVAIL" }).eq("trailer_id", pendingTrailerId),
-      ]);
-    }
-    await Promise.all([onRefreshCombos(), loadEquipment()]);
-    if (newComboId) {
-      // Swap — select the new combo after refresh
-      onSelectComboId(newComboId);
-    } else if (wasSelected) {
-      // True decouple of the selected unit — clear selection
-      onSelectComboId("");
-    }
-  }
-
-  async function handleSlipSeat(comboId: string, truckId?: string, trailerId?: string) {
-    if (busy) return;
-    setBusy(true); setLocalErr(null);
-    try {
-      const { error } = await supabase.rpc("slip_seat_combo", { p_combo_id: comboId });
-      if (error) throw error;
-      onSelectComboId(String(comboId));
-      await onRefreshCombos();
-    } catch (e: any) { setLocalErr(e?.message ?? "Failed to slip seat."); }
-    finally { setBusy(false); }
-  }
-
-  async function handleTryCouple() {
-    setLocalErr(null);
-    if (!pickTruckId || !pickTrailerId) { setLocalErr("Select both a truck and trailer first."); return; }
-    setBusy(true);
-    try {
-      const { data: history, error: histErr } = await supabase
-        .from("equipment_combos").select("combo_id")
-        .eq("truck_id", pickTruckId).eq("trailer_id", pickTrailerId).eq("active", false).limit(1);
-      if (histErr) throw histErr;
-      if (history && history.length > 0) { setBusy(false); setView("confirm_target"); }
-      else { setBusy(false); setView("new_tare"); }
-    } catch (e: any) { setLocalErr(e?.message ?? "Failed."); setBusy(false); }
-  }
-
-  async function doCouple(tareLbs: number | null, targetLbs?: number) {
-    setBusy(true); setLocalErr(null);
-    try {
-      const params: Record<string, any> = { p_truck_id: pickTruckId, p_trailer_id: pickTrailerId };
-      if (tareLbs != null) params.p_tare_lbs = tareLbs;
-      if (targetLbs != null && targetLbs > 0) params.p_target_weight = targetLbs;
-      const { data, error } = await supabase.rpc("couple_combo", params);
-      if (error) throw error;
-      const comboId = String((data as any)?.combo_id ?? "");
-      if (!comboId) throw new Error("No combo_id returned.");
-      // Set COUPLED status on both units — suppress location (managed at combo level)
-      await Promise.all([
-        supabase.from("trucks").update({ status_code: "COUPLED", status_location: null })
-          .eq("truck_id", pickTruckId),
-        supabase.from("trailers").update({ status_code: "COUPLED", status_location: null })
-          .eq("trailer_id", pickTrailerId),
-      ]);
-      await Promise.all([onRefreshCombos(), loadEquipment()]);
-      onSelectComboId(comboId);
-      setPickRegion(""); setPickTruckId(""); setPickTrailerId(""); setNewTareLbs(""); setNewTargetLbs("80000");
-      setView("list");
-      setFleetOpen(false);
-    } catch (e: any) { setLocalErr(e?.message ?? "Failed to couple."); }
-    finally { setBusy(false); }
-  }
-
-  async function handleCreateNewCombo() {
-    setLocalErr(null);
-    const tare   = Number(newTareLbs);
-    const target = Number(newTargetLbs) || 80000;
-    if (!Number.isFinite(tare) || tare <= 0) { setLocalErr("Enter a valid tare weight (lbs)."); return; }
-    await doCouple(tare, target);
-  }
-
-  const errNode = (localErr || combosError) ? (
-    <div style={S.err}>
-      <div style={{ fontWeight: 900, marginBottom: 4 }}>{localErr ? "Error" : "Equipment error"}</div>
-      <div>{String(localErr || combosError)}</div>
     </div>
   ) : null;
 
-  // ── View: Confirm target weight (existing combo re-couple) ─────────────────
+  // ─────────────────────────────────────────────────────────────────────────
+  // ── STEP: CONFIRM ─────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
 
-  if (view === "confirm_target") {
-    const tName  = trucks.find((t) => t.truck_id === pickTruckId)?.truck_name ?? pickTruckId;
-    const trName = trailers.find((t) => t.trailer_id === pickTrailerId)?.trailer_name ?? pickTrailerId;
-    const targetNum = Number(newTargetLbs) || 0;
-    const tooClose  = targetNum > 0 && targetNum >= 79500;
-    return (
-      <ModalShell open={open} onClose={onClose} title="Equipment">
-        <button type="button" style={{ ...S.btn, background: "transparent", margin: "12px 0 16px" }}
-          onClick={() => { setView("list"); setLocalErr(null); }}>
-          ← Back
-        </button>
-        <div style={{ fontSize: 22, fontWeight: 900, marginBottom: 6 }}>Confirm Target Weight</div>
-        <div style={{ ...S.sub, marginBottom: 20 }}>{tName} / {trName}</div>
-        {errNode}
+  const truckWarn   = ["MAINT","OOS"].includes(truckStatus);
+  const trailerWarn = ["MAINT","OOS"].includes(trailerStatus);
 
-        <div style={{ marginBottom: 4 }}>
-          <label style={S.label}>Target gross weight (lbs)</label>
-          <input type="number" inputMode="numeric" placeholder="80000"
-            value={newTargetLbs} onChange={(e) => setNewTargetLbs(e.target.value)}
-            style={S.input} disabled={busy} autoFocus />
-        </div>
-        <div style={{ padding: "10px 12px", borderRadius: 10, marginBottom: 24,
-          background: tooClose ? "rgba(180,50,20,0.12)" : "rgba(255,255,255,0.04)",
-          border: tooClose ? "1px solid rgba(220,80,40,0.35)" : "1px solid rgba(255,255,255,0.08)" }}>
-          {tooClose ? (
-            <><div style={{ fontSize: 11, fontWeight: 900, color: "#fb923c", letterSpacing: 0.8, marginBottom: 4 }}>⚠ CUTTING IT CLOSE</div>
-            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.65)", lineHeight: 1.5 }}>
-              You're targeting right at the legal limit. Consider a small buffer — even a few hundred pounds leaves room for an unexpected passenger, denser-than-expected load, or API variance at the meter.
-            </div></>
-          ) : (
-            <><div style={{ fontSize: 11, fontWeight: 900, color: "rgba(255,255,255,0.35)", letterSpacing: 0.8, marginBottom: 4 }}>💡 BUFFER TIP</div>
-            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", lineHeight: 1.5 }}>
-              Most drivers target <strong style={{ color: "rgba(255,255,255,0.65)" }}>200–500 lbs under</strong> the legal limit as a buffer for API variance and density shifts. Defaults to 80,000 lbs.
-            </div></>
-          )}
-        </div>
+  const newTruckName   = uncoupledTrucks.find(t => t.id === newTruckId)?.name ?? "";
+  const newTrailerName = uncoupledTrailers.find(t => t.id === newTrailerId)?.name ?? "";
 
-        <button type="button"
-          style={{ ...S.btn, ...S.btnPrimary, width: "100%", padding: "16px 18px", borderRadius: 18, fontSize: 17, textAlign: "center" as const, opacity: busy ? 0.55 : 1 }}
-          onClick={() => doCouple(null, Number(newTargetLbs) || 80000)} disabled={busy}>
-          {busy ? "Coupling…" : "Couple & Select"}
-        </button>
-      </ModalShell>
-    );
-  }
+  const confirmStep = scenario ? (
+    <div>
+      <BackBtn onClick={() => setStep("details")} />
+      <div style={{ fontSize: 17, fontWeight: 900, marginBottom: 4 }}>Confirm Decouple</div>
+      <div style={{ fontSize: 13, color: "rgba(255,255,255,0.45)", marginBottom: 14, lineHeight: 1.5 }}>
+        Review before confirming. This will deactivate the combo and update each unit's status.
+      </div>
 
-  // ── View: New tare ─────────────────────────────────────────────────────────
-
-  if (view === "new_tare") {
-    const tName  = trucks.find((t) => t.truck_id === pickTruckId)?.truck_name ?? pickTruckId;
-    const trName = trailers.find((t) => t.trailer_id === pickTrailerId)?.trailer_name ?? pickTrailerId;
-    const targetNum = Number(newTargetLbs) || 0;
-    const tooClose  = targetNum > 0 && targetNum >= 79500;
-    return (
-      <ModalShell open={open} onClose={onClose} title="Equipment">
-        <button type="button" style={{ ...S.btn, background: "transparent", margin: "12px 0 16px" }}
-          onClick={() => { setView("list"); setLocalErr(null); }}>
-          ← Back
-        </button>
-        <div style={{ fontSize: 22, fontWeight: 900, marginBottom: 6 }}>New Pairing</div>
-        <div style={{ ...S.sub, marginBottom: 16 }}>{tName} / {trName}</div>
-        {errNode}
-
-        {/* Tare weight */}
-        <div style={{ marginBottom: 4 }}>
-          <label style={S.label}>Tare weight (lbs) *</label>
-          <input type="number" inputMode="numeric" placeholder="e.g. 34800"
-            value={newTareLbs} onChange={(e) => setNewTareLbs(e.target.value)}
-            style={S.input} disabled={busy} autoFocus />
-        </div>
-        <div style={{ padding: "10px 12px", borderRadius: 10, background: "rgba(255,185,0,0.07)", border: "1px solid rgba(255,185,0,0.18)", marginBottom: 20 }}>
-          <div style={{ fontSize: 11, fontWeight: 900, color: "#fbbf24", letterSpacing: 0.8, marginBottom: 4 }}>⛽ WEIGH-IN REMINDER</div>
-          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.65)", lineHeight: 1.5 }}>
-            Ensure saddle tank(s) are <strong style={{ color: "rgba(255,255,255,0.85)" }}>completely full</strong> before weighing. Enter the tare weight from a <strong style={{ color: "rgba(255,255,255,0.85)" }}>certified scale ticket</strong>.
-          </div>
-        </div>
-
-        {/* Target gross weight */}
-        <div style={{ marginBottom: 4 }}>
-          <label style={S.label}>Target gross weight (lbs)</label>
-          <input type="number" inputMode="numeric" placeholder="80000"
-            value={newTargetLbs} onChange={(e) => setNewTargetLbs(e.target.value)}
-            style={S.input} disabled={busy} />
-        </div>
-        <div style={{ padding: "10px 12px", borderRadius: 10, marginBottom: 20,
-          background: tooClose ? "rgba(180,50,20,0.12)" : "rgba(255,255,255,0.04)",
-          border: tooClose ? "1px solid rgba(220,80,40,0.35)" : "1px solid rgba(255,255,255,0.08)" }}>
-          {tooClose ? (
-            <><div style={{ fontSize: 11, fontWeight: 900, color: "#fb923c", letterSpacing: 0.8, marginBottom: 4 }}>⚠ CUTTING IT CLOSE</div>
-            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.65)", lineHeight: 1.5 }}>
-              You're targeting right at the legal limit. Consider a small buffer — even a few hundred pounds leaves room for an unexpected passenger, a denser-than-expected load, or API variance at the meter.
-            </div></>
-          ) : (
-            <><div style={{ fontSize: 11, fontWeight: 900, color: "rgba(255,255,255,0.35)", letterSpacing: 0.8, marginBottom: 4 }}>💡 BUFFER TIP</div>
-            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", lineHeight: 1.5 }}>
-              Most drivers target <strong style={{ color: "rgba(255,255,255,0.65)" }}>200–500 lbs under</strong> the legal limit as a buffer for API variance and density shifts. Defaults to 80,000 lbs.
-            </div></>
-          )}
-        </div>
-
-        <button type="button"
-          style={{ ...S.btn, ...S.btnPrimary, width: "100%", padding: "16px 18px", borderRadius: 18, fontSize: 17, textAlign: "center" as const, opacity: busy ? 0.55 : 1 }}
-          onClick={handleCreateNewCombo} disabled={busy}>
-          {busy ? "Creating…" : "Couple & Select"}
-        </button>
-      </ModalShell>
-    );
-  }
-
-  // ── View: Main list ────────────────────────────────────────────────────────
-
-  return (
-    <>
-      <ModalShell open={open} onClose={onClose} title="Equipment">
-        {errNode}
-
-        {/* ── My Equipment (starred coupled combos only) ─────────────────── */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 8, marginBottom: 4 }}>
-          <div style={S.sectionHeader}>My Equipment</div>
-          {myEquipmentCombos.length > 0 && (
-            <div style={{ color: "rgba(255,255,255,0.28)", fontWeight: 700, fontSize: 13 }}>{myEquipmentCombos.length}</div>
-          )}
-        </div>
-        <div style={S.sub}>Only coupled equipment is usable by the planner.</div>
-
-        {combosLoading ? (
-          <div style={S.sub}>Loading…</div>
-        ) : myEquipmentCombos.length === 0 ? (
-          <div style={{ ...S.sub, marginTop: 8 }}>
-            No equipment selected. Use <em>Browse fleet & couple equipment →</em> below to find and select your rig.
-          </div>
-        ) : (
-          <div style={{ marginTop: 6 }}>
-            {myEquipmentCombos.map((c) => {
-              const cid     = String(c.combo_id);
-              const cm      = mergeCombo(c, comboMeta[cid]);
-              const mine    = isMine(cm);
-              const inUse   = isInUse(cm);
-              const sel     = isSelected(cid);
-              const label   = comboDisplayLabel(cm);
-              const tare    = Number(cm.tare_lbs ?? 0);
-              const targetW = Number(cm.target_weight ?? 0);
-
-              const showInUse = inUse || sel;
-              const inUseName = inUse
-                ? getClaimedByName(cm)
-                : (myDisplayName ?? "You");
-
-              const rowStyle = mine ? { ...S.row, ...S.rowMine }
-                : inUse ? { ...S.row, ...S.rowInUse } : S.row;
-
-              return (
-                <div
-                  key={cid}
-                  style={{ ...rowStyle, cursor: "pointer" }}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => openDetails(c)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      openDetails(c);
-                    }
-                  }}
-                  title="Tap to view details"
-                >
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={S.rowName}>{label}</div>
-                    {tare > 0 && <div style={S.rowSub}>Tare {tare.toLocaleString()} lbs</div>}
-                    {targetW > 0 && <div style={S.rowSub}>Target {targetW.toLocaleString()} lbs</div>}
-                    {showInUse && (
-                      <div style={S.rowInUseBadge}>In use · {inUseName}</div>
-                    )}
-                  </div>
-
-                  {/* Star pinned top-right; action button below */}
-                  <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6, flexShrink: 0 }}>
-                    <StarBtn
-                      active={true}
-                      busy={primaryBusy}
-                      onToggle={() => toggleComboPrimary(c)}
-                      title="Remove from my equipment"
-                    />
-                    {inUse && (
-                      <button
-                        type="button"
-                        style={{ ...S.btn, ...S.btnSlipSeat, opacity: busy ? 0.55 : 1 }}
-                        onClick={(e) => { e.stopPropagation(); handleSlipSeat(cid); }}
-                        disabled={busy}
-                      >
-                        {busy ? "…" : "SLIP SEAT"}
-                      </button>
-                    )}
-                    {(mine || (sel && !c.claimed_by)) && (
-                      <button
-                        type="button"
-                        style={{ ...S.btn, ...S.btnDecouple, opacity: busy ? 0.55 : 1 }}
-                        onClick={(e) => { e.stopPropagation(); handleDecouple(cid); }}
-                        disabled={busy}
-                      >
-                        {busy ? "…" : "DECOUPLE"}
-                      </button>
-                    )}
-                    {!mine && !inUse && !(sel && !c.claimed_by) && (
-                      <button
-                        type="button"
-                        style={{ ...S.btn, ...S.btnPrimary }}
-                        onClick={(e) => { e.stopPropagation(); handleClaim(cid); }}
-                        disabled={busy}
-                      >
-                        SELECT
-                      </button>
-                    )}
+      {/* Scenario-specific summary */}
+      {scenario === "swap_truck" && (
+        <>
+          <SummaryRow label={`Parking — ${truckName}`} code={truckStatus}
+            location={truckLocation} notes={truckNotes} />
+          <div style={{ padding: "10px 13px", borderRadius: 12, marginBottom: 8,
+            border: needsTare ? "1px solid rgba(251,191,36,0.40)" : "1px solid rgba(64,180,255,0.25)",
+            background: needsTare ? "rgba(180,120,0,0.12)" : "rgba(32,100,200,0.12)" }}>
+            <div style={{ fontSize: 10, fontWeight: 800, color: "rgba(255,255,255,0.35)", letterSpacing: 0.5, textTransform: "uppercase" as const, marginBottom: 4 }}>
+              New combo
+            </div>
+            <div style={{ fontSize: 14, fontWeight: 900, color: "rgba(255,255,255,0.85)", marginBottom: 2 }}>
+              {newTruckName} / {trailerName}
+            </div>
+            {!needsTare && (
+              <div style={{ fontSize: 12, color: "rgba(255,255,255,0.40)" }}>
+                {trailerName} status unchanged · will be recoupled immediately
+              </div>
+            )}
+            {needsTare && (
+              <div style={{ marginTop: 10 }}>
+                <div style={{ fontSize: 12, color: "#fbbf24", fontWeight: 700, marginBottom: 6 }}>
+                  ⚠ New pairing — tare weight required
+                </div>
+                <label style={{ fontSize: 11, fontWeight: 800, color: "rgba(255,255,255,0.40)", letterSpacing: 0.5, textTransform: "uppercase" as const, display: "block", marginBottom: 5 }}>
+                  Tare weight (lbs) *
+                </label>
+                <input type="number" inputMode="numeric" placeholder="e.g. 34800"
+                  value={newTareLbs} onChange={(e) => setNewTareLbs(e.target.value)}
+                  style={{ ...D.input, fontSize: 16, fontWeight: 700, marginBottom: 8 }}
+                  autoFocus />
+                <div style={{ padding: "8px 10px", borderRadius: 8, background: "rgba(255,185,0,0.07)", border: "1px solid rgba(255,185,0,0.18)", marginBottom: 6 }}>
+                  <div style={{ fontSize: 10, fontWeight: 900, color: "#fbbf24", letterSpacing: 0.8, marginBottom: 3 }}>⛽ WEIGH-IN REMINDER</div>
+                  <div style={{ fontSize: 11, color: "rgba(255,255,255,0.60)", lineHeight: 1.5 }}>
+                    Ensure saddle tank(s) are <strong style={{ color: "rgba(255,255,255,0.82)" }}>completely full</strong> before weighing. Enter from a <strong style={{ color: "rgba(255,255,255,0.82)" }}>certified scale ticket</strong>.
                   </div>
                 </div>
-              );
-            })}
+              </div>
+            )}
           </div>
-        )}
-
-        <div style={{ height: 8 }} />
-        <button type="button"
-          style={{ ...S.btn, width: "100%", textAlign: "center" as const, padding: "11px 16px", borderRadius: 10, fontSize: 14 }}
-          onClick={() => setFleetOpen(true)}>
-          Browse fleet & couple equipment →
-        </button>
-
-        <div style={{ height: 16 }} />
-      </ModalShell>
-
-      <FleetModal
-        open={fleetOpen}
-        onClose={() => setFleetOpen(false)}
-        authUserId={authUserId}
-        companyId={companyId}
-        onSlipSeat={handleSlipSeat}
-        onClaim={handleClaim}
-        selectedComboId={selectedComboId}
-        primaryTruckIds={primaryTruckIds}
-        primaryTrailerIds={primaryTrailerIds}
-        onTogglePrimary={toggleComboPrimary}
-        onToggleTruck={togglePrimaryTruck}
-        onToggleTrailer={togglePrimaryTrailer}
-        uncoupledTrucks={sortedUncoupledTrucks}
-        uncoupledTrailers={sortedUncoupledTrailers}
-        coupleRegions={allRegions}
-        onTryCouple={handleTryCouple}
-        onCoupleDone={() => { loadEquipment(); onRefreshCombos(); }}
-        pickRegion={pickRegion}    setPickRegion={setPickRegion}
-        pickTruckId={pickTruckId}  setPickTruckId={setPickTruckId}
-        pickTrailerId={pickTrailerId} setPickTrailerId={setPickTrailerId}
-        coupleBusy={busy}
-      />
-
-      {decoupleComboPending && (
-        <DecoupleModal
-          open={decoupleOpen}
-          onClose={() => { setDecoupleOpen(false); setDecoupleComboPending(null); }}
-          comboId={decoupleComboPending.comboId}
-          truckId={decoupleComboPending.truckId}
-          trailerId={decoupleComboPending.trailerId}
-          truckName={decoupleComboPending.truckName}
-          trailerName={decoupleComboPending.trailerName}
-          companyId={companyId ?? null}
-          uncoupledTrucks={uncoupledTrucks.map(t => ({ id: t.truck_id, name: t.truck_name }))}
-          uncoupledTrailers={uncoupledTrailers.map(t => ({ id: t.trailer_id, name: t.trailer_name }))}
-          onDecoupled={handleDecoupled}
-        />
+        </>
       )}
 
-      <EquipmentDetailsModal
-        open={detailsOpen}
-        onClose={() => { setDetailsOpen(false); setDetailsTarget(null); }}
-        target={detailsTarget}
-        companyId={companyId}
-        forceInUse={Boolean(detailsTarget?.combo && String(detailsTarget.combo.combo_id) === String(selectedComboId))}
-        claimedByName={detailsTarget?.combo
-          ? (String(detailsTarget.combo.combo_id) === String(selectedComboId)
-              ? (myDisplayName ?? "You")
-              : getClaimedByName(detailsTarget.combo))
-          : null}
-      />
-    </>
+      {scenario === "swap_trailer" && (
+        <>
+          <SummaryRow label={`Parking — ${trailerName}`} code={trailerStatus}
+            location={trailerLocation} notes={trailerNotes} />
+          <div style={{ padding: "10px 13px", borderRadius: 12, marginBottom: 8,
+            border: needsTare ? "1px solid rgba(251,191,36,0.40)" : "1px solid rgba(167,139,250,0.25)",
+            background: needsTare ? "rgba(180,120,0,0.12)" : "rgba(100,70,200,0.12)" }}>
+            <div style={{ fontSize: 10, fontWeight: 800, color: "rgba(255,255,255,0.35)", letterSpacing: 0.5, textTransform: "uppercase" as const, marginBottom: 4 }}>
+              New combo
+            </div>
+            <div style={{ fontSize: 14, fontWeight: 900, color: "rgba(255,255,255,0.85)", marginBottom: 2 }}>
+              {truckName} / {newTrailerName}
+            </div>
+            {!needsTare && (
+              <div style={{ fontSize: 12, color: "rgba(255,255,255,0.40)" }}>
+                {truckName} status unchanged · will be recoupled immediately
+              </div>
+            )}
+            {needsTare && (
+              <div style={{ marginTop: 10 }}>
+                <div style={{ fontSize: 12, color: "#fbbf24", fontWeight: 700, marginBottom: 6 }}>
+                  ⚠ New pairing — tare weight required
+                </div>
+                <label style={{ fontSize: 11, fontWeight: 800, color: "rgba(255,255,255,0.40)", letterSpacing: 0.5, textTransform: "uppercase" as const, display: "block", marginBottom: 5 }}>
+                  Tare weight (lbs) *
+                </label>
+                <input type="number" inputMode="numeric" placeholder="e.g. 34800"
+                  value={newTareLbs} onChange={(e) => setNewTareLbs(e.target.value)}
+                  style={{ ...D.input, fontSize: 16, fontWeight: 700, marginBottom: 8 }}
+                  autoFocus />
+                <div style={{ padding: "8px 10px", borderRadius: 8, background: "rgba(255,185,0,0.07)", border: "1px solid rgba(255,185,0,0.18)", marginBottom: 6 }}>
+                  <div style={{ fontSize: 10, fontWeight: 900, color: "#fbbf24", letterSpacing: 0.8, marginBottom: 3 }}>⛽ WEIGH-IN REMINDER</div>
+                  <div style={{ fontSize: 11, color: "rgba(255,255,255,0.60)", lineHeight: 1.5 }}>
+                    Ensure saddle tank(s) are <strong style={{ color: "rgba(255,255,255,0.82)" }}>completely full</strong> before weighing. Enter from a <strong style={{ color: "rgba(255,255,255,0.82)" }}>certified scale ticket</strong>.
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {scenario === "drop_trailer" && (
+        <>
+          <SummaryRow label={`Trailer staying — ${trailerName}`} code={trailerStatus}
+            location={trailerLocation} notes={trailerNotes} />
+          <div style={{ padding: "10px 13px", borderRadius: 12, marginBottom: 8,
+            border: "1px solid rgba(103,232,249,0.20)", background: "rgba(0,150,180,0.10)" }}>
+            <div style={{ fontSize: 10, fontWeight: 800, color: "rgba(255,255,255,0.35)", letterSpacing: 0.5, textTransform: "uppercase" as const, marginBottom: 4 }}>Truck</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 10, fontWeight: 900, padding: "2px 7px", borderRadius: 5,
+                background: "rgba(103,232,249,0.15)", color: "#67e8f9" }}>BOBTAIL</span>
+              <span style={{ fontSize: 13, fontWeight: 700, color: "rgba(255,255,255,0.75)" }}>{truckName}</span>
+            </div>
+          </div>
+        </>
+      )}
+
+      {scenario === "park_both" && (
+        <>
+          <div style={{ padding: "10px 13px", borderRadius: 12, marginBottom: 8,
+            border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.04)" }}>
+            <div style={{ fontSize: 10, fontWeight: 800, color: "rgba(255,255,255,0.35)", letterSpacing: 0.5, textTransform: "uppercase" as const, marginBottom: 4 }}>Shared location</div>
+            <div style={{ fontSize: 13, color: "rgba(255,255,255,0.70)" }}>📍 {sharedLocation}</div>
+          </div>
+          <SummaryRow label={`Truck — ${truckName}`} code={truckStatus} location="" notes={truckNotes} />
+          <SummaryRow label={`Trailer — ${trailerName}`} code={trailerStatus} location="" notes={trailerNotes} />
+        </>
+      )}
+
+      {(truckWarn || trailerWarn) && (
+        <div style={{ ...D.err, background: "rgba(180,80,20,0.18)", border: "1px solid rgba(220,120,40,0.35)", color: "rgba(255,200,140,0.95)", marginTop: 4 }}>
+          ⚠ One or more units will be marked{" "}
+          <strong>{[truckWarn && truckStatus, trailerWarn && trailerStatus].filter(Boolean).join(" / ")}</strong>.
+          Others will see a warning before coupling them.
+        </div>
+      )}
+
+      {err && <div style={{ ...D.err, marginTop: 8 }}>{err}</div>}
+
+      <button type="button" onClick={handleConfirm} disabled={busy}
+        style={{ ...D.btn, ...D.btnDestructive, width: "100%", textAlign: "center" as const,
+          padding: "15px 0", fontSize: 16, marginTop: 10, opacity: busy ? 0.55 : 1 }}>
+        {busy ? (scenario === "swap_truck" || scenario === "swap_trailer" ? "Swapping…" : "Decoupling…") : needsTare ? "Submit Tare & Confirm" : "Confirm"}
+      </button>
+    </div>
+  ) : null;
+
+  return (
+    <FullscreenModal open={open} title="Decouple" onClose={handleClose} footer={null}>
+      {step === "scenario" && scenarioStep}
+      {step === "details"  && detailsStep}
+      {step === "confirm"  && confirmStep}
+    </FullscreenModal>
   );
 }
