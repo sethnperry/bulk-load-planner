@@ -10,7 +10,7 @@ import { Modal, Field, FieldRow, Banner, SubSectionTitle } from "@/lib/ui/driver
 
 type Truck = {
   truck_id: string; truck_name: string; active: boolean;
-  vin_number: string | null; make: string | null; model: string | null; year: number | null;
+  vin_number: string | null; plate_number: string | null; make: string | null; model: string | null; year: number | null;
   region: string | null; local_area: string | null;
   status_code: string | null; status_location: string | null; in_use_by: string | null;
   in_use_by_name?: string | null;
@@ -27,7 +27,7 @@ type Compartment = { comp_number: number; max_gallons: number; position: number;
 
 type Trailer = {
   trailer_id: string; trailer_name: string; active: boolean;
-  vin_number: string | null; make: string | null; model: string | null; year: number | null;
+  vin_number: string | null; plate_number: string | null; make: string | null; model: string | null; year: number | null;
   cg_max: number; region: string | null; local_area: string | null;
   status_code: string | null; status_location: string | null; in_use_by: string | null;
   in_use_by_name?: string | null; last_load_config: string | null;
@@ -426,7 +426,11 @@ function TruckCard({ truck, onEdit, otherPermits }: { truck: Truck; onEdit: () =
               <span style={{ fontSize: 11, color: T.muted }}>📍 {truck.status_location}</span>
             )}
           </div>
-          {truck.vin_number && <div style={{ fontSize: 11, color: T.muted, marginTop: 2, letterSpacing: 0.3 }}>{truck.vin_number}</div>}
+          {(truck.vin_number || truck.plate_number) && (
+            <div style={{ fontSize: 11, color: T.muted, marginTop: 2, letterSpacing: 0.3 }}>
+              {[truck.vin_number, truck.plate_number && `Plate ${truck.plate_number}`].filter(Boolean).join(" · ")}
+            </div>
+          )}
         </div>
         <div style={{ display: "flex", flexDirection: "column" as const, alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
           <button type="button" style={{ ...css.btn("subtle"), padding: "4px 12px", fontSize: 11 }}
@@ -550,7 +554,11 @@ function TrailerCard({ trailer, onEdit }: { trailer: Trailer; onEdit: () => void
             )}
           </div>
           {compSummary && <div style={{ fontSize: 11, color: T.muted, marginTop: 2 }}>{compSummary}</div>}
-          {trailer.vin_number && <div style={{ fontSize: 11, color: T.muted, marginTop: 1, letterSpacing: 0.3 }}>{trailer.vin_number}</div>}
+          {(trailer.vin_number || trailer.plate_number) && (
+            <div style={{ fontSize: 11, color: T.muted, marginTop: 1, letterSpacing: 0.3 }}>
+              {[trailer.vin_number, trailer.plate_number && `Plate ${trailer.plate_number}`].filter(Boolean).join(" · ")}
+            </div>
+          )}
         </div>
         <div style={{ display: "flex", flexDirection: "column" as const, alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
           <button type="button" style={{ ...css.btn("subtle"), padding: "4px 12px", fontSize: 11 }}
@@ -683,6 +691,7 @@ function TruckModal({ truck, companyId, onClose, onDone }: {
   const isNew = !truck;
   const [name,      setName]      = useState(truck?.truck_name ?? "");
   const [vin,       setVin]       = useState(truck?.vin_number ?? "");
+  const [plate,     setPlate]     = useState(truck?.plate_number ?? "");
   const [make,      setMake]      = useState(truck?.make ?? "");
   const [model,     setModel]     = useState(truck?.model ?? "");
   const [year,      setYear]      = useState(String(truck?.year ?? ""));
@@ -729,7 +738,7 @@ function TruckModal({ truck, companyId, onClose, onDone }: {
     }
     setSaving(true); setErr(null);
     const payload: any = {
-      truck_name: name.trim(), vin_number: vin || null, make: make || null, model: model || null,
+      truck_name: name.trim(), vin_number: vin || null, plate_number: plate || null, make: make || null, model: model || null,
       year: year ? parseInt(year) : null, region: region || null, local_area: local || null,
       status_code: status || null, status_location: statusLoc || null, active, company_id: companyId,
       reg_expiration_date: regExp || null, reg_enforcement_date: regEnf || null,
@@ -792,12 +801,20 @@ function TruckModal({ truck, companyId, onClose, onDone }: {
 
       {/* ── Identification ── */}
       <SubSectionTitle>Identification</SubSectionTitle>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "6px 10px", marginBottom: 10 }}>
+      {/* Row 1: Unit · VIN · Plate */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "6px 10px", marginBottom: 6 }}>
         <div><label style={{ ...css.label, fontSize: 10 }}>Unit #</label>{ti(name, setName, "e.g. T-101")}</div>
         <div><label style={{ ...css.label, fontSize: 10 }}>VIN</label>{ti(vin, setVin, "VIN")}</div>
+        <div><label style={{ ...css.label, fontSize: 10 }}>Plate</label>{ti(plate, setPlate, "e.g. ABC1234")}</div>
+      </div>
+      {/* Row 2: Make · Model · Year */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "6px 10px", marginBottom: 6 }}>
         <div><label style={{ ...css.label, fontSize: 10 }}>Make</label>{ti(make, setMake, "e.g. Kenworth")}</div>
         <div><label style={{ ...css.label, fontSize: 10 }}>Model</label>{ti(model, setModel, "e.g. T680")}</div>
         <div><label style={{ ...css.label, fontSize: 10 }}>Year</label>{ti(year, setYear, "2022", "number")}</div>
+      </div>
+      {/* Row 3: Region · Local Area · Status */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "6px 10px", marginBottom: 6 }}>
         <div><label style={{ ...css.label, fontSize: 10 }}>Region</label>{ti(region, setRegion, "Southeast")}</div>
         <div><label style={{ ...css.label, fontSize: 10 }}>Local Area</label>{ti(local, setLocal, "Tampa Bay")}</div>
         <div>
@@ -812,7 +829,11 @@ function TruckModal({ truck, companyId, onClose, onDone }: {
             <option value="OOS">OOS — Out of Service ⚠</option>
           </select>
         </div>
-        <div><label style={{ ...css.label, fontSize: 10 }}>Status Location</label>{ti(statusLoc, setStatusLoc, "e.g. Yard 1")}</div>
+      </div>
+      {/* Row 4: Status Location — full width */}
+      <div style={{ marginBottom: 10 }}>
+        <label style={{ ...css.label, fontSize: 10 }}>Status Location</label>
+        {ti(statusLoc, setStatusLoc, "e.g. Yard 1")}
       </div>
       {/* Active note — inline with label, no checkbox in identification grid */}
       <div style={{ fontSize: 11, color: T.muted, marginBottom: 10, lineHeight: 1.5 }}>
@@ -950,6 +971,7 @@ function TrailerModal({ trailer, companyId, onClose, onDone }: {
   const isNew = !trailer;
   const [name,      setName]      = useState(trailer?.trailer_name ?? "");
   const [vin,       setVin]       = useState(trailer?.vin_number ?? "");
+  const [plate,     setPlate]     = useState(trailer?.plate_number ?? "");
   const [make,      setMake]      = useState(trailer?.make ?? "");
   const [model,     setModel]     = useState(trailer?.model ?? "");
   const [year,      setYear]      = useState(String(trailer?.year ?? ""));
@@ -994,7 +1016,7 @@ function TrailerModal({ trailer, companyId, onClose, onDone }: {
     if (comps.some(c => !c.max_gallons || c.max_gallons <= 0)) { setErr("All compartments need max gallons > 0."); return; }
     setSaving(true); setErr(null);
     const payload: any = {
-      trailer_name: name.trim(), vin_number: vin || null, make: make || null, model: model || null,
+      trailer_name: name.trim(), vin_number: vin || null, plate_number: plate || null, make: make || null, model: model || null,
       year: year ? parseInt(year) : null, region: region || null, local_area: local || null,
       cg_max: 1.0, // always 1 per spec
       status_code: status || null, status_location: statusLoc || null, active, company_id: companyId,
@@ -1056,12 +1078,20 @@ function TrailerModal({ trailer, companyId, onClose, onDone }: {
 
       {/* ── Identification ── */}
       <SubSectionTitle>Identification</SubSectionTitle>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "6px 10px", marginBottom: 10 }}>
+      {/* Row 1: Unit · VIN · Plate */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "6px 10px", marginBottom: 6 }}>
         <div><label style={{ ...css.label, fontSize: 10 }}>Unit #</label>{ti(name, setName, "e.g. 3151")}</div>
         <div><label style={{ ...css.label, fontSize: 10 }}>VIN</label>{ti(vin, setVin, "VIN")}</div>
+        <div><label style={{ ...css.label, fontSize: 10 }}>Plate</label>{ti(plate, setPlate, "e.g. ABC1234")}</div>
+      </div>
+      {/* Row 2: Make · Model · Year */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "6px 10px", marginBottom: 6 }}>
         <div><label style={{ ...css.label, fontSize: 10 }}>Make</label>{ti(make, setMake, "e.g. Polar")}</div>
         <div><label style={{ ...css.label, fontSize: 10 }}>Model</label>{ti(model, setModel, "e.g. Tank")}</div>
         <div><label style={{ ...css.label, fontSize: 10 }}>Year</label>{ti(year, setYear, "2020", "number")}</div>
+      </div>
+      {/* Row 3: Region · Local Area · Status */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "6px 10px", marginBottom: 6 }}>
         <div><label style={{ ...css.label, fontSize: 10 }}>Region</label>{ti(region, setRegion, "Southeast")}</div>
         <div><label style={{ ...css.label, fontSize: 10 }}>Local Area</label>{ti(local, setLocal, "Tampa Bay")}</div>
         <div>
@@ -1077,7 +1107,11 @@ function TrailerModal({ trailer, companyId, onClose, onDone }: {
             <option value="OOS">OOS — Out of Service ⚠</option>
           </select>
         </div>
-        <div><label style={{ ...css.label, fontSize: 10 }}>Status Location</label>{ti(statusLoc, setStatusLoc, "e.g. Yard 1")}</div>
+      </div>
+      {/* Row 4: Status Location — full width */}
+      <div style={{ marginBottom: 10 }}>
+        <label style={{ ...css.label, fontSize: 10 }}>Status Location</label>
+        {ti(statusLoc, setStatusLoc, "e.g. Yard 1")}
       </div>
       <div style={{ fontSize: 11, color: T.muted, marginBottom: 10, lineHeight: 1.5 }}>
         <strong style={{ color: T.text }}>Active</strong> = unit appears in fleet lists and can be coupled.{" "}
