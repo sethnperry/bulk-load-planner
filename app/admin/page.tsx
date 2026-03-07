@@ -668,20 +668,15 @@ function TruckModal({ truck, companyId, onClose, onDone }: {
     if (!confirm("Permanently delete this truck? This cannot be undone.")) return;
     setSaving(true); setErr(null);
     try {
-      const tid = truck!.truck_id;
-      // Delete child records first
-      const { error: opErr } = await supabase.from("truck_other_permits").delete().eq("truck_id", tid);
-      if (opErr) throw opErr;
-      // Delete combos referencing this truck
-      const { error: cErr } = await supabase.from("equipment_combos").delete().eq("truck_id", tid);
-      if (cErr) throw cErr;
-      // Delete the truck — include company_id so RLS policy is satisfied
-      const { error: tErr } = await supabase.from("trucks").delete()
-        .eq("truck_id", tid).eq("company_id", companyId);
-      if (tErr) throw tErr;
+      const { error } = await supabase.rpc("delete_truck", {
+        p_truck_id: truck!.truck_id,
+        p_company_id: companyId,
+      });
+      if (error) throw error;
       onDone();
     } catch (e: any) {
-      setErr(e?.message ?? "Delete failed.");
+      setErr(e?.message ?? "Delete failed. Check console.");
+      console.error("deleteTruck error:", e);
       setSaving(false);
     }
   }
@@ -940,20 +935,15 @@ function TrailerModal({ trailer, companyId, onClose, onDone }: {
     if (!confirm("Permanently delete this trailer? This cannot be undone.")) return;
     setSaving(true); setErr(null);
     try {
-      const tid = trailer!.trailer_id;
-      // Delete child records first
-      const { error: compErr } = await supabase.from("trailer_compartments").delete().eq("trailer_id", tid);
-      if (compErr) throw compErr;
-      // Delete combos referencing this trailer
-      const { error: cErr } = await supabase.from("equipment_combos").delete().eq("trailer_id", tid);
-      if (cErr) throw cErr;
-      // Delete the trailer — include company_id so RLS policy is satisfied
-      const { error: tErr } = await supabase.from("trailers").delete()
-        .eq("trailer_id", tid).eq("company_id", companyId);
-      if (tErr) throw tErr;
+      const { error } = await supabase.rpc("delete_trailer", {
+        p_trailer_id: trailer!.trailer_id,
+        p_company_id: companyId,
+      });
+      if (error) throw error;
       onDone();
     } catch (e: any) {
-      setErr(e?.message ?? "Delete failed.");
+      setErr(e?.message ?? "Delete failed. Check console.");
+      console.error("deleteTrailer error:", e);
       setSaving(false);
     }
   }
