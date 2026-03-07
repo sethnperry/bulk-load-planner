@@ -1195,8 +1195,12 @@ function ComboModal({ combo, companyId, trucks, trailers, onClose, onDone, onDec
   const truckId   = isNew ? newTruckId   : (combo?.truck_id   ?? "");
   const trailerId = isNew ? newTrailerId : (combo?.trailer_id ?? "");
 
-  const [tareLbs, setTareLbs] = useState(String(combo?.tare_lbs ?? ""));
-  const [target,  setTarget]  = useState(String(combo?.target_weight ?? "80000"));
+  const [tareLbs,   setTareLbs]   = useState(String(combo?.tare_lbs ?? ""));
+  const [target,    setTarget]    = useState(String(combo?.target_weight ?? "80000"));
+  // Derive initial status from the truck (both should match when COUPLED)
+  const initTruck = trucks.find(t => t.truck_id === (combo?.truck_id ?? ""));
+  const [comboStatus,    setComboStatus]    = useState(initTruck?.status_code === "COUPLED" ? "AVAIL" : (initTruck?.status_code ?? "AVAIL"));
+  const [comboStatusLoc, setComboStatusLoc] = useState(initTruck?.status_location ?? "");
   const [err,     setErr]     = useState<string | null>(null);
   const [saving,  setSaving]  = useState(false);
 
@@ -1222,6 +1226,12 @@ function ComboModal({ combo, companyId, trucks, trailers, onClose, onDone, onDec
     } else {
       const { error } = await supabase.from("equipment_combos").update({ tare_lbs: parseFloat(tareLbs), target_weight: parseFloat(target) || null }).eq("combo_id", combo!.combo_id);
       if (error) { setErr(error.message); setSaving(false); return; }
+      // Update status on both truck and trailer
+      const statusUpdate = { status_code: comboStatus || null, status_location: comboStatusLoc || null };
+      await Promise.all([
+        supabase.from("trucks").update(statusUpdate).eq("truck_id", truckId),
+        supabase.from("trailers").update(statusUpdate).eq("trailer_id", trailerId),
+      ]);
     }
     onDone();
   }
@@ -1261,7 +1271,7 @@ function ComboModal({ combo, companyId, trucks, trailers, onClose, onDone, onDec
         </div>
       )}
 
-      <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
+      <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
         <div style={{ flex: 1 }}>
           <label style={css.label}>Tare Weight (lbs)</label>
           <input type="number" value={tareLbs} onChange={e => setTareLbs(e.target.value)} placeholder="e.g. 34000" style={css.input} />
@@ -1271,6 +1281,27 @@ function ComboModal({ combo, companyId, trucks, trailers, onClose, onDone, onDec
           <input type="number" value={target} onChange={e => setTarget(e.target.value)} placeholder="e.g. 80000" style={css.input} />
         </div>
       </div>
+
+      {!isNew && (
+        <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
+          <div style={{ flex: 1 }}>
+            <label style={css.label}>Status</label>
+            <select value={comboStatus} onChange={e => setComboStatus(e.target.value)} style={{ ...css.select, width: "100%" }}>
+              <option value="">— Select —</option>
+              <option value="AVAIL">AVAIL — Available</option>
+              <option value="PARK">PARK — Parked</option>
+              <option value="MAINT">MAINT — Maintenance</option>
+              <option value="INSP">INSP — Inspection</option>
+              <option value="OOS">OOS — Out of Service</option>
+            </select>
+          </div>
+          <div style={{ flex: 1 }}>
+            <label style={css.label}>Status Location</label>
+            <input value={comboStatusLoc} onChange={e => setComboStatusLoc(e.target.value)}
+              placeholder="e.g. Yard 1" style={css.input} />
+          </div>
+        </div>
+      )}
 
       <div style={{ display: "flex", gap: 8 }}>
         {!isNew && (

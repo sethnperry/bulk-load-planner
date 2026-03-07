@@ -368,13 +368,6 @@ function TruckCard({ truck, companyId, onEdit, otherPermits }: {
             📍 {truck.status_location}
           </div>
         )}
-        {/* Row 5: notes preview */}
-        {truck.notes && (
-          <div style={{ fontSize: 11, color: T.muted, marginTop: 3, fontStyle: "italic" as const,
-            whiteSpace: "nowrap" as const, overflow: "hidden", textOverflow: "ellipsis" }}>
-            {truck.notes}
-          </div>
-        )}
       </div>
 
       {/* ── Expanded section ── */}
@@ -546,13 +539,6 @@ function TrailerCard({ trailer, companyId, onEdit }: { trailer: Trailer; company
           <div style={{ fontSize: 11, color: T.muted, marginTop: 1,
             whiteSpace: "nowrap" as const, overflow: "hidden", textOverflow: "ellipsis" }}>
             📍 {trailer.status_location}
-          </div>
-        )}
-        {/* Row 5: notes preview */}
-        {trailer.notes && (
-          <div style={{ fontSize: 11, color: T.muted, marginTop: 3, fontStyle: "italic" as const,
-            whiteSpace: "nowrap" as const, overflow: "hidden", textOverflow: "ellipsis" }}>
-            {trailer.notes}
           </div>
         )}
       </div>
