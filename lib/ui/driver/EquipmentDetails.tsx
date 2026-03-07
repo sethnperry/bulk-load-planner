@@ -955,9 +955,12 @@ function TruckModal({ truck, companyId, onClose, onDone }: {
 // TankEditRow — tank inspection row: − label | date input
 // ─────────────────────────────────────────────────────────────
 
-function TankEditRow({ label, dateVal, onDateChange, onRemove }: {
-  label: string; dateVal: string; onDateChange: (v: string) => void; onRemove: () => void;
+function TankEditRow({ label, dateVal, onDateChange, notesVal, onNotesChange, onRemove }: {
+  label: string; dateVal: string; onDateChange: (v: string) => void;
+  notesVal?: string; onNotesChange?: (v: string) => void;
+  onRemove: () => void;
 }) {
+  const [expanded, setExpanded] = useState(false);
   return (
     <div style={{ borderBottom: `1px solid ${T.border}22`, padding: "3px 0" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 6, minHeight: 32 }}>
@@ -966,11 +969,21 @@ function TankEditRow({ label, dateVal, onDateChange, onRemove }: {
             fontSize: 16, padding: "0 2px", flexShrink: 0, lineHeight: 1,
             minWidth: 20, minHeight: 20, display: "flex", alignItems: "center", justifyContent: "center",
             WebkitTapHighlightColor: "transparent" }}>−</button>
-        <span style={{ fontSize: 11, color: T.muted, flex: 1, overflow: "hidden",
-          textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>{label}</span>
+        <span onClick={() => setExpanded(v => !v)}
+          style={{ fontSize: 11, color: T.muted, flex: 1, overflow: "hidden",
+          textOverflow: "ellipsis", whiteSpace: "nowrap" as const, cursor: "pointer" }}>
+          {label} <span style={{ fontSize: 9 }}>▼</span>
+        </span>
         <input type="date" value={dateVal} onChange={e => onDateChange(e.target.value)}
           style={{ ...css.input, ...sm, width: 130, flexShrink: 0 }} />
       </div>
+      {expanded && (
+        <div style={{ paddingLeft: 26, paddingBottom: 8 }}>
+          <textarea value={notesVal ?? ""} onChange={e => onNotesChange?.(e.target.value)}
+            placeholder="Shop, cert #, notes…" rows={2}
+            style={{ ...css.input, width: "100%", boxSizing: "border-box" as const, fontSize: 11, resize: "vertical" as const }} />
+        </div>
+      )}
     </div>
   );
 }
