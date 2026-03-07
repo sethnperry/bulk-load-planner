@@ -22,10 +22,13 @@ type Truck = {
   in_use_by_name?: string | null;
   reg_expiration_date: string | null; reg_enforcement_date: string | null;
   inspection_shop: string | null; inspection_issue_date: string | null; inspection_expiration_date: string | null;
+  inspection_enforcement_date: string | null; inspection_notes: string | null;
   ifta_expiration_date: string | null; ifta_enforcement_date: string | null;
-  phmsa_expiration_date: string | null; alliance_expiration_date: string | null;
-  fleet_ins_expiration_date: string | null; hazmat_lic_expiration_date: string | null;
-  inner_bridge_expiration_date: string | null;
+  phmsa_expiration_date: string | null; phmsa_enforcement_date: string | null; phmsa_notes: string | null;
+  alliance_expiration_date: string | null; alliance_enforcement_date: string | null; alliance_notes: string | null;
+  fleet_ins_expiration_date: string | null; fleet_ins_enforcement_date: string | null; fleet_ins_notes: string | null;
+  hazmat_lic_expiration_date: string | null; hazmat_lic_enforcement_date: string | null; hazmat_lic_notes: string | null;
+  inner_bridge_expiration_date: string | null; inner_bridge_enforcement_date: string | null; inner_bridge_notes: string | null;
   notes: string | null;
 };
 
@@ -41,10 +44,14 @@ type Trailer = {
   trailer_reg_expiration_date: string | null; trailer_reg_enforcement_date: string | null;
   trailer_inspection_shop: string | null; trailer_inspection_issue_date: string | null;
   trailer_inspection_expiration_date: string | null;
+  trailer_inspection_enforcement_date: string | null; trailer_inspection_notes: string | null;
   tank_v_expiration_date: string | null; tank_k_expiration_date: string | null;
   tank_l_expiration_date: string | null; tank_t_expiration_date: string | null;
   tank_i_expiration_date: string | null; tank_p_expiration_date: string | null;
-  tank_uc_expiration_date: string | null; notes: string | null;
+  tank_uc_expiration_date: string | null;
+  tank_v_notes: string | null; tank_k_notes: string | null; tank_l_notes: string | null;
+  tank_t_notes: string | null; tank_i_notes: string | null; tank_p_notes: string | null; tank_uc_notes: string | null;
+  notes: string | null;
 };
 
 type Combo = {
@@ -1851,8 +1858,8 @@ export default function AdminPage() {
       })));
 
       // Trucks + trailers — direct query so we get all fields including notes, reg_notes, etc.
-      const truckFields = "truck_id, truck_name, active, vin_number, plate_number, make, model, year, region, local_area, status_code, status_location, in_use_by, reg_expiration_date, reg_enforcement_date, reg_notes, inspection_shop, inspection_issue_date, inspection_expiration_date, ifta_expiration_date, ifta_enforcement_date, ifta_notes, phmsa_expiration_date, alliance_expiration_date, fleet_ins_expiration_date, hazmat_lic_expiration_date, inner_bridge_expiration_date, notes";
-      const trailerFields = "trailer_id, trailer_name, active, vin_number, plate_number, make, model, year, cg_max, region, local_area, status_code, status_location, in_use_by, last_load_config, trailer_reg_expiration_date, trailer_reg_enforcement_date, trailer_reg_notes, trailer_inspection_shop, trailer_inspection_issue_date, trailer_inspection_expiration_date, tank_v_expiration_date, tank_k_expiration_date, tank_l_expiration_date, tank_t_expiration_date, tank_i_expiration_date, tank_p_expiration_date, tank_uc_expiration_date, notes";
+      const truckFields = "truck_id, truck_name, active, vin_number, plate_number, make, model, year, region, local_area, status_code, status_location, in_use_by, reg_expiration_date, reg_enforcement_date, reg_notes, inspection_shop, inspection_issue_date, inspection_expiration_date, inspection_enforcement_date, inspection_notes, ifta_expiration_date, ifta_enforcement_date, ifta_notes, phmsa_expiration_date, phmsa_enforcement_date, phmsa_notes, alliance_expiration_date, alliance_enforcement_date, alliance_notes, fleet_ins_expiration_date, fleet_ins_enforcement_date, fleet_ins_notes, hazmat_lic_expiration_date, hazmat_lic_enforcement_date, hazmat_lic_notes, inner_bridge_expiration_date, inner_bridge_enforcement_date, inner_bridge_notes, notes";
+      const trailerFields = "trailer_id, trailer_name, active, vin_number, plate_number, make, model, year, cg_max, region, local_area, status_code, status_location, in_use_by, last_load_config, trailer_reg_expiration_date, trailer_reg_enforcement_date, trailer_reg_notes, trailer_inspection_shop, trailer_inspection_issue_date, trailer_inspection_expiration_date, trailer_inspection_enforcement_date, trailer_inspection_notes, tank_v_expiration_date, tank_k_expiration_date, tank_l_expiration_date, tank_t_expiration_date, tank_i_expiration_date, tank_p_expiration_date, tank_uc_expiration_date, tank_v_notes, tank_k_notes, tank_l_notes, tank_t_notes, tank_i_notes, tank_p_notes, tank_uc_notes, notes";
       const [{ data: truckRowsRaw, error: truckErr }, { data: trailerRowsRaw, error: trailerErr }] = await Promise.all([
         supabase.from("trucks").select(truckFields).eq("company_id", cid).order("truck_name"),
         supabase.from("trailers").select(trailerFields).eq("company_id", cid).order("trailer_name"),

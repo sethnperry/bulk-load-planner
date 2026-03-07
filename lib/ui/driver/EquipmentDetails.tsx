@@ -22,10 +22,13 @@ type Truck = {
   in_use_by_name?: string | null;
   reg_expiration_date: string | null; reg_enforcement_date: string | null; reg_notes: string | null;
   inspection_shop: string | null; inspection_issue_date: string | null; inspection_expiration_date: string | null;
+  inspection_enforcement_date: string | null; inspection_notes: string | null;
   ifta_expiration_date: string | null; ifta_enforcement_date: string | null; ifta_notes: string | null;
-  phmsa_expiration_date: string | null; alliance_expiration_date: string | null;
-  fleet_ins_expiration_date: string | null; hazmat_lic_expiration_date: string | null;
-  inner_bridge_expiration_date: string | null;
+  phmsa_expiration_date: string | null; phmsa_enforcement_date: string | null; phmsa_notes: string | null;
+  alliance_expiration_date: string | null; alliance_enforcement_date: string | null; alliance_notes: string | null;
+  fleet_ins_expiration_date: string | null; fleet_ins_enforcement_date: string | null; fleet_ins_notes: string | null;
+  hazmat_lic_expiration_date: string | null; hazmat_lic_enforcement_date: string | null; hazmat_lic_notes: string | null;
+  inner_bridge_expiration_date: string | null; inner_bridge_enforcement_date: string | null; inner_bridge_notes: string | null;
   notes: string | null;
 };
 
@@ -41,10 +44,14 @@ type Trailer = {
   trailer_reg_expiration_date: string | null; trailer_reg_enforcement_date: string | null; trailer_reg_notes: string | null;
   trailer_inspection_shop: string | null; trailer_inspection_issue_date: string | null;
   trailer_inspection_expiration_date: string | null;
+  trailer_inspection_enforcement_date: string | null; trailer_inspection_notes: string | null;
   tank_v_expiration_date: string | null; tank_k_expiration_date: string | null;
   tank_l_expiration_date: string | null; tank_t_expiration_date: string | null;
   tank_i_expiration_date: string | null; tank_p_expiration_date: string | null;
-  tank_uc_expiration_date: string | null; notes: string | null;
+  tank_uc_expiration_date: string | null;
+  tank_v_notes: string | null; tank_k_notes: string | null; tank_l_notes: string | null;
+  tank_t_notes: string | null; tank_i_notes: string | null; tank_p_notes: string | null; tank_uc_notes: string | null;
+  notes: string | null;
 };
 
 type Combo = {
@@ -714,15 +721,27 @@ function TruckModal({ truck, companyId, onClose, onDone }: {
   const [insShop,   setInsShop]   = useState(truck?.inspection_shop ?? "");
   const [insIssue,  setInsIssue]  = useState(truck?.inspection_issue_date ?? "");
   const [insExp,    setInsExp]    = useState(truck?.inspection_expiration_date ?? "");
+  const [insEnf,    setInsEnf]    = useState(truck?.inspection_enforcement_date ?? "");
+  const [insNotes,  setInsNotes]  = useState(truck?.inspection_notes ?? "");
   const [iftaExp,   setIftaExp]   = useState(truck?.ifta_expiration_date ?? "");
   const [iftaEnf,   setIftaEnf]   = useState(truck?.ifta_enforcement_date ?? "");
-  const [phmsaExp,  setPhmsaExp]  = useState(truck?.phmsa_expiration_date ?? "");
-  const [alliExp,   setAlliExp]   = useState(truck?.alliance_expiration_date ?? "");
-  const [fleetExp,  setFleetExp]  = useState(truck?.fleet_ins_expiration_date ?? "");
-  const [hazLicExp, setHazLicExp] = useState(truck?.hazmat_lic_expiration_date ?? "");
-  const [ibExp,     setIbExp]     = useState(truck?.inner_bridge_expiration_date ?? "");
-  const [regNotes,  setRegNotes]  = useState((truck as any)?.reg_notes ?? "");
   const [iftaNotes, setIftaNotes] = useState((truck as any)?.ifta_notes ?? "");
+  const [phmsaExp,  setPhmsaExp]  = useState(truck?.phmsa_expiration_date ?? "");
+  const [phmsaEnf,  setPhmsaEnf]  = useState(truck?.phmsa_enforcement_date ?? "");
+  const [phmsaNotes,setPhmsaNotes]= useState(truck?.phmsa_notes ?? "");
+  const [alliExp,   setAlliExp]   = useState(truck?.alliance_expiration_date ?? "");
+  const [alliEnf,   setAlliEnf]   = useState(truck?.alliance_enforcement_date ?? "");
+  const [alliNotes, setAlliNotes] = useState(truck?.alliance_notes ?? "");
+  const [fleetExp,  setFleetExp]  = useState(truck?.fleet_ins_expiration_date ?? "");
+  const [fleetEnf,  setFleetEnf]  = useState(truck?.fleet_ins_enforcement_date ?? "");
+  const [fleetNotes,setFleetNotes]= useState(truck?.fleet_ins_notes ?? "");
+  const [hazLicExp, setHazLicExp] = useState(truck?.hazmat_lic_expiration_date ?? "");
+  const [hazLicEnf, setHazLicEnf] = useState(truck?.hazmat_lic_enforcement_date ?? "");
+  const [hazLicNotes,setHazLicNotes]= useState(truck?.hazmat_lic_notes ?? "");
+  const [ibExp,     setIbExp]     = useState(truck?.inner_bridge_expiration_date ?? "");
+  const [ibEnf,     setIbEnf]     = useState(truck?.inner_bridge_enforcement_date ?? "");
+  const [ibNotes,   setIbNotes]   = useState(truck?.inner_bridge_notes ?? "");
+  const [regNotes,  setRegNotes]  = useState((truck as any)?.reg_notes ?? "");
   const [notes,     setNotes]     = useState(truck?.notes ?? "");
   // Multiple other permits
   const [otherPermits, setOtherPermits] = useState<OtherPermit[]>([]);
@@ -753,10 +772,14 @@ function TruckModal({ truck, companyId, onClose, onDone }: {
       status_code: status || null, status_location: statusLoc || null, active, company_id: companyId,
       reg_expiration_date: regExp || null, reg_enforcement_date: regEnf || null,
       inspection_shop: insShop || null, inspection_issue_date: insIssue || null, inspection_expiration_date: insExp || null,
-      ifta_expiration_date: iftaExp || null, ifta_enforcement_date: iftaEnf || null,
-      phmsa_expiration_date: phmsaExp || null, alliance_expiration_date: alliExp || null,
-      fleet_ins_expiration_date: fleetExp || null, hazmat_lic_expiration_date: hazLicExp || null,
-      inner_bridge_expiration_date: ibExp || null, reg_notes: regNotes || null, ifta_notes: iftaNotes || null, notes: notes || null,
+      inspection_enforcement_date: insEnf || null, inspection_notes: insNotes || null,
+      ifta_expiration_date: iftaExp || null, ifta_enforcement_date: iftaEnf || null, ifta_notes: iftaNotes || null,
+      phmsa_expiration_date: phmsaExp || null, phmsa_enforcement_date: phmsaEnf || null, phmsa_notes: phmsaNotes || null,
+      alliance_expiration_date: alliExp || null, alliance_enforcement_date: alliEnf || null, alliance_notes: alliNotes || null,
+      fleet_ins_expiration_date: fleetExp || null, fleet_ins_enforcement_date: fleetEnf || null, fleet_ins_notes: fleetNotes || null,
+      hazmat_lic_expiration_date: hazLicExp || null, hazmat_lic_enforcement_date: hazLicEnf || null, hazmat_lic_notes: hazLicNotes || null,
+      inner_bridge_expiration_date: ibExp || null, inner_bridge_enforcement_date: ibEnf || null, inner_bridge_notes: ibNotes || null,
+      reg_notes: regNotes || null, notes: notes || null,
     };
     let truckId = truck?.truck_id;
     if (isNew) {
@@ -860,7 +883,7 @@ function TruckModal({ truck, companyId, onClose, onDone }: {
 
       {/* ── Permit Book ── */}
       <PermitEditRow label="Registration"              expVal={regExp}   onExpChange={setRegExp}   enfVal={regEnf}   onEnfChange={setRegEnf}   notesVal={regNotes}  onNotesChange={setRegNotes} />
-      <PermitEditRow label="Annual Inspection"          expVal={insExp}   onExpChange={setInsExp}
+      <PermitEditRow label="Annual Inspection"          expVal={insExp}   onExpChange={setInsExp}   enfVal={insEnf}     onEnfChange={setInsEnf}     notesVal={insNotes}     onNotesChange={setInsNotes}
         extra={
           <div style={{ display: "flex", gap: 6 }}>
             <input value={insShop} onChange={e => setInsShop(e.target.value)} placeholder="Inspection shop"
@@ -870,12 +893,12 @@ function TruckModal({ truck, companyId, onClose, onDone }: {
           </div>
         }
       />
-      <PermitEditRow label="IFTA Permits + Decals"     expVal={iftaExp}  onExpChange={setIftaExp}  enfVal={iftaEnf}  onEnfChange={setIftaEnf} notesVal={iftaNotes} onNotesChange={setIftaNotes} />
-      <PermitEditRow label="PHMSA HazMat Permit"       expVal={phmsaExp} onExpChange={setPhmsaExp} />
-      <PermitEditRow label="Alliance HazMat Permit"    expVal={alliExp}  onExpChange={setAlliExp} />
-      <PermitEditRow label="Fleet Insurance Cab Card"  expVal={fleetExp} onExpChange={setFleetExp} />
-      <PermitEditRow label="HazMat Transportation Lic" expVal={hazLicExp} onExpChange={setHazLicExp} />
-      <PermitEditRow label="Inner Bridge Permit"       expVal={ibExp}    onExpChange={setIbExp} />
+      <PermitEditRow label="IFTA Permits + Decals"     expVal={iftaExp}  onExpChange={setIftaExp}  enfVal={iftaEnf}     onEnfChange={setIftaEnf}     notesVal={iftaNotes}     onNotesChange={setIftaNotes} />
+      <PermitEditRow label="PHMSA HazMat Permit"       expVal={phmsaExp} onExpChange={setPhmsaExp} enfVal={phmsaEnf}    onEnfChange={setPhmsaEnf}    notesVal={phmsaNotes}    onNotesChange={setPhmsaNotes} />
+      <PermitEditRow label="Alliance HazMat Permit"    expVal={alliExp}  onExpChange={setAlliExp}  enfVal={alliEnf}     onEnfChange={setAlliEnf}     notesVal={alliNotes}     onNotesChange={setAlliNotes} />
+      <PermitEditRow label="Fleet Insurance Cab Card"  expVal={fleetExp} onExpChange={setFleetExp} enfVal={fleetEnf}    onEnfChange={setFleetEnf}    notesVal={fleetNotes}    onNotesChange={setFleetNotes} />
+      <PermitEditRow label="HazMat Transportation Lic" expVal={hazLicExp} onExpChange={setHazLicExp} enfVal={hazLicEnf} onEnfChange={setHazLicEnf}   notesVal={hazLicNotes}   onNotesChange={setHazLicNotes} />
+      <PermitEditRow label="Inner Bridge Permit"       expVal={ibExp}    onExpChange={setIbExp}    enfVal={ibEnf}      onEnfChange={setIbEnf}       notesVal={ibNotes}       onNotesChange={setIbNotes} />
 
       <hr style={css.divider} />
 
@@ -974,6 +997,8 @@ function TrailerModal({ trailer, companyId, onClose, onDone }: {
   const [trInsShop,  setTrInsShop]  = useState(trailer?.trailer_inspection_shop ?? "");
   const [trInsIssue, setTrInsIssue] = useState(trailer?.trailer_inspection_issue_date ?? "");
   const [trInsExp,   setTrInsExp]   = useState(trailer?.trailer_inspection_expiration_date ?? "");
+  const [trInsEnf,   setTrInsEnf]   = useState(trailer?.trailer_inspection_enforcement_date ?? "");
+  const [trInsNotes, setTrInsNotes] = useState(trailer?.trailer_inspection_notes ?? "");
   const [trRegNotes, setTrRegNotes] = useState((trailer as any)?.trailer_reg_notes ?? "");
   // Tank inspections — dynamic list seeded from saved dates
   type TankKey = "v" | "k" | "l" | "t" | "i" | "p" | "uc";
@@ -986,9 +1011,9 @@ function TrailerModal({ trailer, companyId, onClose, onDone }: {
     { key: "p",  label: "P — Pressure Test (5yr)" },
     { key: "uc", label: "UC — Upper Coupler (5yr)" },
   ];
-  const [tanks, setTanks] = useState<{ key: TankKey; date: string }[]>(() =>
+  const [tanks, setTanks] = useState<{ key: TankKey; date: string; notes: string }[]>(() =>
     TANK_DEFS.filter(d => !!(trailer as any)?.[`tank_${d.key}_expiration_date`])
-      .map(d => ({ key: d.key, date: (trailer as any)[`tank_${d.key}_expiration_date`] ?? "" }))
+      .map(d => ({ key: d.key, date: (trailer as any)[`tank_${d.key}_expiration_date`] ?? "", notes: (trailer as any)[`tank_${d.key}_notes`] ?? "" }))
   );
   const [tankAddOpen, setTankAddOpen] = useState(false);
   const [notes,  setNotes]  = useState(trailer?.notes ?? "");
@@ -1010,14 +1035,23 @@ function TrailerModal({ trailer, companyId, onClose, onDone }: {
       status_code: status || null, status_location: statusLoc || null, active, company_id: companyId,
       trailer_reg_expiration_date: trRegExp || null, trailer_reg_enforcement_date: trRegEnf || null,
       trailer_inspection_shop: trInsShop || null, trailer_inspection_issue_date: trInsIssue || null,
-      trailer_inspection_expiration_date: trInsExp || null, trailer_reg_notes: trRegNotes || null,
+      trailer_inspection_expiration_date: trInsExp || null,
+      trailer_inspection_enforcement_date: trInsEnf || null, trailer_inspection_notes: trInsNotes || null,
+      trailer_reg_notes: trRegNotes || null,
       tank_v_expiration_date:  tanks.find(t => t.key === "v")?.date  || null,
+      tank_v_notes:  tanks.find(t => t.key === "v")?.notes  || null,
       tank_k_expiration_date:  tanks.find(t => t.key === "k")?.date  || null,
+      tank_k_notes:  tanks.find(t => t.key === "k")?.notes  || null,
       tank_l_expiration_date:  tanks.find(t => t.key === "l")?.date  || null,
+      tank_l_notes:  tanks.find(t => t.key === "l")?.notes  || null,
       tank_t_expiration_date:  tanks.find(t => t.key === "t")?.date  || null,
+      tank_t_notes:  tanks.find(t => t.key === "t")?.notes  || null,
       tank_i_expiration_date:  tanks.find(t => t.key === "i")?.date  || null,
+      tank_i_notes:  tanks.find(t => t.key === "i")?.notes  || null,
       tank_p_expiration_date:  tanks.find(t => t.key === "p")?.date  || null,
+      tank_p_notes:  tanks.find(t => t.key === "p")?.notes  || null,
       tank_uc_expiration_date: tanks.find(t => t.key === "uc")?.date || null,
+      tank_uc_notes: tanks.find(t => t.key === "uc")?.notes || null,
       notes: notes || null,
     };
     let trailerId = trailer?.trailer_id;
@@ -1123,7 +1157,7 @@ function TrailerModal({ trailer, companyId, onClose, onDone }: {
 
       {/* ── Permit Book ── */}
       <PermitEditRow label="Trailer Registration" expVal={trRegExp} onExpChange={setTrRegExp} enfVal={trRegEnf} onEnfChange={setTrRegEnf} notesVal={trRegNotes} onNotesChange={setTrRegNotes} />
-      <PermitEditRow label="Annual Inspection"    expVal={trInsExp} onExpChange={setTrInsExp}
+      <PermitEditRow label="Annual Inspection"    expVal={trInsExp} onExpChange={setTrInsExp} enfVal={trInsEnf} onEnfChange={setTrInsEnf} notesVal={trInsNotes} onNotesChange={setTrInsNotes}
         extra={
           <div style={{ display: "flex", gap: 6 }}>
             <input value={trInsShop} onChange={e => setTrInsShop(e.target.value)} placeholder="Inspection shop"
@@ -1151,7 +1185,7 @@ function TrailerModal({ trailer, companyId, onClose, onDone }: {
                 minWidth: 220, boxShadow: "0 8px 24px rgba(0,0,0,0.5)", overflow: "hidden" }}>
                 {available.map(d => (
                   <div key={d.key}
-                    onClick={() => { setTanks(prev => [...prev, { key: d.key, date: "" }]); setTankAddOpen(false); }}
+                    onClick={() => { setTanks(prev => [...prev, { key: d.key, date: "", notes: "" }]); setTankAddOpen(false); }}
                     style={{ padding: "8px 14px", fontSize: 12, cursor: "pointer", color: T.text,
                       borderBottom: `1px solid ${T.border}22` }}
                     onMouseEnter={e => (e.currentTarget.style.background = T.surface3)}
@@ -1173,6 +1207,8 @@ function TrailerModal({ trailer, companyId, onClose, onDone }: {
             label={def.label}
             dateVal={tank.date}
             onDateChange={v => setTanks(prev => prev.map(t => t.key === tank.key ? { ...t, date: v } : t))}
+            notesVal={tank.notes}
+            onNotesChange={v => setTanks(prev => prev.map(t => t.key === tank.key ? { ...t, notes: v } : t))}
             onRemove={() => setTanks(prev => prev.filter(t => t.key !== tank.key))}
           />
         );
