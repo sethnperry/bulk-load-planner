@@ -7,6 +7,7 @@ import NavMenu from "@/lib/ui/NavMenu";
 import { T, css, fmtDate, expiryColor, daysUntil } from "@/lib/ui/driver/tokens";
 import { Modal, Field, FieldRow, Banner, SubSectionTitle } from "@/lib/ui/driver/primitives";
 import { MemberCard } from "@/lib/ui/driver/MemberCard";
+import DecoupleModal from "@/app/calculator/modals/DecoupleModal";
 import { DriverProfileModal } from "@/lib/ui/driver/DriverProfileModal";
 import type { Member } from "@/lib/ui/driver/types";
 
@@ -245,7 +246,6 @@ function PermitRow({ label, date, enforcement, extra }: {
   label: string; date: string | null; enforcement?: string | null; extra?: React.ReactNode;
 }) {
   const [notesOpen, setNotesOpen] = useState(false);
-  const [checked,   setChecked]   = useState(false);
   const days     = daysUntil(date);
   const color    = expiryColor(days);
   const enfDays  = enforcement != null ? daysUntil(enforcement) : null;
@@ -265,11 +265,8 @@ function PermitRow({ label, date, enforcement, extra }: {
             : <span style={{ fontSize: 11, color: T.muted }}>—</span>
           }
         </div>
-        {/* Right controls — stop propagation so they don't double-fire expand */}
+        {/* Right controls */}
         <div style={{ display: "flex", alignItems: "center", gap: 2, flexShrink: 0 }} onClick={e => e.stopPropagation()}>
-          <AttachmentBtn />
-          <input type="checkbox" checked={checked} onChange={e => setChecked(e.target.checked)}
-            style={{ width: 13, height: 13, accentColor: T.accent, cursor: "pointer", margin: "0 2px" }} />
           <button type="button" title="Details"
             style={{ background: "none", border: "none", cursor: "pointer", padding: "0 2px", lineHeight: 1,
               display: "flex", alignItems: "center", justifyContent: "center", color: T.muted, fontSize: 8,
@@ -295,18 +292,17 @@ function PermitRow({ label, date, enforcement, extra }: {
 }
 
 // ─────────────────────────────────────────────────────────────
-// PermitEditRow — edit-modal view: label | exp input [| enf input] | 📎 ☑ ▼
+// PermitEditRow — edit-modal view: label | exp input [| enf input] | ▼
 // ─────────────────────────────────────────────────────────────
 
-function PermitEditRow({ label, expVal, onExpChange, enfVal, onEnfChange, extra }: {
+function PermitEditRow({ label, expVal, onExpChange, enfVal, onEnfChange, notesVal, onNotesChange, extra }: {
   label: string;
   expVal: string; onExpChange: (v: string) => void;
   enfVal?: string; onEnfChange?: (v: string) => void;
+  notesVal?: string; onNotesChange?: (v: string) => void;
   extra?: React.ReactNode;
 }) {
   const [dropOpen, setDropOpen] = useState(false);
-  const [checked,  setChecked]  = useState(false);
-  const [noteText, setNoteText] = useState("");
 
   return (
     <div style={{ borderBottom: `1px solid ${T.border}22`, padding: "3px 0" }}>
@@ -319,11 +315,8 @@ function PermitEditRow({ label, expVal, onExpChange, enfVal, onEnfChange, extra 
         >{label}</span>
         <input type="date" value={expVal} onChange={e => onExpChange(e.target.value)}
           style={{ ...css.input, ...sm, flex: 1, minWidth: 0 }} />
-        {/* 📎 · ☑ · ▼ */}
+        {/* ▼ */}
         <div style={{ display: "flex", alignItems: "center", gap: 2, flexShrink: 0 }}>
-          <AttachmentBtn />
-          <input type="checkbox" checked={checked} onChange={e => setChecked(e.target.checked)}
-            style={{ width: 13, height: 13, accentColor: T.accent, cursor: "pointer", margin: "0 2px" }} />
           <button type="button" title="Details"
             style={{ background: "none", border: "none", cursor: "pointer", padding: "0 2px", lineHeight: 1,
               display: "flex", alignItems: "center", justifyContent: "center", color: T.muted, fontSize: 8,
@@ -343,8 +336,10 @@ function PermitEditRow({ label, expVal, onExpChange, enfVal, onEnfChange, extra 
             </div>
           )}
           {extra}
-          <textarea value={noteText} onChange={e => setNoteText(e.target.value)} placeholder="Notes…" rows={2}
-            style={{ ...css.input, width: "100%", fontSize: 11, padding: "3px 6px", resize: "vertical" as const }} />
+          {onNotesChange !== undefined && (
+            <textarea value={notesVal ?? ""} onChange={e => onNotesChange(e.target.value)} placeholder="Notes…" rows={2}
+              style={{ ...css.input, width: "100%", fontSize: 11, padding: "3px 6px", resize: "vertical" as const }} />
+          )}
         </div>
       )}
     </div>
@@ -804,7 +799,6 @@ function TruckModal({ truck, companyId, onClose, onDone }: {
       {err && <Banner msg={err} type="error" />}
 
       {/* ── Identification ── */}
-      <SubSectionTitle>Identification</SubSectionTitle>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "6px 10px", marginBottom: 10 }}>
         <div><label style={{ ...css.label, fontSize: 10 }}>Unit #</label>{ti(name, setName, "e.g. T-101")}</div>
         <div><label style={{ ...css.label, fontSize: 10 }}>VIN</label>{ti(vin, setVin, "VIN")}</div>
@@ -840,9 +834,6 @@ function TruckModal({ truck, companyId, onClose, onDone }: {
       </div>
 
       <hr style={css.divider} />
-
-      {/* ── Permit Book ── */}
-      <SubSectionTitle>Permit Book</SubSectionTitle>
       <PermitEditRow label="Registration"              expVal={regExp}   onExpChange={setRegExp}   enfVal={regEnf}   onEnfChange={setRegEnf} />
       <PermitEditRow label="Annual Inspection"          expVal={insExp}   onExpChange={setInsExp}
         extra={
@@ -954,8 +945,10 @@ function TankEditRow({ label, dateVal, onDateChange, onRemove }: {
       </div>
       {dropOpen && (
         <div style={{ paddingLeft: 26, paddingTop: 4 }}>
-          <textarea value={noteText} onChange={e => setNoteText(e.target.value)} placeholder="Notes…" rows={2}
-            style={{ ...css.input, width: "100%", fontSize: 11, padding: "3px 6px", resize: "vertical" as const }} />
+          {onNotesChange !== undefined && (
+            <textarea value={notesVal ?? ""} onChange={e => onNotesChange(e.target.value)} placeholder="Notes…" rows={2}
+              style={{ ...css.input, width: "100%", fontSize: 11, padding: "3px 6px", resize: "vertical" as const }} />
+          )}
         </div>
       )}
     </div>
@@ -1069,7 +1062,6 @@ function TrailerModal({ trailer, companyId, onClose, onDone }: {
       {err && <Banner msg={err} type="error" />}
 
       {/* ── Identification ── */}
-      <SubSectionTitle>Identification</SubSectionTitle>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "6px 10px", marginBottom: 10 }}>
         <div><label style={{ ...css.label, fontSize: 10 }}>Unit #</label>{ti(name, setName, "e.g. 3151")}</div>
         <div><label style={{ ...css.label, fontSize: 10 }}>VIN</label>{ti(vin, setVin, "VIN")}</div>
@@ -1114,7 +1106,7 @@ function TrailerModal({ trailer, companyId, onClose, onDone }: {
       <hr style={css.divider} />
 
       {/* ── Permit Book ── */}
-      <SubSectionTitle>Permit Book</SubSectionTitle>
+      <hr style={css.divider} />
       <PermitEditRow label="Trailer Registration" expVal={trRegExp} onExpChange={setTrRegExp} enfVal={trRegEnf} onEnfChange={setTrRegEnf} />
       <PermitEditRow label="Annual Inspection"    expVal={trInsExp} onExpChange={setTrInsExp}
         extra={
@@ -1131,7 +1123,7 @@ function TrailerModal({ trailer, companyId, onClose, onDone }: {
 
       {/* ── Tank Inspections — dynamic ── */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-        <SubSectionTitle>Tank Inspections</SubSectionTitle>
+        <div style={{ marginTop: 10 }} />
         <div style={{ position: "relative" as const }}>
           <button type="button" onClick={() => setTankAddOpen(v => !v)}
             style={{ ...css.btn("subtle"), fontSize: 11, padding: "2px 10px" }}>+ Add</button>
@@ -1867,6 +1859,8 @@ export default function AdminPage() {
   const [trailerModal, setTrailerModal] = useState<Trailer | null | "new">(null);
   const [comboModal,   setComboModal]   = useState<Combo | null | "new">(null);
   const [coupleModal,  setCoupleModal]  = useState(false);
+  const [decoupleOpen,  setDecoupleOpen]  = useState(false);
+  const [decoupleComboPending, setDecoupleComboPending] = useState<{ combo: Combo } | null>(null);
   const [terminalModal, setTerminalModal] = useState<Terminal | null | "new">(null);
   const [terminalSearch, setTerminalSearch] = useState("");
 
@@ -2260,14 +2254,39 @@ export default function AdminPage() {
       {comboModal && comboModal !== "new" && (
         <ComboModal combo={comboModal} companyId={companyId!} trucks={trucks} trailers={trailers}
           onClose={() => setComboModal(null)} onDone={() => { setComboModal(null); loadAll(); }}
-          onDecouple={async () => {
-            if (!confirm("Decouple this combo?")) return;
-            await supabase.rpc("decouple_combo", { p_combo_id: (comboModal as Combo).combo_id });
+          onDecouple={() => {
+            const combo = comboModal as Combo;
+            const truckName   = Array.isArray(combo.truck)   ? combo.truck[0]?.truck_name   : combo.truck?.truck_name;
+            const trailerName = Array.isArray(combo.trailer) ? combo.trailer[0]?.trailer_name : combo.trailer?.trailer_name;
+            setDecoupleComboPending({ combo });
             setComboModal(null);
-            loadAll();
+            setDecoupleOpen(true);
           }}
         />
       )}
+      {decoupleComboPending && (() => {
+        const { combo } = decoupleComboPending;
+        const truckName   = Array.isArray(combo.truck)   ? combo.truck[0]?.truck_name   : combo.truck?.truck_name;
+        const trailerName = Array.isArray(combo.trailer) ? combo.trailer[0]?.trailer_name : combo.trailer?.trailer_name;
+        const coupledTruckIds   = new Set(combos.filter(c => c.active).map(c => c.truck_id));
+        const coupledTrailerIds = new Set(combos.filter(c => c.active).map(c => c.trailer_id));
+        return (
+          <DecoupleModal
+            open={decoupleOpen}
+            onClose={() => { setDecoupleOpen(false); setDecoupleComboPending(null); }}
+            comboId={String(combo.combo_id)}
+            truckId={combo.truck_id}
+            trailerId={combo.trailer_id}
+            truckName={truckName ?? combo.truck_id}
+            trailerName={trailerName ?? combo.trailer_id}
+            companyId={companyId}
+            uncoupledTrucks={trucks.filter(t => t.active && !coupledTruckIds.has(t.truck_id)).map(t => ({ id: t.truck_id, name: t.truck_name }))}
+            uncoupledTrailers={trailers.filter(t => t.active && !coupledTrailerIds.has(t.trailer_id)).map(t => ({ id: t.trailer_id, name: t.trailer_name }))}
+            onDecoupled={() => { setDecoupleOpen(false); setDecoupleComboPending(null); loadAll(); }}
+          />
+        );
+      })()}
+
       {coupleModal && (() => {
         const coupledTruckIds   = new Set(combos.filter(c => c.active).map(c => c.truck_id));
         const coupledTrailerIds = new Set(combos.filter(c => c.active).map(c => c.trailer_id));
