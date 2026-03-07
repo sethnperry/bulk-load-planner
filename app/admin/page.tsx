@@ -424,6 +424,13 @@ function TruckCard({ truck, onEdit, otherPermits, coupledTo }: {
               📍 {truck.status_location}
             </div>
           )}
+          {/* Notes preview — single line, tap to expand */}
+          {truck.notes && (
+            <div style={{ fontSize: 11, color: T.muted, marginTop: 3, fontStyle: "italic" as const,
+              whiteSpace: "nowrap" as const, overflow: "hidden", textOverflow: "ellipsis" }}>
+              {truck.notes}
+            </div>
+          )}
         </div>
         <div style={{ display: "flex", flexDirection: "column" as const, alignItems: "flex-end", gap: 3, flexShrink: 0, marginLeft: 8 }}>
           <button type="button" style={{ ...css.btn("subtle"), padding: "3px 10px", fontSize: 11 }} onClick={e => { e.stopPropagation(); onEdit(); }}>Edit</button>
@@ -524,6 +531,13 @@ function TrailerCard({ trailer, onEdit, coupledTo }: {
             <div style={{ fontSize: 11, color: T.muted, marginTop: 2,
               whiteSpace: "nowrap" as const, overflow: "hidden", textOverflow: "ellipsis" }}>
               📍 {trailer.status_location}
+            </div>
+          )}
+          {/* Notes preview — single line, tap to expand */}
+          {trailer.notes && (
+            <div style={{ fontSize: 11, color: T.muted, marginTop: 3, fontStyle: "italic" as const,
+              whiteSpace: "nowrap" as const, overflow: "hidden", textOverflow: "ellipsis" }}>
+              {trailer.notes}
             </div>
           )}
         </div>
