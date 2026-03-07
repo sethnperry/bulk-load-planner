@@ -230,50 +230,36 @@ function AttachmentBtn() {
 function PermitRow({ label, date, enforcement, extra }: {
   label: string; date: string | null; enforcement?: string | null; extra?: React.ReactNode;
 }) {
-  const [notesOpen, setNotesOpen] = useState(false);
-  const [checked,   setChecked]   = useState(false);
-  const days     = daysUntil(date);
-  const color    = expiryColor(days);
-  const enfDays  = enforcement != null ? daysUntil(enforcement) : null;
+  const [expanded, setExpanded] = useState(false);
+  const days    = daysUntil(date);
+  const color   = expiryColor(days);
+  const enfDays = enforcement ? daysUntil(enforcement) : null;
   const enfColor = expiryColor(enfDays);
+  const hasExtra = !!(enforcement || extra);
 
   return (
-    <div style={{ borderBottom: `1px solid ${T.border}22`, paddingBottom: 4, marginBottom: 4 }}>
-      {/* Entire main row tappable → fat-finger friendly */}
+    <div style={{ borderBottom: `1px solid ${T.border}22`, marginBottom: 2 }}>
       <div
-        style={{ display: "flex", alignItems: "center", gap: 6, minHeight: 34, cursor: "pointer", userSelect: "none" as const }}
-        onClick={() => setNotesOpen(v => !v)}
+        style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 36,
+          cursor: hasExtra ? "pointer" : "default", userSelect: "none" as const }}
+        onClick={() => hasExtra && setExpanded(v => !v)}
       >
-        <span style={{ fontSize: 11, color: T.muted, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>{label}</span>
-        <div style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0 }}>
-          {date
-            ? <span style={{ fontSize: 11, color, fontWeight: days != null && days < 30 ? 600 : 400, whiteSpace: "nowrap" as const }}>{fmtExpiryInline(date, days)}</span>
-            : <span style={{ fontSize: 11, color: T.muted }}>—</span>
-          }
-        </div>
-        {/* Right controls — stop propagation so they don't double-fire expand */}
-        <div style={{ display: "flex", alignItems: "center", gap: 2, flexShrink: 0 }} onClick={e => e.stopPropagation()}>
-          <AttachmentBtn />
-          <input type="checkbox" checked={checked} onChange={e => setChecked(e.target.checked)}
-            style={{ width: 13, height: 13, accentColor: T.accent, cursor: "pointer", margin: "0 2px" }} />
-          <button type="button" title="Details"
-            style={{ background: "none", border: "none", cursor: "pointer", padding: "0 2px", lineHeight: 1,
-              display: "flex", alignItems: "center", justifyContent: "center", color: T.muted, fontSize: 8,
-              minWidth: 20, minHeight: 20, WebkitTapHighlightColor: "transparent",
-              transform: notesOpen ? "rotate(180deg)" : "none", transition: "transform 150ms" }}
-            onClick={e => { e.stopPropagation(); setNotesOpen(v => !v); }}>▼</button>
-        </div>
+        <div style={{ width: 6, height: 6, borderRadius: "50%", flexShrink: 0, background: !date ? T.muted : color }} />
+        <span style={{ fontSize: 12, color: T.muted, flex: 1, minWidth: 0,
+          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>{label}</span>
+        <span style={{ fontSize: 12, fontWeight: days != null && days < 30 ? 700 : 400,
+          color: date ? color : T.muted, whiteSpace: "nowrap" as const, flexShrink: 0 }}>
+          {date ? fmtExpiryInline(date, days) : "—"}
+        </span>
+        {hasExtra && (
+          <span style={{ color: T.muted, fontSize: 9, flexShrink: 0,
+            transform: expanded ? "rotate(180deg)" : "none", transition: "transform 150ms", display: "inline-block" }}>▼</span>
+        )}
       </div>
-      {notesOpen && (
-        <div style={{ paddingLeft: 4, paddingTop: 4 }}>
-          {enforcement != null && enforcement && (
-            <div style={{ fontSize: 11, color: enfColor, marginBottom: 3 }}>
-              Enforcement: {fmtExpiryInline(enforcement, enfDays)}
-            </div>
-          )}
+      {expanded && (
+        <div style={{ paddingLeft: 14, paddingBottom: 8, display: "flex", flexDirection: "column" as const, gap: 4 }}>
+          {enforcement && <div style={{ fontSize: 11, color: enfColor }}>Enforcement: {fmtExpiryInline(enforcement, enfDays)}</div>}
           {extra}
-          <textarea placeholder="Notes…" rows={2}
-            style={{ ...css.input, width: "100%", marginTop: 3, fontSize: 11, padding: "3px 6px", resize: "vertical" as const }} />
         </div>
       )}
     </div>
@@ -384,53 +370,108 @@ function CompartmentEditor({ comps, onChange }: { comps: Compartment[]; onChange
 
 function TruckCard({ truck, onEdit, otherPermits }: { truck: Truck; onEdit: () => void; otherPermits?: OtherPermit[] }) {
   const [open, setOpen] = useState(false);
+
   const statusColor = truck.status_code === "OOS" || truck.status_code === "MAINT" ? T.danger
     : truck.status_code === "AVAIL" ? T.success : T.muted;
 
+  // Collect all permit dates to find soonest expiry
+  const allDates = [
+    truck.reg_expiration_date, truck.inspection_expiration_date,
+    truck.ifta_expiration_date, truck.phmsa_expiration_date,
+    truck.alliance_expiration_date, truck.fleet_ins_expiration_date,
+    truck.hazmat_lic_expiration_date, truck.inner_bridge_expiration_date,
+    ...(otherPermits ?? []).map(p => p.expiration_date || null),
+  ].filter(Boolean) as string[];
+  const soonestDays = allDates.reduce<number | null>((min, d) => {
+    const n = daysUntil(d);
+    if (n == null) return min;
+    return min == null ? n : Math.min(min, n);
+  }, null);
+  const warnBadge = soonestDays != null && soonestDays <= 30;
+  const badgeColor = expiryColor(soonestDays);
+
   return (
     <div style={{ ...css.card, padding: 0, marginBottom: 8, overflow: "hidden" }}>
-      <div onClick={() => setOpen(v => !v)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", cursor: "pointer", userSelect: "none" as const }}>
+      {/* Header row — tap anywhere to expand */}
+      <div
+        onClick={() => setOpen(v => !v)}
+        style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "12px 12px 8px", cursor: "pointer", userSelect: "none" as const, gap: 10 }}
+      >
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-            <span style={{ fontWeight: 700, fontSize: 15, color: T.text }}>{truck.truck_name}</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" as const }}>
+            <span style={{ fontWeight: 800, fontSize: 16, color: T.text }}>{truck.truck_name}</span>
+            {/* Status badge */}
+            {truck.status_code && (
+              <span style={{
+                fontSize: 10, fontWeight: 900, padding: "2px 6px", borderRadius: 4,
+                background: statusColor === T.danger ? "rgba(220,60,40,0.18)"
+                  : statusColor === T.success ? "rgba(40,180,80,0.13)" : "rgba(255,255,255,0.07)",
+                color: statusColor, letterSpacing: 0.5,
+              }}>{truck.status_code}</span>
+            )}
+            {/* Expiry warning badge */}
+            {warnBadge && (
+              <span style={{ fontSize: 10, fontWeight: 900, padding: "2px 6px", borderRadius: 4,
+                background: "rgba(220,60,40,0.15)", color: badgeColor, letterSpacing: 0.3 }}>
+                ⚠ {soonestDays! < 0 ? "EXPIRED" : soonestDays === 0 ? "EXP TODAY" : `EXP ${soonestDays}d`}
+              </span>
+            )}
+          </div>
+          <div style={{ display: "flex", gap: 10, marginTop: 3, flexWrap: "wrap" as const }}>
             {(truck.region || truck.local_area) && (
               <span style={{ fontSize: 11, color: T.muted }}>{[truck.region, truck.local_area].filter(Boolean).join(" · ")}</span>
             )}
+            {truck.status_location && (
+              <span style={{ fontSize: 11, color: T.muted }}>📍 {truck.status_location}</span>
+            )}
           </div>
-          {truck.vin_number && <div style={{ fontSize: 11, color: T.muted, marginTop: 1 }}>{truck.vin_number}</div>}
+          {truck.vin_number && <div style={{ fontSize: 11, color: T.muted, marginTop: 2, letterSpacing: 0.3 }}>{truck.vin_number}</div>}
         </div>
-        <div style={{ display: "flex", flexDirection: "column" as const, alignItems: "flex-end", gap: 3, flexShrink: 0 }}>
-          <button type="button" style={{ ...css.btn("subtle"), padding: "3px 10px", fontSize: 11 }} onClick={e => { e.stopPropagation(); onEdit(); }}>Edit</button>
-          <span style={{ fontSize: 11, color: truck.in_use_by_name ? T.accent : T.muted }}>
-            {truck.in_use_by_name ? `In use · ${truck.in_use_by_name}` : "Not in use"}
-          </span>
+        <div style={{ display: "flex", flexDirection: "column" as const, alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
+          <button type="button" style={{ ...css.btn("subtle"), padding: "4px 12px", fontSize: 11 }}
+            onClick={e => { e.stopPropagation(); onEdit(); }}>Edit</button>
+          <span style={{ fontSize: 10, color: T.muted, transform: open ? "rotate(180deg)" : "none",
+            transition: "transform 150ms", display: "inline-block" }}>▼</span>
         </div>
       </div>
-      <div style={{ padding: "3px 12px 7px", display: "flex", justifyContent: "flex-end" }}>
-        <span style={{ fontSize: 11, color: statusColor, fontWeight: 500 }}>
-          {[truck.status_code, truck.status_location].filter(Boolean).join(" · ") || "—"}
-        </span>
-      </div>
+
+      {/* Expanded detail section */}
       {open && (
-        <div style={{ borderTop: `1px solid ${T.border}`, padding: "10px 12px 4px" }} onClick={e => e.stopPropagation()}>
+        <div style={{ borderTop: `1px solid ${T.border}`, padding: "10px 12px 10px" }}
+          onClick={e => e.stopPropagation()}>
+
+          {/* Spec line */}
           {(truck.make || truck.model || truck.year) && (
-            <div style={{ fontSize: 11, color: T.muted, marginBottom: 8 }}>{[truck.year, truck.make, truck.model].filter(Boolean).join(" ")}</div>
+            <div style={{ fontSize: 12, color: T.muted, marginBottom: 10 }}>
+              {[truck.year, truck.make, truck.model].filter(Boolean).join(" ")}
+            </div>
           )}
+
+          {/* Notes */}
+          {truck.notes && (
+            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.60)", background: "rgba(255,255,255,0.04)",
+              borderRadius: 8, padding: "8px 10px", marginBottom: 10, lineHeight: 1.5,
+              borderLeft: `3px solid ${T.accent}40` }}>
+              {truck.notes}
+            </div>
+          )}
+
           <SubSectionTitle>Permit Book</SubSectionTitle>
-          <PermitRow label="Registration" date={truck.reg_expiration_date} enforcement={truck.reg_enforcement_date} />
-          <PermitRow label="Annual Inspection" date={truck.inspection_expiration_date} extra={
-            (truck.inspection_shop || truck.inspection_issue_date) ? (
-              <div style={{ fontSize: 10, color: T.muted, marginTop: 1 }}>
+          <PermitRow label="Registration"               date={truck.reg_expiration_date}         enforcement={truck.reg_enforcement_date} />
+          <PermitRow label="Annual Inspection"           date={truck.inspection_expiration_date}
+            extra={(truck.inspection_shop || truck.inspection_issue_date) ? (
+              <div style={{ fontSize: 11, color: T.muted }}>
                 {[truck.inspection_shop, truck.inspection_issue_date && `Issued ${fmtDate(truck.inspection_issue_date)}`].filter(Boolean).join(" · ")}
               </div>
-            ) : null
-          } />
-          <PermitRow label="IFTA Permit + Decals" date={truck.ifta_expiration_date} enforcement={truck.ifta_enforcement_date} />
-          <PermitRow label="PHMSA HazMat Permit" date={truck.phmsa_expiration_date} />
-          <PermitRow label="Alliance Uniform HazMat Permit" date={truck.alliance_expiration_date} />
-          <PermitRow label="Fleet Insurance Cab Card" date={truck.fleet_ins_expiration_date} />
-          <PermitRow label="HazMat Transportation License" date={truck.hazmat_lic_expiration_date} />
-          <PermitRow label="Inner Bridge Permit" date={truck.inner_bridge_expiration_date} />
+            ) : null}
+          />
+          <PermitRow label="IFTA Permit + Decals"       date={truck.ifta_expiration_date}        enforcement={truck.ifta_enforcement_date} />
+          <PermitRow label="PHMSA HazMat Permit"        date={truck.phmsa_expiration_date} />
+          <PermitRow label="Alliance HazMat Permit"     date={truck.alliance_expiration_date} />
+          <PermitRow label="Fleet Insurance Cab Card"   date={truck.fleet_ins_expiration_date} />
+          <PermitRow label="HazMat Transportation Lic"  date={truck.hazmat_lic_expiration_date} />
+          <PermitRow label="Inner Bridge Permit"        date={truck.inner_bridge_expiration_date} />
           {(otherPermits ?? []).map((p, i) => (
             <PermitRow key={i} label={p.label || "Other Permit"} date={p.expiration_date || null} />
           ))}
@@ -449,68 +490,123 @@ function TrailerCard({ trailer, onEdit }: { trailer: Trailer; onEdit: () => void
   const comps = trailer.compartments ?? [];
   const totalGal = comps.reduce((s, c) => s + c.max_gallons, 0);
   const compSummary = comps.length > 0
-    ? `${comps.length} Comps ${comps.map(c => c.max_gallons.toLocaleString()).join("/")} = ${totalGal.toLocaleString()} max`
+    ? `${comps.length} comps · ${comps.map(c => c.max_gallons.toLocaleString()).join(" / ")} = ${totalGal.toLocaleString()} gal max`
     : null;
+
   const statusColor = trailer.status_code === "OOS" || trailer.status_code === "MAINT" ? T.danger
     : trailer.status_code === "AVAIL" ? T.success : T.muted;
 
+  const tankDates = [
+    trailer.tank_v_expiration_date, trailer.tank_k_expiration_date,
+    trailer.tank_l_expiration_date, trailer.tank_t_expiration_date,
+    trailer.tank_i_expiration_date, trailer.tank_p_expiration_date,
+    trailer.tank_uc_expiration_date,
+  ].filter(Boolean) as string[];
+  const allDates = [
+    trailer.trailer_reg_expiration_date,
+    trailer.trailer_inspection_expiration_date,
+    ...tankDates,
+  ].filter(Boolean) as string[];
+  const soonestDays = allDates.reduce<number | null>((min, d) => {
+    const n = daysUntil(d);
+    if (n == null) return min;
+    return min == null ? n : Math.min(min, n);
+  }, null);
+  const warnBadge = soonestDays != null && soonestDays <= 30;
+  const badgeColor = expiryColor(soonestDays);
+
   return (
     <div style={{ ...css.card, padding: 0, marginBottom: 8, overflow: "hidden" }}>
-      <div onClick={() => setOpen(v => !v)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", cursor: "pointer", userSelect: "none" as const }}>
+      {/* Header row */}
+      <div
+        onClick={() => setOpen(v => !v)}
+        style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "12px 12px 8px", cursor: "pointer", userSelect: "none" as const, gap: 10 }}
+      >
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-            <span style={{ fontWeight: 700, fontSize: 15, color: T.text }}>{trailer.trailer_name}</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" as const }}>
+            <span style={{ fontWeight: 800, fontSize: 16, color: T.text }}>{trailer.trailer_name}</span>
+            {trailer.status_code && (
+              <span style={{
+                fontSize: 10, fontWeight: 900, padding: "2px 6px", borderRadius: 4,
+                background: statusColor === T.danger ? "rgba(220,60,40,0.18)"
+                  : statusColor === T.success ? "rgba(40,180,80,0.13)" : "rgba(255,255,255,0.07)",
+                color: statusColor, letterSpacing: 0.5,
+              }}>{trailer.status_code}</span>
+            )}
+            {warnBadge && (
+              <span style={{ fontSize: 10, fontWeight: 900, padding: "2px 6px", borderRadius: 4,
+                background: "rgba(220,60,40,0.15)", color: badgeColor, letterSpacing: 0.3 }}>
+                ⚠ {soonestDays! < 0 ? "EXPIRED" : soonestDays === 0 ? "EXP TODAY" : `EXP ${soonestDays}d`}
+              </span>
+            )}
+          </div>
+          <div style={{ display: "flex", gap: 10, marginTop: 3, flexWrap: "wrap" as const }}>
             {(trailer.region || trailer.local_area) && (
               <span style={{ fontSize: 11, color: T.muted }}>{[trailer.region, trailer.local_area].filter(Boolean).join(" · ")}</span>
             )}
+            {trailer.status_location && (
+              <span style={{ fontSize: 11, color: T.muted }}>📍 {trailer.status_location}</span>
+            )}
           </div>
-          {trailer.vin_number && <div style={{ fontSize: 11, color: T.muted, marginTop: 1 }}>{trailer.vin_number}</div>}
+          {compSummary && <div style={{ fontSize: 11, color: T.muted, marginTop: 2 }}>{compSummary}</div>}
+          {trailer.vin_number && <div style={{ fontSize: 11, color: T.muted, marginTop: 1, letterSpacing: 0.3 }}>{trailer.vin_number}</div>}
         </div>
-        <div style={{ display: "flex", flexDirection: "column" as const, alignItems: "flex-end", gap: 3, flexShrink: 0 }}>
-          <button type="button" style={{ ...css.btn("subtle"), padding: "3px 10px", fontSize: 11 }} onClick={e => { e.stopPropagation(); onEdit(); }}>Edit</button>
-          <span style={{ fontSize: 11, color: trailer.in_use_by_name ? T.accent : T.muted }}>
-            {trailer.in_use_by_name ? `In use · ${trailer.in_use_by_name}` : "Not in use"}
-          </span>
+        <div style={{ display: "flex", flexDirection: "column" as const, alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
+          <button type="button" style={{ ...css.btn("subtle"), padding: "4px 12px", fontSize: 11 }}
+            onClick={e => { e.stopPropagation(); onEdit(); }}>Edit</button>
+          <span style={{ fontSize: 10, color: T.muted, transform: open ? "rotate(180deg)" : "none",
+            transition: "transform 150ms", display: "inline-block" }}>▼</span>
         </div>
       </div>
-      <div style={{ padding: "3px 12px 7px", display: "flex", justifyContent: "flex-end" }}>
-        <span style={{ fontSize: 11, color: statusColor, fontWeight: 500 }}>
-          {[trailer.status_code, trailer.status_location].filter(Boolean).join(" · ") || "—"}
-        </span>
-      </div>
+
+      {/* Expanded section */}
       {open && (
-        <div style={{ borderTop: `1px solid ${T.border}`, padding: "10px 12px 4px" }} onClick={e => e.stopPropagation()}>
+        <div style={{ borderTop: `1px solid ${T.border}`, padding: "10px 12px 10px" }}
+          onClick={e => e.stopPropagation()}>
+
           {(trailer.make || trailer.model || trailer.year) && (
-            <div style={{ fontSize: 11, color: T.muted, marginBottom: 5 }}>{[trailer.year, trailer.make, trailer.model].filter(Boolean).join(" ")}</div>
+            <div style={{ fontSize: 12, color: T.muted, marginBottom: 6 }}>
+              {[trailer.year, trailer.make, trailer.model].filter(Boolean).join(" ")}
+            </div>
           )}
-          {compSummary && <div style={{ fontSize: 11, color: T.muted, marginBottom: 5 }}>{compSummary}</div>}
-          {trailer.last_load_config && <div style={{ fontSize: 11, color: T.muted, marginBottom: 8 }}>Residue Last Contained — {trailer.last_load_config}</div>}
+
+          {trailer.last_load_config && (
+            <div style={{ fontSize: 12, color: T.muted, marginBottom: 8 }}>
+              Last loaded: {trailer.last_load_config}
+            </div>
+          )}
+
+          {trailer.notes && (
+            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.60)", background: "rgba(255,255,255,0.04)",
+              borderRadius: 8, padding: "8px 10px", marginBottom: 10, lineHeight: 1.5,
+              borderLeft: `3px solid ${T.accent}40` }}>
+              {trailer.notes}
+            </div>
+          )}
+
           <SubSectionTitle>Permit Book</SubSectionTitle>
-          <PermitRow label="Trailer Registration" date={trailer.trailer_reg_expiration_date} enforcement={trailer.trailer_reg_enforcement_date} />
-          <PermitRow label="Annual Inspection" date={trailer.trailer_inspection_expiration_date} extra={
-            (trailer.trailer_inspection_shop || trailer.trailer_inspection_issue_date) ? (
-              <div style={{ fontSize: 10, color: T.muted, marginTop: 1 }}>
+          <PermitRow label="Trailer Registration"  date={trailer.trailer_reg_expiration_date} enforcement={trailer.trailer_reg_enforcement_date} />
+          <PermitRow label="Annual Inspection"      date={trailer.trailer_inspection_expiration_date}
+            extra={(trailer.trailer_inspection_shop || trailer.trailer_inspection_issue_date) ? (
+              <div style={{ fontSize: 11, color: T.muted }}>
                 {[trailer.trailer_inspection_shop, trailer.trailer_inspection_issue_date && `Issued ${fmtDate(trailer.trailer_inspection_issue_date)}`].filter(Boolean).join(" · ")}
               </div>
-            ) : null
-          } />
-          <SubSectionTitle>Tank Inspections</SubSectionTitle>
+            ) : null}
+          />
+
+          {tankDates.length > 0 && <SubSectionTitle>Tank Inspections</SubSectionTitle>}
           {[
-            { label: "V — Annual External Visual",  date: trailer.tank_v_expiration_date },
-            { label: "K — Annual Leakage Test",     date: trailer.tank_k_expiration_date },
-            { label: "L — Annual Lining Inspection",date: trailer.tank_l_expiration_date },
-            { label: "T — 2 Year Thickness Test",   date: trailer.tank_t_expiration_date },
-            { label: "I — 5 Year Internal Visual",  date: trailer.tank_i_expiration_date },
-            { label: "P — 5 Year Pressure Test",    date: trailer.tank_p_expiration_date },
-            { label: "UC — 5 Year Upper Coupler",   date: trailer.tank_uc_expiration_date },
+            { label: "V — Annual External Visual",   date: trailer.tank_v_expiration_date },
+            { label: "K — Annual Leakage Test",      date: trailer.tank_k_expiration_date },
+            { label: "L — Annual Lining Inspection", date: trailer.tank_l_expiration_date },
+            { label: "T — 2yr Thickness Test",       date: trailer.tank_t_expiration_date },
+            { label: "I — 5yr Internal Visual",      date: trailer.tank_i_expiration_date },
+            { label: "P — 5yr Pressure Test",        date: trailer.tank_p_expiration_date },
+            { label: "UC — 5yr Upper Coupler",       date: trailer.tank_uc_expiration_date },
           ].filter(r => !!r.date).map(r => (
             <PermitRow key={r.label} label={r.label} date={r.date} />
           ))}
-          {![trailer.tank_v_expiration_date, trailer.tank_k_expiration_date, trailer.tank_l_expiration_date,
-             trailer.tank_t_expiration_date, trailer.tank_i_expiration_date, trailer.tank_p_expiration_date,
-             trailer.tank_uc_expiration_date].some(Boolean) && (
-            <div style={{ fontSize: 11, color: T.muted, padding: "2px 0 6px" }}>No tank inspections on file.</div>
-          )}
         </div>
       )}
     </div>
@@ -666,20 +762,15 @@ function TruckModal({ truck, companyId, onClose, onDone }: {
     if (!confirm("Permanently delete this truck? This cannot be undone.")) return;
     setSaving(true); setErr(null);
     try {
-      const tid = truck!.truck_id;
-      // Delete child records first
-      const { error: opErr } = await supabase.from("truck_other_permits").delete().eq("truck_id", tid);
-      if (opErr) throw opErr;
-      // Delete combos referencing this truck
-      const { error: cErr } = await supabase.from("equipment_combos").delete().eq("truck_id", tid);
-      if (cErr) throw cErr;
-      // Delete the truck — include company_id so RLS policy is satisfied
-      const { error: tErr } = await supabase.from("trucks").delete()
-        .eq("truck_id", tid).eq("company_id", companyId);
-      if (tErr) throw tErr;
+      const { error } = await supabase.rpc("delete_truck", {
+        p_truck_id: truck!.truck_id,
+        p_company_id: companyId,
+      });
+      if (error) throw error;
       onDone();
     } catch (e: any) {
       setErr(e?.message ?? "Delete failed.");
+      console.error("deleteTruck error:", e);
       setSaving(false);
     }
   }
@@ -942,20 +1033,15 @@ function TrailerModal({ trailer, companyId, onClose, onDone }: {
     if (!confirm("Permanently delete this trailer? This cannot be undone.")) return;
     setSaving(true); setErr(null);
     try {
-      const tid = trailer!.trailer_id;
-      // Delete child records first
-      const { error: compErr } = await supabase.from("trailer_compartments").delete().eq("trailer_id", tid);
-      if (compErr) throw compErr;
-      // Delete combos referencing this trailer
-      const { error: cErr } = await supabase.from("equipment_combos").delete().eq("trailer_id", tid);
-      if (cErr) throw cErr;
-      // Delete the trailer — include company_id so RLS policy is satisfied
-      const { error: tErr } = await supabase.from("trailers").delete()
-        .eq("trailer_id", tid).eq("company_id", companyId);
-      if (tErr) throw tErr;
+      const { error } = await supabase.rpc("delete_trailer", {
+        p_trailer_id: trailer!.trailer_id,
+        p_company_id: companyId,
+      });
+      if (error) throw error;
       onDone();
     } catch (e: any) {
       setErr(e?.message ?? "Delete failed.");
+      console.error("deleteTrailer error:", e);
       setSaving(false);
     }
   }
