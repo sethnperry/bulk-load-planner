@@ -127,8 +127,8 @@ function fmtExpiryInline(dateStr: string | null | undefined, days: number | null
 // PermitRow — read-only row with paperclip indicator
 // ─────────────────────────────────────────────────────────────
 
-function PermitRow({ label, date, enforcement, extra, category, hasDoc, onDocOpen }: {
-  label: string; date: string | null; enforcement?: string | null; extra?: React.ReactNode;
+function PermitRow({ label, date, enforcement, notes, extra, category, hasDoc, onDocOpen }: {
+  label: string; date: string | null; enforcement?: string | null; notes?: string | null; extra?: React.ReactNode;
   category?: string; hasDoc?: boolean; onDocOpen?: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -136,7 +136,7 @@ function PermitRow({ label, date, enforcement, extra, category, hasDoc, onDocOpe
   const color   = expiryColor(days);
   const enfDays = enforcement ? daysUntil(enforcement) : null;
   const enfColor = expiryColor(enfDays);
-  const hasExtra = !!(enforcement || extra);
+  const hasExtra = !!(enforcement || notes || extra);
 
   return (
     <div style={{ borderBottom: `1px solid ${T.border}12` }}>
@@ -163,6 +163,7 @@ function PermitRow({ label, date, enforcement, extra, category, hasDoc, onDocOpe
       {expanded && (
         <div style={{ paddingLeft: 14, paddingBottom: 8, display: "flex", flexDirection: "column" as const, gap: 4 }}>
           {enforcement && <div style={{ fontSize: 11, color: enfColor }}>Enforcement: {fmtExpiryInline(enforcement, enfDays)}</div>}
+          {notes && <div style={{ fontSize: 11, color: T.muted, fontStyle: "italic" as const }}>{notes}</div>}
           {extra}
         </div>
       )}
@@ -360,6 +361,13 @@ function TruckCard({ truck, companyId, onEdit, otherPermits }: {
             📍 {truck.status_location}
           </div>
         )}
+        {/* Row 5: notes preview */}
+        {truck.notes && (
+          <div style={{ fontSize: 11, color: T.muted, marginTop: 3, fontStyle: "italic" as const,
+            whiteSpace: "nowrap" as const, overflow: "hidden", textOverflow: "ellipsis" }}>
+            {truck.notes}
+          </div>
+        )}
       </div>
 
       {/* ── Expanded section ── */}
@@ -391,7 +399,7 @@ function TruckCard({ truck, companyId, onEdit, otherPermits }: {
             </div>
           )}
           <div style={{ borderTop: `1px solid ${T.border}22`, marginBottom: 4, marginTop: 2 }} />
-          <PermitRow label="Registration"               date={truck.reg_expiration_date}         enforcement={truck.reg_enforcement_date}
+          <PermitRow label="Registration"               date={truck.reg_expiration_date}         enforcement={truck.reg_enforcement_date}         notes={(truck as any).reg_notes}
             category="registration"      hasDoc={hasDoc("registration")}      onDocOpen={() => openDocForCategory("registration")} />
           <PermitRow label="Annual Inspection"           date={truck.inspection_expiration_date}
             category="annual_inspection" hasDoc={hasDoc("annual_inspection")} onDocOpen={() => openDocForCategory("annual_inspection")}
@@ -401,7 +409,7 @@ function TruckCard({ truck, companyId, onEdit, otherPermits }: {
               </div>
             ) : null}
           />
-          <PermitRow label="IFTA Permit + Decals"       date={truck.ifta_expiration_date}        enforcement={truck.ifta_enforcement_date}
+          <PermitRow label="IFTA Permit + Decals"       date={truck.ifta_expiration_date}        enforcement={truck.ifta_enforcement_date}        notes={(truck as any).ifta_notes}
             category="ifta"              hasDoc={hasDoc("ifta")}              onDocOpen={() => openDocForCategory("ifta")} />
           <PermitRow label="PHMSA HazMat Permit"        date={truck.phmsa_expiration_date}
             category="phmsa_hazmat"      hasDoc={hasDoc("phmsa_hazmat")}      onDocOpen={() => openDocForCategory("phmsa_hazmat")} />
@@ -531,6 +539,13 @@ function TrailerCard({ trailer, companyId, onEdit }: { trailer: Trailer; company
           <div style={{ fontSize: 11, color: T.muted, marginTop: 1,
             whiteSpace: "nowrap" as const, overflow: "hidden", textOverflow: "ellipsis" }}>
             📍 {trailer.status_location}
+          </div>
+        )}
+        {/* Row 5: notes preview */}
+        {trailer.notes && (
+          <div style={{ fontSize: 11, color: T.muted, marginTop: 3, fontStyle: "italic" as const,
+            whiteSpace: "nowrap" as const, overflow: "hidden", textOverflow: "ellipsis" }}>
+            {trailer.notes}
           </div>
         )}
       </div>
