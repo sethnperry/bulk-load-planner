@@ -90,6 +90,7 @@ export const css = {
     outline: "none",
     width: "100%",
     boxSizing: "border-box" as const,
+    colorScheme: "dark" as const,
   },
   select: {
     padding: "9px 12px",

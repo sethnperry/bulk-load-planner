@@ -127,7 +127,7 @@ export function AttachmentIndicator({
         background: "none", border: "none", cursor: hasDoc ? "pointer" : "default",
         padding: "0 2px", lineHeight: 1, display: "flex", alignItems: "center",
         justifyContent: "center", flexShrink: 0,
-        color: hasDoc ? T.accent : `${T.muted}44`,
+        color: hasDoc ? T.info : `${T.muted}44`,
         fontSize: 13, minWidth: 22, minHeight: 22,
         WebkitTapHighlightColor: "transparent",
         transition: "color 150ms",

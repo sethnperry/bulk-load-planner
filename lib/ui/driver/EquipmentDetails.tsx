@@ -171,7 +171,8 @@ function PermitRow({ label, date, enforcement, extra, category, hasDoc, onDocOpe
 }
 
 // ─────────────────────────────────────────────────────────────
-// PermitEditRow — edit-modal view: label | exp input [| enf input] | 📎 ☑ ▼
+// PermitEditRow — edit-modal view: label | exp date input
+// Tap label to reveal enforcement date + notes (if applicable)
 // ─────────────────────────────────────────────────────────────
 
 function PermitEditRow({ label, expVal, onExpChange, enfVal, onEnfChange, extra }: {
@@ -180,46 +181,37 @@ function PermitEditRow({ label, expVal, onExpChange, enfVal, onEnfChange, extra 
   enfVal?: string; onEnfChange?: (v: string) => void;
   extra?: React.ReactNode;
 }) {
-  const [dropOpen, setDropOpen] = useState(false);
-  const [checked,  setChecked]  = useState(false);
-  const [noteText, setNoteText] = useState("");
+  const hasDetails = onEnfChange !== undefined || !!extra;
+  const [open, setOpen] = useState(false);
 
   return (
     <div style={{ borderBottom: `1px solid ${T.border}22`, padding: "3px 0" }}>
-      {/* Main row — label side is tappable to expand; date input and icon cluster stop propagation */}
       <div style={{ display: "flex", alignItems: "center", gap: 6, minHeight: 32 }}>
         <span
           style={{ fontSize: 11, color: T.muted, width: 148, flexShrink: 0, overflow: "hidden",
-            textOverflow: "ellipsis", whiteSpace: "nowrap" as const, cursor: "pointer", userSelect: "none" as const }}
-          onClick={() => setDropOpen(v => !v)}
-        >{label}</span>
+            textOverflow: "ellipsis", whiteSpace: "nowrap" as const,
+            cursor: hasDetails ? "pointer" : "default", userSelect: "none" as const }}
+          onClick={() => hasDetails && setOpen(v => !v)}
+        >
+          {label}
+          {hasDetails && (
+            <span style={{ marginLeft: 4, fontSize: 8, color: T.muted, display: "inline-block",
+              transform: open ? "rotate(180deg)" : "none", transition: "transform 150ms" }}>▼</span>
+          )}
+        </span>
         <input type="date" value={expVal} onChange={e => onExpChange(e.target.value)}
           style={{ ...css.input, ...sm, flex: 1, minWidth: 0 }} />
-        {/* ☑ · ▼ */}
-        <div style={{ display: "flex", alignItems: "center", gap: 2, flexShrink: 0 }}>
-          <input type="checkbox" checked={checked} onChange={e => setChecked(e.target.checked)}
-            style={{ width: 13, height: 13, accentColor: T.accent, cursor: "pointer", margin: "0 2px" }} />
-          <button type="button" title="Details"
-            style={{ background: "none", border: "none", cursor: "pointer", padding: "0 2px", lineHeight: 1,
-              display: "flex", alignItems: "center", justifyContent: "center", color: T.muted, fontSize: 8,
-              minWidth: 20, minHeight: 20, WebkitTapHighlightColor: "transparent",
-              transform: dropOpen ? "rotate(180deg)" : "none", transition: "transform 150ms" }}
-            onClick={() => setDropOpen(v => !v)}>▼</button>
-        </div>
       </div>
-      {dropOpen && (
-        <div style={{ paddingLeft: 4, paddingTop: 5, display: "flex", flexDirection: "column" as const, gap: 5 }}>
+      {open && (
+        <div style={{ paddingLeft: 4, paddingTop: 5, display: "flex", flexDirection: "column" as const, gap: 5, paddingBottom: 4 }}>
           {onEnfChange !== undefined && (
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <span style={{ fontSize: 10, color: T.muted, width: 148, flexShrink: 0 }}>Enforcement Date</span>
               <input type="date" value={enfVal ?? ""} onChange={e => onEnfChange(e.target.value)}
                 style={{ ...css.input, ...sm, flex: 1, minWidth: 0 }} />
-              <span style={{ width: 62, flexShrink: 0 }} />
             </div>
           )}
           {extra}
-          <textarea value={noteText} onChange={e => setNoteText(e.target.value)} placeholder="Notes…" rows={2}
-            style={{ ...css.input, width: "100%", fontSize: 11, padding: "3px 6px", resize: "vertical" as const }} />
         </div>
       )}
     </div>
@@ -884,51 +876,26 @@ function TruckModal({ truck, companyId, onClose, onDone }: {
 // ─────────────────────────────────────────────────────────────
 
 // ─────────────────────────────────────────────────────────────
-// TankEditRow — tank inspection row with − on left, 📎 ☑ ▼ on right
+// ─────────────────────────────────────────────────────────────
+// TankEditRow — tank inspection row: − label | date input
 // ─────────────────────────────────────────────────────────────
 
 function TankEditRow({ label, dateVal, onDateChange, onRemove }: {
   label: string; dateVal: string; onDateChange: (v: string) => void; onRemove: () => void;
 }) {
-  const [dropOpen, setDropOpen] = useState(false);
-  const [checked,  setChecked]  = useState(false);
-  const [noteText, setNoteText] = useState("");
-
   return (
     <div style={{ borderBottom: `1px solid ${T.border}22`, padding: "3px 0" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 6, minHeight: 32 }}>
-        {/* − delete button on LEFT */}
         <button type="button" onClick={onRemove}
           style={{ background: "none", border: "none", cursor: "pointer", color: T.danger,
             fontSize: 16, padding: "0 2px", flexShrink: 0, lineHeight: 1,
             minWidth: 20, minHeight: 20, display: "flex", alignItems: "center", justifyContent: "center",
             WebkitTapHighlightColor: "transparent" }}>−</button>
-        {/* Label — tappable to expand notes */}
-        <span
-          style={{ fontSize: 11, color: T.muted, flex: 1, overflow: "hidden",
-            textOverflow: "ellipsis", whiteSpace: "nowrap" as const, cursor: "pointer", userSelect: "none" as const }}
-          onClick={() => setDropOpen(v => !v)}
-        >{label}</span>
+        <span style={{ fontSize: 11, color: T.muted, flex: 1, overflow: "hidden",
+          textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>{label}</span>
         <input type="date" value={dateVal} onChange={e => onDateChange(e.target.value)}
           style={{ ...css.input, ...sm, width: 130, flexShrink: 0 }} />
-        {/* ☑ · ▼ on RIGHT */}
-        <div style={{ display: "flex", alignItems: "center", gap: 2, flexShrink: 0 }}>
-          <input type="checkbox" checked={checked} onChange={e => setChecked(e.target.checked)}
-            style={{ width: 13, height: 13, accentColor: T.accent, cursor: "pointer", margin: "0 2px" }} />
-          <button type="button"
-            style={{ background: "none", border: "none", cursor: "pointer", padding: "0 2px", lineHeight: 1,
-              display: "flex", alignItems: "center", justifyContent: "center", color: T.muted, fontSize: 8,
-              minWidth: 20, minHeight: 20, WebkitTapHighlightColor: "transparent",
-              transform: dropOpen ? "rotate(180deg)" : "none", transition: "transform 150ms" }}
-            onClick={() => setDropOpen(v => !v)}>▼</button>
-        </div>
       </div>
-      {dropOpen && (
-        <div style={{ paddingLeft: 26, paddingTop: 4 }}>
-          <textarea value={noteText} onChange={e => setNoteText(e.target.value)} placeholder="Notes…" rows={2}
-            style={{ ...css.input, width: "100%", fontSize: 11, padding: "3px 6px", resize: "vertical" as const }} />
-        </div>
-      )}
     </div>
   );
 }
