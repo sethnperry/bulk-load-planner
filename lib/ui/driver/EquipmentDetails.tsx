@@ -706,6 +706,8 @@ function TruckModal({ truck, companyId, onClose, onDone }: {
   const [fleetExp,  setFleetExp]  = useState(truck?.fleet_ins_expiration_date ?? "");
   const [hazLicExp, setHazLicExp] = useState(truck?.hazmat_lic_expiration_date ?? "");
   const [ibExp,     setIbExp]     = useState(truck?.inner_bridge_expiration_date ?? "");
+  const [regNotes,  setRegNotes]  = useState((truck as any)?.reg_notes ?? "");
+  const [iftaNotes, setIftaNotes] = useState((truck as any)?.ifta_notes ?? "");
   const [notes,     setNotes]     = useState(truck?.notes ?? "");
   // Multiple other permits
   const [otherPermits, setOtherPermits] = useState<OtherPermit[]>([]);
