@@ -1,7 +1,7 @@
 "use client";
 // modals/DecoupleModal.tsx
 
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useRef, useEffect } from "react";
 import { FullscreenModal } from "@/lib/ui/FullscreenModal";
 import { supabase } from "@/lib/supabase/client";
 
@@ -153,6 +153,10 @@ function LocationField({ value, onChange, onGeoTag, geoLoading, isError }: {
 
 function useGeoTag(onResult: (location: string, lat: number, lon: number) => void) {
   const [geoLoading, setGeoLoading] = useState(false);
+  // Keep a ref to the latest onResult so the trigger callback is always stable
+  const onResultRef = useRef(onResult);
+  useEffect(() => { onResultRef.current = onResult; });
+
   const trigger = useCallback(() => {
     if (!navigator.geolocation) return;
     setGeoLoading(true);
@@ -162,7 +166,6 @@ function useGeoTag(onResult: (location: string, lat: number, lon: number) => voi
         try {
           const res  = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`, { headers: { "Accept-Language": "en" } });
           const data = await res.json();
-          // Build a short, human-readable address from components
           const addr = data?.address ?? {};
           const parts = [
             addr.house_number && addr.road ? `${addr.house_number} ${addr.road}` : addr.road,
@@ -170,14 +173,14 @@ function useGeoTag(onResult: (location: string, lat: number, lon: number) => voi
             addr.state,
           ].filter(Boolean);
           const shortAddr = parts.length >= 2 ? parts.join(", ") : data?.display_name ?? `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
-          onResult(shortAddr, lat, lon);
-        } catch { onResult(`${lat.toFixed(5)}, ${lon.toFixed(5)}`, lat, lon); }
+          onResultRef.current(shortAddr, lat, lon);
+        } catch { onResultRef.current(`${lat.toFixed(5)}, ${lon.toFixed(5)}`, lat, lon); }
         setGeoLoading(false);
       },
       () => setGeoLoading(false),
       { timeout: 8000, enableHighAccuracy: true }
     );
-  }, [onResult]);
+  }, []); // stable — never recreated
   return { geoLoading, trigger };
 }
 
