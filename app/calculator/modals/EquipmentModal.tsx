@@ -132,17 +132,21 @@ function DetailField({ label, value }: { label: string; value?: React.ReactNode 
 // PlannerComboEditModal — edit tare / target on existing combo
 // Truck and trailer are read-only; no unit swapping here.
 // ─────────────────────────────────────────────────────────────
-function PlannerComboEditModal({ combo, truckName, trailerName, onClose, onDone }: {
+function PlannerComboEditModal({ combo, truckName, trailerName, initialStatus, initialStatusLoc, onClose, onDone }: {
   combo: ComboRow;
   truckName: string;
   trailerName: string;
+  initialStatus?: string | null;
+  initialStatusLoc?: string | null;
   onClose: () => void;
   onDone: () => void;
 }) {
-  const [tareLbs, setTareLbs] = useState(String(combo.tare_lbs ?? ""));
-  const [target,  setTarget]  = useState(String((combo as any).target_weight ?? "80000"));
-  const [err,     setErr]     = useState<string | null>(null);
-  const [saving,  setSaving]  = useState(false);
+  const [tareLbs,   setTareLbs]   = useState(String(combo.tare_lbs ?? ""));
+  const [target,    setTarget]    = useState(String((combo as any).target_weight ?? "80000"));
+  const [status,    setStatus]    = useState(initialStatus && initialStatus !== "COUPLED" ? initialStatus : "AVAIL");
+  const [statusLoc, setStatusLoc] = useState(initialStatusLoc ?? "");
+  const [err,       setErr]       = useState<string | null>(null);
+  const [saving,    setSaving]    = useState(false);
 
   async function save() {
     if (!tareLbs || parseFloat(tareLbs) <= 0) { setErr("Tare weight is required."); return; }
@@ -151,6 +155,11 @@ function PlannerComboEditModal({ combo, truckName, trailerName, onClose, onDone 
       .update({ tare_lbs: parseFloat(tareLbs), target_weight: parseFloat(target) || null })
       .eq("combo_id", combo.combo_id);
     if (error) { setErr(error.message); setSaving(false); return; }
+    const statusUpdate = { status_code: status || null, status_location: statusLoc || null };
+    await Promise.all([
+      supabase.from("trucks").update(statusUpdate).eq("truck_id", String(combo.truck_id)),
+      supabase.from("trailers").update(statusUpdate).eq("trailer_id", String(combo.trailer_id)),
+    ]);
     onDone();
   }
 
@@ -169,7 +178,7 @@ function PlannerComboEditModal({ combo, truckName, trailerName, onClose, onDone 
       </div>
 
       {/* Tare + Target inputs */}
-      <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
+      <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.5)", letterSpacing: 0.5, marginBottom: 4 }}>TARE WEIGHT (LBS)</div>
           <input type="number" value={tareLbs} onChange={e => setTareLbs(e.target.value)} placeholder="e.g. 34000"
@@ -180,6 +189,30 @@ function PlannerComboEditModal({ combo, truckName, trailerName, onClose, onDone 
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.5)", letterSpacing: 0.5, marginBottom: 4 }}>TARGET GROSS (LBS)</div>
           <input type="number" value={target} onChange={e => setTarget(e.target.value)} placeholder="e.g. 80000"
+            style={{ width: "100%", boxSizing: "border-box" as const, background: "rgba(255,255,255,0.06)",
+              border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: "10px 12px",
+              fontSize: 15, color: "#fff", outline: "none" }} />
+        </div>
+      </div>
+
+      {/* Status + Location */}
+      <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.5)", letterSpacing: 0.5, marginBottom: 4 }}>STATUS</div>
+          <select value={status} onChange={e => setStatus(e.target.value)}
+            style={{ width: "100%", boxSizing: "border-box" as const, background: "rgba(255,255,255,0.06)",
+              border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: "10px 12px",
+              fontSize: 14, color: "#fff", outline: "none" }}>
+            <option value="AVAIL">AVAIL — Available</option>
+            <option value="PARK">PARK — Parked</option>
+            <option value="MAINT">MAINT — Maintenance</option>
+            <option value="INSP">INSP — Inspection</option>
+            <option value="OOS">OOS — Out of Service</option>
+          </select>
+        </div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.5)", letterSpacing: 0.5, marginBottom: 4 }}>STATUS LOCATION</div>
+          <input value={statusLoc} onChange={e => setStatusLoc(e.target.value)} placeholder="e.g. Yard 1"
             style={{ width: "100%", boxSizing: "border-box" as const, background: "rgba(255,255,255,0.06)",
               border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: "10px 12px",
               fontSize: 15, color: "#fff", outline: "none" }} />
@@ -413,6 +446,8 @@ function EquipmentDetailsModal({
           combo={c}
           truckName={truck?.truck_name ?? String(c.truck_id)}
           trailerName={trailer?.trailer_name ?? String(c.trailer_id)}
+          initialStatus={(fullTruck as any)?.status_code}
+          initialStatusLoc={(fullTruck as any)?.status_location}
           onClose={() => setComboEditOpen(false)}
           onDone={() => { setComboEditOpen(false); void reloadDetails(); }}
         />
