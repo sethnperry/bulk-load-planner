@@ -127,13 +127,17 @@ export function AttachmentIndicator({
         background: "none", border: "none", cursor: hasDoc ? "pointer" : "default",
         padding: "0 2px", lineHeight: 1, display: "flex", alignItems: "center",
         justifyContent: "center", flexShrink: 0,
-        color: hasDoc ? T.info : `${T.muted}44`,
+        color: hasDoc ? T.info : `${T.muted}55`,
         fontSize: 13, minWidth: 22, minHeight: 22,
         WebkitTapHighlightColor: "transparent",
         transition: "color 150ms",
       }}
     >
-      📎
+      {/* SVG paperclip — responds to CSS color unlike emoji */}
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+        stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66L9.41 17.41a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+      </svg>
     </button>
   );
 }
