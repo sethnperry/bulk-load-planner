@@ -128,6 +128,81 @@ function DetailField({ label, value }: { label: string; value?: React.ReactNode 
   );
 }
 
+// ─────────────────────────────────────────────────────────────
+// PlannerComboEditModal — edit tare / target on existing combo
+// Truck and trailer are read-only; no unit swapping here.
+// ─────────────────────────────────────────────────────────────
+function PlannerComboEditModal({ combo, truckName, trailerName, onClose, onDone }: {
+  combo: ComboRow;
+  truckName: string;
+  trailerName: string;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [tareLbs, setTareLbs] = useState(String(combo.tare_lbs ?? ""));
+  const [target,  setTarget]  = useState(String((combo as any).target_weight ?? "80000"));
+  const [err,     setErr]     = useState<string | null>(null);
+  const [saving,  setSaving]  = useState(false);
+
+  async function save() {
+    if (!tareLbs || parseFloat(tareLbs) <= 0) { setErr("Tare weight is required."); return; }
+    setSaving(true); setErr(null);
+    const { error } = await supabase.from("equipment_combos")
+      .update({ tare_lbs: parseFloat(tareLbs), target_weight: parseFloat(target) || null })
+      .eq("combo_id", combo.combo_id);
+    if (error) { setErr(error.message); setSaving(false); return; }
+    onDone();
+  }
+
+  return (
+    <ModalShell open onClose={onClose} title="Edit Combo">
+      {err && <div style={{ background: "rgba(220,60,40,0.18)", border: "1px solid rgba(220,60,40,0.4)",
+        borderRadius: 8, padding: "10px 14px", fontSize: 13, color: "#f87171", marginBottom: 12 }}>{err}</div>}
+
+      {/* Read-only names */}
+      <div style={{ borderRadius: 14, border: "1px solid rgba(255,255,255,0.10)",
+        background: "rgba(255,255,255,0.04)", padding: "12px 16px", marginBottom: 16 }}>
+        <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: 0.2, marginBottom: 2, color: "#fff" }}>
+          {truckName} / {trailerName}
+        </div>
+        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)" }}>To change units, decouple and create a new combo.</div>
+      </div>
+
+      {/* Tare + Target inputs */}
+      <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.5)", letterSpacing: 0.5, marginBottom: 4 }}>TARE WEIGHT (LBS)</div>
+          <input type="number" value={tareLbs} onChange={e => setTareLbs(e.target.value)} placeholder="e.g. 34000"
+            style={{ width: "100%", boxSizing: "border-box" as const, background: "rgba(255,255,255,0.06)",
+              border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: "10px 12px",
+              fontSize: 15, color: "#fff", outline: "none" }} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.5)", letterSpacing: 0.5, marginBottom: 4 }}>TARGET GROSS (LBS)</div>
+          <input type="number" value={target} onChange={e => setTarget(e.target.value)} placeholder="e.g. 80000"
+            style={{ width: "100%", boxSizing: "border-box" as const, background: "rgba(255,255,255,0.06)",
+              border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: "10px 12px",
+              fontSize: 15, color: "#fff", outline: "none" }} />
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 8 }}>
+        <button type="button" onClick={onClose}
+          style={{ flex: 1, padding: "12px 0", borderRadius: 10, border: "1px solid rgba(255,255,255,0.15)",
+            background: "transparent", color: "rgba(255,255,255,0.75)", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
+          Cancel
+        </button>
+        <button type="button" onClick={save} disabled={saving}
+          style={{ flex: 1, padding: "12px 0", borderRadius: 10, border: "none",
+            background: saving ? "rgba(234,179,8,0.5)" : "rgba(234,179,8,0.95)",
+            color: "#1a1a1a", fontSize: 14, fontWeight: 900, cursor: saving ? "not-allowed" : "pointer" }}>
+          {saving ? "Saving…" : "Save"}
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
+
 function EquipmentDetailsModal({
   open,
   onClose,
@@ -153,8 +228,9 @@ function EquipmentDetailsModal({
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [detailsErr, setDetailsErr] = useState<string | null>(null);
 
-  const [truckEditOpen, setTruckEditOpen] = useState(false);
+  const [truckEditOpen,   setTruckEditOpen]   = useState(false);
   const [trailerEditOpen, setTrailerEditOpen] = useState(false);
+  const [comboEditOpen,   setComboEditOpen]   = useState(false);
 
   const reloadDetails = useCallback(async () => {
     if (!target?.combo) return;
@@ -265,6 +341,17 @@ function EquipmentDetailsModal({
             In use · {claimedByName ?? "Someone"}
           </div>
         )}
+        {/* Edit Combo button */}
+        <button
+          type="button"
+          onClick={() => setComboEditOpen(true)}
+          style={{ marginTop: 12, padding: "6px 14px", fontSize: 12, fontWeight: 700,
+            background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.15)",
+            borderRadius: 8, color: "rgba(255,255,255,0.75)", cursor: "pointer",
+            WebkitTapHighlightColor: "transparent" }}
+        >
+          Edit Combo
+        </button>
       </div>
 
       <div style={{ height: 14 }} />
@@ -319,6 +406,15 @@ function EquipmentDetailsModal({
           companyId={companyIdSafe}
           onClose={() => setTrailerEditOpen(false)}
           onDone={() => { setTrailerEditOpen(false); void reloadDetails(); }}
+        />
+      )}
+      {comboEditOpen && c && (
+        <PlannerComboEditModal
+          combo={c}
+          truckName={truck?.truck_name ?? String(c.truck_id)}
+          trailerName={trailer?.trailer_name ?? String(c.trailer_id)}
+          onClose={() => setComboEditOpen(false)}
+          onDone={() => { setComboEditOpen(false); void reloadDetails(); }}
         />
       )}
 

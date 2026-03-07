@@ -16,7 +16,7 @@ import type { Member } from "@/lib/ui/driver/types";
 
 type Truck = {
   truck_id: string; truck_name: string; active: boolean;
-  vin_number: string | null; make: string | null; model: string | null; year: number | null;
+  vin_number: string | null; plate_number: string | null; make: string | null; model: string | null; year: number | null;
   region: string | null; local_area: string | null;
   status_code: string | null; status_location: string | null; in_use_by: string | null;
   in_use_by_name?: string | null;
@@ -33,7 +33,7 @@ type Compartment = { comp_number: number; max_gallons: number; position: number;
 
 type Trailer = {
   trailer_id: string; trailer_name: string; active: boolean;
-  vin_number: string | null; make: string | null; model: string | null; year: number | null;
+  vin_number: string | null; plate_number: string | null; make: string | null; model: string | null; year: number | null;
   cg_max: number; region: string | null; local_area: string | null;
   status_code: string | null; status_location: string | null; in_use_by: string | null;
   in_use_by_name?: string | null; last_load_config: string | null;
@@ -1168,12 +1168,24 @@ function ComboModal({ combo, companyId, trucks, trailers, onClose, onDone, onDec
   onClose: () => void; onDone: () => void; onDecouple?: () => void;
 }) {
   const isNew = !combo;
-  const [truckId,   setTruckId]   = useState(combo?.truck_id ?? trucks[0]?.truck_id ?? "");
-  const [trailerId, setTrailerId] = useState(combo?.trailer_id ?? trailers[0]?.trailer_id ?? "");
-  const [tareLbs,   setTareLbs]   = useState(String(combo?.tare_lbs ?? ""));
-  const [target,    setTarget]    = useState(String(combo?.target_weight ?? "80000"));
-  const [err,       setErr]       = useState<string | null>(null);
-  const [saving,    setSaving]    = useState(false);
+  // For new combos only: truck/trailer selection state
+  const [newTruckId,   setNewTruckId]   = useState(trucks[0]?.truck_id ?? "");
+  const [newTrailerId, setNewTrailerId] = useState(trailers[0]?.trailer_id ?? "");
+  const truckId   = isNew ? newTruckId   : (combo?.truck_id   ?? "");
+  const trailerId = isNew ? newTrailerId : (combo?.trailer_id ?? "");
+
+  const [tareLbs, setTareLbs] = useState(String(combo?.tare_lbs ?? ""));
+  const [target,  setTarget]  = useState(String(combo?.target_weight ?? "80000"));
+  const [err,     setErr]     = useState<string | null>(null);
+  const [saving,  setSaving]  = useState(false);
+
+  // Resolve display names from props
+  const truckName   = trucks.find(t => t.truck_id === truckId)?.truck_name
+    ?? (Array.isArray(combo?.truck)   ? combo?.truck[0]?.truck_name   : combo?.truck?.truck_name)
+    ?? truckId;
+  const trailerName = trailers.find(t => t.trailer_id === trailerId)?.trailer_name
+    ?? (Array.isArray(combo?.trailer) ? combo?.trailer[0]?.trailer_name : combo?.trailer?.trailer_name)
+    ?? trailerId;
 
   async function save() {
     if (!truckId || !trailerId) { setErr("Select a truck and trailer."); return; }
@@ -1182,13 +1194,12 @@ function ComboModal({ combo, companyId, trucks, trailers, onClose, onDone, onDec
     if (isNew) {
       const { error } = await supabase.rpc("couple_combo", { p_truck_id: truckId, p_trailer_id: trailerId, p_tare_lbs: parseFloat(tareLbs), p_target_weight: parseFloat(target) || 80000 });
       if (error) { setErr(error.message); setSaving(false); return; }
-      // Mark both units COUPLED, clear individual location
       await Promise.all([
         supabase.from("trucks").update({ status_code: "COUPLED", status_location: null }).eq("truck_id", truckId),
         supabase.from("trailers").update({ status_code: "COUPLED", status_location: null }).eq("trailer_id", trailerId),
       ]);
     } else {
-      const { error } = await supabase.from("equipment_combos").update({ truck_id: truckId, trailer_id: trailerId, tare_lbs: parseFloat(tareLbs), target_weight: parseFloat(target) || null }).eq("combo_id", combo!.combo_id);
+      const { error } = await supabase.from("equipment_combos").update({ tare_lbs: parseFloat(tareLbs), target_weight: parseFloat(target) || null }).eq("combo_id", combo!.combo_id);
       if (error) { setErr(error.message); setSaving(false); return; }
     }
     onDone();
@@ -1202,18 +1213,33 @@ function ComboModal({ combo, companyId, trucks, trailers, onClose, onDone, onDec
   return (
     <Modal title={isNew ? "New Combo" : "Edit Combo"} onClose={onClose}>
       {err && <Banner msg={err} type="error" />}
-      <Field label="Truck">
-        <select value={truckId} onChange={e => setTruckId(e.target.value)} style={{ ...css.select, width: "100%" }}>
-          {trucks.length === 0 && <option value="">No active trucks</option>}
-          {trucks.map(t => <option key={t.truck_id} value={t.truck_id}>{t.truck_name}</option>)}
-        </select>
-      </Field>
-      <Field label="Trailer">
-        <select value={trailerId} onChange={e => setTrailerId(e.target.value)} style={{ ...css.select, width: "100%" }}>
-          {trailers.length === 0 && <option value="">No active trailers</option>}
-          {trailers.map(t => <option key={t.trailer_id} value={t.trailer_id}>{t.trailer_name}</option>)}
-        </select>
-      </Field>
+
+      {/* ── Combo header — names read-only for existing, dropdowns for new ── */}
+      {isNew ? (
+        <>
+          <Field label="Truck">
+            <select value={newTruckId} onChange={e => setNewTruckId(e.target.value)} style={{ ...css.select, width: "100%" }}>
+              {trucks.length === 0 && <option value="">No active trucks</option>}
+              {trucks.map(t => <option key={t.truck_id} value={t.truck_id}>{t.truck_name}</option>)}
+            </select>
+          </Field>
+          <Field label="Trailer">
+            <select value={newTrailerId} onChange={e => setNewTrailerId(e.target.value)} style={{ ...css.select, width: "100%" }}>
+              {trailers.length === 0 && <option value="">No active trailers</option>}
+              {trailers.map(t => <option key={t.trailer_id} value={t.trailer_id}>{t.trailer_name}</option>)}
+            </select>
+          </Field>
+        </>
+      ) : (
+        <div style={{ borderRadius: 14, border: "1px solid rgba(255,255,255,0.10)",
+          background: "rgba(255,255,255,0.04)", padding: "12px 16px", marginBottom: 14 }}>
+          <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: 0.2, marginBottom: 2 }}>
+            {truckName} / {trailerName}
+          </div>
+          <div style={{ fontSize: 11, color: T.muted }}>To change units, decouple and create a new combo.</div>
+        </div>
+      )}
+
       <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
         <div style={{ flex: 1 }}>
           <label style={css.label}>Tare Weight (lbs)</label>
@@ -1225,7 +1251,6 @@ function ComboModal({ combo, companyId, trucks, trailers, onClose, onDone, onDec
         </div>
       </div>
 
-      {/* Equal-width buttons, full-width row, evenly spaced */}
       <div style={{ display: "flex", gap: 8 }}>
         {!isNew && (
           <button style={{ ...css.btn("ghost"), flex: 1, color: T.danger, borderColor: `${T.danger}55`, justifyContent: "center" as const }}
@@ -1258,7 +1283,6 @@ function CoupleModal({ companyId, trucks, trailers, onClose, onDone }: {
   const [trailerId, setTrailerId] = useState("");
   const [tareLbs,   setTareLbs]   = useState("");
   const [target,    setTarget]    = useState("80000");
-  const [statusLoc, setStatusLoc] = useState("");
   const [err,       setErr]       = useState<string | null>(null);
   const [saving,    setSaving]    = useState(false);
 
@@ -1278,10 +1302,11 @@ function CoupleModal({ companyId, trucks, trailers, onClose, onDone }: {
       p_tare_lbs: parseFloat(tareLbs), p_target_weight: parseFloat(target) || 80000,
     });
     if (error) { setErr(error.message); setSaving(false); return; }
-    if (statusLoc) {
-      await supabase.from("trucks").update({ status_location: statusLoc, status_code: "AVAIL" }).eq("truck_id", truckId);
-      await supabase.from("trailers").update({ status_location: statusLoc, status_code: "AVAIL" }).eq("trailer_id", trailerId);
-    }
+    // Set COUPLED on both units — clear individual location (managed at combo level)
+    await Promise.all([
+      supabase.from("trucks").update({ status_code: "COUPLED", status_location: null }).eq("truck_id", truckId),
+      supabase.from("trailers").update({ status_code: "COUPLED", status_location: null }).eq("trailer_id", trailerId),
+    ]);
     onDone();
   }
 
