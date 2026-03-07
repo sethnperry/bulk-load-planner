@@ -82,6 +82,30 @@ const sm: React.CSSProperties = { padding: "4px 8px", fontSize: 12, height: 26 }
 
 
 // ─────────────────────────────────────────────────────────────
+// ComboCard
+// ─────────────────────────────────────────────────────────────
+
+function ComboCard({ combo, onEdit }: { combo: Combo; onEdit: () => void }) {
+  const truckName   = Array.isArray(combo.truck)   ? combo.truck[0]?.truck_name   : combo.truck?.truck_name;
+  const trailerName = Array.isArray(combo.trailer) ? combo.trailer[0]?.trailer_name : combo.trailer?.trailer_name;
+  return (
+    <div style={{ ...css.card, padding: 0, marginBottom: 8, overflow: "hidden" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px" }}>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontWeight: 700, fontSize: 15, color: T.text }}>{truckName || "—"} / {trailerName || "—"}</div>
+          <div style={{ fontSize: 11, color: T.muted, marginTop: 2 }}>
+            Tare {combo.tare_lbs?.toLocaleString() ?? "—"} lbs
+            {combo.target_weight ? ` · Target ${combo.target_weight.toLocaleString()} lbs` : ""}
+            {combo.in_use_by_name ? ` · In use: ${combo.in_use_by_name}` : ""}
+          </div>
+        </div>
+        <button type="button" style={{ ...css.btn("subtle"), padding: "3px 10px", fontSize: 11, flexShrink: 0 }} onClick={onEdit}>Edit</button>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
 // Invite Modal
 // ─────────────────────────────────────────────────────────────
 
