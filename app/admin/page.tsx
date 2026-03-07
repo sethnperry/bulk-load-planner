@@ -58,6 +58,7 @@ type Combo = {
   combo_id: string; combo_name: string; truck_id: string; trailer_id: string;
   tare_lbs: number; target_weight: number | null; active: boolean;
   claimed_by?: string | null;
+  combo_status_code?: string | null; combo_status_location?: string | null;
   truck?: { truck_name: string } | { truck_name: string }[] | null;
   trailer?: { trailer_name: string } | { trailer_name: string }[] | null;
   in_use_by_name?: string | null;
@@ -621,16 +622,31 @@ function TrailerCard({ trailer, onEdit, coupledTo }: {
 function ComboCard({ combo, onEdit }: { combo: Combo; onEdit: () => void }) {
   const truckName   = Array.isArray(combo.truck)   ? combo.truck[0]?.truck_name   : combo.truck?.truck_name;
   const trailerName = Array.isArray(combo.trailer) ? combo.trailer[0]?.trailer_name : combo.trailer?.trailer_name;
+  const sc = combo.combo_status_code;
+  const statusColor = sc === "OOS" || sc === "MAINT" ? T.danger : sc === "AVAIL" ? T.success : T.muted;
   return (
     <div style={{ ...css.card, padding: 0, marginBottom: 8, overflow: "hidden" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px" }}>
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontWeight: 700, fontSize: 15, color: T.text }}>{truckName || "—"} / {trailerName || "—"}</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" as const }}>
+            <span style={{ fontWeight: 700, fontSize: 15, color: T.text }}>{truckName || "—"} / {trailerName || "—"}</span>
+            {sc && (
+              <span style={{ fontSize: 10, fontWeight: 900, padding: "2px 6px", borderRadius: 4,
+                background: statusColor === T.danger ? "rgba(220,60,40,0.18)" : statusColor === T.success ? "rgba(40,180,80,0.13)" : "rgba(255,255,255,0.07)",
+                color: statusColor, letterSpacing: 0.5 }}>{sc}</span>
+            )}
+          </div>
           <div style={{ fontSize: 11, color: T.muted, marginTop: 2 }}>
             Tare {combo.tare_lbs?.toLocaleString() ?? "—"} lbs
             {combo.target_weight ? ` · Target ${combo.target_weight.toLocaleString()} lbs` : ""}
             {combo.in_use_by_name ? ` · In use: ${combo.in_use_by_name}` : ""}
           </div>
+          {combo.combo_status_location && (
+            <div style={{ fontSize: 11, color: T.muted, marginTop: 1,
+              whiteSpace: "nowrap" as const, overflow: "hidden", textOverflow: "ellipsis" }}>
+              📍 {combo.combo_status_location}
+            </div>
+          )}
         </div>
         <button type="button" style={{ ...css.btn("subtle"), padding: "3px 10px", fontSize: 11, flexShrink: 0 }} onClick={onEdit}>Edit</button>
       </div>
@@ -1198,9 +1214,8 @@ function ComboModal({ combo, companyId, trucks, trailers, onClose, onDone, onDec
   const [tareLbs,   setTareLbs]   = useState(String(combo?.tare_lbs ?? ""));
   const [target,    setTarget]    = useState(String(combo?.target_weight ?? "80000"));
   // Derive initial status from the truck (both should match when COUPLED)
-  const initTruck = trucks.find(t => t.truck_id === (combo?.truck_id ?? ""));
-  const [comboStatus,    setComboStatus]    = useState(initTruck?.status_code === "COUPLED" ? "AVAIL" : (initTruck?.status_code ?? "AVAIL"));
-  const [comboStatusLoc, setComboStatusLoc] = useState(initTruck?.status_location ?? "");
+  const [comboStatus,    setComboStatus]    = useState(combo?.combo_status_code ?? "AVAIL");
+  const [comboStatusLoc, setComboStatusLoc] = useState(combo?.combo_status_location ?? "");
   const [err,     setErr]     = useState<string | null>(null);
   const [saving,  setSaving]  = useState(false);
 
@@ -1217,21 +1232,19 @@ function ComboModal({ combo, companyId, trucks, trailers, onClose, onDone, onDec
     if (!tareLbs || parseFloat(tareLbs) <= 0) { setErr("Tare weight is required."); return; }
     setSaving(true); setErr(null);
     if (isNew) {
-      const { error } = await supabase.rpc("couple_combo", { p_truck_id: truckId, p_trailer_id: trailerId, p_tare_lbs: parseFloat(tareLbs), p_target_weight: parseFloat(target) || 80000 });
+      const { data: coupleData, error } = await supabase.rpc("couple_combo", { p_truck_id: truckId, p_trailer_id: trailerId, p_tare_lbs: parseFloat(tareLbs), p_target_weight: parseFloat(target) || 80000 });
       if (error) { setErr(error.message); setSaving(false); return; }
       await Promise.all([
         supabase.from("trucks").update({ status_code: "COUPLED", status_location: null }).eq("truck_id", truckId),
         supabase.from("trailers").update({ status_code: "COUPLED", status_location: null }).eq("trailer_id", trailerId),
+        supabase.from("equipment_combos").update({ combo_status_code: "AVAIL" }).eq("truck_id", truckId).eq("trailer_id", trailerId).eq("active", true),
       ]);
     } else {
-      const { error } = await supabase.from("equipment_combos").update({ tare_lbs: parseFloat(tareLbs), target_weight: parseFloat(target) || null }).eq("combo_id", combo!.combo_id);
+      const { error } = await supabase.from("equipment_combos").update({
+        tare_lbs: parseFloat(tareLbs), target_weight: parseFloat(target) || null,
+        combo_status_code: comboStatus || null, combo_status_location: comboStatusLoc || null,
+      }).eq("combo_id", combo!.combo_id);
       if (error) { setErr(error.message); setSaving(false); return; }
-      // Update status on both truck and trailer
-      const statusUpdate = { status_code: comboStatus || null, status_location: comboStatusLoc || null };
-      await Promise.all([
-        supabase.from("trucks").update(statusUpdate).eq("truck_id", truckId),
-        supabase.from("trailers").update(statusUpdate).eq("trailer_id", trailerId),
-      ]);
     }
     onDone();
   }
@@ -1286,7 +1299,7 @@ function ComboModal({ combo, companyId, trucks, trailers, onClose, onDone, onDec
         <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
           <div style={{ flex: 1 }}>
             <label style={css.label}>Status</label>
-            <select value={comboStatus} onChange={e => setComboStatus(e.target.value)} style={{ ...css.select, width: "100%" }}>
+            <select value={comboStatus} onChange={e => setComboStatus(e.target.value)} style={{ ...css.select, width: "100%", background: T.surface2, color: T.text }}>
               <option value="">— Select —</option>
               <option value="AVAIL">AVAIL — Available</option>
               <option value="PARK">PARK — Parked</option>
@@ -1927,7 +1940,7 @@ export default function AdminPage() {
 
       // Active combos
       const { data: comboRows } = await supabase.from("equipment_combos")
-        .select("combo_id, combo_name, truck_id, trailer_id, tare_lbs, target_weight, active, claimed_by, truck:trucks(truck_name), trailer:trailers(trailer_name)")
+        .select("combo_id, combo_name, truck_id, trailer_id, tare_lbs, target_weight, active, claimed_by, combo_status_code, combo_status_location, truck:trucks(truck_name), trailer:trailers(trailer_name)")
         .eq("company_id", cid).eq("active", true).order("combo_name");
 
       const claimedIds = [...new Set((comboRows ?? []).map((c: any) => c.claimed_by).filter(Boolean))];
@@ -2060,8 +2073,10 @@ export default function AdminPage() {
   if (err)     return <div style={css.page}><Banner msg={err} type="error" /></div>;
 
   const plusBtn: React.CSSProperties = {
-    ...css.btn("primary"), width: 36, height: 36, padding: 0, fontSize: 20, lineHeight: "1",
-    display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+    background: "none", border: "none", padding: "0 4px", fontSize: 24, lineHeight: "1",
+    color: T.accent, cursor: "pointer", flexShrink: 0, fontWeight: 700,
+    display: "flex", alignItems: "center", justifyContent: "center",
+    WebkitTapHighlightColor: "transparent",
   };
   const filterRow: React.CSSProperties = { display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" };
 

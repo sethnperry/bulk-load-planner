@@ -44,6 +44,8 @@ export type ComboRow = {
   claimed_by?: string | null;
   claimed_at?: string | null;
   company_id?: string | null;
+  combo_status_code?: string | null;
+  combo_status_location?: string | null;
 };
 
 type TruckRow = {
@@ -132,19 +134,17 @@ function DetailField({ label, value }: { label: string; value?: React.ReactNode 
 // PlannerComboEditModal — edit tare / target on existing combo
 // Truck and trailer are read-only; no unit swapping here.
 // ─────────────────────────────────────────────────────────────
-function PlannerComboEditModal({ combo, truckName, trailerName, initialStatus, initialStatusLoc, onClose, onDone }: {
+function PlannerComboEditModal({ combo, truckName, trailerName, onClose, onDone }: {
   combo: ComboRow;
   truckName: string;
   trailerName: string;
-  initialStatus?: string | null;
-  initialStatusLoc?: string | null;
   onClose: () => void;
   onDone: () => void;
 }) {
   const [tareLbs,   setTareLbs]   = useState(String(combo.tare_lbs ?? ""));
   const [target,    setTarget]    = useState(String((combo as any).target_weight ?? "80000"));
-  const [status,    setStatus]    = useState(initialStatus && initialStatus !== "COUPLED" ? initialStatus : "AVAIL");
-  const [statusLoc, setStatusLoc] = useState(initialStatusLoc ?? "");
+  const [status,    setStatus]    = useState((combo as any).combo_status_code ?? "AVAIL");
+  const [statusLoc, setStatusLoc] = useState((combo as any).combo_status_location ?? "");
   const [err,       setErr]       = useState<string | null>(null);
   const [saving,    setSaving]    = useState(false);
 
@@ -152,14 +152,10 @@ function PlannerComboEditModal({ combo, truckName, trailerName, initialStatus, i
     if (!tareLbs || parseFloat(tareLbs) <= 0) { setErr("Tare weight is required."); return; }
     setSaving(true); setErr(null);
     const { error } = await supabase.from("equipment_combos")
-      .update({ tare_lbs: parseFloat(tareLbs), target_weight: parseFloat(target) || null })
+      .update({ tare_lbs: parseFloat(tareLbs), target_weight: parseFloat(target) || null,
+        combo_status_code: status || null, combo_status_location: statusLoc || null })
       .eq("combo_id", combo.combo_id);
     if (error) { setErr(error.message); setSaving(false); return; }
-    const statusUpdate = { status_code: status || null, status_location: statusLoc || null };
-    await Promise.all([
-      supabase.from("trucks").update(statusUpdate).eq("truck_id", String(combo.truck_id)),
-      supabase.from("trailers").update(statusUpdate).eq("trailer_id", String(combo.trailer_id)),
-    ]);
     onDone();
   }
 
@@ -200,7 +196,7 @@ function PlannerComboEditModal({ combo, truckName, trailerName, initialStatus, i
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.5)", letterSpacing: 0.5, marginBottom: 4 }}>STATUS</div>
           <select value={status} onChange={e => setStatus(e.target.value)}
-            style={{ width: "100%", boxSizing: "border-box" as const, background: "rgba(255,255,255,0.06)",
+            style={{ width: "100%", boxSizing: "border-box" as const, background: "#1a1a1a",
               border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: "10px 12px",
               fontSize: 14, color: "#fff", outline: "none" }}>
             <option value="AVAIL">AVAIL — Available</option>
@@ -369,8 +365,26 @@ function EquipmentDetailsModal({
           </div>
         )}
 
+        {/* Combo status badge */}
+        {(() => {
+          const sc = (c as any).combo_status_code;
+          if (!sc) return null;
+          const sColor = sc === "OOS" || sc === "MAINT" ? "#f87171" : sc === "AVAIL" ? "#4ade80" : "rgba(255,255,255,0.5)";
+          const sBg    = sc === "OOS" || sc === "MAINT" ? "rgba(220,60,40,0.18)" : sc === "AVAIL" ? "rgba(40,180,80,0.13)" : "rgba(255,255,255,0.07)";
+          return (
+            <div style={{ marginTop: 8 }}>
+              <span style={{ fontSize: 11, fontWeight: 900, padding: "3px 8px", borderRadius: 5,
+                background: sBg, color: sColor, letterSpacing: 0.5 }}>{sc}</span>
+              {(c as any).combo_status_location && (
+                <span style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginLeft: 8 }}>
+                  📍 {(c as any).combo_status_location}
+                </span>
+              )}
+            </div>
+          );
+        })()}
         {inUse && (
-          <div style={{ marginTop: 10, color: "rgba(234,179,8,0.95)", fontWeight: 900, fontSize: 16 }}>
+          <div style={{ marginTop: 8, color: "rgba(234,179,8,0.95)", fontWeight: 900, fontSize: 16 }}>
             In use · {claimedByName ?? "Someone"}
           </div>
         )}
@@ -446,8 +460,6 @@ function EquipmentDetailsModal({
           combo={c}
           truckName={truck?.truck_name ?? String(c.truck_id)}
           trailerName={trailer?.trailer_name ?? String(c.trailer_id)}
-          initialStatus={(fullTruck as any)?.status_code}
-          initialStatusLoc={(fullTruck as any)?.status_location}
           onClose={() => setComboEditOpen(false)}
           onDone={() => { setComboEditOpen(false); void reloadDetails(); }}
         />
@@ -778,7 +790,7 @@ function FleetModal({
     // Fetch all active combos — manual join (no FK assumption)
     const { data: comboData, error: comboErr } = await supabase
       .from("equipment_combos")
-      .select("combo_id, combo_name, truck_id, trailer_id, tare_lbs, target_weight, claimed_by, claimed_at, active, company_id")
+      .select("combo_id, combo_name, truck_id, trailer_id, tare_lbs, target_weight, claimed_by, claimed_at, active, company_id, combo_status_code, combo_status_location")
       .eq("active", true)
       .eq("company_id", activeCompanyId)
       .order("combo_name", { ascending: true });
