@@ -308,13 +308,11 @@ function TruckCard({ truck, companyId, onEdit, otherPermits }: {
       {/* ── Collapsed header ── */}
       <div
         onClick={() => setOpen(v => !v)}
-        style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between",
-          padding: "12px 12px 10px", cursor: "pointer", userSelect: "none" as const, gap: 10 }}
+        style={{ padding: "12px 12px 10px", cursor: "pointer", userSelect: "none" as const }}
       >
-        {/* LEFT: unit + status + region/local + status location */}
-        <div style={{ minWidth: 0, flex: 1 }}>
-          {/* Row 1: unit name + status badge */}
-          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" as const }}>
+        {/* Row 1: unit name + status badge LEFT, Docs+Edit RIGHT */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" as const, minWidth: 0 }}>
             <span style={{ fontWeight: 800, fontSize: 16, color: T.text }}>{truck.truck_name}</span>
             {truck.status_code && (
               <span style={{ fontSize: 10, fontWeight: 900, padding: "2px 6px", borderRadius: 4,
@@ -323,36 +321,34 @@ function TruckCard({ truck, companyId, onEdit, otherPermits }: {
                 color: statusColor, letterSpacing: 0.5 }}>{truck.status_code}</span>
             )}
           </div>
-          {/* Row 2: region · local area — tight to unit name */}
-          {(truck.region || truck.local_area) && (
-            <div style={{ fontSize: 11, color: T.muted, marginTop: 2 }}>
-              {[truck.region, truck.local_area].filter(Boolean).join(" · ")}
-            </div>
-          )}
-          {/* Row 3: status location — full width, no wrap */}
-          {truck.status_location && (
-            <div style={{ fontSize: 11, color: T.muted, marginTop: 1,
-              whiteSpace: "nowrap" as const, overflow: "hidden", textOverflow: "ellipsis" }}>
-              📍 {truck.status_location}
-            </div>
-          )}
-        </div>
-
-        {/* RIGHT: Docs + Edit buttons, then expiry badge, then chevron */}
-        <div style={{ display: "flex", flexDirection: "column" as const, alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
-          <div style={{ display: "flex", gap: 6 }}>
+          <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
             <button type="button" style={{ ...css.btn("subtle"), padding: "4px 10px", fontSize: 11 }}
               onClick={e => { e.stopPropagation(); setHubOpen(true); }}>📎 Docs</button>
             <button type="button" style={{ ...css.btn("subtle"), padding: "4px 12px", fontSize: 11 }}
               onClick={e => { e.stopPropagation(); onEdit(); }}>Edit</button>
           </div>
-          {warnBadge && (
-            <span style={{ fontSize: 10, fontWeight: 900, padding: "2px 6px", borderRadius: 4,
-              background: "rgba(220,60,40,0.15)", color: badgeColor, letterSpacing: 0.3, textAlign: "right" as const }}>
-              ⚠ {soonestDays! < 0 ? "EXPIRED" : soonestDays === 0 ? "EXP TODAY" : `EXP ${soonestDays}d`}
-            </span>
-          )}
         </div>
+        {/* Row 2: expiry badge */}
+        {warnBadge && (
+          <span style={{ display: "inline-block", marginTop: 4, fontSize: 10, fontWeight: 900,
+            padding: "2px 6px", borderRadius: 4, background: "rgba(220,60,40,0.15)",
+            color: badgeColor, letterSpacing: 0.3 }}>
+            ⚠ {soonestDays! < 0 ? "EXPIRED" : soonestDays === 0 ? "EXP TODAY" : `EXP ${soonestDays}d`}
+          </span>
+        )}
+        {/* Row 3: region · local area */}
+        {(truck.region || truck.local_area) && (
+          <div style={{ fontSize: 11, color: T.muted, marginTop: 3 }}>
+            {[truck.region, truck.local_area].filter(Boolean).join(" · ")}
+          </div>
+        )}
+        {/* Row 4: status location — spans full card width */}
+        {truck.status_location && (
+          <div style={{ fontSize: 11, color: T.muted, marginTop: 1,
+            whiteSpace: "nowrap" as const, overflow: "hidden", textOverflow: "ellipsis" }}>
+            📍 {truck.status_location}
+          </div>
+        )}
       </div>
 
       {/* ── Expanded section ── */}
@@ -483,12 +479,11 @@ function TrailerCard({ trailer, companyId, onEdit }: { trailer: Trailer; company
       {/* ── Collapsed header ── */}
       <div
         onClick={() => setOpen(v => !v)}
-        style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between",
-          padding: "12px 12px 10px", cursor: "pointer", userSelect: "none" as const, gap: 10 }}
+        style={{ padding: "12px 12px 10px", cursor: "pointer", userSelect: "none" as const }}
       >
-        {/* LEFT: unit + status + region/local + status location + comp summary */}
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" as const }}>
+        {/* Row 1: unit name + status badge LEFT, Docs+Edit RIGHT */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" as const, minWidth: 0 }}>
             <span style={{ fontWeight: 800, fontSize: 16, color: T.text }}>{trailer.trailer_name}</span>
             {trailer.status_code && (
               <span style={{ fontSize: 10, fontWeight: 900, padding: "2px 6px", borderRadius: 4,
@@ -497,34 +492,34 @@ function TrailerCard({ trailer, companyId, onEdit }: { trailer: Trailer; company
                 color: statusColor, letterSpacing: 0.5 }}>{trailer.status_code}</span>
             )}
           </div>
-          {(trailer.region || trailer.local_area) && (
-            <div style={{ fontSize: 11, color: T.muted, marginTop: 2 }}>
-              {[trailer.region, trailer.local_area].filter(Boolean).join(" · ")}
-            </div>
-          )}
-          {trailer.status_location && (
-            <div style={{ fontSize: 11, color: T.muted, marginTop: 1,
-              whiteSpace: "nowrap" as const, overflow: "hidden", textOverflow: "ellipsis" }}>
-              📍 {trailer.status_location}
-            </div>
-          )}
-        </div>
-
-        {/* RIGHT: Docs + Edit, expiry badge */}
-        <div style={{ display: "flex", flexDirection: "column" as const, alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
-          <div style={{ display: "flex", gap: 6 }}>
+          <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
             <button type="button" style={{ ...css.btn("subtle"), padding: "4px 10px", fontSize: 11 }}
               onClick={e => { e.stopPropagation(); setHubOpen(true); }}>📎 Docs</button>
             <button type="button" style={{ ...css.btn("subtle"), padding: "4px 12px", fontSize: 11 }}
               onClick={e => { e.stopPropagation(); onEdit(); }}>Edit</button>
           </div>
-          {warnBadge && (
-            <span style={{ fontSize: 10, fontWeight: 900, padding: "2px 6px", borderRadius: 4,
-              background: "rgba(220,60,40,0.15)", color: badgeColor, letterSpacing: 0.3, textAlign: "right" as const }}>
-              ⚠ {soonestDays! < 0 ? "EXPIRED" : soonestDays === 0 ? "EXP TODAY" : `EXP ${soonestDays}d`}
-            </span>
-          )}
         </div>
+        {/* Row 2: expiry badge */}
+        {warnBadge && (
+          <span style={{ display: "inline-block", marginTop: 4, fontSize: 10, fontWeight: 900,
+            padding: "2px 6px", borderRadius: 4, background: "rgba(220,60,40,0.15)",
+            color: badgeColor, letterSpacing: 0.3 }}>
+            ⚠ {soonestDays! < 0 ? "EXPIRED" : soonestDays === 0 ? "EXP TODAY" : `EXP ${soonestDays}d`}
+          </span>
+        )}
+        {/* Row 3: region · local area */}
+        {(trailer.region || trailer.local_area) && (
+          <div style={{ fontSize: 11, color: T.muted, marginTop: 3 }}>
+            {[trailer.region, trailer.local_area].filter(Boolean).join(" · ")}
+          </div>
+        )}
+        {/* Row 4: status location — spans full card width */}
+        {trailer.status_location && (
+          <div style={{ fontSize: 11, color: T.muted, marginTop: 1,
+            whiteSpace: "nowrap" as const, overflow: "hidden", textOverflow: "ellipsis" }}>
+            📍 {trailer.status_location}
+          </div>
+        )}
       </div>
 
       {/* ── Expanded section ── */}
