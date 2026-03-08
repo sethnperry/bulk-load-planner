@@ -44,8 +44,6 @@ export type ComboRow = {
   claimed_by?: string | null;
   claimed_at?: string | null;
   company_id?: string | null;
-  combo_status_code?: string | null;
-  combo_status_location?: string | null;
 };
 
 type TruckRow = {
@@ -130,108 +128,6 @@ function DetailField({ label, value }: { label: string; value?: React.ReactNode 
   );
 }
 
-// ─────────────────────────────────────────────────────────────
-// PlannerComboEditModal — edit tare / target on existing combo
-// Truck and trailer are read-only; no unit swapping here.
-// ─────────────────────────────────────────────────────────────
-function PlannerComboEditModal({ combo, truckName, trailerName, onClose, onDone }: {
-  combo: ComboRow;
-  truckName: string;
-  trailerName: string;
-  onClose: () => void;
-  onDone: () => void;
-}) {
-  const [tareLbs,   setTareLbs]   = useState(String(combo.tare_lbs ?? ""));
-  const [target,    setTarget]    = useState(String((combo as any).target_weight ?? "80000"));
-  const [status,    setStatus]    = useState((combo as any).combo_status_code ?? "AVAIL");
-  const [statusLoc, setStatusLoc] = useState((combo as any).combo_status_location ?? "");
-  const [err,       setErr]       = useState<string | null>(null);
-  const [saving,    setSaving]    = useState(false);
-
-  async function save() {
-    if (!tareLbs || parseFloat(tareLbs) <= 0) { setErr("Tare weight is required."); return; }
-    setSaving(true); setErr(null);
-    const { error } = await supabase.from("equipment_combos")
-      .update({ tare_lbs: parseFloat(tareLbs), target_weight: parseFloat(target) || null,
-        combo_status_code: status || null, combo_status_location: statusLoc || null })
-      .eq("combo_id", combo.combo_id);
-    if (error) { setErr(error.message); setSaving(false); return; }
-    onDone();
-  }
-
-  return (
-    <ModalShell open onClose={onClose} title="Edit Combo">
-      {err && <div style={{ background: "rgba(220,60,40,0.18)", border: "1px solid rgba(220,60,40,0.4)",
-        borderRadius: 8, padding: "10px 14px", fontSize: 13, color: "#f87171", marginBottom: 12 }}>{err}</div>}
-
-      {/* Read-only names */}
-      <div style={{ borderRadius: 14, border: "1px solid rgba(255,255,255,0.10)",
-        background: "rgba(255,255,255,0.04)", padding: "12px 16px", marginBottom: 16 }}>
-        <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: 0.2, marginBottom: 2, color: "#fff" }}>
-          {truckName} / {trailerName}
-        </div>
-        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)" }}>To change units, decouple and create a new combo.</div>
-      </div>
-
-      {/* Tare + Target inputs */}
-      <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.5)", letterSpacing: 0.5, marginBottom: 4 }}>TARE WEIGHT (LBS)</div>
-          <input type="number" value={tareLbs} onChange={e => setTareLbs(e.target.value)} placeholder="e.g. 34000"
-            style={{ width: "100%", boxSizing: "border-box" as const, background: "rgba(255,255,255,0.06)",
-              border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: "10px 12px",
-              fontSize: 15, color: "#fff", outline: "none" }} />
-        </div>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.5)", letterSpacing: 0.5, marginBottom: 4 }}>TARGET GROSS (LBS)</div>
-          <input type="number" value={target} onChange={e => setTarget(e.target.value)} placeholder="e.g. 80000"
-            style={{ width: "100%", boxSizing: "border-box" as const, background: "rgba(255,255,255,0.06)",
-              border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: "10px 12px",
-              fontSize: 15, color: "#fff", outline: "none" }} />
-        </div>
-      </div>
-
-      {/* Status + Location */}
-      <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.5)", letterSpacing: 0.5, marginBottom: 4 }}>STATUS</div>
-          <select value={status} onChange={e => setStatus(e.target.value)}
-            style={{ width: "100%", boxSizing: "border-box" as const, background: "#1a1a1a",
-              border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: "10px 12px",
-              fontSize: 14, color: "#fff", outline: "none" }}>
-            <option value="AVAIL">AVAIL — Available</option>
-            <option value="PARK">PARK — Parked</option>
-            <option value="MAINT">MAINT — Maintenance</option>
-            <option value="INSP">INSP — Inspection</option>
-            <option value="OOS">OOS — Out of Service</option>
-          </select>
-        </div>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.5)", letterSpacing: 0.5, marginBottom: 4 }}>STATUS LOCATION</div>
-          <input value={statusLoc} onChange={e => setStatusLoc(e.target.value)} placeholder="e.g. Yard 1"
-            style={{ width: "100%", boxSizing: "border-box" as const, background: "rgba(255,255,255,0.06)",
-              border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: "10px 12px",
-              fontSize: 15, color: "#fff", outline: "none" }} />
-        </div>
-      </div>
-
-      <div style={{ display: "flex", gap: 8 }}>
-        <button type="button" onClick={onClose}
-          style={{ flex: 1, padding: "12px 0", borderRadius: 10, border: "1px solid rgba(255,255,255,0.15)",
-            background: "transparent", color: "rgba(255,255,255,0.75)", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
-          Cancel
-        </button>
-        <button type="button" onClick={save} disabled={saving}
-          style={{ flex: 1, padding: "12px 0", borderRadius: 10, border: "none",
-            background: saving ? "rgba(234,179,8,0.5)" : "rgba(234,179,8,0.95)",
-            color: "#1a1a1a", fontSize: 14, fontWeight: 900, cursor: saving ? "not-allowed" : "pointer" }}>
-          {saving ? "Saving…" : "Save"}
-        </button>
-      </div>
-    </ModalShell>
-  );
-}
-
 function EquipmentDetailsModal({
   open,
   onClose,
@@ -250,16 +146,15 @@ function EquipmentDetailsModal({
   const c = target?.combo;
   const truck = target?.truck;
   const trailer = target?.trailer;
-  const companyIdSafe = (c as any)?.company_id ?? companyId ?? null;
+  const companyIdSafe = String((c as any)?.company_id ?? companyId ?? "");
   const [fullTruck, setFullTruck] = useState<AdminTruck | null>(null);
   const [fullTrailer, setFullTrailer] = useState<AdminTrailer | null>(null);
   const [otherPermits, setOtherPermits] = useState<AdminOtherPermit[]>([]);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [detailsErr, setDetailsErr] = useState<string | null>(null);
 
-  const [truckEditOpen,   setTruckEditOpen]   = useState(false);
+  const [truckEditOpen, setTruckEditOpen] = useState(false);
   const [trailerEditOpen, setTrailerEditOpen] = useState(false);
-  const [comboEditOpen,   setComboEditOpen]   = useState(false);
 
   const reloadDetails = useCallback(async () => {
     if (!target?.combo) return;
@@ -271,8 +166,8 @@ function EquipmentDetailsModal({
     setLoadingDetails(true);
     setDetailsErr(null);
     try {
-      const truckSel = "truck_id, truck_name, active, vin_number, plate_number, make, model, year, region, local_area, status_code, status_location, in_use_by, reg_expiration_date, reg_enforcement_date, reg_notes, inspection_shop, inspection_issue_date, inspection_expiration_date, inspection_enforcement_date, inspection_notes, ifta_expiration_date, ifta_enforcement_date, ifta_notes, phmsa_expiration_date, phmsa_enforcement_date, phmsa_notes, alliance_expiration_date, alliance_enforcement_date, alliance_notes, fleet_ins_expiration_date, fleet_ins_enforcement_date, fleet_ins_notes, hazmat_lic_expiration_date, hazmat_lic_enforcement_date, hazmat_lic_notes, inner_bridge_expiration_date, inner_bridge_enforcement_date, inner_bridge_notes, notes";
-      const trailerSel = "trailer_id, trailer_name, active, vin_number, plate_number, make, model, year, cg_max, region, local_area, status_code, status_location, in_use_by, last_load_config, trailer_reg_expiration_date, trailer_reg_enforcement_date, trailer_reg_notes, trailer_inspection_shop, trailer_inspection_issue_date, trailer_inspection_expiration_date, trailer_inspection_enforcement_date, trailer_inspection_notes, tank_v_expiration_date, tank_k_expiration_date, tank_l_expiration_date, tank_t_expiration_date, tank_i_expiration_date, tank_p_expiration_date, tank_uc_expiration_date, tank_v_notes, tank_k_notes, tank_l_notes, tank_t_notes, tank_i_notes, tank_p_notes, tank_uc_notes, notes";
+      const truckSel = "truck_id, truck_name, active, vin_number, make, model, year, region, local_area, status_code, status_location, in_use_by, reg_expiration_date, reg_enforcement_date, inspection_shop, inspection_issue_date, inspection_expiration_date, ifta_expiration_date, ifta_enforcement_date, phmsa_expiration_date, alliance_expiration_date, fleet_ins_expiration_date, hazmat_lic_expiration_date, inner_bridge_expiration_date, notes";
+      const trailerSel = "trailer_id, trailer_name, active, vin_number, make, model, year, cg_max, region, local_area, status_code, status_location, in_use_by, last_load_config, trailer_reg_expiration_date, trailer_reg_enforcement_date, trailer_inspection_shop, trailer_inspection_issue_date, trailer_inspection_expiration_date, tank_v_expiration_date, tank_k_expiration_date, tank_l_expiration_date, tank_t_expiration_date, tank_i_expiration_date, tank_p_expiration_date, tank_uc_expiration_date, notes";
 
       const [truckRes, trailerRes, permitsRes] = await Promise.all([
         truckId ? supabase.from("trucks").select(truckSel).eq("truck_id", truckId).maybeSingle() : Promise.resolve({ data: null, error: null } as any),
@@ -365,40 +260,11 @@ function EquipmentDetailsModal({
           </div>
         )}
 
-        {/* Combo status badge */}
-        {(() => {
-          const sc = (c as any).combo_status_code;
-          if (!sc) return null;
-          const sColor = sc === "OOS" || sc === "MAINT" ? "#f87171" : sc === "AVAIL" ? "#4ade80" : "rgba(255,255,255,0.5)";
-          const sBg    = sc === "OOS" || sc === "MAINT" ? "rgba(220,60,40,0.18)" : sc === "AVAIL" ? "rgba(40,180,80,0.13)" : "rgba(255,255,255,0.07)";
-          return (
-            <div style={{ marginTop: 8 }}>
-              <span style={{ fontSize: 11, fontWeight: 900, padding: "3px 8px", borderRadius: 5,
-                background: sBg, color: sColor, letterSpacing: 0.5 }}>{sc}</span>
-              {(c as any).combo_status_location && (
-                <span style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginLeft: 8 }}>
-                  📍 {(c as any).combo_status_location}
-                </span>
-              )}
-            </div>
-          );
-        })()}
         {inUse && (
-          <div style={{ marginTop: 8, color: "rgba(234,179,8,0.95)", fontWeight: 900, fontSize: 16 }}>
+          <div style={{ marginTop: 10, color: "rgba(234,179,8,0.95)", fontWeight: 900, fontSize: 16 }}>
             In use · {claimedByName ?? "Someone"}
           </div>
         )}
-        {/* Edit Combo button */}
-        <button
-          type="button"
-          onClick={() => setComboEditOpen(true)}
-          style={{ marginTop: 12, padding: "6px 14px", fontSize: 12, fontWeight: 700,
-            background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.15)",
-            borderRadius: 8, color: "rgba(255,255,255,0.75)", cursor: "pointer",
-            WebkitTapHighlightColor: "transparent" }}
-        >
-          Edit Combo
-        </button>
       </div>
 
       <div style={{ height: 14 }} />
@@ -416,7 +282,6 @@ function EquipmentDetailsModal({
         <AdminTruckCard
           truck={fullTruck}
           otherPermits={otherPermits}
-          companyId={companyIdSafe}
           onEdit={() => setTruckEditOpen(true)}
         />
       ) : (
@@ -431,7 +296,6 @@ function EquipmentDetailsModal({
       ) : fullTrailer ? (
         <AdminTrailerCard
           trailer={fullTrailer}
-          companyId={companyIdSafe}
           onEdit={() => setTrailerEditOpen(true)}
         />
       ) : (
@@ -453,15 +317,6 @@ function EquipmentDetailsModal({
           companyId={companyIdSafe}
           onClose={() => setTrailerEditOpen(false)}
           onDone={() => { setTrailerEditOpen(false); void reloadDetails(); }}
-        />
-      )}
-      {comboEditOpen && c && (
-        <PlannerComboEditModal
-          combo={c}
-          truckName={truck?.truck_name ?? String(c.truck_id)}
-          trailerName={trailer?.trailer_name ?? String(c.trailer_id)}
-          onClose={() => setComboEditOpen(false)}
-          onDone={() => { setComboEditOpen(false); void reloadDetails(); }}
         />
       )}
 
@@ -790,7 +645,7 @@ function FleetModal({
     // Fetch all active combos — manual join (no FK assumption)
     const { data: comboData, error: comboErr } = await supabase
       .from("equipment_combos")
-      .select("combo_id, combo_name, truck_id, trailer_id, tare_lbs, target_weight, claimed_by, claimed_at, active, company_id, combo_status_code, combo_status_location")
+      .select("combo_id, combo_name, truck_id, trailer_id, tare_lbs, target_weight, claimed_by, claimed_at, active, company_id")
       .eq("active", true)
       .eq("company_id", activeCompanyId)
       .order("combo_name", { ascending: true });
@@ -812,7 +667,7 @@ function FleetModal({
           ? supabase.from("trailers").select("trailer_id, trailer_name").eq("company_id", activeCompanyId).in("trailer_id", trailerIds)
           : Promise.resolve({ data: [] }),
         claimedIds.length > 0
-          ? supabase.from("profiles").select("user_id, display_name").in("user_id", claimedIds)
+          ? supabase.rpc("get_display_names", { p_user_ids: claimedIds })
           : Promise.resolve({ data: [] }),
       ]);
 
@@ -1210,7 +1065,7 @@ export default function EquipmentModal({
   const loadProfileNames = useCallback(async (userIds: string[]) => {
     const unique = Array.from(new Set(userIds.filter(Boolean)));
     if (!unique.length) return;
-    const { data } = await supabase.from("profiles").select("user_id, display_name").in("user_id", unique);
+    const { data } = await supabase.rpc("get_display_names", { p_user_ids: unique });
     const map: Record<string, string> = {};
     for (const row of data ?? []) {
       if ((row as any).user_id) map[String((row as any).user_id)] = (row as any).display_name ?? "Someone";
@@ -1468,16 +1323,7 @@ export default function EquipmentModal({
   async function handleDecoupled(newComboId?: string) {
     setDecoupleOpen(false);
     const wasSelected = isSelected(decoupleComboPending?.comboId ?? "");
-    const pendingTruckId    = decoupleComboPending?.truckId;
-    const pendingTrailerId  = decoupleComboPending?.trailerId;
     setDecoupleComboPending(null);
-    // Restore AVAIL on both units when fully decoupled (not a swap)
-    if (!newComboId && pendingTruckId && pendingTrailerId) {
-      await Promise.all([
-        supabase.from("trucks").update({ status_code: "AVAIL" }).eq("truck_id", pendingTruckId),
-        supabase.from("trailers").update({ status_code: "AVAIL" }).eq("trailer_id", pendingTrailerId),
-      ]);
-    }
     await Promise.all([onRefreshCombos(), loadEquipment()]);
     if (newComboId) {
       // Swap — select the new combo after refresh
@@ -1524,13 +1370,6 @@ export default function EquipmentModal({
       if (error) throw error;
       const comboId = String((data as any)?.combo_id ?? "");
       if (!comboId) throw new Error("No combo_id returned.");
-      // Set COUPLED status on both units — suppress location (managed at combo level)
-      await Promise.all([
-        supabase.from("trucks").update({ status_code: "COUPLED", status_location: null })
-          .eq("truck_id", pickTruckId),
-        supabase.from("trailers").update({ status_code: "COUPLED", status_location: null })
-          .eq("trailer_id", pickTrailerId),
-      ]);
       await Promise.all([onRefreshCombos(), loadEquipment()]);
       onSelectComboId(comboId);
       setPickRegion(""); setPickTruckId(""); setPickTrailerId(""); setNewTareLbs(""); setNewTargetLbs("80000");
@@ -1820,7 +1659,6 @@ export default function EquipmentModal({
           trailerId={decoupleComboPending.trailerId}
           truckName={decoupleComboPending.truckName}
           trailerName={decoupleComboPending.trailerName}
-          companyId={companyId ?? null}
           uncoupledTrucks={uncoupledTrucks.map(t => ({ id: t.truck_id, name: t.truck_name }))}
           uncoupledTrailers={uncoupledTrailers.map(t => ({ id: t.trailer_id, name: t.trailer_name }))}
           onDecoupled={handleDecoupled}
