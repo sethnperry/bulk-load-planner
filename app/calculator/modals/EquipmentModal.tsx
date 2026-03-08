@@ -281,6 +281,7 @@ function EquipmentDetailsModal({
       ) : fullTruck ? (
         <AdminTruckCard
           truck={fullTruck}
+          companyId={companyIdSafe}
           otherPermits={otherPermits}
           onEdit={() => setTruckEditOpen(true)}
         />
@@ -296,6 +297,7 @@ function EquipmentDetailsModal({
       ) : fullTrailer ? (
         <AdminTrailerCard
           trailer={fullTrailer}
+          companyId={companyIdSafe}
           onEdit={() => setTrailerEditOpen(true)}
         />
       ) : (
