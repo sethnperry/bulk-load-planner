@@ -162,6 +162,7 @@ export async function POST(req: NextRequest) {
   }
 }
 
+
 // ─── Email HTML ───────────────────────────────────────────────────────────────
 function buildEmailHtml(confirmUrl: string, companyName: string): string {
   return `<!DOCTYPE html>
@@ -169,85 +170,95 @@ function buildEmailHtml(confirmUrl: string, companyName: string): string {
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Welcome to ProTankr</title>
+  <title>You've been invited to ProTankr</title>
 </head>
-<body style="margin:0;padding:0;background:#0f0f0f;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
-<table width="100%" cellpadding="0" cellspacing="0" style="background:#0f0f0f;padding:40px 16px;">
+<body style="margin:0;padding:0;background:transparent;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" style="padding:32px 16px;">
 <tr><td align="center">
-<table width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#1a1a1a;border-radius:12px;border:1px solid #2a2a2a;overflow:hidden;">
+<table width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#111111;border-radius:16px;border:1px solid rgba(255,255,255,0.08);overflow:hidden;">
 
-  <tr><td style="background:#1c1c1c;padding:28px 32px 22px;border-bottom:1px solid #2a2a2a;">
-    <div style="font-size:22px;font-weight:800;color:#f97316;letter-spacing:-0.5px;">&#9981; ProTankr</div>
-    <div style="font-size:13px;color:#666;margin-top:3px;">Bulk Liquid Load Planner</div>
+  <!-- Header -->
+  <tr><td style="padding:32px 36px 24px;border-bottom:1px solid rgba(255,255,255,0.07);">
+    <div style="font-size:26px;font-weight:900;letter-spacing:-0.5px;color:#ffffff;">Pro<span style="color:#d48a0a;">Tankr</span></div>
   </td></tr>
 
-  <tr><td style="padding:28px 32px;">
-    <p style="margin:0 0 16px;font-size:16px;font-weight:600;color:#f0f0f0;">
-      You've been added to <span style="color:#f97316;">${companyName}</span> on ProTankr.
-    </p>
-    <p style="margin:0 0 24px;font-size:14px;color:#999;line-height:1.65;">
-      ProTankr is a mobile load planning tool for fuel drivers — compartment-level fuel planning,
-      DOT hazmat placarding, and real-time weight calculations, all from your phone.
+  <!-- Body -->
+  <tr><td style="padding:32px 36px 0;">
+
+    <div style="font-size:18px;font-weight:700;color:#ffffff;margin-bottom:6px;line-height:1.4;">
+      You've been added to<br><span style="color:#d48a0a;">${companyName}</span> on ProTankr.
+    </div>
+
+    <p style="margin:0 0 28px;font-size:14px;color:rgba(255,255,255,0.50);line-height:1.6;">
+      ProTankr helps you verify your load before you cross a scale —
+      tracking weight, compartment fills, and environmental variables
+      so overweight surprises stay in the past.
     </p>
 
-    <table cellpadding="0" cellspacing="0" style="margin:0 0 28px;">
-      <tr><td style="background:#f97316;border-radius:8px;">
-        <a href="${confirmUrl}" style="display:inline-block;padding:14px 32px;font-size:15px;font-weight:700;color:#fff;text-decoration:none;">
-          Set Up Your Profile &#8594;
+    <!-- CTA -->
+    <table cellpadding="0" cellspacing="0" style="margin-bottom:32px;">
+      <tr><td style="background:#d48a0a;border-radius:12px;">
+        <a href="${confirmUrl}" style="display:inline-block;padding:14px 28px;font-size:15px;font-weight:800;color:#ffffff;text-decoration:none;letter-spacing:0.3px;">
+          Set Up Your Account &#8594;
         </a>
       </td></tr>
     </table>
 
-    <div style="background:#222;border-radius:8px;padding:18px 20px;margin-bottom:22px;border-left:3px solid #f97316;">
-      <div style="font-size:12px;font-weight:700;color:#ccc;margin-bottom:12px;text-transform:uppercase;letter-spacing:0.6px;">Fill these in when you arrive at your profile</div>
-      <table cellpadding="0" cellspacing="4" width="100%">
+    <!-- What's in the app -->
+    <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:20px 22px;margin-bottom:20px;">
+      <div style="font-size:10px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;color:rgba(255,255,255,0.35);margin-bottom:14px;">What's in the app</div>
+      <table cellpadding="0" cellspacing="0" width="100%">
         <tr>
-          <td style="font-size:12px;font-weight:600;color:#f97316;width:140px;padding:3px 0;">Display Name</td>
-          <td style="font-size:12px;color:#888;">How your name appears to dispatchers</td>
+          <td valign="top" style="width:14px;padding-top:5px;"><div style="width:6px;height:6px;border-radius:50%;background:#d48a0a;"></div></td>
+          <td style="font-size:13px;color:rgba(255,255,255,0.70);line-height:1.5;padding-bottom:10px;padding-left:8px;"><strong style="color:rgba(255,255,255,0.85);">Load verification</strong> — check your weight before the scale, accounting for API, temperature, and density shifts.</td>
         </tr>
         <tr>
-          <td style="font-size:12px;font-weight:600;color:#f97316;padding:3px 0;">Employee Number</td>
-          <td style="font-size:12px;color:#888;">Used on Bill of Lading and load records</td>
+          <td valign="top" style="width:14px;padding-top:5px;"><div style="width:6px;height:6px;border-radius:50%;background:#d48a0a;"></div></td>
+          <td style="font-size:13px;color:rgba(255,255,255,0.70);line-height:1.5;padding-bottom:10px;padding-left:8px;"><strong style="color:rgba(255,255,255,0.85);">Terminal access &amp; credentials</strong> — your terminal cards, permits, and expiration dates in one place.</td>
         </tr>
         <tr>
-          <td style="font-size:12px;font-weight:600;color:#f97316;padding:3px 0;">Division</td>
-          <td style="font-size:12px;color:#888;">Your operating division or fleet group</td>
-        </tr>
-        <tr>
-          <td style="font-size:12px;font-weight:600;color:#f97316;padding:3px 0;">Region</td>
-          <td style="font-size:12px;color:#888;">e.g. Southeast, Gulf Coast, Southwest</td>
-        </tr>
-        <tr>
-          <td style="font-size:12px;font-weight:600;color:#f97316;padding:3px 0;">Local Area</td>
-          <td style="font-size:12px;color:#888;">e.g. Tampa Bay, Houston Metro</td>
+          <td valign="top" style="width:14px;padding-top:5px;"><div style="width:6px;height:6px;border-radius:50%;background:#d48a0a;"></div></td>
+          <td style="font-size:13px;color:rgba(255,255,255,0.70);line-height:1.5;padding-left:8px;"><strong style="color:rgba(255,255,255,0.85);">Shared equipment</strong> — track equipment status, organize and centralize documentation to stay in sync with your team.</td>
         </tr>
       </table>
     </div>
 
-    <div style="background:#1e1e1e;border-radius:8px;padding:18px 20px;">
-      <div style="font-size:12px;font-weight:700;color:#ccc;margin-bottom:12px;text-transform:uppercase;letter-spacing:0.6px;">Getting started</div>
+    <!-- Profile fields -->
+    <div style="background:rgba(212,138,10,0.07);border:1px solid rgba(212,138,10,0.20);border-radius:12px;padding:16px 20px;margin-bottom:32px;">
+      <div style="font-size:10px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;color:rgba(212,138,10,0.80);margin-bottom:10px;">Fill in when you set up your profile</div>
       <table cellpadding="0" cellspacing="0" width="100%">
-        ${[
-          ["1", "Tap the button above to log in and finish setting up your profile."],
-          ["2", "Open the Load Planner and select your truck and trailer under Equipment."],
-          ["3", "Choose a terminal and tap the products you're loading. Compartment fills, weight, and DOT placards are calculated automatically."],
-          ["4", "Tap Save Load when done to record it. Load history and Bill of Lading info are available from the loads screen."],
-        ].map(([n, text]) => `
         <tr>
-          <td valign="top" style="width:28px;padding-bottom:10px;">
-            <div style="background:#f97316;color:#fff;font-size:11px;font-weight:800;border-radius:50%;width:20px;height:20px;text-align:center;line-height:20px;">${n}</div>
-          </td>
-          <td style="font-size:13px;color:#999;line-height:1.5;padding-bottom:10px;">${text}</td>
-        </tr>`).join("")}
+          <td style="font-size:12px;font-weight:700;color:#d48a0a;width:130px;padding:3px 0;">Display Name</td>
+          <td style="font-size:12px;color:rgba(255,255,255,0.50);">How your name appears to dispatch</td>
+        </tr>
+        <tr>
+          <td style="font-size:12px;font-weight:700;color:#d48a0a;padding:3px 0;">Employee Number</td>
+          <td style="font-size:12px;color:rgba(255,255,255,0.50);">Your company Employee Number (optional)</td>
+        </tr>
+        <tr>
+          <td style="font-size:12px;font-weight:700;color:#d48a0a;padding:3px 0;">Division</td>
+          <td style="font-size:12px;color:rgba(255,255,255,0.50);">Your operating division or fleet group</td>
+        </tr>
+        <tr>
+          <td style="font-size:12px;font-weight:700;color:#d48a0a;padding:3px 0;">Region</td>
+          <td style="font-size:12px;color:rgba(255,255,255,0.50);">e.g. Southeast, Gulf Coast, Southwest</td>
+        </tr>
+        <tr>
+          <td style="font-size:12px;font-weight:700;color:#d48a0a;padding:3px 0;">Local Area</td>
+          <td style="font-size:12px;color:rgba(255,255,255,0.50);">e.g. Tampa Bay, Houston Metro</td>
+        </tr>
       </table>
     </div>
+
   </td></tr>
 
-  <tr><td style="padding:18px 32px;border-top:1px solid #252525;background:#161616;">
-    <p style="margin:0;font-size:11px;color:#444;line-height:1.7;">
-      This link expires in 24 hours and works only once. If you didn't expect this, you can safely ignore it.<br/>
-      Button not working? Copy and paste: <a href="${confirmUrl}" style="color:#f97316;word-break:break-all;">${confirmUrl}</a>
+  <!-- Footer -->
+  <tr><td style="padding:0 36px 28px;">
+    <p style="margin:0 0 6px;font-size:11px;color:rgba(255,255,255,0.25);line-height:1.6;">
+      This link expires in 24 hours and works only once. If you didn't expect this email, you can safely ignore it.
     </p>
+    <p style="margin:0 0 4px;font-size:11px;color:rgba(255,255,255,0.25);">Button not working? Copy and paste:</p>
+    <a href="${confirmUrl}" style="font-size:11px;color:rgba(212,138,10,0.60);word-break:break-all;">${confirmUrl}</a>
   </td></tr>
 
 </table>
