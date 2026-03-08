@@ -346,6 +346,12 @@ function EquipmentDetailsModal({
 
 
 
+// Merge in authoritative combo fields fetched directly from equipment_combos.
+// (The parent list may omit newer columns like target_weight.)
+function mergeCombo(base: ComboRow, meta?: Partial<ComboRow> | null): ComboRow {
+  return meta ? ({ ...base, ...meta } as ComboRow) : base;
+}
+
 // ─── Star button ──────────────────────────────────────────────────────────────
 
 function StarBtn({
