@@ -7,7 +7,7 @@ import NavMenu from "@/lib/ui/NavMenu";
 import { T, css, fmtDate, expiryColor, daysUntil } from "@/lib/ui/driver/tokens";
 import { Modal, Field, FieldRow, Banner, SubSectionTitle } from "@/lib/ui/driver/primitives";
 import { MemberCard } from "@/lib/ui/driver/MemberCard";
-import { TruckModal, TrailerModal } from "@/app/calculator/modals/EquipmentDetails";
+import { TruckModal, TrailerModal } from "@/lib/ui/driver/EquipmentDetails";
 import DecoupleModal from "@/app/calculator/modals/DecoupleModal";
 import { DriverProfileModal } from "@/lib/ui/driver/DriverProfileModal";
 import type { Member } from "@/lib/ui/driver/types";
