@@ -1226,16 +1226,17 @@ export default function EquipmentModal({
     [combos]
   );
 
-  // My Equipment: starred OR currently claimed by me OR selected-but-unclaimed
-  // Never show a combo that is claimed by someone else, even if selectedComboId still points to it
-  // (the eviction effect above handles clearing selectedComboId, but this guards the render too).
+  // My Equipment: starred OR currently claimed by me OR selected-but-not-stolen
+  // Starred and isMine always show. isSelected is suppressed if another user has claimed it
+  // (eviction effect clears selectedComboId async; this guards the render in the meantime).
   const myEquipmentCombos = useMemo(
     () => coupledCombos.filter((c) => {
-      const isStarred   = c.truck_id && primaryTruckIds.has(String(c.truck_id));
-      const isMine      = authUserId && String(c.claimed_by ?? "") === String(authUserId);
-      const isSelected  = String(c.combo_id) === String(selectedComboId);
-      const stolenByOther = c.claimed_by && authUserId && String(c.claimed_by) !== String(authUserId);
-      return (isStarred || isMine || isSelected) && !stolenByOther;
+      const isStarred     = c.truck_id && primaryTruckIds.has(String(c.truck_id));
+      const isMine        = authUserId && String(c.claimed_by ?? "") === String(authUserId);
+      const isSelected    = String(c.combo_id) === String(selectedComboId);
+      const stolenByOther = !!c.claimed_by && !!authUserId && String(c.claimed_by) !== String(authUserId);
+      // Starred and isMine are always visible; isSelected is only valid if not stolen
+      return isStarred || isMine || (isSelected && !stolenByOther);
     }),
     [coupledCombos, primaryTruckIds, authUserId, selectedComboId]
   );
