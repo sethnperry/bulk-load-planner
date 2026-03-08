@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 import ComboEditModal from "@/lib/ui/driver/ComboEditModal";
+import DecoupleModal from "@/app/calculator/modals/DecoupleModal";
 import NavMenu from "@/lib/ui/NavMenu";
 
 import { T, css, fmtDate, expiryColor, daysUntil } from "@/lib/ui/driver/tokens";
@@ -1694,6 +1695,10 @@ export default function AdminPage() {
   const [trailerModal, setTrailerModal] = useState<Trailer | null | "new">(null);
   const [comboModal,   setComboModal]   = useState<Combo | null | "new">(null);
   const [comboEditModal, setComboEditModal] = useState<Combo | null>(null);
+  const [decoupleOpen,    setDecoupleOpen]    = useState(false);
+  const [decouplePending, setDecouplePending] = useState<{
+    comboId: string; truckId: string; trailerId: string; truckName: string; trailerName: string;
+  } | null>(null);
   const [coupleModal,  setCoupleModal]  = useState(false);
   const [terminalModal, setTerminalModal] = useState<Terminal | null | "new">(null);
   const [terminalSearch, setTerminalSearch] = useState("");
@@ -2085,16 +2090,38 @@ export default function AdminPage() {
             truckName={truckName}
             trailerName={trailerName}
             claimedByName={c.in_use_by_name ?? null}
-            onDecouple={async () => {
+            onDecouple={() => {
+              const truckName2   = Array.isArray(c.truck)   ? c.truck[0]?.truck_name   : c.truck?.truck_name;
+              const trailerName2 = Array.isArray(c.trailer) ? c.trailer[0]?.trailer_name : c.trailer?.trailer_name;
+              setDecouplePending({
+                comboId:     c.combo_id,
+                truckId:     c.truck_id,
+                trailerId:   c.trailer_id,
+                truckName:   truckName2   ?? c.truck_id,
+                trailerName: trailerName2 ?? c.trailer_id,
+              });
+              setDecoupleOpen(true);
               setComboEditModal(null);
-              if (!confirm("Decouple this combo?")) return;
-              await supabase.rpc("decouple_combo", { p_combo_id: c.combo_id });
-              loadAll();
             }}
             onSaved={() => { loadAll(); }}
           />
         );
       })()}
+      {decouplePending && (
+        <DecoupleModal
+          open={decoupleOpen}
+          onClose={() => { setDecoupleOpen(false); setDecouplePending(null); }}
+          comboId={decouplePending.comboId}
+          truckId={decouplePending.truckId}
+          trailerId={decouplePending.trailerId}
+          truckName={decouplePending.truckName}
+          trailerName={decouplePending.trailerName}
+          companyId={companyId ?? ""}
+          uncoupledTrucks={trucks.filter(t => t.active && t.truck_id !== decouplePending.truckId).map(t => ({ id: t.truck_id, name: t.truck_name }))}
+          uncoupledTrailers={trailers.filter(t => t.active && t.trailer_id !== decouplePending.trailerId).map(t => ({ id: t.trailer_id, name: t.trailer_name }))}
+          onDecoupled={() => { setDecoupleOpen(false); setDecouplePending(null); loadAll(); }}
+        />
+      )}
       {coupleModal && (() => {
         const coupledTruckIds   = new Set(combos.filter(c => c.active).map(c => c.truck_id));
         const coupledTrailerIds = new Set(combos.filter(c => c.active).map(c => c.trailer_id));
