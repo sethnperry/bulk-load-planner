@@ -106,6 +106,7 @@ export default function ComboEditModal({
   const tooClose = Number(targetLbs) >= 79500;
 
   async function handleSave() {
+    if (!combo) return;
     setSaving(true); setErr(null); setSaved(false);
     try {
       const tare   = Number(tareLbs);
