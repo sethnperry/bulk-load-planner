@@ -837,16 +837,18 @@ function TruckModal({ truck, companyId, onClose, onDone }: {
         <div><label style={{ ...css.label, fontSize: 10 }}>Local Area</label>{ti(local, setLocal, "Tampa Bay")}</div>
         <div>
           <label style={{ ...css.label, fontSize: 10 }}>Status</label>
-          <select value={status} onChange={e => setStatus(e.target.value)} style={{ ...css.select, ...sm, width: "100%" }}>
-            <option value="">— Select —</option>
-            <option value="AVAIL">AVAIL — Available</option>
-            <option value="COUPLED">COUPLED — Hooked to trailer</option>
-            <option value="BOBTAIL">BOBTAIL — Bobtailing</option>
-            <option value="PARK">PARK — Parked</option>
-            <option value="MAINT">MAINT — Maintenance ⚠</option>
-            <option value="INSP">INSP — Inspection</option>
-            <option value="OOS">OOS — Out of Service ⚠</option>
-          </select>
+          {status === "COUPLED"
+            ? <div style={{ ...css.input, ...sm, color: T.info, fontWeight: 700, cursor: "not-allowed", opacity: 0.85 }}>COUPLED</div>
+            : <select value={status} onChange={e => setStatus(e.target.value)} style={{ ...css.select, ...sm, width: "100%" }}>
+                <option value="">— Select —</option>
+                <option value="AVAIL">AVAIL — Available</option>
+                <option value="BOBTAIL">BOBTAIL — Bobtailing</option>
+                <option value="PARK">PARK — Parked</option>
+                <option value="MAINT">MAINT — Maintenance ⚠</option>
+                <option value="INSP">INSP — Inspection</option>
+                <option value="OOS">OOS — Out of Service ⚠</option>
+              </select>
+          }
         </div>
       </div>
       {/* Row 4: Status Location — read-only when COUPLED, editable otherwise */}
@@ -1116,17 +1118,19 @@ function TrailerModal({ trailer, companyId, onClose, onDone }: {
         <div><label style={{ ...css.label, fontSize: 10 }}>Local Area</label>{ti(local, setLocal, "Tampa Bay")}</div>
         <div>
           <label style={{ ...css.label, fontSize: 10 }}>Status</label>
-          <select value={status} onChange={e => setStatus(e.target.value)} style={{ ...css.select, ...sm, width: "100%" }}>
-            <option value="">— Select —</option>
-            <option value="AVAIL">AVAIL — Available</option>
-            <option value="COUPLED">COUPLED — Hooked to truck</option>
-            <option value="LOAD">LOAD — Loaded / Staged</option>
-            <option value="PARK">PARK — Parked / Stored</option>
-            <option value="CLEAN">CLEAN — Cleaning / Purge</option>
-            <option value="MAINT">MAINT — Maintenance ⚠</option>
-            <option value="INSP">INSP — Inspection</option>
-            <option value="OOS">OOS — Out of Service ⚠</option>
-          </select>
+          {status === "COUPLED"
+            ? <div style={{ ...css.input, ...sm, color: T.info, fontWeight: 700, cursor: "not-allowed", opacity: 0.85 }}>COUPLED</div>
+            : <select value={status} onChange={e => setStatus(e.target.value)} style={{ ...css.select, ...sm, width: "100%" }}>
+                <option value="">— Select —</option>
+                <option value="AVAIL">AVAIL — Available</option>
+                <option value="LOAD">LOAD — Loaded / Staged</option>
+                <option value="PARK">PARK — Parked / Stored</option>
+                <option value="CLEAN">CLEAN — Cleaning / Purge</option>
+                <option value="MAINT">MAINT — Maintenance ⚠</option>
+                <option value="INSP">INSP — Inspection</option>
+                <option value="OOS">OOS — Out of Service ⚠</option>
+              </select>
+          }
         </div>
       </div>
       {/* Row 4: Status Location — read-only when COUPLED */}
