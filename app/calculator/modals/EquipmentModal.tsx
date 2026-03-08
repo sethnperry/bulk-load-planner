@@ -128,6 +128,221 @@ function DetailField({ label, value }: { label: string; value?: React.ReactNode 
   );
 }
 
+// ─── Equipment Details Modal ─────────────────────────────────────────────────
+// Shows combo card (tappable → ComboEditModal) + truck card + trailer card.
+
+function EquipmentDetailsModal({
+  open,
+  onClose,
+  target,
+  claimedByName,
+  forceInUse,
+  companyId,
+  onDecoupleRequest,
+  onSaved,
+}: {
+  open: boolean;
+  onClose: () => void;
+  target: DetailTarget | null;
+  claimedByName?: string | null;
+  forceInUse?: boolean;
+  companyId?: string | null;
+  onDecoupleRequest: () => void;
+  onSaved: () => void;
+}) {
+  const c = target?.combo;
+  const truck = target?.truck;
+  const trailer = target?.trailer;
+  const companyIdSafe = String((c as any)?.company_id ?? companyId ?? "");
+
+  const [fullTruck,    setFullTruck]    = useState<AdminTruck | null>(null);
+  const [fullTrailer,  setFullTrailer]  = useState<AdminTrailer | null>(null);
+  const [otherPermits, setOtherPermits] = useState<AdminOtherPermit[]>([]);
+  const [loadingDetails, setLoadingDetails] = useState(false);
+  const [detailsErr,     setDetailsErr]     = useState<string | null>(null);
+
+  const [truckEditOpen,   setTruckEditOpen]   = useState(false);
+  const [trailerEditOpen, setTrailerEditOpen] = useState(false);
+  const [comboEditOpen,   setComboEditOpen]   = useState(false);
+
+  const reloadDetails = useCallback(async () => {
+    if (!target?.combo) return;
+    const combo = target.combo;
+    const truckId   = String(combo.truck_id   ?? "");
+    const trailerId = String(combo.trailer_id ?? "");
+    if (!truckId && !trailerId) return;
+
+    setLoadingDetails(true);
+    setDetailsErr(null);
+    try {
+      const truckSel   = "truck_id, truck_name, active, vin_number, make, model, year, region, local_area, status_code, status_location, in_use_by, reg_expiration_date, reg_enforcement_date, inspection_shop, inspection_issue_date, inspection_expiration_date, ifta_expiration_date, ifta_enforcement_date, phmsa_expiration_date, alliance_expiration_date, fleet_ins_expiration_date, hazmat_lic_expiration_date, inner_bridge_expiration_date, notes";
+      const trailerSel = "trailer_id, trailer_name, active, vin_number, make, model, year, cg_max, region, local_area, status_code, status_location, in_use_by, last_load_config, trailer_reg_expiration_date, trailer_reg_enforcement_date, trailer_inspection_shop, trailer_inspection_issue_date, trailer_inspection_expiration_date, tank_v_expiration_date, tank_k_expiration_date, tank_l_expiration_date, tank_t_expiration_date, tank_i_expiration_date, tank_p_expiration_date, tank_uc_expiration_date, notes";
+
+      const [truckRes, trailerRes, permitsRes] = await Promise.all([
+        truckId   ? supabase.from("trucks").select(truckSel).eq("truck_id", truckId).maybeSingle()                                        : Promise.resolve({ data: null, error: null } as any),
+        trailerId ? supabase.from("trailers").select(trailerSel).eq("trailer_id", trailerId).maybeSingle()                                : Promise.resolve({ data: null, error: null } as any),
+        truckId   ? supabase.from("truck_other_permits").select("permit_id, label, expiration_date").eq("truck_id", truckId).order("created_at") : Promise.resolve({ data: [], error: null } as any),
+      ]);
+
+      if (truckRes.error)   throw truckRes.error;
+      if (trailerRes.error) throw trailerRes.error;
+      if (permitsRes.error) throw permitsRes.error;
+
+      const t: AdminTruck | null = truckRes.data ? (truckRes.data as any) : null;
+      let tr: AdminTrailer | null = trailerRes.data ? (trailerRes.data as any) : null;
+
+      if (tr) {
+        const { data: comps, error: compsErr } = await supabase
+          .from("trailer_compartments")
+          .select("comp_number, max_gallons, position")
+          .eq("trailer_id", tr.trailer_id)
+          .order("position");
+        if (!compsErr && comps) {
+          (tr as any).compartments = comps.map((r: any) => ({
+            comp_number: Number(r.comp_number),
+            max_gallons: Number(r.max_gallons),
+            position:    Number(r.position),
+          }));
+        }
+      }
+
+      setFullTruck(t ? ({ ...(t as any), in_use_by_name: (combo.claimed_by ? (claimedByName ?? (t as any).in_use_by_name) : (t as any).in_use_by_name) } as any) : null);
+      setFullTrailer(tr ? ({ ...(tr as any), in_use_by_name: (combo.claimed_by ? (claimedByName ?? (tr as any).in_use_by_name) : (tr as any).in_use_by_name) } as any) : null);
+      setOtherPermits((permitsRes.data ?? []).map((r: any) => ({
+        permit_id:       r.permit_id,
+        label:           r.label ?? "",
+        expiration_date: r.expiration_date ?? "",
+      })));
+    } catch (e: any) {
+      setDetailsErr(e?.message ?? "Failed to load equipment details.");
+    } finally {
+      setLoadingDetails(false);
+    }
+  }, [target?.combo]);
+
+  useEffect(() => {
+    if (!open) return;
+    void reloadDetails();
+  }, [open, reloadDetails]);
+
+  if (!c) return null;
+
+  const tare    = Number(c.tare_lbs      ?? 0);
+  const targetW = Number((c as any).target_weight ?? 0);
+  const buffer  = Number(c.buffer_lbs   ?? 0);
+  const label   = `${truck?.truck_name ?? c.truck_id ?? "—"} / ${trailer?.trailer_name ?? c.trailer_id ?? "—"}`;
+  const inUse   = Boolean(c.claimed_by) || Boolean(forceInUse);
+
+  return (
+    <ModalShell open={open} onClose={onClose} title="Equipment Details">
+
+      {/* ── Combo card — tappable to open edit modal ── */}
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={() => setComboEditOpen(true)}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setComboEditOpen(true); } }}
+        style={{
+          borderRadius: 18,
+          border: "1px solid rgba(255,255,255,0.10)",
+          background: "rgba(255,255,255,0.04)",
+          padding: 16,
+          marginTop: 6,
+          boxShadow: "0 10px 24px rgba(0,0,0,0.35)",
+          cursor: "pointer",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+          <div style={{ fontSize: 28, fontWeight: 950, letterSpacing: 0.2, lineHeight: 1.05 }}>{label}</div>
+          <span style={{ fontSize: 18, color: "rgba(255,255,255,0.25)", flexShrink: 0, marginTop: 4 }}>›</span>
+        </div>
+
+        {(tare > 0 || targetW > 0 || buffer > 0) && (
+          <div style={{ marginTop: 10 }}>
+            {tare    > 0 && <div style={{ color: "rgba(255,255,255,0.45)", fontWeight: 800, fontSize: 14 }}>Tare {tare.toLocaleString()} lbs</div>}
+            {targetW > 0 && <div style={{ marginTop: 6, color: "rgba(255,255,255,0.45)", fontWeight: 800, fontSize: 14 }}>Target {targetW.toLocaleString()} lbs</div>}
+            {buffer  > 0 && <div style={{ marginTop: 6, color: "rgba(255,255,255,0.45)", fontWeight: 800, fontSize: 14 }}>Buffer {buffer.toLocaleString()} lbs</div>}
+          </div>
+        )}
+
+        {inUse && (
+          <div style={{ marginTop: 10, color: "rgba(234,179,8,0.95)", fontWeight: 900, fontSize: 16 }}>
+            In use · {claimedByName ?? "Someone"}
+          </div>
+        )}
+      </div>
+
+      <div style={{ height: 14 }} />
+
+      {detailsErr && <div style={{ ...S.err, marginTop: 8 }}>{detailsErr}</div>}
+
+      {/* ── Truck card ── */}
+      <div style={S.sectionHeader}>Truck</div>
+      {loadingDetails ? (
+        <div style={S.sub}>Loading truck…</div>
+      ) : fullTruck ? (
+        <AdminTruckCard
+          truck={fullTruck}
+          companyId={companyIdSafe}
+          otherPermits={otherPermits}
+          onEdit={() => setTruckEditOpen(true)}
+        />
+      ) : (
+        <div style={S.sub}>No truck details.</div>
+      )}
+
+      <div style={{ height: 14 }} />
+
+      {/* ── Trailer card ── */}
+      <div style={S.sectionHeader}>Trailer</div>
+      {loadingDetails ? (
+        <div style={S.sub}>Loading trailer…</div>
+      ) : fullTrailer ? (
+        <AdminTrailerCard
+          trailer={fullTrailer}
+          companyId={companyIdSafe}
+          onEdit={() => setTrailerEditOpen(true)}
+        />
+      ) : (
+        <div style={S.sub}>No trailer details.</div>
+      )}
+
+      {/* ── Truck edit modal ── */}
+      {truckEditOpen && (
+        <AdminTruckModal
+          truck={fullTruck}
+          companyId={companyIdSafe}
+          onClose={() => setTruckEditOpen(false)}
+          onDone={() => { setTruckEditOpen(false); void reloadDetails(); }}
+        />
+      )}
+
+      {/* ── Trailer edit modal ── */}
+      {trailerEditOpen && (
+        <AdminTrailerModal
+          trailer={fullTrailer}
+          companyId={companyIdSafe}
+          onClose={() => setTrailerEditOpen(false)}
+          onDone={() => { setTrailerEditOpen(false); void reloadDetails(); }}
+        />
+      )}
+
+      {/* ── Combo edit modal — opened by tapping the combo card above ── */}
+      <ComboEditModal
+        open={comboEditOpen}
+        onClose={() => setComboEditOpen(false)}
+        combo={c}
+        truckName={truck?.truck_name ?? null}
+        trailerName={trailer?.trailer_name ?? null}
+        claimedByName={inUse ? (claimedByName ?? "Someone") : null}
+        onDecouple={() => { setComboEditOpen(false); onClose(); onDecoupleRequest(); }}
+        onSaved={() => { void reloadDetails(); onSaved(); }}
+      />
+
+    </ModalShell>
+  );
+}
+
 function ComboEditModal({
   open,
   onClose,
@@ -988,9 +1203,9 @@ export default function EquipmentModal({
   const [fleetOpen, setFleetOpen] = useState(false);
   const [companyId, setCompanyId] = useState<string | null>(null);
 
-  // Combo edit modal (tap a card)
-  const [editOpen, setEditOpen] = useState(false);
-  const [editTarget, setEditTarget] = useState<DetailTarget | null>(null);
+  // Details view (tap a card)
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [detailsTarget, setDetailsTarget] = useState<DetailTarget | null>(null);
 
   // Decouple flow
   const [decoupleOpen, setDecoupleOpen]       = useState(false);
@@ -1294,12 +1509,12 @@ export default function EquipmentModal({
     return [t, tr].filter(Boolean).join(" / ") || "Unknown equipment";
   }
 
-  function openEdit(c: ComboRow) {
+  function openDetails(c: ComboRow) {
     const cm = mergeCombo(c, comboMeta[String(c.combo_id)]);
     const truck = trucks.find((x) => String(x.truck_id) === String(cm.truck_id)) ?? null;
     const trailer = trailers.find((x) => String(x.trailer_id) === String(cm.trailer_id)) ?? null;
-    setEditTarget({ combo: cm, truck, trailer });
-    setEditOpen(true);
+    setDetailsTarget({ combo: cm, truck, trailer });
+    setDetailsOpen(true);
   }
 
   // ── Actions ────────────────────────────────────────────────────────────────
@@ -1560,11 +1775,11 @@ export default function EquipmentModal({
                   style={{ ...rowStyle, cursor: "pointer" }}
                   role="button"
                   tabIndex={0}
-                  onClick={() => openEdit(c)}
+                  onClick={() => openDetails(c)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" || e.key === " ") {
                       e.preventDefault();
-                      openEdit(c);
+                      openDetails(c);
                     }
                   }}
                   title="Tap to view details"
@@ -1673,19 +1888,19 @@ export default function EquipmentModal({
         />
       )}
 
-      <ComboEditModal
-        open={editOpen}
-        onClose={() => { setEditOpen(false); setEditTarget(null); }}
-        combo={editTarget?.combo ?? null}
-        truckName={editTarget?.truck?.truck_name ?? null}
-        trailerName={editTarget?.trailer?.trailer_name ?? null}
-        claimedByName={editTarget?.combo
-          ? (isMine(editTarget.combo)
+      <EquipmentDetailsModal
+        open={detailsOpen}
+        onClose={() => { setDetailsOpen(false); setDetailsTarget(null); }}
+        target={detailsTarget}
+        companyId={companyId}
+        forceInUse={Boolean(detailsTarget?.combo && String(detailsTarget.combo.combo_id) === String(selectedComboId))}
+        claimedByName={detailsTarget?.combo
+          ? (isMine(detailsTarget.combo)
               ? (myDisplayName ?? "You")
-              : editTarget.combo.claimed_by ? getClaimedByName(editTarget.combo) : null)
+              : detailsTarget.combo.claimed_by ? getClaimedByName(detailsTarget.combo) : null)
           : null}
-        onDecouple={() => {
-          if (editTarget?.combo) handleDecouple(String(editTarget.combo.combo_id));
+        onDecoupleRequest={() => {
+          if (detailsTarget?.combo) handleDecouple(String(detailsTarget.combo.combo_id));
         }}
         onSaved={() => { hydrateCombosFromDb(); onRefreshCombos(); }}
       />
