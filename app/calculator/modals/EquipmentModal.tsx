@@ -813,8 +813,10 @@ function FleetModal({
                 {c.truck_region && (
                   <div style={{ ...S.rowSub, fontSize: 12 }}>{c.truck_region}</div>
                 )}
-                {inUse && (
-                  <div style={S.rowMineBadge}>In use · {c.claimed_by_name ?? "Someone"}</div>
+                {(mine || inUse) && (
+                  <div style={S.rowMineBadge}>
+                    In use · {mine ? (myDisplayName ?? "You") : (c.claimed_by_name ?? "Someone")}
+                  </div>
                 )}
               </div>
 
