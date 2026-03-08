@@ -616,6 +616,7 @@ function FleetModal({
   const [regionFilter, setRegionFilter] = useState("all");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [starBusy, setStarBusy] = useState(false);
+  const [myDisplayName, setMyDisplayName] = useState<string | null>(null);
 
   const loadFleet = useCallback(async () => {
     setLoading(true);
@@ -684,6 +685,17 @@ function FleetModal({
     const nameMap: Record<string, string> = {};
     for (const p of profileData ?? []) {
       if ((p as any).user_id) nameMap[(p as any).user_id] = (p as any).display_name ?? "Unknown";
+    }
+
+    // Resolve current user's own display name for "In use · [name]" on isMine combos.
+    if (authUserId) {
+      if (nameMap[authUserId]) {
+        setMyDisplayName(nameMap[authUserId]);
+      } else {
+        const { data: meData } = await supabase.rpc("get_display_names", { p_user_ids: [authUserId] });
+        const meRow = (meData ?? []).find((p: any) => p.user_id === authUserId);
+        setMyDisplayName(meRow?.display_name ?? null);
+      }
     }
 
     const fleet: FleetCombo[] = rows.map((r: any) => ({
