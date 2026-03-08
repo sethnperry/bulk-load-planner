@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
+import ComboEditModal from "@/lib/ui/driver/ComboEditModal";
 import NavMenu from "@/lib/ui/NavMenu";
 
 import { T, css, fmtDate, expiryColor, daysUntil } from "@/lib/ui/driver/tokens";
@@ -1692,6 +1693,7 @@ export default function AdminPage() {
   const [truckModal,   setTruckModal]   = useState<Truck | null | "new">(null);
   const [trailerModal, setTrailerModal] = useState<Trailer | null | "new">(null);
   const [comboModal,   setComboModal]   = useState<Combo | null | "new">(null);
+  const [comboEditModal, setComboEditModal] = useState<Combo | null>(null);
   const [coupleModal,  setCoupleModal]  = useState(false);
   const [terminalModal, setTerminalModal] = useState<Terminal | null | "new">(null);
   const [terminalSearch, setTerminalSearch] = useState("");
@@ -2012,7 +2014,7 @@ export default function AdminPage() {
               <input value={comboSearch} onChange={e => setComboSearch(e.target.value)} placeholder="Search truck, trailer, driver…" style={{ ...css.input, flex: 1, minWidth: 160, padding: "7px 10px" }} />
             </div>
             {filteredCombos.length === 0 && <div style={{ ...css.card, color: T.muted, fontSize: 13 }}>No active combos.</div>}
-            {filteredCombos.map(c => <ComboCard key={c.combo_id} combo={c} onEdit={() => setComboModal(c)} />)}
+            {filteredCombos.map(c => <ComboCard key={c.combo_id} combo={c} onEdit={() => setComboEditModal(c)} />)}
           </>
         )}
       </section>
@@ -2071,17 +2073,28 @@ export default function AdminPage() {
           onDone={() => { setTerminalModal(null); loadAll(); }}
         />
       )}
-      {comboModal && comboModal !== "new" && (
-        <ComboModal combo={comboModal} companyId={companyId!} trucks={trucks} trailers={trailers}
-          onClose={() => setComboModal(null)} onDone={() => { setComboModal(null); loadAll(); }}
-          onDecouple={async () => {
-            if (!confirm("Decouple this combo?")) return;
-            await supabase.rpc("decouple_combo", { p_combo_id: (comboModal as Combo).combo_id });
-            setComboModal(null);
-            loadAll();
-          }}
-        />
-      )}
+      {comboEditModal && (() => {
+        const c = comboEditModal;
+        const truckName   = Array.isArray(c.truck)   ? c.truck[0]?.truck_name   : c.truck?.truck_name;
+        const trailerName = Array.isArray(c.trailer) ? c.trailer[0]?.trailer_name : c.trailer?.trailer_name;
+        return (
+          <ComboEditModal
+            open={true}
+            onClose={() => setComboEditModal(null)}
+            combo={{ combo_id: c.combo_id, tare_lbs: c.tare_lbs, target_weight: c.target_weight ?? null, claimed_by: c.claimed_by }}
+            truckName={truckName}
+            trailerName={trailerName}
+            claimedByName={c.in_use_by_name ?? null}
+            onDecouple={async () => {
+              setComboEditModal(null);
+              if (!confirm("Decouple this combo?")) return;
+              await supabase.rpc("decouple_combo", { p_combo_id: c.combo_id });
+              loadAll();
+            }}
+            onSaved={() => { loadAll(); }}
+          />
+        );
+      })()}
       {coupleModal && (() => {
         const coupledTruckIds   = new Set(combos.filter(c => c.active).map(c => c.truck_id));
         const coupledTrailerIds = new Set(combos.filter(c => c.active).map(c => c.trailer_id));
