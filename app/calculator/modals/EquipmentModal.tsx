@@ -616,7 +616,6 @@ function FleetModal({
   const [regionFilter, setRegionFilter] = useState("all");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [starBusy, setStarBusy] = useState(false);
-  const [myDisplayName, setMyDisplayName] = useState<string | null>(null);
 
   const loadFleet = useCallback(async () => {
     setLoading(true);
@@ -685,18 +684,6 @@ function FleetModal({
     const nameMap: Record<string, string> = {};
     for (const p of profileData ?? []) {
       if ((p as any).user_id) nameMap[(p as any).user_id] = (p as any).display_name ?? "Unknown";
-    }
-
-    // Resolve current user's display name for the "In use · [name]" label on isMine combos.
-    // nameMap already covers them if they have a claimed combo; otherwise do a targeted fetch.
-    if (authUserId) {
-      if (nameMap[authUserId]) {
-        setMyDisplayName(nameMap[authUserId]);
-      } else {
-        const { data: meData } = await supabase.rpc("get_display_names", { p_user_ids: [authUserId] });
-        const meRow = (meData ?? []).find((p: any) => p.user_id === authUserId);
-        setMyDisplayName(meRow?.display_name ?? null);
-      }
     }
 
     const fleet: FleetCombo[] = rows.map((r: any) => ({
@@ -1171,6 +1158,18 @@ export default function EquipmentModal({
     if (ids.length) loadProfileNames(ids);
   }, [combos, authUserId, loadProfileNames]);
 
+  // If the currently selected combo has been claimed by someone else, evict the
+  // local selection so the planner resets to "select equipment".
+  useEffect(() => {
+    if (!selectedComboId || !authUserId) return;
+    const selected = (combos ?? []).find((c) => String(c.combo_id) === String(selectedComboId));
+    if (!selected) return; // combo not in list yet — wait for next refresh
+    const claimedBy = String(selected.claimed_by ?? "");
+    if (claimedBy && claimedBy !== String(authUserId)) {
+      onSelectComboId("");
+    }
+  }, [combos, selectedComboId, authUserId, onSelectComboId]);
+
   // ── Primary equipment toggle (shared by main + fleet) ─────────────────────
 
   const togglePrimaryTruck = useCallback(async (truckId: string) => {
@@ -1215,13 +1214,16 @@ export default function EquipmentModal({
     [combos]
   );
 
-  // My Equipment: starred OR currently claimed by me OR actively selected
+  // My Equipment: starred OR currently claimed by me OR selected-but-unclaimed
+  // Never show a combo that is claimed by someone else, even if selectedComboId still points to it
+  // (the eviction effect above handles clearing selectedComboId, but this guards the render too).
   const myEquipmentCombos = useMemo(
     () => coupledCombos.filter((c) => {
-      const isStarred  = c.truck_id && primaryTruckIds.has(String(c.truck_id));
-      const isMine     = authUserId && String(c.claimed_by ?? "") === String(authUserId);
-      const isSelected = String(c.combo_id) === String(selectedComboId);
-      return isStarred || isMine || isSelected;
+      const isStarred   = c.truck_id && primaryTruckIds.has(String(c.truck_id));
+      const isMine      = authUserId && String(c.claimed_by ?? "") === String(authUserId);
+      const isSelected  = String(c.combo_id) === String(selectedComboId);
+      const stolenByOther = c.claimed_by && authUserId && String(c.claimed_by) !== String(authUserId);
+      return (isStarred || isMine || isSelected) && !stolenByOther;
     }),
     [coupledCombos, primaryTruckIds, authUserId, selectedComboId]
   );
