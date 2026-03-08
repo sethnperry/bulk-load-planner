@@ -531,7 +531,13 @@ function ComboCard({ combo, onEdit }: { combo: Combo; onEdit: () => void }) {
   const truckName   = Array.isArray(combo.truck)   ? combo.truck[0]?.truck_name   : combo.truck?.truck_name;
   const trailerName = Array.isArray(combo.trailer) ? combo.trailer[0]?.trailer_name : combo.trailer?.trailer_name;
   return (
-    <div style={{ ...css.card, padding: 0, marginBottom: 8, overflow: "hidden" }}>
+    <div
+      style={{ ...css.card, padding: 0, marginBottom: 8, overflow: "hidden", cursor: "pointer" }}
+      onClick={onEdit}
+      role="button"
+      tabIndex={0}
+      onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onEdit(); } }}
+    >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px" }}>
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ fontWeight: 700, fontSize: 15, color: T.text }}>{truckName || "—"} / {trailerName || "—"}</div>
@@ -541,7 +547,7 @@ function ComboCard({ combo, onEdit }: { combo: Combo; onEdit: () => void }) {
             {combo.in_use_by_name ? ` · In use: ${combo.in_use_by_name}` : ""}
           </div>
         </div>
-        <button type="button" style={{ ...css.btn("subtle"), padding: "3px 10px", fontSize: 11, flexShrink: 0 }} onClick={onEdit}>Edit</button>
+        <span style={{ fontSize: 11, color: T.muted, flexShrink: 0 }}>›</span>
       </div>
     </div>
   );
@@ -1088,22 +1094,33 @@ function ComboModal({ combo, companyId, trucks, trailers, onClose, onDone, onDec
   onClose: () => void; onDone: () => void; onDecouple?: () => void;
 }) {
   const isNew = !combo;
+  // When editing we resolve truck/trailer names from the combo itself — no dropdowns
+  const truckName   = Array.isArray(combo?.truck)   ? combo?.truck[0]?.truck_name   : combo?.truck?.truck_name;
+  const trailerName = Array.isArray(combo?.trailer) ? combo?.trailer[0]?.trailer_name : combo?.trailer?.trailer_name;
+  const comboLabel  = [truckName, trailerName].filter(Boolean).join(" / ") || "Unknown";
+
   const [truckId,   setTruckId]   = useState(combo?.truck_id ?? trucks[0]?.truck_id ?? "");
   const [trailerId, setTrailerId] = useState(combo?.trailer_id ?? trailers[0]?.trailer_id ?? "");
+  const [comboName, setComboName] = useState(combo?.combo_name ?? "");
   const [tareLbs,   setTareLbs]   = useState(String(combo?.tare_lbs ?? ""));
   const [target,    setTarget]    = useState(String(combo?.target_weight ?? "80000"));
   const [err,       setErr]       = useState<string | null>(null);
   const [saving,    setSaving]    = useState(false);
 
   async function save() {
-    if (!truckId || !trailerId) { setErr("Select a truck and trailer."); return; }
+    if (isNew && (!truckId || !trailerId)) { setErr("Select a truck and trailer."); return; }
     if (!tareLbs || parseFloat(tareLbs) <= 0) { setErr("Tare weight is required."); return; }
     setSaving(true); setErr(null);
     if (isNew) {
       const { error } = await supabase.rpc("couple_combo", { p_truck_id: truckId, p_trailer_id: trailerId, p_tare_lbs: parseFloat(tareLbs), p_target_weight: parseFloat(target) || 80000 });
       if (error) { setErr(error.message); setSaving(false); return; }
     } else {
-      const { error } = await supabase.from("equipment_combos").update({ truck_id: truckId, trailer_id: trailerId, tare_lbs: parseFloat(tareLbs), target_weight: parseFloat(target) || null }).eq("combo_id", combo!.combo_id);
+      const patch: any = {
+        tare_lbs: parseFloat(tareLbs),
+        target_weight: parseFloat(target) || null,
+        combo_name: comboName.trim() || null,
+      };
+      const { error } = await supabase.from("equipment_combos").update(patch).eq("combo_id", combo!.combo_id);
       if (error) { setErr(error.message); setSaving(false); return; }
     }
     onDone();
@@ -1117,18 +1134,46 @@ function ComboModal({ combo, companyId, trucks, trailers, onClose, onDone, onDec
   return (
     <Modal title={isNew ? "New Combo" : "Edit Combo"} onClose={onClose}>
       {err && <Banner msg={err} type="error" />}
-      <Field label="Truck">
-        <select value={truckId} onChange={e => setTruckId(e.target.value)} style={{ ...css.select, width: "100%" }}>
-          {trucks.length === 0 && <option value="">No active trucks</option>}
-          {trucks.map(t => <option key={t.truck_id} value={t.truck_id}>{t.truck_name}</option>)}
-        </select>
-      </Field>
-      <Field label="Trailer">
-        <select value={trailerId} onChange={e => setTrailerId(e.target.value)} style={{ ...css.select, width: "100%" }}>
-          {trailers.length === 0 && <option value="">No active trailers</option>}
-          {trailers.map(t => <option key={t.trailer_id} value={t.trailer_id}>{t.trailer_name}</option>)}
-        </select>
-      </Field>
+
+      {/* Edit: show unit label + in-use status; no dropdowns — decouple to change units */}
+      {!isNew && (
+        <div style={{ background: T.surface2, borderRadius: 8, padding: "8px 12px", marginBottom: 16 }}>
+          <div style={{ fontWeight: 700, fontSize: 15, color: T.text }}>{comboLabel}</div>
+          {combo?.in_use_by_name && (
+            <div style={{ fontSize: 12, color: T.accent, marginTop: 3 }}>In use · {combo.in_use_by_name}</div>
+          )}
+          <div style={{ fontSize: 11, color: T.muted, marginTop: 4 }}>
+            To change units, use Decouple below.
+          </div>
+        </div>
+      )}
+
+      {/* New combo: truck + trailer dropdowns */}
+      {isNew && (
+        <>
+          <Field label="Truck">
+            <select value={truckId} onChange={e => setTruckId(e.target.value)} style={{ ...css.select, width: "100%" }}>
+              {trucks.length === 0 && <option value="">No active trucks</option>}
+              {trucks.map(t => <option key={t.truck_id} value={t.truck_id}>{t.truck_name}</option>)}
+            </select>
+          </Field>
+          <Field label="Trailer">
+            <select value={trailerId} onChange={e => setTrailerId(e.target.value)} style={{ ...css.select, width: "100%" }}>
+              {trailers.length === 0 && <option value="">No active trailers</option>}
+              {trailers.map(t => <option key={t.trailer_id} value={t.trailer_id}>{t.trailer_name}</option>)}
+            </select>
+          </Field>
+        </>
+      )}
+
+      {/* Edit: combo name */}
+      {!isNew && (
+        <Field label="Combo name (optional)">
+          <input type="text" value={comboName} onChange={e => setComboName(e.target.value)}
+            placeholder={comboLabel} style={css.input} />
+        </Field>
+      )}
+
       <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
         <div style={{ flex: 1 }}>
           <label style={css.label}>Tare Weight (lbs)</label>
@@ -1140,7 +1185,6 @@ function ComboModal({ combo, companyId, trucks, trailers, onClose, onDone, onDec
         </div>
       </div>
 
-      {/* Equal-width buttons, full-width row, evenly spaced */}
       <div style={{ display: "flex", gap: 8 }}>
         {!isNew && (
           <button style={{ ...css.btn("ghost"), flex: 1, color: T.danger, borderColor: `${T.danger}55`, justifyContent: "center" as const }}

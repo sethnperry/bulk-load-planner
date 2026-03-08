@@ -128,203 +128,178 @@ function DetailField({ label, value }: { label: string; value?: React.ReactNode 
   );
 }
 
-function EquipmentDetailsModal({
+function ComboEditModal({
   open,
   onClose,
-  target,
+  combo,
+  truckName,
+  trailerName,
   claimedByName,
-  forceInUse,
-  companyId,
+  onDecouple,
+  onSaved,
 }: {
   open: boolean;
   onClose: () => void;
-  target: DetailTarget | null;
+  combo: ComboRow | null;
+  truckName?: string | null;
+  trailerName?: string | null;
   claimedByName?: string | null;
-  forceInUse?: boolean;
-  companyId?: string | null;
+  onDecouple: () => void;
+  onSaved: () => void;
 }) {
-  const c = target?.combo;
-  const truck = target?.truck;
-  const trailer = target?.trailer;
-  const companyIdSafe = String((c as any)?.company_id ?? companyId ?? "");
-  const [fullTruck, setFullTruck] = useState<AdminTruck | null>(null);
-  const [fullTrailer, setFullTrailer] = useState<AdminTrailer | null>(null);
-  const [otherPermits, setOtherPermits] = useState<AdminOtherPermit[]>([]);
-  const [loadingDetails, setLoadingDetails] = useState(false);
-  const [detailsErr, setDetailsErr] = useState<string | null>(null);
+  const [comboName, setComboName] = useState("");
+  const [tareLbs,   setTareLbs]   = useState("");
+  const [targetLbs, setTargetLbs] = useState("");
+  const [bufferLbs, setBufferLbs] = useState("");
+  const [saving, setSaving]       = useState(false);
+  const [err,    setErr]          = useState<string | null>(null);
+  const [saved,  setSaved]        = useState(false);
 
-  const [truckEditOpen, setTruckEditOpen] = useState(false);
-  const [trailerEditOpen, setTrailerEditOpen] = useState(false);
-
-  const reloadDetails = useCallback(async () => {
-    if (!target?.combo) return;
-    const combo = target.combo;
-    const truckId = String(combo.truck_id ?? "");
-    const trailerId = String(combo.trailer_id ?? "");
-    if (!truckId && !trailerId) return;
-
-    setLoadingDetails(true);
-    setDetailsErr(null);
-    try {
-      const truckSel = "truck_id, truck_name, active, vin_number, make, model, year, region, local_area, status_code, status_location, in_use_by, reg_expiration_date, reg_enforcement_date, inspection_shop, inspection_issue_date, inspection_expiration_date, ifta_expiration_date, ifta_enforcement_date, phmsa_expiration_date, alliance_expiration_date, fleet_ins_expiration_date, hazmat_lic_expiration_date, inner_bridge_expiration_date, notes";
-      const trailerSel = "trailer_id, trailer_name, active, vin_number, make, model, year, cg_max, region, local_area, status_code, status_location, in_use_by, last_load_config, trailer_reg_expiration_date, trailer_reg_enforcement_date, trailer_inspection_shop, trailer_inspection_issue_date, trailer_inspection_expiration_date, tank_v_expiration_date, tank_k_expiration_date, tank_l_expiration_date, tank_t_expiration_date, tank_i_expiration_date, tank_p_expiration_date, tank_uc_expiration_date, notes";
-
-      const [truckRes, trailerRes, permitsRes] = await Promise.all([
-        truckId ? supabase.from("trucks").select(truckSel).eq("truck_id", truckId).maybeSingle() : Promise.resolve({ data: null, error: null } as any),
-        trailerId ? supabase.from("trailers").select(trailerSel).eq("trailer_id", trailerId).maybeSingle() : Promise.resolve({ data: null, error: null } as any),
-        truckId ? supabase.from("truck_other_permits").select("permit_id, label, expiration_date").eq("truck_id", truckId).order("created_at") : Promise.resolve({ data: [], error: null } as any),
-      ]);
-
-      if (truckRes.error) throw truckRes.error;
-      if (trailerRes.error) throw trailerRes.error;
-      if (permitsRes.error) throw permitsRes.error;
-
-      const t: AdminTruck | null = truckRes.data ? (truckRes.data as any) : null;
-      let tr: AdminTrailer | null = trailerRes.data ? (trailerRes.data as any) : null;
-
-      if (tr) {
-        const { data: comps, error: compsErr } = await supabase
-          .from("trailer_compartments")
-          .select("comp_number, max_gallons, position")
-          .eq("trailer_id", tr.trailer_id)
-          .order("position");
-        if (!compsErr && comps) {
-          (tr as any).compartments = comps.map((r: any) => ({
-            comp_number: Number(r.comp_number),
-            max_gallons: Number(r.max_gallons),
-            position: Number(r.position),
-          }));
-        }
-      }
-
-      setFullTruck(t ? ({ ...(t as any), in_use_by_name: (combo.claimed_by ? (claimedByName ?? (t as any).in_use_by_name) : (t as any).in_use_by_name) } as any) : null);
-      setFullTrailer(tr ? ({ ...(tr as any), in_use_by_name: (combo.claimed_by ? (claimedByName ?? (tr as any).in_use_by_name) : (tr as any).in_use_by_name) } as any) : null);
-      setOtherPermits((permitsRes.data ?? []).map((r: any) => ({
-        permit_id: r.permit_id,
-        label: r.label ?? "",
-        expiration_date: r.expiration_date ?? "",
-      })));
-    } catch (e: any) {
-      setDetailsErr(e?.message ?? "Failed to load equipment details.");
-    } finally {
-      setLoadingDetails(false);
-    }
-  }, [target?.combo]);
-
+  // Populate fields when combo changes
   useEffect(() => {
-    if (!open) return;
-    void reloadDetails();
-  }, [open, reloadDetails]);
+    if (!open || !combo) return;
+    setComboName(combo.combo_name ?? "");
+    setTareLbs(combo.tare_lbs != null ? String(combo.tare_lbs) : "");
+    setTargetLbs((combo as any).target_weight != null ? String((combo as any).target_weight) : "");
+    setBufferLbs(combo.buffer_lbs != null ? String(combo.buffer_lbs) : "");
+    setErr(null);
+    setSaved(false);
+  }, [open, combo?.combo_id]);
 
-  if (!c) return null;
+  if (!combo) return null;
 
-  const tare = Number(c.tare_lbs ?? 0);
-  const targetW = Number(c.target_weight ?? 0);
-  const buffer = Number(c.buffer_lbs ?? 0);
-  const label = `${truck?.truck_name ?? c.truck_id ?? "—"} / ${trailer?.trailer_name ?? c.trailer_id ?? "—"}`;
-  const inUse = Boolean(c.claimed_by) || Boolean(forceInUse);
+  const label = [truckName, trailerName].filter(Boolean).join(" / ") || "Unknown";
+
+  async function handleSave() {
+    if (!combo) return;
+    setSaving(true); setErr(null); setSaved(false);
+    try {
+      const patch: Record<string, any> = {};
+      patch.combo_name   = comboName.trim() || null;
+      const tare   = Number(tareLbs);
+      const target = Number(targetLbs);
+      const buf    = Number(bufferLbs);
+      if (tareLbs   && Number.isFinite(tare)   && tare   > 0) patch.tare_lbs      = tare;
+      if (targetLbs && Number.isFinite(target) && target > 0) patch.target_weight = target;
+      if (bufferLbs && Number.isFinite(buf)    && buf    >= 0) patch.buffer_lbs   = buf;
+
+      const { error } = await supabase
+        .from("equipment_combos")
+        .update(patch)
+        .eq("combo_id", combo.combo_id);
+      if (error) throw error;
+      setSaved(true);
+      onSaved();
+    } catch (e: any) {
+      setErr(e?.message ?? "Failed to save.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const tooClose = Number(targetLbs) >= 79500;
 
   return (
-    <ModalShell open={open} onClose={onClose} title="Equipment Details">
-      <div
-        style={{
-          borderRadius: 18,
-          border: "1px solid rgba(255,255,255,0.10)",
-          background: "rgba(255,255,255,0.04)",
-          padding: 16,
-          marginTop: 6,
-          boxShadow: "0 10px 24px rgba(0,0,0,0.35)",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
-          <div style={{ fontSize: 28, fontWeight: 950, letterSpacing: 0.2, lineHeight: 1.05 }}>{label}</div>
-        </div>
-
-        {(tare > 0 || targetW > 0 || buffer > 0) && (
-          <div style={{ marginTop: 10 }}>
-            {tare > 0 && (
-              <div style={{ color: "rgba(255,255,255,0.45)", fontWeight: 800, fontSize: 14 }}>
-                Tare {tare.toLocaleString()} lbs
-              </div>
-            )}
-            {targetW > 0 && (
-              <div style={{ marginTop: 6, color: "rgba(255,255,255,0.45)", fontWeight: 800, fontSize: 14 }}>
-                Target {targetW.toLocaleString()} lbs
-              </div>
-            )}
-            {buffer > 0 && (
-              <div style={{ marginTop: 6, color: "rgba(255,255,255,0.45)", fontWeight: 800, fontSize: 14 }}>
-                Buffer {buffer.toLocaleString()} lbs
-              </div>
-            )}
-          </div>
-        )}
-
-        {inUse && (
-          <div style={{ marginTop: 10, color: "rgba(234,179,8,0.95)", fontWeight: 900, fontSize: 16 }}>
-            In use · {claimedByName ?? "Someone"}
+    <ModalShell open={open} onClose={onClose} title="Edit Combo">
+      {/* Combo identity header */}
+      <div style={{
+        borderRadius: 16, border: "1px solid rgba(255,255,255,0.10)",
+        background: "rgba(255,255,255,0.04)", padding: "14px 16px", marginTop: 6, marginBottom: 20,
+      }}>
+        <div style={{ fontSize: 22, fontWeight: 950, letterSpacing: 0.2 }}>{label}</div>
+        {claimedByName && (
+          <div style={{ marginTop: 6, color: "rgba(255,170,80,0.90)", fontWeight: 800, fontSize: 13 }}>
+            In use · {claimedByName}
           </div>
         )}
       </div>
 
-      <div style={{ height: 14 }} />
-
-      
-      {/* Driver details (copied from admin Truck/Trailer cards) */}
-      {detailsErr && (
-        <div style={{ ...S.err, marginTop: 8 }}>{detailsErr}</div>
+      {err && <div style={S.err}>{err}</div>}
+      {saved && !err && (
+        <div style={{ ...S.info, marginBottom: 16 }}>Saved ✓</div>
       )}
 
-      <div style={{ ...S.sectionHeader, marginTop: 0 }}>Truck</div>
-      {loadingDetails ? (
-        <div style={S.sub}>Loading truck…</div>
-      ) : fullTruck ? (
-        <AdminTruckCard
-          truck={fullTruck}
-          companyId={companyIdSafe}
-          otherPermits={otherPermits}
-          onEdit={() => setTruckEditOpen(true)}
+      {/* Combo name */}
+      <div style={{ marginBottom: 16 }}>
+        <label style={S.label}>Combo name (optional)</label>
+        <input
+          type="text"
+          placeholder={label}
+          value={comboName}
+          onChange={(e) => { setComboName(e.target.value); setSaved(false); }}
+          style={S.input}
+          disabled={saving}
         />
-      ) : (
-        <div style={S.sub}>No truck details.</div>
-      )}
+      </div>
 
-      <div style={{ height: 14 }} />
-
-      <div style={S.sectionHeader}>Trailer</div>
-      {loadingDetails ? (
-        <div style={S.sub}>Loading trailer…</div>
-      ) : fullTrailer ? (
-        <AdminTrailerCard
-          trailer={fullTrailer}
-          companyId={companyIdSafe}
-          onEdit={() => setTrailerEditOpen(true)}
+      {/* Tare */}
+      <div style={{ marginBottom: 16 }}>
+        <label style={S.label}>Tare weight (lbs)</label>
+        <input
+          type="number" inputMode="numeric" placeholder="e.g. 34800"
+          value={tareLbs}
+          onChange={(e) => { setTareLbs(e.target.value); setSaved(false); }}
+          style={S.input}
+          disabled={saving}
         />
-      ) : (
-        <div style={S.sub}>No trailer details.</div>
+      </div>
+
+      {/* Target */}
+      <div style={{ marginBottom: 4 }}>
+        <label style={S.label}>Target gross weight (lbs)</label>
+        <input
+          type="number" inputMode="numeric" placeholder="80000"
+          value={targetLbs}
+          onChange={(e) => { setTargetLbs(e.target.value); setSaved(false); }}
+          style={S.input}
+          disabled={saving}
+        />
+      </div>
+      {tooClose && (
+        <div style={{ padding: "8px 12px", borderRadius: 10, marginBottom: 12,
+          background: "rgba(180,50,20,0.12)", border: "1px solid rgba(220,80,40,0.35)" }}>
+          <div style={{ fontSize: 11, fontWeight: 900, color: "#fb923c", letterSpacing: 0.8, marginBottom: 2 }}>⚠ CUTTING IT CLOSE</div>
+          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.65)", lineHeight: 1.5 }}>
+            Right at the legal limit. Consider a small buffer for API variance and density shifts.
+          </div>
+        </div>
       )}
 
-      {/* Edit modals */}
-      {truckEditOpen && (
-        <AdminTruckModal
-          truck={fullTruck}
-          companyId={companyIdSafe}
-          onClose={() => setTruckEditOpen(false)}
-          onDone={() => { setTruckEditOpen(false); void reloadDetails(); }}
+      {/* Buffer */}
+      <div style={{ marginBottom: 24 }}>
+        <label style={S.label}>Buffer (lbs)</label>
+        <input
+          type="number" inputMode="numeric" placeholder="0"
+          value={bufferLbs}
+          onChange={(e) => { setBufferLbs(e.target.value); setSaved(false); }}
+          style={S.input}
+          disabled={saving}
         />
-      )}
-      {trailerEditOpen && (
-        <AdminTrailerModal
-          trailer={fullTrailer}
-          companyId={companyIdSafe}
-          onClose={() => setTrailerEditOpen(false)}
-          onDone={() => { setTrailerEditOpen(false); void reloadDetails(); }}
-        />
-      )}
+      </div>
 
+      {/* Save */}
+      <button
+        type="button"
+        style={{ ...S.btn, ...S.btnPrimary, width: "100%", padding: "15px 18px", borderRadius: 16, fontSize: 16, textAlign: "center" as const, marginBottom: 12, opacity: saving ? 0.55 : 1 }}
+        onClick={handleSave}
+        disabled={saving}
+      >
+        {saving ? "Saving…" : "Save Changes"}
+      </button>
+
+      {/* Decouple */}
+      <button
+        type="button"
+        style={{ ...S.btn, ...S.btnDecouple, width: "100%", padding: "13px 18px", borderRadius: 16, fontSize: 15, textAlign: "center" as const, opacity: saving ? 0.55 : 1 }}
+        onClick={() => { onClose(); onDecouple(); }}
+        disabled={saving}
+      >
+        DECOUPLE
+      </button>
     </ModalShell>
   );
 }
+
 
 // Merge in authoritative combo fields fetched directly from equipment_combos.
 // (The parent list may omit newer columns like target_weight.)
@@ -1013,9 +988,9 @@ export default function EquipmentModal({
   const [fleetOpen, setFleetOpen] = useState(false);
   const [companyId, setCompanyId] = useState<string | null>(null);
 
-  // Details view (tap a card)
-  const [detailsOpen, setDetailsOpen] = useState(false);
-  const [detailsTarget, setDetailsTarget] = useState<DetailTarget | null>(null);
+  // Combo edit modal (tap a card)
+  const [editOpen, setEditOpen] = useState(false);
+  const [editTarget, setEditTarget] = useState<DetailTarget | null>(null);
 
   // Decouple flow
   const [decoupleOpen, setDecoupleOpen]       = useState(false);
@@ -1319,12 +1294,12 @@ export default function EquipmentModal({
     return [t, tr].filter(Boolean).join(" / ") || "Unknown equipment";
   }
 
-  function openDetails(c: ComboRow) {
+  function openEdit(c: ComboRow) {
     const cm = mergeCombo(c, comboMeta[String(c.combo_id)]);
     const truck = trucks.find((x) => String(x.truck_id) === String(cm.truck_id)) ?? null;
     const trailer = trailers.find((x) => String(x.trailer_id) === String(cm.trailer_id)) ?? null;
-    setDetailsTarget({ combo: cm, truck, trailer });
-    setDetailsOpen(true);
+    setEditTarget({ combo: cm, truck, trailer });
+    setEditOpen(true);
   }
 
   // ── Actions ────────────────────────────────────────────────────────────────
@@ -1585,11 +1560,11 @@ export default function EquipmentModal({
                   style={{ ...rowStyle, cursor: "pointer" }}
                   role="button"
                   tabIndex={0}
-                  onClick={() => openDetails(c)}
+                  onClick={() => openEdit(c)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" || e.key === " ") {
                       e.preventDefault();
-                      openDetails(c);
+                      openEdit(c);
                     }
                   }}
                   title="Tap to view details"
@@ -1698,17 +1673,21 @@ export default function EquipmentModal({
         />
       )}
 
-      <EquipmentDetailsModal
-        open={detailsOpen}
-        onClose={() => { setDetailsOpen(false); setDetailsTarget(null); }}
-        target={detailsTarget}
-        companyId={companyId}
-        forceInUse={Boolean(detailsTarget?.combo && String(detailsTarget.combo.combo_id) === String(selectedComboId))}
-        claimedByName={detailsTarget?.combo
-          ? (String(detailsTarget.combo.combo_id) === String(selectedComboId)
+      <ComboEditModal
+        open={editOpen}
+        onClose={() => { setEditOpen(false); setEditTarget(null); }}
+        combo={editTarget?.combo ?? null}
+        truckName={editTarget?.truck?.truck_name ?? null}
+        trailerName={editTarget?.trailer?.trailer_name ?? null}
+        claimedByName={editTarget?.combo
+          ? (isMine(editTarget.combo)
               ? (myDisplayName ?? "You")
-              : getClaimedByName(detailsTarget.combo))
+              : editTarget.combo.claimed_by ? getClaimedByName(editTarget.combo) : null)
           : null}
+        onDecouple={() => {
+          if (editTarget?.combo) handleDecouple(String(editTarget.combo.combo_id));
+        }}
+        onSaved={() => { hydrateCombosFromDb(); onRefreshCombos(); }}
       />
     </>
   );
