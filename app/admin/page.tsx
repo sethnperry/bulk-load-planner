@@ -575,7 +575,7 @@ function InviteModal({ companyId, onClose, onDone }: { companyId: string; onClos
     <Modal title="Invite User" onClose={onClose}>
       {status && <Banner msg={status.msg} type={status.type} />}
       <Field label="Email"><input type="email" value={email} onChange={e => setEmail(e.target.value)} style={css.input} onKeyDown={e => e.key === "Enter" && send()} autoFocus /></Field>
-      <Field label="Role"><select value={role} onChange={e => setRole(e.target.value)} style={{ ...css.select, width: "100%" }}><option value="driver">Driver</option><option value="admin">Admin</option></select></Field>
+      <Field label="Role"><select value={role} onChange={e => setRole(e.target.value)} style={{ ...css.select, width: "100%" }}><option value="driver">Driver</option><option value="lead">Lead</option><option value="admin">Admin</option></select></Field>
       <div style={{ fontSize: 12, color: T.muted, marginBottom: 18, lineHeight: 1.5 }}>If the user already has an account they'll be added immediately. New users receive a magic link.</div>
       <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
         <button style={css.btn("ghost")} onClick={onClose}>Cancel</button>
@@ -1658,6 +1658,7 @@ function TerminalModal({ terminal, companyId, allProducts, onClose, onDone }: {
 export default function AdminPage() {
   const [companyId,     setCompanyId]     = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string>("");
+  const [myRole,        setMyRole]        = useState<string>("");
   const [companyName,   setCompanyName]   = useState<string>("");
   const [members,       setMembers]       = useState<Member[]>([]);
   const [trucks,        setTrucks]        = useState<Truck[]>([]);
@@ -1716,7 +1717,9 @@ export default function AdminPage() {
       setCompanyId(cid);
       const { data: memRow } = await supabase.from("user_companies").select("role, company:companies(company_name)").eq("user_id", uid).eq("company_id", cid).maybeSingle();
       setCompanyName((memRow?.company as any)?.company_name ?? "");
-      if (memRow?.role !== "admin") { setErr("Admin access required."); return; }
+      const role = memRow?.role ?? "";
+      setMyRole(role);
+      if (role !== "admin" && role !== "lead") { setErr("Admin access required."); return; }
 
       // Members
       const { data: memberRows } = await supabase.from("user_companies").select("user_id, role").eq("company_id", cid);
@@ -1916,35 +1919,38 @@ export default function AdminPage() {
         <NavMenu />
       </div>
 
-      {/* ── USERS ── */}
-      <section style={{ marginBottom: 32 }}>
-        <div style={css.sectionHead}>
-          <h2 style={{ ...css.sectionTitle, display: "flex", alignItems: "center", gap: 8, cursor: "pointer", userSelect: "none", flex: 1 }} onClick={() => setUsersOpen(v => !v)}>
-            <span style={{ transition: "transform 150ms", transform: usersOpen ? "rotate(90deg)" : "none", display: "inline-block", fontSize: 14 }}>›</span>
-            Users ({members.length})
-          </h2>
-          <button style={plusBtn} onClick={() => setInviteModal(true)}>+</button>
-        </div>
-        {usersOpen && (
-          <>
-            <div style={filterRow}>
-              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name, email, employee #…" style={{ ...css.input, flex: 1, minWidth: 140, padding: "7px 10px" }} />
-              <select value={filterRole} onChange={e => setFilterRole(e.target.value as any)} style={{ ...css.select, fontSize: 12, padding: "7px 8px" }}>
-                <option value="">All roles</option><option value="admin">Admin</option><option value="driver">Driver</option>
-              </select>
-              <select value={`${sortField}:${sortDir}`} onChange={e => { const [f, d] = e.target.value.split(":"); setSortField(f as SortField); setSortDir(d as SortDir); }} style={{ ...css.select, fontSize: 12, padding: "7px 8px" }}>
-                <option value="name:asc">Name A→Z</option><option value="name:desc">Name Z→A</option>
-                <option value="role:asc">Role A→Z</option><option value="division:asc">Division A→Z</option>
-                <option value="region:asc">Region A→Z</option><option value="hire_date:asc">Hire ↑</option><option value="hire_date:desc">Hire ↓</option>
-              </select>
+      {/* ── USERS (admin only) ── */}
+      {myRole === "admin" && (
+        <>
+          <section style={{ marginBottom: 32 }}>
+            <div style={css.sectionHead}>
+              <h2 style={{ ...css.sectionTitle, display: "flex", alignItems: "center", gap: 8, cursor: "pointer", userSelect: "none", flex: 1 }} onClick={() => setUsersOpen(v => !v)}>
+                <span style={{ transition: "transform 150ms", transform: usersOpen ? "rotate(90deg)" : "none", display: "inline-block", fontSize: 14 }}>›</span>
+                Users ({members.length})
+              </h2>
+              <button style={plusBtn} onClick={() => setInviteModal(true)}>+</button>
             </div>
-            {filteredMembers.length === 0 && <div style={{ ...css.card, color: T.muted, fontSize: 13 }}>No members match your search.</div>}
-            {filteredMembers.map(m => <MemberCard key={m.user_id} member={m} companyId={companyId!} onRefresh={loadAll} onEditProfile={(member, onSaved) => setProfileModal({ member, onSaved })} currentUserId={currentUserId} />)}
-          </>
-        )}
-      </section>
-
-      <hr style={css.divider} />
+            {usersOpen && (
+              <>
+                <div style={filterRow}>
+                  <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name, email, employee #…" style={{ ...css.input, flex: 1, minWidth: 140, padding: "7px 10px" }} />
+                  <select value={filterRole} onChange={e => setFilterRole(e.target.value as any)} style={{ ...css.select, fontSize: 12, padding: "7px 8px" }}>
+                    <option value="">All roles</option><option value="admin">Admin</option><option value="lead">Lead</option><option value="driver">Driver</option>
+                  </select>
+                  <select value={`${sortField}:${sortDir}`} onChange={e => { const [f, d] = e.target.value.split(":"); setSortField(f as SortField); setSortDir(d as SortDir); }} style={{ ...css.select, fontSize: 12, padding: "7px 8px" }}>
+                    <option value="name:asc">Name A→Z</option><option value="name:desc">Name Z→A</option>
+                    <option value="role:asc">Role A→Z</option><option value="division:asc">Division A→Z</option>
+                    <option value="region:asc">Region A→Z</option><option value="hire_date:asc">Hire ↑</option><option value="hire_date:desc">Hire ↓</option>
+                  </select>
+                </div>
+                {filteredMembers.length === 0 && <div style={{ ...css.card, color: T.muted, fontSize: 13 }}>No members match your search.</div>}
+                {filteredMembers.map(m => <MemberCard key={m.user_id} member={m} companyId={companyId!} onRefresh={loadAll} onEditProfile={(member, onSaved) => setProfileModal({ member, onSaved })} currentUserId={currentUserId} />)}
+              </>
+            )}
+          </section>
+          <hr style={css.divider} />
+        </>
+      )}
 
       {/* ── TRUCKS ── */}
       <section style={{ marginBottom: 32, marginTop: 28 }}>
@@ -2065,7 +2071,7 @@ export default function AdminPage() {
       </section>
 
       {/* ── Modals ── */}
-      {inviteModal  && <InviteModal companyId={companyId!} onClose={() => setInviteModal(false)} onDone={() => { setInviteModal(false); loadAll(); }} />}
+      {inviteModal && myRole === "admin" && <InviteModal companyId={companyId!} onClose={() => setInviteModal(false)} onDone={() => { setInviteModal(false); loadAll(); }} />}
       {profileModal && <DriverProfileModal member={profileModal.member} companyId={companyId!} onClose={() => setProfileModal(null)} onDone={(u) => { profileModal.onSaved(u); setProfileModal(null); }} onRemove={() => { setProfileModal(null); loadAll(); }} />}
       {truckModal   && <TruckModal truck={truckModal === "new" ? null : truckModal} companyId={companyId!} onClose={() => setTruckModal(null)} onDone={() => { setTruckModal(null); loadAll(); }} />}
       {trailerModal && <TrailerModal trailer={trailerModal === "new" ? null : trailerModal} companyId={companyId!} onClose={() => setTrailerModal(null)} onDone={() => { setTrailerModal(null); loadAll(); }} />}

@@ -21,12 +21,13 @@ export default function NavMenu() {
   const [userId,      setUserId]      = useState("");
   const [memberships, setMemberships] = useState<Membership[]>([]);
   const [activeId,    setActiveId]    = useState("");
-  const [isAdmin,     setIsAdmin]     = useState(false);
+  const [myRole,      setMyRole]      = useState("");
   const [switching,   setSwitching]   = useState(false);
 
   const isPlanner = pathname === "/calculator" || pathname === "/";
   const isProfile = pathname === "/profile";
   const isAdmin_  = pathname === "/admin";
+  const isAdmin   = myRole === "admin" || myRole === "lead";
 
   useEffect(() => {
     let cancelled = false;
@@ -51,7 +52,7 @@ export default function NavMenu() {
       const current = (sRow?.active_company_id as string | null) ?? ms[0]?.company_id ?? "";
       setMemberships(ms);
       setActiveId(current);
-      setIsAdmin(ms.find(m => m.company_id === current)?.role === "admin");
+      setMyRole(ms.find(m => m.company_id === current)?.role ?? "");
     }
     load();
     return () => { cancelled = true; };
@@ -73,7 +74,7 @@ export default function NavMenu() {
     if (id === activeId || switching) return;
     setSwitching(true);
     setActiveId(id);
-    setIsAdmin(memberships.find(m => m.company_id === id)?.role === "admin");
+    setMyRole(memberships.find(m => m.company_id === id)?.role ?? "");
     await supabase.rpc("set_active_company", { p_company_id: id });
     window.location.reload();
   }
@@ -144,7 +145,7 @@ export default function NavMenu() {
                 <div style={{ fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,0.9)", display: "flex", alignItems: "center", gap: 6 }}>
                   <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#f5a623", flexShrink: 0 }} />
                   {activeName}
-                  {isAdmin && <AdminBadge />}
+                  {(myRole === "admin" || myRole === "lead") && <AdminBadge role={myRole} />}
                 </div>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column" as const, gap: 4 }}>
@@ -167,7 +168,7 @@ export default function NavMenu() {
                         <span style={{ fontSize: 13, fontWeight: active ? 600 : 400, color: active ? "rgba(255,255,255,0.92)" : "rgba(255,255,255,0.55)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
                           {m.company?.company_name ?? "Company"}
                         </span>
-                        {m.role === "admin" && <AdminBadge />}
+                        {(m.role === "admin" || m.role === "lead") && <AdminBadge role={m.role} />}
                       </button>
                     );
                   })}
@@ -196,10 +197,10 @@ export default function NavMenu() {
   );
 }
 
-function AdminBadge() {
+function AdminBadge({ role }: { role: string }) {
   return (
     <span style={{ marginLeft: "auto", fontSize: 10, fontWeight: 700, padding: "1px 6px", borderRadius: 10, background: "rgba(245,166,35,0.15)", color: "#f5a623", border: "1px solid rgba(245,166,35,0.3)", flexShrink: 0 }}>
-      ADMIN
+      {role === "lead" ? "LEAD" : "ADMIN"}
     </span>
   );
 }
