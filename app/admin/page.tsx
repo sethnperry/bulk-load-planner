@@ -906,12 +906,11 @@ function TruckModal({ truck, companyId, onClose, onDone }: {
 // TankEditRow — tank inspection row with − on left, 📎 ☑ ▼ on right
 // ─────────────────────────────────────────────────────────────
 
-function TankEditRow({ label, dateVal, onDateChange, onRemove }: {
-  label: string; dateVal: string; onDateChange: (v: string) => void; onRemove: () => void;
+function TankEditRow({ label, dateVal, onDateChange, notesVal, onNotesChange, onRemove }: {
+  label: string; dateVal: string; onDateChange: (v: string) => void;
+  notesVal?: string; onNotesChange?: (v: string) => void; onRemove: () => void;
 }) {
   const [dropOpen, setDropOpen] = useState(false);
-  const [checked,  setChecked]  = useState(false);
-  const [noteText, setNoteText] = useState("");
 
   return (
     <div style={{ borderBottom: `1px solid ${T.border}22`, padding: "3px 0" }}>
@@ -930,11 +929,8 @@ function TankEditRow({ label, dateVal, onDateChange, onRemove }: {
         >{label}</span>
         <input type="date" value={dateVal} onChange={e => onDateChange(e.target.value)}
           style={{ ...css.input, ...sm, width: 130, flexShrink: 0 }} />
-        {/* 📎 · ☑ · ▼ on RIGHT */}
+        {/* ▼ on RIGHT */}
         <div style={{ display: "flex", alignItems: "center", gap: 2, flexShrink: 0 }}>
-          <AttachmentBtn />
-          <input type="checkbox" checked={checked} onChange={e => setChecked(e.target.checked)}
-            style={{ width: 13, height: 13, accentColor: T.accent, cursor: "pointer", margin: "0 2px" }} />
           <button type="button"
             style={{ background: "none", border: "none", cursor: "pointer", padding: "0 2px", lineHeight: 1,
               display: "flex", alignItems: "center", justifyContent: "center", color: T.muted, fontSize: 8,
@@ -943,12 +939,10 @@ function TankEditRow({ label, dateVal, onDateChange, onRemove }: {
             onClick={() => setDropOpen(v => !v)}>▼</button>
         </div>
       </div>
-      {dropOpen && (
+      {dropOpen && onNotesChange !== undefined && (
         <div style={{ paddingLeft: 26, paddingTop: 4 }}>
-          {onNotesChange !== undefined && (
-            <textarea value={notesVal ?? ""} onChange={e => onNotesChange(e.target.value)} placeholder="Notes…" rows={2}
-              style={{ ...css.input, width: "100%", fontSize: 11, padding: "3px 6px", resize: "vertical" as const }} />
-          )}
+          <textarea value={notesVal ?? ""} onChange={e => onNotesChange(e.target.value)} placeholder="Notes…" rows={2}
+            style={{ ...css.input, width: "100%", fontSize: 11, padding: "3px 6px", resize: "vertical" as const }} />
         </div>
       )}
     </div>
