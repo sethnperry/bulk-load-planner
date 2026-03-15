@@ -755,12 +755,34 @@ const lastProductInfoById = useMemo(() => {
             ⚠️ Unstable load (rear of neutral)
           </div>
         )}
+        <style jsx global>{`
+          input.cgRange { -webkit-appearance: none; appearance: none; background: transparent; height: 56px; }
+          input.cgRange:focus { outline: none; }
+          input.cgRange::-webkit-slider-runnable-track { height: 8px; border-radius: 999px; background: rgba(255,255,255,0.07); border: none; }
+          input.cgRange::-webkit-slider-thumb { -webkit-appearance: none; width: 28px; height: 28px; margin-top: -10px; background: transparent; border: none; opacity: 0; }
+          input.cgRange::-moz-range-track { height: 8px; border-radius: 999px; background: rgba(255,255,255,0.07); border: none; }
+          input.cgRange::-moz-range-thumb { width: 28px; height: 28px; background: transparent; border: none; opacity: 0; }
+        `}</style>
         <div style={{ position: "relative", width: "100%" }}>
           <input type="range" className="cgRange" min={0} max={1} step={0.005} value={cgSlider}
             onChange={(e) => setCgSlider(Number(e.target.value))}
             style={{ width: "100%" }} disabled={!equipment.selectedCombo}
           />
-          <div aria-hidden style={{ position: "absolute", left: `${Math.max(0, Math.min(1, cgSlider)) * 100}%`, top: "50%", transform: "translate(-50%, -50%)", width: 48, height: 48, display: "grid", placeItems: "center", pointerEvents: "none", fontWeight: 800, fontSize: 16, color: "rgba(255,255,255,0.75)", textShadow: "0 2px 10px rgba(0,0,0,0.55)" }}>CG</div>
+          {/* CG label — centered vertically on the track (track is 8px tall, thumb area 56px, so track center is at 50%) */}
+          <div aria-hidden style={{
+            position: "absolute",
+            left: `${Math.max(0, Math.min(1, cgSlider)) * 100}%`,
+            top: "50%",
+            transform: "translate(-50%, -50%)",
+            width: 36, height: 36,
+            display: "grid", placeItems: "center",
+            pointerEvents: "none",
+            fontWeight: 900, fontSize: 13,
+            color: "rgba(255,255,255,0.65)",
+            background: "rgba(255,255,255,0.10)",
+            borderRadius: "50%",
+            boxShadow: "0 1px 4px rgba(0,0,0,0.5)",
+          }}>CG</div>
         </div>
       </div>
 
@@ -850,12 +872,12 @@ const lastProductInfoById = useMemo(() => {
                   disabled={!locationSelected}
                   style={{ flex: 1, background: "transparent", border: "none", cursor: locationSelected ? "pointer" : "default", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "flex-start", padding: "10px 12px", minHeight: 54 }}
                 >
-                  <div style={{ fontWeight: 700, fontSize: "clamp(12px, 3.2vw, 15px)", color: terminalSelected ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.40)", lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const, width: "100%" }}>
+                  <div style={{ fontWeight: 700, fontSize: "clamp(12px, 3.2vw, 15px)", color: terminalSelected ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.40)", lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const, width: "100%", textAlign: "center" as const }}>
                     {terminalSelected ? (terminalLabel ?? "Terminal") : (locationSelected ? "Tap to select" : "Select location first")}
                   </div>
                   {terminalSelected && termDuration && (
-                    <div style={{ marginTop: 3, fontSize: "clamp(10px, 2.5vw, 12px)", fontWeight: 600, color: termDurationColor, lineHeight: 1.2 }}>
-                      {termDuration}
+                    <div style={{ marginTop: 4, fontSize: "clamp(10px, 2.5vw, 12px)", fontWeight: 600, color: termDurationColor, lineHeight: 1.2, textAlign: "center" as const, width: "100%" }}>
+                      {termDuration === "Expired" ? "Expired" : `Expires in ${termDuration}`}
                     </div>
                   )}
                 </button>
@@ -897,20 +919,35 @@ const lastProductInfoById = useMemo(() => {
 
             {/* Row 2: Temp | Load — no sub-buttons */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-              {/* Temp button */}
+              {/* Temp button — glow style */}
               <button type="button" onClick={() => setTempDialOpen(true)}
-                style={{ ...cardBase, border: `1px solid ${tempBorderColor}`, background: tempBg, alignItems: "center", justifyContent: "center", padding: "18px 10px", cursor: "pointer", boxShadow: `0 0 0 1px ${tempBorderColor}18` }}
+                style={{
+                  ...cardBase,
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  background: `radial-gradient(ellipse at 50% 120%, ${tempBg.replace('0.05','0.22').replace('0.10','0.22').replace('0.12','0.22')} 0%, rgba(0,0,0,0) 70%), rgba(18,18,18,0.95)`,
+                  alignItems: "center", justifyContent: "center", padding: "20px 10px",
+                  cursor: "pointer",
+                  boxShadow: `0 4px 24px ${tempBorderColor}28, inset 0 1px 0 rgba(255,255,255,0.06), inset 0 -1px 0 rgba(0,0,0,0.3)`,
+                }}
               >
-                <div style={{ fontSize: "clamp(24px, 6.5vw, 44px)", fontWeight: 900, color: tempBorderColor, lineHeight: 1 }}>
+                <div style={{ fontSize: "clamp(20px, 5.5vw, 34px)", fontWeight: 900, color: tempBorderColor, lineHeight: 1 }}>
                   {Math.round(tempF)}°F
                 </div>
               </button>
 
-              {/* Load button */}
+              {/* Load button — glow style */}
               <button type="button" onClick={loadWorkflow.beginLoadToSupabase} disabled={loadDisabled}
-                style={{ ...cardBase, border: `1px solid ${loadBorderColor}`, background: loadBg, alignItems: "center", justifyContent: "center", padding: "18px 10px", cursor: loadDisabled ? "not-allowed" : "pointer", filter: loadDisabled ? "brightness(0.7)" : "none" }}
+                style={{
+                  ...cardBase,
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  background: `radial-gradient(ellipse at 50% 120%, ${loadDisabled ? "rgba(20,50,70,0.4)" : "rgba(30,100,140,0.35)"} 0%, rgba(0,0,0,0) 70%), rgba(18,18,18,0.95)`,
+                  alignItems: "center", justifyContent: "center", padding: "20px 10px",
+                  cursor: loadDisabled ? "not-allowed" : "pointer",
+                  boxShadow: loadDisabled ? "none" : `0 4px 24px ${loadBorderColor}30, inset 0 1px 0 rgba(255,255,255,0.06), inset 0 -1px 0 rgba(0,0,0,0.3)`,
+                  opacity: loadDisabled ? 0.55 : 1,
+                }}
               >
-                <div style={{ fontWeight: 1000, letterSpacing: 0.6, fontSize: "clamp(28px, 8vw, 56px)", lineHeight: 1, color: loadTextColor }}>
+                <div style={{ fontWeight: 1000, letterSpacing: 0.6, fontSize: "clamp(22px, 6vw, 42px)", lineHeight: 1, color: loadTextColor }}>
                   {loadLabel}
                 </div>
               </button>
@@ -966,6 +1003,25 @@ const lastProductInfoById = useMemo(() => {
         open={tempDial2Open} onClose={() => setTempDial2Open(false)} title="Temp"
         value={tempDial2ProductId ? Number(productInputs[tempDial2ProductId]?.tempF ?? 60) : 60}
         onChange={(v) => { const pid = tempDial2ProductId; if (!pid) return; setProductInputs((prev) => ({ ...prev, [pid]: { ...(prev[pid] ?? {}), tempF: v } })); }}
+        TempDial={TempDial}
+      />
+
+      <ProductTempModal
+        open={tempDialOpen}
+        onClose={() => setTempDialOpen(false)}
+        styles={styles}
+        selectedCity={location.selectedCity}
+        selectedState={location.selectedState}
+        selectedTerminalId={location.selectedTerminalId}
+        locationLat={location.locationLat}
+        locationLon={location.locationLon}
+        ambientTempLoading={location.ambientTempLoading}
+        ambientTempF={location.ambientTempF}
+        tempF={tempF}
+        setTempF={setTempF}
+        predictedFuelTempF={predictedFuelTempF}
+        fuelTempConfidence={fuelTempConfidence}
+        fuelTempLoading={fuelTempLoading}
         TempDial={TempDial}
       />
 
