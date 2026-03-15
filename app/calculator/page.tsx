@@ -798,17 +798,18 @@ const lastProductInfoById = useMemo(() => {
         const diffColor = diff == null ? "rgba(255,255,255,0.90)" : diff > 0 ? "#ef4444" : "#4ade80";
 
         // Temp button confidence colors
-        const isOverride = predictedFuelTempF != null && Math.abs(tempF - predictedFuelTempF) > 0.5;
-        const tempBorderColor = isOverride ? "#fb923c"
-          : fuelTempConfidence === "high"   ? "#4ade80"
-          : fuelTempConfidence === "medium" ? "#fbbf24"
-          : fuelTempConfidence === "low"    ? "#f87171"
-          : "rgba(255,255,255,0.18)";
-        const tempBg = isOverride ? "rgba(251,146,60,0.12)"
-          : fuelTempConfidence === "high"   ? "rgba(74,222,128,0.10)"
-          : fuelTempConfidence === "medium" ? "rgba(251,191,36,0.10)"
-          : fuelTempConfidence === "low"    ? "rgba(248,113,113,0.10)"
-          : "rgba(255,255,255,0.05)";
+        // isOverride = user manually moved temp away from prediction after it auto-applied
+        const isOverride = userAdjustedTempRef.current && predictedFuelTempF != null && Math.abs(tempF - predictedFuelTempF) > 0.5;
+        const tempBorderColor = isOverride              ? "#fb923c"
+          : fuelTempConfidence === "high"               ? "#4ade80"
+          : fuelTempConfidence === "medium"             ? "#fbbf24"
+          : fuelTempConfidence === "low"                ? "#f87171"
+          : "rgba(255,255,255,0.35)";
+        const tempGlowColor = isOverride                ? "rgba(251,146,60,0.28)"
+          : fuelTempConfidence === "high"               ? "rgba(74,222,128,0.28)"
+          : fuelTempConfidence === "medium"             ? "rgba(251,191,36,0.28)"
+          : fuelTempConfidence === "low"                ? "rgba(248,113,113,0.28)"
+          : "rgba(255,255,255,0.08)";
 
         // Load button colors
         const loadBg = loadReport ? "rgba(103,232,249,0.12)" : "rgba(30,60,80,0.60)";
@@ -924,10 +925,10 @@ const lastProductInfoById = useMemo(() => {
                 style={{
                   ...cardBase,
                   border: "1px solid rgba(255,255,255,0.08)",
-                  background: `radial-gradient(ellipse at 50% 120%, ${tempBg.replace('0.05','0.22').replace('0.10','0.22').replace('0.12','0.22')} 0%, rgba(0,0,0,0) 70%), rgba(18,18,18,0.95)`,
+                  background: `radial-gradient(ellipse at 50% 120%, ${tempGlowColor} 0%, rgba(0,0,0,0) 70%), rgba(18,18,18,0.95)`,
                   alignItems: "center", justifyContent: "center", padding: "20px 10px",
                   cursor: "pointer",
-                  boxShadow: `0 4px 24px ${tempBorderColor}28, inset 0 1px 0 rgba(255,255,255,0.06), inset 0 -1px 0 rgba(0,0,0,0.3)`,
+                  boxShadow: `0 4px 24px ${tempGlowColor}, inset 0 1px 0 rgba(255,255,255,0.06), inset 0 -1px 0 rgba(0,0,0,0.3)`,
                 }}
               >
                 <div style={{ fontSize: "clamp(20px, 5.5vw, 34px)", fontWeight: 900, color: tempBorderColor, lineHeight: 1 }}>
