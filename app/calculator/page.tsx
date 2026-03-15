@@ -33,7 +33,6 @@ import { useFuelTempPrediction } from "./hooks/useFuelTempPrediction";
 import { useLoadHistory } from "./hooks/useLoadHistory";
 
 // ── Sections ───────────────────────────────────────────────────────────────────
-import LocationBar from "./sections/LocationBar";
 import PlannerControls from "./sections/PlannerControls";
 
 // ── Modals ─────────────────────────────────────────────────────────────────────
@@ -718,24 +717,7 @@ const lastProductInfoById = useMemo(() => {
         <NavMenu />
       </div>
 
-      <LocationBar
-        styles={styles}
-        locationTitle={location.locationLabel ?? "City, State"}
-        ambientSubtitle={location.locationLabel
-          ? `${location.ambientTempLoading ? "…" : location.ambientTempF == null ? "—" : Math.round(location.ambientTempF)}° ambient`
-          : undefined}
-        terminalTitle={terminalLabel ?? "Terminal"}
-        terminalSubtitle={terminalCardedText}
-        terminalSubtitleClassName={terminalCardedClass}
-        onOpenLocation={() => setLocOpen(true)}
-        onOpenTerminal={() => setTermOpen(true)}
-        terminalEnabled={Boolean(location.locationLabel)}
-        locationSelected={Boolean(location.selectedCity && location.selectedState)}
-        terminalSelected={Boolean(location.selectedTerminalId)}
-        snapshotSlots={null}
-      />
-
-      <PlannerControls
+<PlannerControls
         styles={styles}
         selectedTrailerId={selectedTrailerId}
         compLoading={compLoading}
@@ -766,30 +748,23 @@ const lastProductInfoById = useMemo(() => {
         onClose={() => { setCompModalOpen(false); setCompModalComp(null); }}
       />
 
-      {location.selectedTerminalId && (
-        <>
-          <div style={{ marginTop: 12 }}>
-            {unstableLoad && (
-              <div style={{ ...styles.error, marginTop: 0, marginBottom: 10, textAlign: "center" }}>
-                ⚠️ Unstable load (rear of neutral)
-              </div>
-            )}
-
-            {/* CG Slider — full width, no return button */}
-            <div style={{ position: "relative", width: "100%" }}>
-              <input type="range" className="cgRange" min={0} max={1} step={0.005} value={cgSlider}
-                onChange={(e) => setCgSlider(Number(e.target.value))}
-                style={{ width: "100%" }} disabled={!equipment.selectedCombo}
-              />
-              <div aria-hidden style={{ position: "absolute", left: `${Math.max(0, Math.min(1, cgSlider)) * 100}%`, top: "50%", transform: "translate(-50%, -50%)", width: 48, height: 48, display: "grid", placeItems: "center", pointerEvents: "none", fontWeight: 800, fontSize: 16, color: "rgba(255,255,255,0.75)", textShadow: "0 2px 10px rgba(0,0,0,0.55)" }}>CG</div>
-            </div>
-
-
+      {/* CG Slider — always visible */}
+      <div style={{ marginTop: 10 }}>
+        {unstableLoad && (
+          <div style={{ ...styles.error, marginTop: 0, marginBottom: 10, textAlign: "center" }}>
+            ⚠️ Unstable load (rear of neutral)
           </div>
-        </>
-      )}
+        )}
+        <div style={{ position: "relative", width: "100%" }}>
+          <input type="range" className="cgRange" min={0} max={1} step={0.005} value={cgSlider}
+            onChange={(e) => setCgSlider(Number(e.target.value))}
+            style={{ width: "100%" }} disabled={!equipment.selectedCombo}
+          />
+          <div aria-hidden style={{ position: "absolute", left: `${Math.max(0, Math.min(1, cgSlider)) * 100}%`, top: "50%", transform: "translate(-50%, -50%)", width: 48, height: 48, display: "grid", placeItems: "center", pointerEvents: "none", fontWeight: 800, fontSize: 16, color: "rgba(255,255,255,0.75)", textShadow: "0 2px 10px rgba(0,0,0,0.55)" }}>CG</div>
+        </div>
+      </div>
 
-      {/* Action grid */}
+      {/* ── Action grid ── */}
       {(() => {
         const { loadReport } = loadWorkflow;
         const plannedGal = loadReport?.planned_total_gal ?? (planRows.length ? plannedGallonsTotal : null);
@@ -800,23 +775,38 @@ const lastProductInfoById = useMemo(() => {
         const diffText = diff == null ? "—" : `${diff >= 0 ? "+" : ""}${Math.round(diff).toLocaleString()} lbs`;
         const diffColor = diff == null ? "rgba(255,255,255,0.90)" : diff > 0 ? "#ef4444" : "#4ade80";
 
-        // Temp button colors (confidence)
+        // Temp button confidence colors
         const isOverride = predictedFuelTempF != null && Math.abs(tempF - predictedFuelTempF) > 0.5;
         const tempBorderColor = isOverride ? "#fb923c"
           : fuelTempConfidence === "high"   ? "#4ade80"
-          : fuelTempConfidence === "medium"  ? "#fbbf24"
-          : fuelTempConfidence === "low"     ? "#f87171"
+          : fuelTempConfidence === "medium" ? "#fbbf24"
+          : fuelTempConfidence === "low"    ? "#f87171"
           : "rgba(255,255,255,0.18)";
         const tempBg = isOverride ? "rgba(251,146,60,0.12)"
           : fuelTempConfidence === "high"   ? "rgba(74,222,128,0.10)"
-          : fuelTempConfidence === "medium"  ? "rgba(251,191,36,0.10)"
-          : fuelTempConfidence === "low"     ? "rgba(248,113,113,0.10)"
+          : fuelTempConfidence === "medium" ? "rgba(251,191,36,0.10)"
+          : fuelTempConfidence === "low"    ? "rgba(248,113,113,0.10)"
           : "rgba(255,255,255,0.05)";
 
         // Load button colors
-        const loadBg = loadReport ? "rgba(103,232,249,0.12)" : "rgba(255,255,255,0.05)";
-        const loadBorderColor = loadReport ? "#67e8f9" : "rgba(255,255,255,0.18)";
+        const loadBg = loadReport ? "rgba(103,232,249,0.12)" : "rgba(30,60,80,0.60)";
+        const loadBorderColor = loadReport ? "#67e8f9" : "rgba(40,120,180,0.55)";
         const loadTextColor = loadReport ? "#67e8f9" : "rgba(255,255,255,0.92)";
+
+        // Terminal duration only — strip date, keep "(N days)" or "Expired"
+        const termDuration = (() => {
+          if (!terminalCardedText) return undefined;
+          if (isPastISO_(terminalDisplayISO!)) return "Expired";
+          const m = terminalCardedText.match(/\(([^)]+)\)/);
+          return m ? m[1] : terminalCardedText;
+        })();
+        const termDurationColor = (() => {
+          if (!termDuration) return "rgba(255,255,255,0.45)";
+          if (termDuration === "Expired") return "#ef4444";
+          const d = parseInt(termDuration);
+          if (!isNaN(d) && d <= 7) return "#f97316";
+          return "rgba(255,255,255,0.45)";
+        })();
 
         const subBtnStyle: React.CSSProperties = {
           display: "flex", alignItems: "center", justifyContent: "space-between",
@@ -835,26 +825,46 @@ const lastProductInfoById = useMemo(() => {
           display: "flex", flexDirection: "column", overflow: "hidden",
         };
 
+        const locationLabel = location.locationLabel ?? null;
+        const locationSelected = Boolean(location.selectedCity && location.selectedState);
+        const terminalSelected = Boolean(location.selectedTerminalId);
+
         return (
-          <div style={{ marginTop: 12, position: "relative", width: "100%", boxSizing: "border-box" }}>
+          <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 10 }}>
 
-            {/* Row 1: Temp + Load — full width side by side */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
-              {/* Temp button */}
-              <button type="button" onClick={() => setTempDialOpen(true)}
-                style={{ ...cardBase, border: `1px solid ${tempBorderColor}`, background: tempBg, alignItems: "center", justifyContent: "center", padding: "14px 10px", cursor: "pointer", boxShadow: `0 0 0 1px ${tempBorderColor}18` }}
-              >
-                <div style={{ fontSize: "clamp(22px, 6vw, 40px)", fontWeight: 900, color: tempBorderColor, lineHeight: 1 }}>
-                  {Math.round(tempF)}°F
-                </div>
-              </button>
+            {/* Row 1: Location+Terminal card | Report card */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
 
-              {/* Load button */}
-              <div style={{ ...cardBase, border: `1px solid ${loadBorderColor}`, background: loadBg }}>
-                {/* History sub-button at top */}
-                <button type="button" onClick={(e) => { e.stopPropagation(); setMyLoadsOpen(true); loadHistory.fetch(); }}
-                  style={subBtnStyle}
+              {/* Combined Location / Terminal card */}
+              <div style={{ ...cardBase }}>
+                {/* Location sub-button at top */}
+                <button type="button" onClick={() => setLocOpen(true)} style={subBtnStyle}>
+                  <span style={{ ...subBtnLabel, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
+                    {locationSelected ? locationLabel! : "Location"}
+                  </span>
+                  <span style={subBtnChevron}>›</span>
+                </button>
+                {/* Terminal main area */}
+                <button type="button"
+                  onClick={() => setTermOpen(true)}
+                  disabled={!locationSelected}
+                  style={{ flex: 1, background: "transparent", border: "none", cursor: locationSelected ? "pointer" : "default", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "flex-start", padding: "10px 12px", minHeight: 54 }}
                 >
+                  <div style={{ fontWeight: 700, fontSize: "clamp(12px, 3.2vw, 15px)", color: terminalSelected ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.40)", lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const, width: "100%" }}>
+                    {terminalSelected ? (terminalLabel ?? "Terminal") : (locationSelected ? "Tap to select" : "Select location first")}
+                  </div>
+                  {terminalSelected && termDuration && (
+                    <div style={{ marginTop: 3, fontSize: "clamp(10px, 2.5vw, 12px)", fontWeight: 600, color: termDurationColor, lineHeight: 1.2 }}>
+                      {termDuration}
+                    </div>
+                  )}
+                </button>
+              </div>
+
+              {/* Report card — history sub-button at top, over/under at bottom */}
+              <div style={{ ...cardBase, justifyContent: "space-between" }}>
+                {/* History sub-button */}
+                <button type="button" onClick={() => { setMyLoadsOpen(true); loadHistory.fetch(); }} style={subBtnStyle}>
                   {(() => {
                     const last = loadHistory.rows[0];
                     if (!last) return <><span style={subBtnLabel}>My Loads</span><span style={subBtnChevron}>›</span></>;
@@ -864,49 +874,53 @@ const lastProductInfoById = useMemo(() => {
                     return <><span style={{ ...subBtnLabel, flex: 1, textAlign: "left" as const }}>{ago} · {gal}</span><span style={subBtnChevron}>›</span></>;
                   })()}
                 </button>
-                {/* Primary LOAD tap */}
-                <button type="button" onClick={loadWorkflow.beginLoadToSupabase} disabled={loadDisabled}
-                  style={{ flex: 1, background: "transparent", border: "none", cursor: loadDisabled ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", padding: "10px 0" }}
-                >
-                  <div style={{ fontWeight: 1000, letterSpacing: 0.6, fontSize: "clamp(26px, 7.5vw, 56px)", lineHeight: 1, color: loadTextColor }}>
-                    {loadLabel}
-                  </div>
-                </button>
-              </div>
-            </div>
-
-            {/* Row 2: Report card — full width */}
-            <div>
-              {/* Report card — over/under sub-button at bottom */}
-              <div style={{ ...cardBase, justifyContent: "space-between" }}>
                 {/* Planned / Target / Actual */}
-                <div style={{ padding: "clamp(10px,2.5vw,14px)", display: "flex", flexDirection: "column", gap: 7, flex: 1 }}>
+                <div style={{ padding: "8px 12px", display: "flex", flexDirection: "column", gap: 5, flex: 1 }}>
                   {[
-                    { label: "Planned", text: plannedGalText, big: true },
+                    { label: "Gallons", text: plannedGalText, big: true },
                     { label: "Target",  text: targetText },
                     { label: "Actual",  text: actualText },
                   ].map(({ label, text, big }) => (
                     <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 4 }}>
-                      <div style={{ color: "rgba(255,255,255,0.55)", fontWeight: 900, fontSize: "clamp(10px, 2.5vw, 13px)", whiteSpace: "nowrap" as const }}>{label}</div>
-                      <div style={{ color: "rgba(255,255,255,0.92)", fontWeight: 1000, fontSize: big ? "clamp(14px, 4vw, 28px)" : "clamp(12px, 3.2vw, 22px)", lineHeight: 1.1, textAlign: "right" as const, whiteSpace: "nowrap" as const }}>{text}</div>
+                      <div style={{ color: "rgba(255,255,255,0.45)", fontWeight: 700, fontSize: "clamp(9px, 2.2vw, 11px)", whiteSpace: "nowrap" as const }}>{label}</div>
+                      <div style={{ color: "rgba(255,255,255,0.92)", fontWeight: 900, fontSize: big ? "clamp(13px, 3.5vw, 20px)" : "clamp(11px, 2.8vw, 16px)", lineHeight: 1.1, textAlign: "right" as const, whiteSpace: "nowrap" as const }}>{text}</div>
                     </div>
                   ))}
                 </div>
-
-                {/* Over/Under — styled as sub-button at bottom */}
-                <div style={{ ...subBtnStyle, borderBottom: "none", borderTop: "1px solid rgba(255,255,255,0.07)", cursor: "default", justifyContent: "space-between" }}>
-                  <span style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.40)" }}>Over/Under</span>
-                  <span style={{ fontSize: "clamp(12px, 3.5vw, 18px)", fontWeight: 900, color: diffColor, textAlign: "right" as const }}>{diffText}</span>
+                {/* Over/Under strip at bottom */}
+                <div style={{ ...subBtnStyle, borderBottom: "none", borderTop: "1px solid rgba(255,255,255,0.07)", cursor: "default" }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.35)" }}>Over/Under</span>
+                  <span style={{ fontSize: "clamp(11px, 3vw, 16px)", fontWeight: 900, color: diffColor }}>{diffText}</span>
                 </div>
               </div>
             </div>
 
+            {/* Row 2: Temp | Load — no sub-buttons */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              {/* Temp button */}
+              <button type="button" onClick={() => setTempDialOpen(true)}
+                style={{ ...cardBase, border: `1px solid ${tempBorderColor}`, background: tempBg, alignItems: "center", justifyContent: "center", padding: "18px 10px", cursor: "pointer", boxShadow: `0 0 0 1px ${tempBorderColor}18` }}
+              >
+                <div style={{ fontSize: "clamp(24px, 6.5vw, 44px)", fontWeight: 900, color: tempBorderColor, lineHeight: 1 }}>
+                  {Math.round(tempF)}°F
+                </div>
+              </button>
+
+              {/* Load button */}
+              <button type="button" onClick={loadWorkflow.beginLoadToSupabase} disabled={loadDisabled}
+                style={{ ...cardBase, border: `1px solid ${loadBorderColor}`, background: loadBg, alignItems: "center", justifyContent: "center", padding: "18px 10px", cursor: loadDisabled ? "not-allowed" : "pointer", filter: loadDisabled ? "brightness(0.7)" : "none" }}
+              >
+                <div style={{ fontWeight: 1000, letterSpacing: 0.6, fontSize: "clamp(28px, 8vw, 56px)", lineHeight: 1, color: loadTextColor }}>
+                  {loadLabel}
+                </div>
+              </button>
+            </div>
 
           </div>
         );
       })()}
 
-      
+            
       {/* ── Modals ── */}
       <EquipmentModal
         open={equipOpen} onClose={() => setEquipOpen(false)}
