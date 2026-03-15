@@ -1,163 +1,124 @@
 "use client";
 
-type TileProps = {
-  iconText: string;
-  title: string;
-  subtitle?: string;
-  onClick: () => void;
-  disabled?: boolean;
-  selected?: boolean;
-  subtitleClassName?: string;
-  placeholderSubtitle?: string;
-};
+// ── Duration color: grey=healthy, orange=≤7 days, red=expired ─────────────────
+function terminalSubColor(subtitle: string | undefined, subtitleClassName: string | undefined): string {
+  if (subtitleClassName?.includes("red")) return "#ef4444";
+  // Parse days from countdown text like "86 days", "6 days", "Expired"
+  if (!subtitle) return "rgba(255,255,255,0.45)";
+  if (/[Ee]xpired/.test(subtitle)) return "#ef4444";
+  const m = subtitle.match(/(\d+)\s*d(?:ays?)?/i);
+  if (m) {
+    const d = parseInt(m[1], 10);
+    if (d <= 7) return "#f97316";
+  }
+  return "rgba(255,255,255,0.45)";
+}
 
-function Tile({
-  iconText,
-  title,
-  subtitle,
-  onClick,
-  subtitleClassName,
-  placeholderSubtitle,
-  disabled = false,
-  selected = false,
-}: TileProps) {
-  const isSelected = !!selected;
-
-  const cardClass = disabled
-    ? "bg-[#2a2a2a]/70 border-white/5 opacity-60"
-    : "bg-[#202020]/90 border-white/10 hover:border-white/20";
-
-  const iconWellClass = disabled
-    ? "bg-[#2a2a2a] border-white/5"
-    : isSelected
-    ? "bg-black border-white/20"
-    : "bg-[#2a2a2a] border-white/10";
-
-  const iconTextClass = disabled ? "text-white/30" : isSelected ? "text-amber-400" : "text-white/50";
-  const titleClass = disabled ? "text-white/35" : isSelected ? "text-white" : "text-white/80";
-
-  const hasSubtitle = typeof subtitle === "string" ? subtitle.trim().length > 0 : subtitle != null;
-
-  const defaultSubtitleClass = disabled ? "text-white/30" : isSelected ? "text-white/70" : "text-white/50";
-
-  const subtitleText =
-    hasSubtitle
-      ? (subtitle as any)
-      : placeholderSubtitle ?? (disabled ? "Select location first" : "Tap to select");
-
-  const subtitleFinalClass =
-    subtitleClassName ?? (hasSubtitle ? defaultSubtitleClass : disabled ? "text-white/30" : "text-white/40");
-
+// ── Sub-button strip ──────────────────────────────────────────────────────────
+function SubButton({ label, onClick }: { label: string; onClick: () => void }) {
   return (
     <button
       type="button"
-      onClick={disabled ? undefined : onClick}
-      disabled={disabled}
-      className={[
-        "w-full rounded-2xl text-left overflow-hidden shadow-xl border transition active:scale-[0.99]",
-        cardClass,
-      ].join(" ")}
-      style={{ height: 72 }}
+      onClick={(e) => { e.stopPropagation(); onClick(); }}
+      style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        width: "100%", padding: "5px 10px",
+        background: "rgba(255,255,255,0.04)",
+        border: "none",
+        borderBottom: "1px solid rgba(255,255,255,0.08)",
+        cursor: "pointer", flexShrink: 0,
+      }}
     >
-      <div style={{ display: "flex", alignItems: "stretch", height: "100%", padding: 4, gap: 0 }}>
-        <div
-          className={["rounded-xl border flex items-center justify-center transition-colors flex-shrink-0", iconWellClass].join(
-            " "
-          )}
-          style={{ width: 56, minWidth: 56 }}
-        >
-          <span className={["text-base font-bold transition-colors", iconTextClass].join(" ")}>{iconText}</span>
-        </div>
-
-        <div
-          style={{
-            flex: 1,
-            minWidth: 0,
-            display: "flex",
-            flexDirection: "column",
-            justifyContent: "center",
-            padding: "0 8px 0 10px",
-          }}
-        >
-          <div
-            className={["font-semibold transition-colors", titleClass].join(" ")}
-            style={{
-              fontSize: "clamp(12px, 3.5vw, 16px)",
-              lineHeight: 1.2,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {title}
-          </div>
-
-          <div
-            className={["mt-0.5 transition-colors", subtitleFinalClass].join(" ")}
-            style={{
-              fontSize: "clamp(10px, 2.8vw, 13px)",
-              lineHeight: 1.25,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {subtitleText}
-          </div>
-        </div>
-      </div>
+      <span style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.50)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
+        {label}
+      </span>
+      <span style={{ fontSize: 11, color: "rgba(255,255,255,0.25)", marginLeft: 4, flexShrink: 0 }}>›</span>
     </button>
   );
 }
 
-export function TopTiles({
-  locationTitle,
-  ambientSubtitle,
-  terminalTitle,
-  terminalSubtitle,
-  terminalSubtitleClassName,
-  onOpenLocation,
-  onOpenTerminal,
-  terminalEnabled,
-  locationSelected,
-  terminalSelected,
-}: {
-  locationTitle: string;
-  ambientSubtitle?: string;
-  terminalTitle: string;
-  terminalSubtitle?: string;
-  terminalSubtitleClassName?: string;
-  onOpenLocation: () => void;
-  onOpenTerminal: () => void;
-  terminalEnabled: boolean;
-  locationSelected: boolean;
-  terminalSelected: boolean;
-}) {
-  const ambientHasValue = typeof ambientSubtitle === "string" ? ambientSubtitle.trim().length > 0 : ambientSubtitle != null;
+// ── Single tile ───────────────────────────────────────────────────────────────
+type TileProps = {
+  subLabel?: string;
+  onSubClick?: () => void;
+  title: string;
+  subtitle?: string;
+  subtitleClassName?: string;
+  onClick: () => void;
+  disabled?: boolean;
+  selected?: boolean;
+  placeholderTitle?: string;
+  isTerminal?: boolean;
+};
+
+function Tile({ subLabel, onSubClick, title, subtitle, subtitleClassName, onClick, disabled = false, selected = false, placeholderTitle, isTerminal = false }: TileProps) {
+  const cardBorder = disabled ? "1px solid rgba(255,255,255,0.05)" : selected ? "1px solid rgba(255,255,255,0.16)" : "1px solid rgba(255,255,255,0.10)";
+  const cardBg = disabled ? "rgba(42,42,42,0.7)" : selected ? "rgba(28,28,28,0.95)" : "rgba(32,32,32,0.90)";
+  const titleColor = disabled ? "rgba(255,255,255,0.35)" : selected ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.80)";
+
+  const hasSubtitle = subtitle != null && String(subtitle).trim().length > 0;
+  const subtitleDisplay = hasSubtitle ? subtitle : (disabled ? "Select location first" : "Tap to select");
+  const subColor = isTerminal
+    ? terminalSubColor(subtitle, subtitleClassName)
+    : "rgba(255,166,35,0.90)";
+  const subtitleColor = hasSubtitle ? subColor : "rgba(255,255,255,0.30)";
+
+  const displayTitle = title || (placeholderTitle ?? "");
 
   return (
-    <div className="grid grid-cols-2 gap-2">
+    <div style={{ borderRadius: 16, border: cardBorder, background: cardBg, boxShadow: "0 8px 24px rgba(0,0,0,0.40)", overflow: "hidden", display: "flex", flexDirection: "column", opacity: disabled ? 0.6 : 1, transition: "border-color 200ms" }}>
+      {subLabel && onSubClick && !disabled && (
+        <SubButton label={subLabel} onClick={onSubClick} />
+      )}
+      <button
+        type="button"
+        onClick={disabled ? undefined : onClick}
+        disabled={disabled}
+        style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "flex-start", padding: "10px 12px", background: "transparent", border: "none", cursor: disabled ? "default" : "pointer", textAlign: "left" as const, width: "100%", minHeight: 52 }}
+      >
+        <div style={{ fontWeight: 700, fontSize: "clamp(12px, 3.5vw, 15px)", color: titleColor, lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const, width: "100%" }}>
+          {displayTitle}
+        </div>
+        <div style={{ marginTop: 3, fontSize: "clamp(10px, 2.6vw, 12px)", color: subtitleColor, fontWeight: 600, lineHeight: 1.25, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const, width: "100%" }}>
+          {subtitleDisplay}
+        </div>
+      </button>
+    </div>
+  );
+}
+
+// ── TopTiles export ───────────────────────────────────────────────────────────
+export function TopTiles({
+  locationTitle, ambientSubtitle, terminalTitle, terminalSubtitle,
+  terminalSubtitleClassName, onOpenLocation, onOpenTerminal,
+  terminalEnabled, locationSelected, terminalSelected,
+}: {
+  locationTitle: string; ambientSubtitle?: string; terminalTitle: string;
+  terminalSubtitle?: string; terminalSubtitleClassName?: string;
+  onOpenLocation: () => void; onOpenTerminal: () => void;
+  terminalEnabled: boolean; locationSelected: boolean; terminalSelected: boolean;
+}) {
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
       <Tile
-        iconText="SC"
-        title={locationTitle}
+        subLabel={locationSelected ? locationTitle : undefined}
+        onSubClick={onOpenLocation}
+        title={locationSelected ? locationTitle : "Location"}
         subtitle={ambientSubtitle}
-        // Ambient orange (only when we have a real value string)
-        subtitleClassName={locationSelected && ambientHasValue ? "text-amber-400" : undefined}
         onClick={onOpenLocation}
         selected={locationSelected}
-        disabled={false}
-        placeholderSubtitle={locationSelected ? "— ambient" : "Tap to select"}
+        isTerminal={false}
       />
-
       <Tile
-        iconText="T"
-        title={terminalTitle}
+        subLabel={terminalSelected ? terminalTitle : undefined}
+        onSubClick={onOpenTerminal}
+        title={terminalSelected ? terminalTitle : "Terminal"}
         subtitle={terminalSubtitle}
         subtitleClassName={terminalSubtitleClassName}
         onClick={onOpenTerminal}
         disabled={!terminalEnabled}
         selected={terminalSelected}
-        placeholderSubtitle={terminalEnabled ? "Tap to select" : "Select location first"}
+        isTerminal={true}
       />
     </div>
   );
