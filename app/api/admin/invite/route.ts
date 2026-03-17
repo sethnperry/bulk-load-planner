@@ -178,8 +178,19 @@ function buildEmailHtml(confirmUrl: string, companyName: string): string {
 <table width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background:#111111;border-radius:16px;border:1px solid rgba(255,255,255,0.08);overflow:hidden;">
 
   <!-- Header -->
-  <tr><td style="padding:32px 36px 24px;border-bottom:1px solid rgba(255,255,255,0.07);">
-    <div style="font-size:26px;font-weight:900;letter-spacing:-0.5px;color:#ffffff;">ProTankr</div>
+  <tr><td style="padding:28px 36px 22px;border-bottom:1px solid rgba(255,255,255,0.07);">
+    <table cellpadding="0" cellspacing="0" width="100%">
+      <tr>
+        <td valign="middle">
+          <div style="font-size:26px;font-weight:900;letter-spacing:-0.5px;color:#ffffff;">ProTankr</div>
+        </td>
+        <td valign="middle" align="right">
+          <svg width="36" height="33" viewBox="0 0 100 92.1" xmlns="http://www.w3.org/2000/svg">
+            <path d="M 41.28,85.61 L40.14,85.38 L39.51,84.29 L39.51,29.70 L39.97,28.44 L41.86,27.35 L75.00,27.35 L76.43,26.38 L76.66,24.20 L74.77,22.76 L21.90,22.65 L19.15,21.62 L16.57,19.50 L9.12,11.24 L8.66,10.21 L8.89,8.72 L10.32,7.51 L75.11,7.40 L79.36,8.08 L82.91,9.58 L87.90,13.65 L91.34,19.72 L92.14,26.38 L91.46,30.05 L90.08,33.37 L85.67,38.70 L82.57,40.77 L79.13,42.14 L75.92,42.72 L55.85,42.72 L54.99,43.35 L54.42,72.36 L52.92,74.89 L41.28,85.61 Z" fill="white"/>
+          </svg>
+        </td>
+      </tr>
+    </table>
   </td></tr>
 
   <!-- Body -->
