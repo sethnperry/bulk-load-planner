@@ -173,84 +173,57 @@ function buildEmailHtml(confirmUrl: string, companyName: string): string {
   <title>You've been invited to ProTankr</title>
 </head>
 <body style="margin:0;padding:0;background:transparent;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
-<table width="100%" cellpadding="0" cellspacing="0" style="padding:32px 16px;">
+<table width="100%" cellpadding="0" cellspacing="0" style="padding:24px 12px;">
 <tr><td align="center">
 <table width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background:#111111;border-radius:16px;border:1px solid rgba(255,255,255,0.08);overflow:hidden;">
 
   <!-- Header -->
-  <tr><td style="padding:28px 36px 22px;border-bottom:1px solid rgba(255,255,255,0.07);">
-    <table cellpadding="0" cellspacing="0" width="100%">
-      <tr>
-        <td valign="middle">
-          <div style="font-size:26px;font-weight:900;letter-spacing:-0.5px;color:#ffffff;">ProTankr</div>
-        </td>
-        <td valign="middle" align="right">
-          <svg width="36" height="33" viewBox="0 0 100 92.1" xmlns="http://www.w3.org/2000/svg">
-            <path d="M 41.28,85.61 L40.14,85.38 L39.51,84.29 L39.51,29.70 L39.97,28.44 L41.86,27.35 L75.00,27.35 L76.43,26.38 L76.66,24.20 L74.77,22.76 L21.90,22.65 L19.15,21.62 L16.57,19.50 L9.12,11.24 L8.66,10.21 L8.89,8.72 L10.32,7.51 L75.11,7.40 L79.36,8.08 L82.91,9.58 L87.90,13.65 L91.34,19.72 L92.14,26.38 L91.46,30.05 L90.08,33.37 L85.67,38.70 L82.57,40.77 L79.13,42.14 L75.92,42.72 L55.85,42.72 L54.99,43.35 L54.42,72.36 L52.92,74.89 L41.28,85.61 Z" fill="white"/>
-          </svg>
-        </td>
-      </tr>
-    </table>
+  <tr><td style="padding:24px 28px 20px;border-bottom:1px solid rgba(255,255,255,0.07);">
+    <table cellpadding="0" cellspacing="0" width="100%"><tr>
+      <td valign="middle"><div style="font-size:24px;font-weight:900;letter-spacing:-0.5px;color:#ffffff;white-space:nowrap;">ProTankr</div></td>
+      <td valign="middle" align="right" width="40"><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAMAAAADACAYAAABS3GwHAAADeklEQVR4nO3dwW3jQBBE0dbCCUj5x6gU7JMBYU+GRE73sN5LwIRRn0MRWu/tfr9/F4T6130B0EkARBMA0QRANAEQTQBEEwDRBEA0ARBNAEQTANEEQDQBEE0ARBMA0QRANAEQTQBEEwDRBEA0ARBNAEQTANEEQDQBEE0ARBMA0QRANAEQTQBEEwDRvrp+8PP57PrRfODxeHRfwqFuHf9BhvFfx+5BLA/A+K9rxxh8BuAwz+dzuxucADjcThEIgFPschosD2DH50TeNz2ClhNABFkmR9D2CCSCLFMjaP0MIIIsEyNo/xAsgizTImgPoEoEaSZFMCIA8kyJYEwATgE6jAmgSgRpJpwCowKoEkGa7gjGBVAlAtYZGUCVCJJ0ngJjA6gSAecbHUCVCDjX+ACqRJCg6zFoiwCqRMA5tgmgSgQcr+WvQhyh+/0x51h9k2v7u0Cfev1FiYF3bRvAK49G57ryDWarzwD0uPINRgD8yVUjEADRBEA0ARBNAPzJVd8EXeI16ARXHcjVCeBDhr83j0AfMP5jdbxqFcCbjP8aBEA0ARBNAIzQ9VULARBNALTr/KKdAIgmAFp1f81aAEQTAG267/5VAqDJhPFXCYBwAmC5KXf/KgGw2KTxVwmAhaaNv0oALDJx/FUCYIGp46/yTyI50eTh/3ICcIodxl/lBOBguwz/lwD42G6jfyUA3rLz6F8JYANXGdtEAhjM8M/nLRDRBEA0ARBNAEQTANEEQDQBEE0ARBMA0QRANAEQTQBEEwDRBEA0ARBNAEQTANEEQDQBEE0ARBMA0QRANAEQTQBEEwDRBEA0ARBNAEQTANEEQDQBEE0ARBMA0QRANAEQTQBEEwDRBEA0ARBNAEQTANEEQDQBEE0ARBMA0QRANAEM9Xg8ui8hggCIJgCiCWAgjz/rCGAY419LAIMY/3oCGML4ewhgAOPvI4Bmxt9LAI2Mv58Amhj/DAJoYPxzCGAx459FAAsZ/zwCWMT4Z/rqvoCrM/zZnAAnMv75BHAS49+DAE5g/PsQwMGMfy8COJDx70cAb/p/7Ma/p9v9fv/uvgjo4gQgmgCIJgCiCYBoAiCaAIgmAKIJgGgCIJoAiCYAogmAaAIgmgCIJgCiCYBoAiCaAIgmAKIJgGgCIJoAiCYAogmAaAIgmgCIJgCiCYBoAiCaAIgmAKIJgGg/U/NgJgS4GO8AAAAASUVORK5CYII=" width="36" height="36" alt="" style="display:block;" /></td>
+    </tr></table>
   </td></tr>
 
   <!-- Body -->
-  <tr><td style="padding:32px 36px 28px;">
-
-    <div style="font-size:18px;font-weight:700;color:#ffffff;margin-bottom:8px;line-height:1.4;">
+  <tr><td style="padding:28px 28px 24px;">
+    <div style="font-size:17px;font-weight:700;color:#ffffff;margin-bottom:8px;line-height:1.4;">
       You've been added to<br><span style="color:rgba(255,255,255,0.70);">${companyName}</span>.
     </div>
-
-    <p style="margin:0 0 28px;font-size:14px;color:rgba(255,255,255,0.45);line-height:1.6;">
+    <p style="margin:0 0 24px;font-size:14px;color:rgba(255,255,255,0.45);line-height:1.6;">
       Tap the button below to sign in. The link logs you in automatically — no password needed.
     </p>
-
-    <!-- CTA -->
-    <table cellpadding="0" cellspacing="0" style="margin-bottom:36px;">
-      <tr><td style="background:#ffffff;border-radius:12px;">
-        <a href="${confirmUrl}" style="display:inline-block;padding:15px 32px;font-size:15px;font-weight:800;color:#111111;text-decoration:none;letter-spacing:0.3px;">
+    <table cellpadding="0" cellspacing="0" width="100%" style="margin-bottom:32px;">
+      <tr><td style="background:#ffffff;border-radius:12px;text-align:center;">
+        <a href="${confirmUrl}" style="display:block;padding:15px 24px;font-size:15px;font-weight:800;color:#111111;text-decoration:none;">
           Open ProTankr &#8594;
         </a>
       </td></tr>
     </table>
-
-    <!-- Install instructions -->
-    <div style="border-top:1px solid rgba(255,255,255,0.07);padding-top:24px;">
-      <div style="font-size:10px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;color:rgba(255,255,255,0.28);margin-bottom:18px;">Save it to your home screen</div>
-
-      <!-- Android -->
-      <table cellpadding="0" cellspacing="0" width="100%" style="margin-bottom:16px;">
-        <tr>
-          <td style="font-size:12px;font-weight:700;color:rgba(255,255,255,0.60);padding-bottom:4px;">Android / Chrome</td>
-        </tr>
-        <tr>
-          <td style="font-size:12px;color:rgba(255,255,255,0.38);line-height:1.7;">
-            Tap the three-dot menu &rsaquo; <span style="color:rgba(255,255,255,0.55);font-weight:600;">Add to Home screen</span> &rsaquo; choose <span style="color:rgba(255,255,255,0.55);font-weight:600;">Install app</span>.
-          </td>
-        </tr>
+    <div style="border-top:1px solid rgba(255,255,255,0.07);padding-top:20px;">
+      <div style="font-size:10px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;color:rgba(255,255,255,0.28);margin-bottom:16px;">Save it to your home screen</div>
+      <table cellpadding="0" cellspacing="0" width="100%" style="margin-bottom:14px;">
+        <tr><td style="font-size:12px;font-weight:700;color:rgba(255,255,255,0.60);padding-bottom:4px;">Android / Chrome</td></tr>
+        <tr><td style="font-size:12px;color:rgba(255,255,255,0.38);line-height:1.8;">
+          Tap the three-dot menu &rsaquo; <span style="color:rgba(255,255,255,0.55);font-weight:600;">Add to Home screen</span> &rsaquo; choose <span style="color:rgba(255,255,255,0.55);font-weight:600;">Install app</span>.
+        </td></tr>
       </table>
-
-      <!-- iPhone -->
       <table cellpadding="0" cellspacing="0" width="100%">
-        <tr>
-          <td style="font-size:12px;font-weight:700;color:rgba(255,255,255,0.60);padding-bottom:4px;">iPhone / Safari</td>
-        </tr>
-        <tr>
-          <td style="font-size:12px;color:rgba(255,255,255,0.38);line-height:1.7;">
-            Must be opened in <span style="color:rgba(255,255,255,0.55);font-weight:600;">Safari</span> — if this email opened in Gmail or another app, copy the link and paste it into Safari first. Then tap the <span style="color:rgba(255,255,255,0.55);font-weight:600;">Share</span> button at the bottom &rsaquo; <span style="color:rgba(255,255,255,0.55);font-weight:600;">Add to Home Screen</span>.
-          </td>
-        </tr>
+        <tr><td style="font-size:12px;font-weight:700;color:rgba(255,255,255,0.60);padding-bottom:4px;">iPhone / Safari</td></tr>
+        <tr><td style="font-size:12px;color:rgba(255,255,255,0.38);line-height:1.8;">
+          Must be opened in <span style="color:rgba(255,255,255,0.55);font-weight:600;">Safari</span> — if this email opened in Gmail or another app, copy the link and paste it into Safari first. Then tap <span style="color:rgba(255,255,255,0.55);font-weight:600;">Share</span> &rsaquo; <span style="color:rgba(255,255,255,0.55);font-weight:600;">Add to Home Screen</span>.
+        </td></tr>
       </table>
     </div>
-
   </td></tr>
 
   <!-- Footer -->
-  <tr><td style="padding:0 36px 28px;border-top:1px solid rgba(255,255,255,0.05);">
+  <tr><td style="padding:0 28px 24px;border-top:1px solid rgba(255,255,255,0.05);">
     <p style="margin:16px 0 6px;font-size:11px;color:rgba(255,255,255,0.18);line-height:1.6;">
       This link expires in 24 hours and works only once. If you didn't expect this, you can safely ignore it.
     </p>
-    <p style="margin:0 0 4px;font-size:11px;color:rgba(255,255,255,0.18);">Button not working? Copy and paste:</p>
-    <a href="${confirmUrl}" style="font-size:11px;color:rgba(255,255,255,0.30);word-break:break-all;">${confirmUrl}</a>
+    <p style="margin:0 0 4px;font-size:11px;color:rgba(255,255,255,0.18);">Button not working? Copy and paste into your browser:</p>
+    <a href="${confirmUrl}" style="font-size:11px;color:rgba(255,255,255,0.30);word-break:break-all;overflow-wrap:break-word;">${confirmUrl}</a>
   </td></tr>
 
 </table>
