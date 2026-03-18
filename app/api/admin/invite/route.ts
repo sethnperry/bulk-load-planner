@@ -172,58 +172,62 @@ function buildEmailHtml(confirmUrl: string, companyName: string): string {
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>You've been invited to ProTankr</title>
 </head>
-<body style="margin:0;padding:0;background:transparent;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
-<table width="100%" cellpadding="0" cellspacing="0" style="padding:24px 12px;">
+<body style="margin:0;padding:0;background:#ffffff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#111111;">
+<table width="100%" cellpadding="0" cellspacing="0" style="padding:32px 16px;background:#ffffff;">
 <tr><td align="center">
-<table width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background:#111111;border-radius:16px;border:1px solid rgba(255,255,255,0.08);overflow:hidden;">
+<table width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;">
 
   <!-- Header -->
-  <tr><td style="padding:24px 28px 20px;border-bottom:1px solid rgba(255,255,255,0.07);">
+  <tr><td style="padding:0 0 24px;border-bottom:1px solid #e5e5e5;">
     <table cellpadding="0" cellspacing="0" width="100%"><tr>
-      <td valign="middle"><div style="font-size:24px;font-weight:900;letter-spacing:-0.5px;color:#ffffff;white-space:nowrap;">ProTankr</div></td>
-      <td valign="middle" align="right" width="40"><img src="https://protankr.com/icons/icon-email.png" width="36" height="36" alt="" style="display:block;" /></td>
+      <td valign="middle">
+        <div style="font-size:24px;font-weight:900;letter-spacing:-0.5px;color:#111111;white-space:nowrap;">ProTankr</div>
+      </td>
+      <td valign="middle" align="right" width="40">
+        <img src="https://protankr.com/icons/icon-email-black.png" width="36" height="36" alt="" style="display:block;" />
+      </td>
     </tr></table>
   </td></tr>
 
   <!-- Body -->
-  <tr><td style="padding:28px 28px 24px;">
-    <div style="font-size:17px;font-weight:700;color:#ffffff;margin-bottom:8px;line-height:1.4;">
-      You've been added to<br><span style="color:rgba(255,255,255,0.70);">${companyName}</span>.
+  <tr><td style="padding:28px 0 24px;">
+    <div style="font-size:17px;font-weight:700;color:#111111;margin-bottom:8px;line-height:1.4;">
+      You've been added to<br><span style="color:#555555;">${companyName}</span>.
     </div>
-    <p style="margin:0 0 24px;font-size:14px;color:rgba(255,255,255,0.45);line-height:1.6;">
+    <p style="margin:0 0 24px;font-size:14px;color:#666666;line-height:1.6;">
       Tap the button below to sign in. The link logs you in automatically — no password needed.
     </p>
     <table cellpadding="0" cellspacing="0" width="100%" style="margin-bottom:32px;">
-      <tr><td style="background:#ffffff;border-radius:12px;text-align:center;">
-        <a href="${confirmUrl}" style="display:block;padding:15px 24px;font-size:15px;font-weight:800;color:#111111;text-decoration:none;">
+      <tr><td style="background:#111111;border-radius:12px;text-align:center;">
+        <a href="${confirmUrl}" style="display:block;padding:15px 24px;font-size:15px;font-weight:800;color:#ffffff;text-decoration:none;">
           Open ProTankr &#8594;
         </a>
       </td></tr>
     </table>
-    <div style="border-top:1px solid rgba(255,255,255,0.07);padding-top:20px;">
-      <div style="font-size:10px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;color:rgba(255,255,255,0.28);margin-bottom:16px;">Save it to your home screen</div>
+    <div style="border-top:1px solid #e5e5e5;padding-top:20px;">
+      <div style="font-size:10px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;color:#aaaaaa;margin-bottom:16px;">Save it to your home screen</div>
       <table cellpadding="0" cellspacing="0" width="100%" style="margin-bottom:14px;">
-        <tr><td style="font-size:12px;font-weight:700;color:rgba(255,255,255,0.60);padding-bottom:4px;">Android / Chrome</td></tr>
-        <tr><td style="font-size:12px;color:rgba(255,255,255,0.38);line-height:1.8;">
-          Tap the three-dot menu &rsaquo; <span style="color:rgba(255,255,255,0.55);font-weight:600;">Add to Home screen</span> &rsaquo; choose <span style="color:rgba(255,255,255,0.55);font-weight:600;">Install app</span>.
+        <tr><td style="font-size:12px;font-weight:700;color:#444444;padding-bottom:4px;">Android / Chrome</td></tr>
+        <tr><td style="font-size:12px;color:#888888;line-height:1.8;">
+          Tap the three-dot menu &rsaquo; <span style="color:#333333;font-weight:600;">Add to Home screen</span> &rsaquo; choose <span style="color:#333333;font-weight:600;">Install app</span>.
         </td></tr>
       </table>
       <table cellpadding="0" cellspacing="0" width="100%">
-        <tr><td style="font-size:12px;font-weight:700;color:rgba(255,255,255,0.60);padding-bottom:4px;">iPhone / Safari</td></tr>
-        <tr><td style="font-size:12px;color:rgba(255,255,255,0.38);line-height:1.8;">
-          Must be opened in <span style="color:rgba(255,255,255,0.55);font-weight:600;">Safari</span> — if this email opened in Gmail or another app, copy the link and paste it into Safari first. Then tap <span style="color:rgba(255,255,255,0.55);font-weight:600;">Share</span> &rsaquo; <span style="color:rgba(255,255,255,0.55);font-weight:600;">Add to Home Screen</span>.
+        <tr><td style="font-size:12px;font-weight:700;color:#444444;padding-bottom:4px;">iPhone / Safari</td></tr>
+        <tr><td style="font-size:12px;color:#888888;line-height:1.8;">
+          Must be opened in <span style="color:#333333;font-weight:600;">Safari</span> — if this email opened in Gmail or another app, copy the link and paste it into Safari first. Then tap <span style="color:#333333;font-weight:600;">Share</span> &rsaquo; <span style="color:#333333;font-weight:600;">Add to Home Screen</span>.
         </td></tr>
       </table>
     </div>
   </td></tr>
 
   <!-- Footer -->
-  <tr><td style="padding:0 28px 24px;border-top:1px solid rgba(255,255,255,0.05);">
-    <p style="margin:16px 0 6px;font-size:11px;color:rgba(255,255,255,0.18);line-height:1.6;">
+  <tr><td style="padding:20px 0 0;border-top:1px solid #e5e5e5;">
+    <p style="margin:0 0 6px;font-size:11px;color:#aaaaaa;line-height:1.6;">
       This link expires in 24 hours and works only once. If you didn't expect this, you can safely ignore it.
     </p>
-    <p style="margin:0 0 4px;font-size:11px;color:rgba(255,255,255,0.18);">Button not working? Copy and paste into your browser:</p>
-    <a href="${confirmUrl}" style="font-size:11px;color:rgba(255,255,255,0.30);word-break:break-all;overflow-wrap:break-word;">${confirmUrl}</a>
+    <p style="margin:0 0 4px;font-size:11px;color:#aaaaaa;">Button not working? Copy and paste into your browser:</p>
+    <a href="${confirmUrl}" style="font-size:11px;color:#888888;word-break:break-all;overflow-wrap:break-word;">${confirmUrl}</a>
   </td></tr>
 
 </table>
