@@ -181,7 +181,7 @@ function buildEmailHtml(confirmUrl: string, companyName: string): string {
   <tr><td style="padding:24px 28px 20px;border-bottom:1px solid rgba(255,255,255,0.07);">
     <table cellpadding="0" cellspacing="0" width="100%"><tr>
       <td valign="middle"><div style="font-size:24px;font-weight:900;letter-spacing:-0.5px;color:#ffffff;white-space:nowrap;">ProTankr</div></td>
-      <td valign="middle" align="right" width="40"><img src="https://protankr.com/icons/icon-192.png" width="36" height="36" alt="" style="display:block;" /></td>
+      <td valign="middle" align="right" width="40"><img src="https://protankr.com/icons/icon-email.png" width="36" height="36" alt="" style="display:block;" /></td>
     </tr></table>
   </td></tr>
 
