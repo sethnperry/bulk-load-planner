@@ -1,27 +1,23 @@
-import { redirect } from "next/navigation";
-import { cookies } from "next/headers";
-import { createServerClient } from "@supabase/ssr";
+"use client";
+// app/page.tsx
 
-export default async function Home() {
-  const cookieStore = await cookies();
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase/client";
 
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return cookieStore.getAll();
-        },
-      },
-    }
-  );
+export default function Home() {
+  const router = useRouter();
 
-  const { data: { session } } = await supabase.auth.getSession();
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) {
+        router.replace("/calculator");
+      } else {
+        router.replace("/login");
+      }
+    });
+  }, [router]);
 
-  if (session) {
-    redirect("/calculator");
-  } else {
-    redirect("/login");
-  }
+  // Blank dark screen while session resolves — no flash
+  return <div style={{ minHeight: "100dvh", background: "#111111" }} />;
 }
