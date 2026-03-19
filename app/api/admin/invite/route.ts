@@ -207,6 +207,12 @@ function buildEmailHtml(confirmUrl: string, companyName: string): string {
     <div style="border-top:1px solid #e5e5e5;padding-top:20px;">
       <div style="font-size:10px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;color:#aaaaaa;margin-bottom:16px;">Save it to your home screen</div>
       <table cellpadding="0" cellspacing="0" width="100%" style="margin-bottom:14px;">
+        <tr><td style="font-size:12px;font-weight:700;color:#444444;padding-bottom:4px;">Outlook</td></tr>
+        <tr><td style="font-size:12px;color:#888888;line-height:1.8;">
+          Tap the <span style="color:#333333;font-weight:600;">&#8943;</span> menu in the top-right corner &rsaquo; choose <span style="color:#333333;font-weight:600;">Open in browser</span>. Then follow the steps below for your device.
+        </td></tr>
+      </table>
+      <table cellpadding="0" cellspacing="0" width="100%" style="margin-bottom:14px;">
         <tr><td style="font-size:12px;font-weight:700;color:#444444;padding-bottom:4px;">Android / Chrome</td></tr>
         <tr><td style="font-size:12px;color:#888888;line-height:1.8;">
           Tap the three-dot menu &rsaquo; <span style="color:#333333;font-weight:600;">Add to Home screen</span> &rsaquo; choose <span style="color:#333333;font-weight:600;">Install app</span>.
