@@ -24,24 +24,28 @@ export default function PlannerControls(props: any) {
           <div style={{
             display: "flex",
             justifyContent: "center",
-            gap: compartments.length >= 5 ? 6 : 10,
+            gap: 12,
             flexWrap: "nowrap",
             width: "100%",
             alignItems: "flex-end",
           }}>
             {(() => {
               const n = compartments.length;
-              // Taller bars, scale with count
-              const barH = n >= 5 ? "min(220px, 40vw)" : n >= 4 ? "min(240px, 46vw)" : "min(260px, 50vw)";
-              const barW = n >= 5 ? "clamp(36px, 12vw, 60px)" : "clamp(44px, 14vw, 72px)";
+              const barH = n >= 5 ? "min(110px, 20vw)" : n >= 4 ? "min(120px, 23vw)" : "min(130px, 25vw)";
 
               const ordered = [...compartments]
                 .sort((a: any, b: any) => Number(a.comp_number) - Number(b.comp_number))
                 .reverse(); // right-to-left display (5,4,3,2,1)
 
+              // Total capacity for proportional widths
+              const totalCap = ordered.reduce((sum: number, c: any) => sum + Number(c.max_gallons ?? 0), 0);
+              const gapPx = 12;
+
               return ordered.map((c: any) => {
-                const compNumber = Number(c.comp_number);
                 const trueMax = Number(c.max_gallons ?? 0);
+                const capFraction = totalCap > 0 ? trueMax / totalCap : 1 / n;
+                const barW = `calc(${(capFraction * 100).toFixed(4)}% - ${((n - 1) * gapPx / n).toFixed(2)}px)`;
+                const compNumber = Number(c.comp_number);
                 const headPct = headspacePctForComp(compNumber);
                 const effMax = effectiveMaxGallonsForComp(compNumber, trueMax);
                 const planned = plannedGallonsByComp?.[compNumber] ?? 0;
@@ -75,7 +79,7 @@ export default function PlannerControls(props: any) {
                     style={{
                       display: "flex", flexDirection: "column", alignItems: "center",
                       cursor: "pointer", userSelect: "none",
-                      width: barW, flexShrink: 0,
+                      width: barW, flexShrink: 0, flexGrow: 0,
                     }}
                     title={`Comp ${compNumber}`}
                   >
