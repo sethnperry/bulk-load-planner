@@ -151,6 +151,48 @@ export default function CalculatorPage() {
     })();
   }, []);
 
+  // ── Card data (card number + private note, per terminal, per user) ──────────
+  const [cardDataByTerminalId, setCardDataByTerminalId] =
+    useState<Record<string, { cardNumber: string; privateNote: string }>>({});
+
+  useEffect(() => {
+    if (!authUserId) return;
+    (async () => {
+      const { data } = await supabase
+        .from("user_terminal_cards")
+        .select("terminal_id, card_number, private_note")
+        .eq("user_id", authUserId);
+      if (data) {
+        const map: Record<string, { cardNumber: string; privateNote: string }> = {};
+        for (const row of data) {
+          map[String(row.terminal_id)] = {
+            cardNumber: row.card_number ?? "",
+            privateNote: row.private_note ?? "",
+          };
+        }
+        setCardDataByTerminalId(map);
+      }
+    })();
+  }, [authUserId]);
+
+  const setCardDataForTerminal_ = async (
+    terminalId: string,
+    data: { cardNumber: string; privateNote: string }
+  ) => {
+    setCardDataByTerminalId(prev => ({ ...prev, [terminalId]: data }));
+    if (!authUserId) return;
+    await supabase.from("user_terminal_cards").upsert(
+      {
+        user_id: authUserId,
+        terminal_id: terminalId,
+        card_number: data.cardNumber,
+        private_note: data.privateNote,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "user_id,terminal_id" }
+    );
+  };
+
   // ── Modal open/close flags ─────────────────────────────────────────────────
   const [equipOpen, setEquipOpen] = useState(false);
   const [locOpen, setLocOpen] = useState(false);
@@ -1059,20 +1101,18 @@ const lastProductInfoById = useMemo(() => {
         selectedTerminalId={location.selectedTerminalId}
         expandedTerminalId={expandedTerminalId}
         setExpandedTerminalId={setExpandedTerminalId}
-        cardingBusyId={terminals.cardingBusyId}
         addDaysISO_={addDaysISO_}
         isPastISO_={isPastISO_}
         formatMDYWithCountdown_={formatMDYWithCountdown_}
-        starBtnClass={starBtnClass}
+        accessDateByTerminalId={terminals.accessDateByTerminalId}
+        setAccessDateForTerminal_={terminals.setAccessDateForTerminal}
+        cardDataByTerminalId={cardDataByTerminalId}
+        setCardDataForTerminal_={setCardDataForTerminal_}
         myTerminalIds={myTerminalIdSet}
         setMyTerminalIds={() => {}}
         setTerminals={terminals.setTerminals}
-        toggleTerminalStar={terminals.toggleTerminalStar}
-        doGetCardedForTerminal={terminals.doGetCarded}
         setSelectedTerminalId={location.setSelectedTerminalId}
         setTermOpen={setTermOpen}
-        setCatalogExpandedId={setCatalogExpandedId}
-        setCatalogOpen={setCatalogOpen}
       />
 
       <TerminalCatalogModal
