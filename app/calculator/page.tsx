@@ -1,5 +1,8 @@
 "use client";
 import NavMenu from "@/lib/ui/NavMenu";
+import ExpirationAlertBar from "./components/ExpirationAlertBar";
+import ExpirationModal from "./modals/ExpirationModal";
+import { useExpirations } from "./hooks/useExpirations";
 
 /**
  * page.tsx — CalculatorPage
@@ -201,6 +204,7 @@ export default function CalculatorPage() {
   const [catalogExpandedId, setCatalogExpandedId] = useState<string | null>(null);
   const [catalogEditingDateId, setCatalogEditingDateId] = useState<string | null>(null);
   const [expandedTerminalId, setExpandedTerminalId] = useState<string | null>(null);
+  const [expModalOpen, setExpModalOpen] = useState(false);
   const [statePickerOpen, setStatePickerOpen] = useState(false);
   const [compModalOpen, setCompModalOpen] = useState(false);
   const [compModalComp, setCompModalComp] = useState<number | null>(null);
@@ -528,6 +532,17 @@ export default function CalculatorPage() {
     myTerminalIdSet,
   });
 
+  // ── Expiration alerts ─────────────────────────────────────────────────────
+  const expirations = useExpirations({
+    truckId: equipment.selectedCombo?.truck_id ?? null,
+    trailerId: equipment.selectedCombo?.trailer_id ?? null,
+    truckName: equipment.truckNameById[equipment.selectedCombo?.truck_id ?? ""] ?? "",
+    trailerName: equipment.trailerNameById[equipment.selectedCombo?.trailer_id ?? ""] ?? "",
+    accessDateByTerminalId: terminals.accessDateByTerminalId,
+    terminals: terminals.terminals,
+    addDaysISO_,
+  });
+
   // Fetch terminal access dates for city terminals
   useEffect(() => {
     (async () => {
@@ -756,6 +771,13 @@ const lastProductInfoById = useMemo(() => {
         >
           {equipment.equipmentLabel ?? "Select Equipment"}
         </button>
+        <ExpirationAlertBar
+          items={expirations.items}
+          expiredCount={expirations.expiredCount}
+          warningCount={expirations.warningCount}
+          mostUrgent={expirations.mostUrgent}
+          onClick={() => setExpModalOpen(true)}
+        />
         <NavMenu />
       </div>
 
@@ -1126,6 +1148,14 @@ const lastProductInfoById = useMemo(() => {
         setTerminals={terminals.setTerminals}
         setSelectedTerminalId={location.setSelectedTerminalId}
         setTermOpen={setTermOpen}
+      />
+
+      <ExpirationModal
+        open={expModalOpen}
+        onClose={() => setExpModalOpen(false)}
+        items={expirations.items}
+        onOpenEquipment={() => setEquipOpen(true)}
+        onOpenTerminals={() => setTermOpen(true)}
       />
 
       <TerminalCatalogModal
