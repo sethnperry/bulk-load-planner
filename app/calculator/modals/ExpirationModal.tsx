@@ -245,7 +245,7 @@ export default function ExpirationModal({
               : `⚠ ${item.daysLeft}d left`
         }
         expired={item.expired}
-        urgent={!item.expired && item.daysLeft <= 7}
+        urgent={!item.expired}
         deferred={isDeferred}
         onTap={() => tapAction(item)}
         onToggleDefer={() => toggleDefer(item.id)}

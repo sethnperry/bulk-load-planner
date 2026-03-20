@@ -140,7 +140,24 @@ export function useTerminals(
 
   const setAccessDateForTerminal = useCallback(async (terminalId: string, isoDate: string) => {
     if (!authUserId) return;
-    if (!isoDate || !/^\d{4}-\d{2}-\d{2}$/.test(isoDate)) return;
+
+    // Empty string = deactivate: remove the access date entirely
+    if (!isoDate) {
+      setAccessDateByTerminalId((prev) => {
+        const next = { ...prev };
+        delete next[terminalId];
+        return next;
+      });
+      await supabase
+        .from("terminal_access")
+        .delete()
+        .eq("user_id", authUserId)
+        .eq("terminal_id", terminalId);
+      await loadMyTerminals();
+      return;
+    }
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(isoDate)) return;
     setAccessDateByTerminalId((prev) => ({ ...prev, [terminalId]: isoDate }));
     const res = await supabase
       .from("terminal_access")
