@@ -26,6 +26,7 @@ const TRUCK_EXP_COLS: Record<string, string> = {
   inspection_expiration_date:    "Inspection",
   phmsa_expiration_date:         "PHMSA",
   reg_expiration_date:           "Registration",
+  alliance_expiration_date:      "Alliance",
 };
 
 // Trailer expiration columns → human labels
@@ -39,7 +40,6 @@ const TRAILER_EXP_COLS: Record<string, string> = {
   tank_v_expiration_date:                "Tank V",
   trailer_inspection_expiration_date:    "Trailer Inspection",
   trailer_reg_expiration_date:           "Trailer Registration",
-  alliance_expiration_date:              "Alliance",
 };
 
 const TRUCK_WARN_DAYS    = 30;
@@ -78,7 +78,7 @@ export function useExpirations(opts: {
       const cols = Object.keys(TRUCK_EXP_COLS).join(", ");
       const { data } = await supabase
         .from("trucks")
-        .select(`truck_id, truck_number, ${cols}`)
+        .select(`truck_id, truck_name, ${cols}`)
         .eq("truck_id", truckId)
         .maybeSingle();
       setTruckRow(data ?? null);
@@ -94,7 +94,7 @@ export function useExpirations(opts: {
       const cols = Object.keys(TRAILER_EXP_COLS).join(", ");
       const { data } = await supabase
         .from("trailers")
-        .select(`trailer_id, trailer_number, ${cols}`)
+        .select(`trailer_id, trailer_name, ${cols}`)
         .eq("trailer_id", trailerId)
         .maybeSingle();
       setTrailerRow(data ?? null);
@@ -108,8 +108,8 @@ export function useExpirations(opts: {
 
     // Truck docs
     if (truckRow) {
-      const name = truckRow.truck_number
-        ? String(truckRow.truck_number)
+      const name = truckRow.truck_name
+        ? String(truckRow.truck_name)
         : truckName || String(truckId ?? "Truck");
       for (const [col, label] of Object.entries(TRUCK_EXP_COLS)) {
         const iso = truckRow[col];
@@ -132,8 +132,8 @@ export function useExpirations(opts: {
 
     // Trailer docs
     if (trailerRow) {
-      const name = trailerRow.trailer_number
-        ? String(trailerRow.trailer_number)
+      const name = trailerRow.trailer_name
+        ? String(trailerRow.trailer_name)
         : trailerName || String(trailerId ?? "Trailer");
       for (const [col, label] of Object.entries(TRAILER_EXP_COLS)) {
         const iso = trailerRow[col];
