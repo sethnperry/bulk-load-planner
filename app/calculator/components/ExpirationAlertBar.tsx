@@ -1,5 +1,6 @@
 "use client";
 // components/ExpirationAlertBar.tsx
+// Text-only alert — no pill, no border. Just a tappable label.
 
 import React from "react";
 import type { ExpirationItem } from "../hooks/useExpirations";
@@ -19,31 +20,18 @@ export default function ExpirationAlertBar({
 }: Props) {
   if (items.length === 0) return null;
 
-  // All deferred — show a quiet grey tag
-  if (allDeferred) {
-    return (
-      <button type="button" onClick={onClick} style={{
-        display: "flex", alignItems: "center", gap: 5,
-        padding: "6px 10px", borderRadius: 10,
-        border: "1px solid rgba(255,255,255,0.08)",
-        background: "rgba(255,255,255,0.04)",
-        cursor: "pointer", flexShrink: 0,
-      }}>
-        <span style={{ fontSize: "clamp(10px, 2.4vw, 12px)", fontWeight: 700, color: "rgba(255,255,255,0.28)", letterSpacing: 0.2 }}>
-          Expirations
-        </span>
-      </button>
-    );
-  }
-
-  const isRed = expiredCount > 0;
-  const total = activeItems.length;
+  const isRed  = expiredCount > 0;
+  const color  = allDeferred
+    ? "rgba(255,255,255,0.28)"
+    : isRed
+      ? "rgba(239,68,68,0.90)"
+      : "rgba(234,179,8,0.90)";
 
   let label: string;
-  if (total === 1 && mostUrgent) {
-    label = mostUrgent.expired
-      ? `EXP ${mostUrgent.entityName}`
-      : `EXP ${mostUrgent.daysLeft}d`;
+  if (allDeferred) {
+    label = "Expirations";
+  } else if (activeItems.length === 1 && mostUrgent) {
+    label = mostUrgent.expired ? `EXP ${mostUrgent.entityName}` : `EXP ${mostUrgent.daysLeft}d`;
   } else {
     const parts: string[] = [];
     if (expiredCount > 0) parts.push(`${expiredCount} expired`);
@@ -52,22 +40,26 @@ export default function ExpirationAlertBar({
   }
 
   return (
-    <button type="button" onClick={onClick} style={{
-      display: "flex", alignItems: "center", gap: 5,
-      padding: "6px 10px", borderRadius: 10,
-      border: `1px solid ${isRed ? "rgba(239,68,68,0.40)" : "rgba(234,179,8,0.40)"}`,
-      background: isRed ? "rgba(239,68,68,0.12)" : "rgba(234,179,8,0.10)",
-      cursor: "pointer", flexShrink: 0, overflow: "hidden",
-    }}>
-      <span style={{ fontSize: 12, color: isRed ? "rgba(239,68,68,0.90)" : "rgba(234,179,8,0.90)", flexShrink: 0 }}>
-        {isRed ? "⛔" : "⚠"}
-      </span>
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        background: "none",
+        border: "none",
+        padding: "4px 2px",
+        cursor: "pointer",
+        flexShrink: 0,
+        overflow: "hidden",
+      }}
+    >
       <span style={{
-        fontSize: "clamp(10px, 2.4vw, 12px)", fontWeight: 700,
-        color: isRed ? "rgba(239,68,68,0.90)" : "rgba(234,179,8,0.90)",
-        whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", letterSpacing: 0.2,
+        fontSize: "clamp(11px, 2.6vw, 13px)",
+        fontWeight: 800,
+        color,
+        whiteSpace: "nowrap",
+        letterSpacing: 0.2,
       }}>
-        {label}
+        {!allDeferred && (isRed ? "⛔ " : "⚠ ")}{label}
       </span>
     </button>
   );

@@ -1161,6 +1161,13 @@ const lastProductInfoById = useMemo(() => {
         toggleDefer={expirations.toggleDefer}
         onOpenEquipment={() => setEquipOpen(true)}
         onOpenTerminals={() => setTermOpen(true)}
+        selectedCity={location.selectedCity}
+        selectedState={location.selectedState}
+        allTerminalsInCity={catalogTerminalsInCity}
+        accessDateByTerminalId={terminals.accessDateByTerminalId}
+        addDaysISO_={addDaysISO_}
+        isPastISO_={isPastISO_}
+        formatMDYWithCountdown_={formatMDYWithCountdown_}
       />
 
       <TerminalCatalogModal
