@@ -186,7 +186,6 @@ export default function ExpirationModal({
 }: Props) {
   const [copied, setCopied] = useState(false);
   const [shareError, setShareError] = useState("");
-  const [deferredExpanded, setDeferredExpanded] = useState(false);
 
   // ── Build terminal card data ──────────────────────────────────────────────
   type CardEntry = { name: string; expires: string; expiresISO: string; daysLeft: number };
@@ -246,7 +245,7 @@ export default function ExpirationModal({
               : `⚠ ${item.daysLeft}d left`
         }
         expired={item.expired}
-        urgent={!item.expired}
+        urgent={!item.expired && item.daysLeft <= 7}
         deferred={isDeferred}
         onTap={() => tapAction(item)}
         onToggleDefer={() => toggleDefer(item.id)}
@@ -277,12 +276,13 @@ export default function ExpirationModal({
           </div>
         )}
 
-        {/* ── Terminal Cards — all terminals in city as unified cards ── */}
+        {/* ── Terminal Cards — all terminals in city + deferred merged at bottom ── */}
         {hasCards && (
           <div>
             <SectionLabel left="Terminal Cards" right={locLabel || undefined} />
             <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
 
+              {/* Expired */}
               {cardExpired.map(c => (
                 <ExpirationCard key={`exp-${c.name}`}
                   label={c.name}
@@ -293,6 +293,7 @@ export default function ExpirationModal({
                 />
               ))}
 
+              {/* Active — soonest first */}
               {cardActive.map(c => (
                 <ExpirationCard key={`act-${c.name}`}
                   label={c.name}
@@ -303,6 +304,23 @@ export default function ExpirationModal({
                 />
               ))}
 
+              {/* Ghost divider before inactive items */}
+              {(cardNotCarded.length > 0 || deferredItems.length > 0) && (cardExpired.length + cardActive.length > 0) && (
+                <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", marginTop: 2, marginBottom: 2 }} />
+              )}
+
+              {/* Deferred — ghost style, shows expiry date, ↩ to restore */}
+              {deferredItems.map(item => (
+                <ExpirationCard key={item.id}
+                  label={item.entityName}
+                  statusText={item.expired ? `Expired ${Math.abs(item.daysLeft)}d ago` : `${item.daysLeft}d left`}
+                  expired={false} urgent={false} deferred={true}
+                  onTap={() => tapAction(item)}
+                  onToggleDefer={() => toggleDefer(item.id)}
+                />
+              ))}
+
+              {/* Not carded — ghost, no date */}
               {cardNotCarded.map(name => (
                 <div key={`nc-${name}`} style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.05)", background: "rgba(255,255,255,0.02)" }}>
                   <div style={{ fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,0.25)" }}>{name}</div>
@@ -310,24 +328,6 @@ export default function ExpirationModal({
               ))}
 
             </div>
-          </div>
-        )}
-
-        {/* ── Deferred — collapsed ── */}
-        {deferredItems.length > 0 && (
-          <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", paddingTop: 10 }}>
-            <button type="button" onClick={() => setDeferredExpanded(p => !p)}
-              style={{ background: "none", border: "none", cursor: "pointer", padding: 0, display: "flex", alignItems: "center", gap: 6 }}>
-              <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.1em", textTransform: "uppercase" as const, color: "rgba(255,255,255,0.20)" }}>
-                Deferred ({deferredItems.length})
-              </div>
-              <div style={{ fontSize: 9, color: "rgba(255,255,255,0.18)" }}>{deferredExpanded ? "▲" : "▼"}</div>
-            </button>
-            {deferredExpanded && (
-              <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 5 }}>
-                {renderExpCards(deferredItems, true)}
-              </div>
-            )}
           </div>
         )}
 
