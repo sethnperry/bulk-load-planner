@@ -234,9 +234,13 @@ export default function ExpirationModal({
       const statusText = item.expired
         ? `${deferred ? "" : "⛔ "}Expired ${Math.abs(item.daysLeft)}d ago`
         : `${deferred ? "" : "⚠ "}${item.daysLeft}d left`;
+      // For terminals: show terminal name as title, doc type as subtitle
+      // For equipment: show doc type as title (entity name is in section header)
+      const isTerminal = item.entityType === "terminal";
       return (
         <ItemRow key={item.id}
-          label={item.label}
+          label={isTerminal ? item.entityName : item.label}
+          subtitle={isTerminal ? undefined : undefined}
           statusText={statusText} statusColor={statusColor}
           deferred={deferred}
           onTap={() => onTap(item)}
@@ -271,53 +275,41 @@ export default function ExpirationModal({
           </div>
         )}
 
-        {/* ── Terminal cards (expiring) + full directory ── */}
+        {/* ── Terminal Cards — alerts + full directory in one section ── */}
         {(activeTerminals.length > 0 || hasCards) && (
           <div>
             <SectionLabel left="Terminal Cards" right={locLabel || undefined} />
             <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
 
-              {/* Expiring/expired alerts first */}
+              {/* Expiring/expired alert cards */}
               {activeTerminals.length > 0 && (
-                <div style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: cardExpired.length + cardActive.length + cardNotCarded.length > 0 ? 8 : 0 }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 8 }}>
                   {renderItems(activeTerminals, false, tapAction)}
                 </div>
               )}
 
-              {/* Expired cards */}
-              {cardExpired.length > 0 && (
-                <div style={{ marginBottom: 6 }}>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: "rgba(239,68,68,0.50)", letterSpacing: "0.08em", textTransform: "uppercase" as const, padding: "4px 0 4px" }}>Expired</div>
-                  {cardExpired.map(c => (
-                    <div key={c.name} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "4px 0", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,0.65)" }}>{c.name}</div>
-                      <div style={{ fontSize: 11, color: "rgba(239,68,68,0.70)", fontWeight: 600, whiteSpace: "nowrap" as const }}>{c.expires} · {Math.abs(c.daysLeft)}d ago</div>
-                    </div>
-                  ))}
+              {/* All terminals as a flat list: expired → active → not carded */}
+              {cardExpired.map(c => (
+                <div key={`exp-${c.name}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "5px 2px", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,0.60)" }}>{c.name}</div>
+                  <div style={{ fontSize: 11, color: "rgba(239,68,68,0.65)", fontWeight: 600, whiteSpace: "nowrap" as const }}>{c.expires} · {Math.abs(c.daysLeft)}d ago</div>
                 </div>
-              )}
+              ))}
 
-              {/* Active cards */}
-              {cardActive.length > 0 && (
-                <div style={{ marginBottom: 6 }}>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.25)", letterSpacing: "0.08em", textTransform: "uppercase" as const, padding: "4px 0 4px" }}>Active</div>
-                  {cardActive.map(c => (
-                    <div key={c.name} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "4px 0", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,0.65)" }}>{c.name}</div>
-                      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", fontWeight: 600, whiteSpace: "nowrap" as const }}>{c.expires} · {c.daysLeft}d</div>
-                    </div>
-                  ))}
+              {cardActive.map(c => (
+                <div key={`act-${c.name}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "5px 2px", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,0.70)" }}>{c.name}</div>
+                  <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", fontWeight: 600, whiteSpace: "nowrap" as const }}>{c.expires} · {c.daysLeft}d</div>
                 </div>
-              )}
+              ))}
 
-              {/* Not carded */}
               {cardNotCarded.length > 0 && (
-                <div>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.18)", letterSpacing: "0.08em", textTransform: "uppercase" as const, padding: "4px 0 4px" }}>Not Carded</div>
+                <>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.18)", letterSpacing: "0.08em", textTransform: "uppercase" as const, padding: "8px 0 4px" }}>Not Carded</div>
                   {cardNotCarded.map(name => (
-                    <div key={name} style={{ fontSize: 13, color: "rgba(255,255,255,0.25)", padding: "4px 0", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>{name}</div>
+                    <div key={`nc-${name}`} style={{ fontSize: 13, color: "rgba(255,255,255,0.25)", padding: "4px 2px", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>{name}</div>
                   ))}
-                </div>
+                </>
               )}
             </div>
           </div>
