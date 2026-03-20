@@ -924,6 +924,19 @@ const lastProductInfoById = useMemo(() => {
                     </div>
                   )}
                 </button>
+                {/* Card number strip — matches Over/Under strip on report card */}
+                {(() => {
+                  const tid = location.selectedTerminalId ? String(location.selectedTerminalId) : null;
+                  const cardNum = tid ? (cardDataByTerminalId[tid]?.cardNumber ?? "") : "";
+                  return (
+                    <div style={{ ...subBtnStyle, borderBottom: "none", borderTop: "1px solid rgba(255,255,255,0.07)", cursor: "default" }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.35)" }}>Card #</span>
+                      <span style={{ fontSize: "clamp(11px, 3vw, 16px)", fontWeight: 900, color: cardNum ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.18)" }}>
+                        {cardNum || "—"}
+                      </span>
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* Report card — history sub-button at top, over/under at bottom */}
