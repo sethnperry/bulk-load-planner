@@ -773,9 +773,11 @@ const lastProductInfoById = useMemo(() => {
         </button>
         <ExpirationAlertBar
           items={expirations.items}
+          activeItems={expirations.activeItems}
           expiredCount={expirations.expiredCount}
           warningCount={expirations.warningCount}
           mostUrgent={expirations.mostUrgent}
+          allDeferred={expirations.allDeferred}
           onClick={() => setExpModalOpen(true)}
         />
         <NavMenu />
@@ -1154,6 +1156,9 @@ const lastProductInfoById = useMemo(() => {
         open={expModalOpen}
         onClose={() => setExpModalOpen(false)}
         items={expirations.items}
+        activeItems={expirations.activeItems}
+        deferredItems={expirations.deferredItems}
+        toggleDefer={expirations.toggleDefer}
         onOpenEquipment={() => setEquipOpen(true)}
         onOpenTerminals={() => setTermOpen(true)}
       />

@@ -1,50 +1,49 @@
 "use client";
 // hooks/useExpirations.ts
-// Fetches expiration dates for the selected truck + trailer.
-// Returns a sorted list of expiring/expired items for the alert bar and modal.
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { supabase } from "@/lib/supabase/client";
 
 export type ExpirationItem = {
-  id: string;              // unique key
-  label: string;           // e.g. "Fleet Insurance"
-  entityName: string;      // e.g. "25184" (truck) or "3151" (trailer)
+  id: string;
+  label: string;
+  entityName: string;      // truck name, trailer name, or terminal name
+  entitySubtitle: string;  // doc type for equipment, city/state for terminals
   entityType: "truck" | "trailer" | "terminal";
-  entityId: string;        // truck_id / trailer_id / terminal_id
-  expiresISO: string;      // YYYY-MM-DD
-  daysLeft: number;        // negative = expired
+  entityId: string;
+  expiresISO: string;
+  daysLeft: number;
   expired: boolean;
 };
 
-// Truck expiration columns → human labels
 const TRUCK_EXP_COLS: Record<string, string> = {
-  fleet_ins_expiration_date:     "Fleet Insurance",
-  hazmat_lic_expiration_date:    "Hazmat License",
-  ifta_expiration_date:          "IFTA",
-  inner_bridge_expiration_date:  "Inner Bridge",
-  inspection_expiration_date:    "Inspection",
-  phmsa_expiration_date:         "PHMSA",
-  reg_expiration_date:           "Registration",
-  alliance_expiration_date:      "Alliance",
+  fleet_ins_expiration_date:    "Fleet Insurance",
+  hazmat_lic_expiration_date:   "Hazmat License",
+  ifta_expiration_date:         "IFTA",
+  inner_bridge_expiration_date: "Inner Bridge",
+  inspection_expiration_date:   "Inspection",
+  phmsa_expiration_date:        "PHMSA",
+  reg_expiration_date:          "Registration",
+  alliance_expiration_date:     "Alliance",
 };
 
-// Trailer expiration columns → human labels
 const TRAILER_EXP_COLS: Record<string, string> = {
-  tank_i_expiration_date:                "Tank I",
-  tank_k_expiration_date:                "Tank K",
-  tank_l_expiration_date:                "Tank L",
-  tank_p_expiration_date:                "Tank P",
-  tank_t_expiration_date:                "Tank T",
-  tank_uc_expiration_date:               "Tank UC",
-  tank_v_expiration_date:                "Tank V",
-  trailer_inspection_expiration_date:    "Trailer Inspection",
-  trailer_reg_expiration_date:           "Trailer Registration",
+  tank_i_expiration_date:             "Tank I",
+  tank_k_expiration_date:             "Tank K",
+  tank_l_expiration_date:             "Tank L",
+  tank_p_expiration_date:             "Tank P",
+  tank_t_expiration_date:             "Tank T",
+  tank_uc_expiration_date:            "Tank UC",
+  tank_v_expiration_date:             "Tank V",
+  trailer_inspection_expiration_date: "Trailer Inspection",
+  trailer_reg_expiration_date:        "Trailer Registration",
 };
 
 const TRUCK_WARN_DAYS    = 30;
 const TRAILER_WARN_DAYS  = 30;
 const TERMINAL_WARN_DAYS = 7;
+
+const DEFER_KEY = "protankr_exp_deferred_v1";
 
 function daysUntil(isoDate: string): number {
   const today = new Date();
@@ -53,28 +52,38 @@ function daysUntil(isoDate: string): number {
   return Math.round((exp.getTime() - today.getTime()) / 86400000);
 }
 
+function loadDeferred(): Set<string> {
+  try {
+    const raw = localStorage.getItem(DEFER_KEY);
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw);
+    return new Set(Array.isArray(parsed) ? parsed : []);
+  } catch { return new Set(); }
+}
+
+function saveDeferred(set: Set<string>) {
+  try { localStorage.setItem(DEFER_KEY, JSON.stringify(Array.from(set))); } catch {}
+}
+
 export function useExpirations(opts: {
   truckId: string | null;
   trailerId: string | null;
   truckName: string;
   trailerName: string;
-  // terminal access dates keyed by terminal_id
   accessDateByTerminalId: Record<string, string | undefined>;
-  // terminal list for names
   terminals: any[];
   addDaysISO_: (iso: string, days: number) => string;
 }) {
   const { truckId, trailerId, truckName, trailerName, accessDateByTerminalId, terminals, addDaysISO_ } = opts;
 
-  const [truckRow, setTruckRow] = useState<Record<string, any> | null>(null);
+  const [truckRow,   setTruckRow]   = useState<Record<string, any> | null>(null);
   const [trailerRow, setTrailerRow] = useState<Record<string, any> | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [deferred,   setDeferred]   = useState<Set<string>>(() => loadDeferred());
 
-  // Fetch truck row
+  // Fetch truck
   useEffect(() => {
     if (!truckId) { setTruckRow(null); return; }
     (async () => {
-      setLoading(true);
       const cols = Object.keys(TRUCK_EXP_COLS).join(", ");
       const { data } = await supabase
         .from("trucks")
@@ -82,15 +91,13 @@ export function useExpirations(opts: {
         .eq("truck_id", truckId)
         .maybeSingle();
       setTruckRow(data ?? null);
-      setLoading(false);
     })();
   }, [truckId]);
 
-  // Fetch trailer row
+  // Fetch trailer
   useEffect(() => {
     if (!trailerId) { setTrailerRow(null); return; }
     (async () => {
-      setLoading(true);
       const cols = Object.keys(TRAILER_EXP_COLS).join(", ");
       const { data } = await supabase
         .from("trailers")
@@ -98,63 +105,37 @@ export function useExpirations(opts: {
         .eq("trailer_id", trailerId)
         .maybeSingle();
       setTrailerRow(data ?? null);
-      setLoading(false);
     })();
   }, [trailerId]);
 
-  // Build full expiration list
+  // Build item list
   const items = useMemo<ExpirationItem[]>(() => {
     const out: ExpirationItem[] = [];
 
-    // Truck docs
     if (truckRow) {
-      const name = truckRow.truck_name
-        ? String(truckRow.truck_name)
-        : truckName || String(truckId ?? "Truck");
+      const name = truckRow.truck_name ? String(truckRow.truck_name) : truckName || "Truck";
       for (const [col, label] of Object.entries(TRUCK_EXP_COLS)) {
         const iso = truckRow[col];
         if (!iso || typeof iso !== "string") continue;
         const days = daysUntil(iso);
         if (days <= TRUCK_WARN_DAYS) {
-          out.push({
-            id: `truck-${truckId}-${col}`,
-            label,
-            entityName: name,
-            entityType: "truck",
-            entityId: String(truckId),
-            expiresISO: iso,
-            daysLeft: days,
-            expired: days < 0,
-          });
+          out.push({ id: `truck-${truckId}-${col}`, label, entityName: name, entitySubtitle: label, entityType: "truck", entityId: String(truckId), expiresISO: iso, daysLeft: days, expired: days < 0 });
         }
       }
     }
 
-    // Trailer docs
     if (trailerRow) {
-      const name = trailerRow.trailer_name
-        ? String(trailerRow.trailer_name)
-        : trailerName || String(trailerId ?? "Trailer");
+      const name = trailerRow.trailer_name ? String(trailerRow.trailer_name) : trailerName || "Trailer";
       for (const [col, label] of Object.entries(TRAILER_EXP_COLS)) {
         const iso = trailerRow[col];
         if (!iso || typeof iso !== "string") continue;
         const days = daysUntil(iso);
         if (days <= TRAILER_WARN_DAYS) {
-          out.push({
-            id: `trailer-${trailerId}-${col}`,
-            label,
-            entityName: name,
-            entityType: "trailer",
-            entityId: String(trailerId),
-            expiresISO: iso,
-            daysLeft: days,
-            expired: days < 0,
-          });
+          out.push({ id: `trailer-${trailerId}-${col}`, label, entityName: name, entitySubtitle: label, entityType: "trailer", entityId: String(trailerId), expiresISO: iso, daysLeft: days, expired: days < 0 });
         }
       }
     }
 
-    // Terminal cards
     for (const [terminalId, lastVisitISO] of Object.entries(accessDateByTerminalId)) {
       if (!lastVisitISO) continue;
       const terminal = terminals.find((t: any) => String(t.terminal_id) === terminalId);
@@ -162,10 +143,14 @@ export function useExpirations(opts: {
       const expiresISO = addDaysISO_(lastVisitISO, renewalDays);
       const days = daysUntil(expiresISO);
       if (days <= TERMINAL_WARN_DAYS) {
+        const city  = terminal?.city  ? String(terminal.city)  : "";
+        const state = terminal?.state ? String(terminal.state) : "";
+        const subtitle = city && state ? `${city}, ${state}` : city || state || "Terminal Card";
         out.push({
           id: `terminal-${terminalId}`,
-          label: "Terminal Card",
+          label: subtitle,
           entityName: terminal?.terminal_name ?? `Terminal ${terminalId}`,
+          entitySubtitle: subtitle,
           entityType: "terminal",
           entityId: terminalId,
           expiresISO,
@@ -175,14 +160,41 @@ export function useExpirations(opts: {
       }
     }
 
-    // Sort: expired first, then soonest expiring
     out.sort((a, b) => a.daysLeft - b.daysLeft);
     return out;
   }, [truckRow, trailerRow, truckId, trailerId, truckName, trailerName, accessDateByTerminalId, terminals, addDaysISO_]);
 
-  const expiredCount  = useMemo(() => items.filter(i => i.expired).length, [items]);
-  const warningCount  = useMemo(() => items.filter(i => !i.expired).length, [items]);
-  const mostUrgent    = items[0] ?? null;
+  // Auto-remove from deferred when item resolves (e.g. terminal renewed)
+  useEffect(() => {
+    const activeIds = new Set(items.map(i => i.id));
+    setDeferred(prev => {
+      const next = new Set(prev);
+      let changed = false;
+      for (const id of prev) {
+        // If the item no longer appears in the list, remove from deferred
+        if (!activeIds.has(id)) { next.delete(id); changed = true; }
+      }
+      if (changed) saveDeferred(next);
+      return changed ? next : prev;
+    });
+  }, [items]);
 
-  return { items, expiredCount, warningCount, mostUrgent, loading };
+  const toggleDefer = useCallback((id: string) => {
+    setDeferred(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      saveDeferred(next);
+      return next;
+    });
+  }, []);
+
+  const activeItems   = useMemo(() => items.filter(i => !deferred.has(i.id)), [items, deferred]);
+  const deferredItems = useMemo(() => items.filter(i =>  deferred.has(i.id)), [items, deferred]);
+
+  const expiredCount  = useMemo(() => activeItems.filter(i => i.expired).length,  [activeItems]);
+  const warningCount  = useMemo(() => activeItems.filter(i => !i.expired).length, [activeItems]);
+  const mostUrgent    = activeItems[0] ?? null;
+  const allDeferred   = items.length > 0 && activeItems.length === 0;
+
+  return { items, activeItems, deferredItems, expiredCount, warningCount, mostUrgent, allDeferred, toggleDefer };
 }
