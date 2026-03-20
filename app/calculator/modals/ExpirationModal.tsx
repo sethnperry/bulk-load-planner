@@ -275,42 +275,38 @@ export default function ExpirationModal({
           </div>
         )}
 
-        {/* ── Terminal Cards — alerts + full directory in one section ── */}
-        {(activeTerminals.length > 0 || hasCards) && (
+        {/* ── Terminal Cards — one card per terminal, sorted by status ── */}
+        {hasCards && (
           <div>
             <SectionLabel left="Terminal Cards" right={locLabel || undefined} />
-            <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
 
-              {/* Expiring/expired alert cards */}
-              {activeTerminals.length > 0 && (
-                <div style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 8 }}>
-                  {renderItems(activeTerminals, false, tapAction)}
-                </div>
-              )}
-
-              {/* All terminals as a flat list: expired → active → not carded */}
+              {/* Expired */}
               {cardExpired.map(c => (
-                <div key={`exp-${c.name}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "5px 2px", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,0.60)" }}>{c.name}</div>
-                  <div style={{ fontSize: 11, color: "rgba(239,68,68,0.65)", fontWeight: 600, whiteSpace: "nowrap" as const }}>{c.expires} · {Math.abs(c.daysLeft)}d ago</div>
+                <div key={`exp-${c.name}`} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "8px 10px", borderRadius: 8, border: "1px solid rgba(239,68,68,0.20)", background: "rgba(239,68,68,0.06)" }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "rgba(255,255,255,0.85)" }}>{c.name}</div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "rgba(239,68,68,0.85)", whiteSpace: "nowrap" as const }}>⛔ {c.expires} · {Math.abs(c.daysLeft)}d ago</div>
                 </div>
               ))}
 
-              {cardActive.map(c => (
-                <div key={`act-${c.name}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "5px 2px", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,0.70)" }}>{c.name}</div>
-                  <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", fontWeight: 600, whiteSpace: "nowrap" as const }}>{c.expires} · {c.daysLeft}d</div>
+              {/* Active — sorted soonest first */}
+              {cardActive.map(c => {
+                const urgent = c.daysLeft <= 7;
+                return (
+                  <div key={`act-${c.name}`} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "8px 10px", borderRadius: 8, border: `1px solid ${urgent ? "rgba(234,179,8,0.20)" : "rgba(255,255,255,0.07)"}`, background: urgent ? "rgba(234,179,8,0.05)" : "rgba(255,255,255,0.03)" }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "rgba(255,255,255,0.85)" }}>{c.name}</div>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: urgent ? "rgba(234,179,8,0.85)" : "rgba(255,255,255,0.38)", whiteSpace: "nowrap" as const }}>{urgent ? "⚠ " : ""}{c.expires} · {c.daysLeft}d</div>
+                  </div>
+                );
+              })}
+
+              {/* Not carded — grey, no date */}
+              {cardNotCarded.map(name => (
+                <div key={`nc-${name}`} style={{ display: "flex", alignItems: "center", padding: "8px 10px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.05)", background: "rgba(255,255,255,0.02)" }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,0.25)" }}>{name}</div>
                 </div>
               ))}
 
-              {cardNotCarded.length > 0 && (
-                <>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.18)", letterSpacing: "0.08em", textTransform: "uppercase" as const, padding: "8px 0 4px" }}>Not Carded</div>
-                  {cardNotCarded.map(name => (
-                    <div key={`nc-${name}`} style={{ fontSize: 13, color: "rgba(255,255,255,0.25)", padding: "4px 2px", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>{name}</div>
-                  ))}
-                </>
-              )}
             </div>
           </div>
         )}
