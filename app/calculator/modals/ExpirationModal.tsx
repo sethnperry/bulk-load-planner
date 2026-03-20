@@ -24,7 +24,6 @@ type Props = {
   toggleDefer: (id: string) => void;
   onOpenEquipment: () => void;
   onOpenTerminals: () => void;
-  // Card directory
   selectedCity: string;
   selectedState: string;
   allTerminalsInCity: TerminalEntry[];
@@ -34,80 +33,72 @@ type Props = {
   formatMDYWithCountdown_: (iso: string) => string;
 };
 
-// ── Report builder ────────────────────────────────────────────────────────────
+// ── Report ────────────────────────────────────────────────────────────────────
 function buildReport(
-  active: ExpirationItem[],
-  deferred: ExpirationItem[],
-  city: string,
-  state: string,
-  cardActive: { name: string; expires: string; daysLeft: number }[],
-  cardExpired: { name: string; expires: string; daysLeft: number }[],
+  activeItems: ExpirationItem[],
+  truckName: string,
+  city: string, state: string,
+  cardActive:    { name: string; expires: string; daysLeft: number }[],
+  cardExpired:   { name: string; expires: string; daysLeft: number }[],
   cardNotCarded: string[],
 ): string {
-  const date = new Date().toLocaleDateString("en-US", {
-    month: "2-digit", day: "2-digit", year: "numeric",
-  });
-
+  const date = new Date().toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" });
+  const loc = city && state ? `${city}, ${state}` : city || state || "";
   const lines: string[] = [];
 
-  // ── Expiration section ────────────────────────────────────────────────────
-  const hasExp = active.length > 0 || deferred.length > 0;
-  if (hasExp) {
+  // Equipment expirations
+  const trucks   = activeItems.filter(i => i.entityType === "truck");
+  const trailers = activeItems.filter(i => i.entityType === "trailer");
+  const termExp  = activeItems.filter(i => i.entityType === "terminal");
+  const hasEquipExp = trucks.length + trailers.length + termExp.length > 0;
+
+  if (hasEquipExp) {
     lines.push(`Expiration Report — ${date}`, "");
-    const trucks   = active.filter(i => i.entityType === "truck");
-    const trailers = active.filter(i => i.entityType === "trailer");
-    const terminals = active.filter(i => i.entityType === "terminal");
-    for (const [label, group] of [["TRUCK", trucks], ["TRAILER", trailers], ["TERMINAL", terminals]] as [string, ExpirationItem[]][]) {
-      if (group.length === 0) continue;
+    for (const [label, group] of [["TRUCK", trucks], ["TRAILER", trailers], ["TERMINAL CARDS", termExp]] as [string, ExpirationItem[]][]) {
+      if (!group.length) continue;
       lines.push(label);
       for (const i of group) {
         const status = i.expired ? `expired ${Math.abs(i.daysLeft)}d ago` : `${i.daysLeft}d remaining`;
-        lines.push(`${i.entityName}  ${i.entitySubtitle}  ${status}`);
+        lines.push(`${i.label}  ${status}`);
       }
       lines.push("");
     }
   }
 
-  // ── Card directory section ────────────────────────────────────────────────
-  const loc = city && state ? `${city}, ${state}` : city || state || "";
-  lines.push(`Card Directory${loc ? ` — ${loc}` : ""}  ${date}`, "");
+  // Card directory
+  const hasCards = cardActive.length + cardExpired.length + cardNotCarded.length > 0;
+  if (hasCards) {
+    lines.push(`Terminals${loc ? ` — ${loc}` : ""}  ${date}`, "");
 
-  if (cardActive.length > 0) {
-    lines.push("ACTIVE");
-    // Pad names for clean columns
-    const maxLen = Math.max(...cardActive.map(c => c.name.length));
-    for (const c of cardActive) {
-      const pad = " ".repeat(Math.max(1, maxLen - c.name.length + 2));
-      lines.push(`${c.name}${pad}${c.expires}  ${c.daysLeft}d`);
+    if (cardActive.length > 0) {
+      lines.push("ACTIVE");
+      const maxLen = Math.max(...cardActive.map(c => c.name.length));
+      for (const c of cardActive) {
+        const pad = " ".repeat(Math.max(1, maxLen - c.name.length + 2));
+        lines.push(`${c.name}${pad}${c.expires}  ${c.daysLeft}d`);
+      }
+      lines.push("");
     }
-    lines.push("");
-  }
-
-  if (cardExpired.length > 0) {
-    lines.push("EXPIRED");
-    const maxLen = Math.max(...cardExpired.map(c => c.name.length));
-    for (const c of cardExpired) {
-      const pad = " ".repeat(Math.max(1, maxLen - c.name.length + 2));
-      lines.push(`${c.name}${pad}${c.expires}  ${Math.abs(c.daysLeft)}d ago`);
+    if (cardExpired.length > 0) {
+      lines.push("EXPIRED");
+      const maxLen = Math.max(...cardExpired.map(c => c.name.length));
+      for (const c of cardExpired) {
+        const pad = " ".repeat(Math.max(1, maxLen - c.name.length + 2));
+        lines.push(`${c.name}${pad}${c.expires}  ${Math.abs(c.daysLeft)}d ago`);
+      }
+      lines.push("");
     }
-    lines.push("");
-  }
-
-  if (cardNotCarded.length > 0) {
-    lines.push("NOT CARDED");
-    for (const n of cardNotCarded) lines.push(n);
-    lines.push("");
+    if (cardNotCarded.length > 0) {
+      lines.push("NOT CARDED");
+      for (const n of cardNotCarded) lines.push(n);
+      lines.push("");
+    }
   }
 
   return lines.join("\n").trimEnd();
 }
 
 // ── Shared styles ─────────────────────────────────────────────────────────────
-const SECTION_HEADER: React.CSSProperties = {
-  fontSize: 10, fontWeight: 800, letterSpacing: "0.1em",
-  textTransform: "uppercase", color: "rgba(255,255,255,0.30)",
-  marginBottom: 6,
-};
 const BTN: React.CSSProperties = {
   flex: 1, padding: "11px 0", borderRadius: 10,
   border: "1px solid rgba(255,255,255,0.12)",
@@ -116,42 +107,51 @@ const BTN: React.CSSProperties = {
   fontSize: 13, fontWeight: 700, cursor: "pointer", letterSpacing: 0.2,
 };
 
-// ── Expiration item row ───────────────────────────────────────────────────────
-function ItemRow({ item, deferred, onTap, onToggleDefer }: {
-  item: ExpirationItem; deferred: boolean;
-  onTap: () => void; onToggleDefer: () => void;
-}) {
-  const statusColor = deferred ? "rgba(255,255,255,0.25)"
-    : item.expired ? "rgba(239,68,68,0.90)" : "rgba(234,179,8,0.90)";
-  const statusText = item.expired
-    ? `Expired ${Math.abs(item.daysLeft)}d ago` : `${item.daysLeft}d left`;
+function SectionLabel({ left, right }: { left: string; right?: string }) {
+  return (
+    <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 6 }}>
+      <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.1em", textTransform: "uppercase" as const, color: "rgba(255,255,255,0.30)" }}>
+        {left}
+      </div>
+      {right && (
+        <div style={{ fontSize: 10, fontWeight: 600, color: "rgba(255,255,255,0.20)", letterSpacing: 0 }}>
+          {right}
+        </div>
+      )}
+    </div>
+  );
+}
 
+// ── Expiration item row ───────────────────────────────────────────────────────
+function ItemRow({ label, subtitle, statusText, statusColor, deferred, onTap, onToggleDefer }: {
+  label: string; subtitle?: string;
+  statusText: string; statusColor: string;
+  deferred: boolean; onTap: () => void; onToggleDefer: () => void;
+}) {
   return (
     <div style={{
       display: "flex", alignItems: "center", gap: 8,
-      padding: "10px 12px", borderRadius: 10,
+      padding: "8px 10px", borderRadius: 8,
       border: `1px solid ${deferred ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.08)"}`,
       background: deferred ? "rgba(255,255,255,0.01)" : "rgba(255,255,255,0.03)",
     }}>
       <div role="button" tabIndex={0} onClick={onTap}
         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onTap(); } }}
         style={{ flex: 1, minWidth: 0, cursor: "pointer" }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: deferred ? "rgba(255,255,255,0.35)" : "rgba(255,255,255,0.90)" }}>
-          {item.entityName}
+        <div style={{ fontSize: 13, fontWeight: 700, color: deferred ? "rgba(255,255,255,0.30)" : "rgba(255,255,255,0.88)" }}>
+          {label}
         </div>
-        <div style={{ fontSize: 11, color: deferred ? "rgba(255,255,255,0.22)" : "rgba(255,255,255,0.45)", marginTop: 1 }}>
-          {item.entitySubtitle}
-        </div>
+        {subtitle && (
+          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.28)", marginTop: 1 }}>{subtitle}</div>
+        )}
       </div>
-      <div style={{ fontSize: 12, fontWeight: 800, color: statusColor, whiteSpace: "nowrap", flexShrink: 0 }}>
-        {!deferred && (item.expired ? "⛔" : "⚠")} {statusText}
+      <div style={{ fontSize: 12, fontWeight: 800, color: statusColor, whiteSpace: "nowrap" as const, flexShrink: 0 }}>
+        {statusText}
       </div>
       <button type="button" onClick={(e) => { e.stopPropagation(); onToggleDefer(); }}
-        title={deferred ? "Restore alert" : "Defer alert"}
+        title={deferred ? "Restore" : "Defer"}
         style={{ background: "none", border: "none", cursor: "pointer", padding: "2px 4px",
-          fontSize: 14, color: deferred ? "rgba(255,255,255,0.30)" : "rgba(255,255,255,0.20)",
-          flexShrink: 0, lineHeight: 1 }}
-        aria-label={deferred ? "Restore" : "Defer"}>
+          fontSize: 13, color: "rgba(255,255,255,0.18)", flexShrink: 0, lineHeight: 1 }}>
         {deferred ? "↩" : "—"}
       </button>
     </div>
@@ -169,57 +169,44 @@ export default function ExpirationModal({
   const [shareError, setShareError] = useState("");
   const [deferredExpanded, setDeferredExpanded] = useState(false);
 
-  // ── Build card directory data ─────────────────────────────────────────────
+  // ── Build card directory ──────────────────────────────────────────────────
   type CardEntry = { name: string; expires: string; expiresISO: string; daysLeft: number };
   const cardActive:    CardEntry[] = [];
   const cardExpired:   CardEntry[] = [];
   const cardNotCarded: string[]    = [];
 
   for (const t of allTerminalsInCity) {
-    const tid    = String(t.terminal_id);
-    const name   = t.terminal_name ?? `Terminal ${tid}`;
+    const tid     = String(t.terminal_id);
+    const name    = t.terminal_name ?? `Terminal ${tid}`;
     const lastISO = accessDateByTerminalId[tid];
-    if (!lastISO) {
-      cardNotCarded.push(name);
-      continue;
-    }
+    if (!lastISO) { cardNotCarded.push(name); continue; }
     const renewalDays = Number(t.renewal_days ?? t.renewalDays ?? t.renewal ?? 90) || 90;
     const expiresISO  = addDaysISO_(lastISO, renewalDays);
     const expired     = isPastISO_(expiresISO);
-    const today       = new Date(); today.setHours(0,0,0,0);
-    const expDate     = new Date(expiresISO + "T00:00:00");
-    const daysLeft    = Math.round((expDate.getTime() - today.getTime()) / 86400000);
-    const expiresText = formatMDYWithCountdown_(expiresISO).split(" (")[0]; // just the date
+    const today = new Date(); today.setHours(0,0,0,0);
+    const daysLeft = Math.round((new Date(expiresISO + "T00:00:00").getTime() - today.getTime()) / 86400000);
+    const expiresText = formatMDYWithCountdown_(expiresISO).split(" (")[0];
     const entry: CardEntry = { name, expires: expiresText, expiresISO, daysLeft };
     expired ? cardExpired.push(entry) : cardActive.push(entry);
   }
-
-  // Sort active by soonest expiring, expired by most recently expired
   cardActive.sort((a, b) => a.daysLeft - b.daysLeft);
   cardExpired.sort((a, b) => a.daysLeft - b.daysLeft);
   cardNotCarded.sort();
 
-  const report = buildReport(
-    activeItems, deferredItems,
-    selectedCity, selectedState,
-    cardActive, cardExpired, cardNotCarded,
-  );
+  // Derive truck name for report header
+  const truckItem = activeItems.find(i => i.entityType === "truck");
+  const truckName = truckItem?.entityName ?? "";
+
+  const report = buildReport(activeItems, truckName, selectedCity, selectedState, cardActive, cardExpired, cardNotCarded);
 
   const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(report);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch { setShareError("Could not copy to clipboard."); }
+    try { await navigator.clipboard.writeText(report); setCopied(true); setTimeout(() => setCopied(false), 2000); }
+    catch { setShareError("Could not copy to clipboard."); }
   };
-
   const handleShare = async () => {
     setShareError("");
-    if (navigator.share) {
-      try { await navigator.share({ title: "Expiration Report", text: report }); } catch {}
-    } else {
-      window.open(`mailto:?subject=${encodeURIComponent("Expiration Report")}&body=${encodeURIComponent(report)}`);
-    }
+    if (navigator.share) { try { await navigator.share({ title: "Expiration Report", text: report }); } catch {} }
+    else { window.open(`mailto:?subject=${encodeURIComponent("Expiration Report")}&body=${encodeURIComponent(report)}`); }
   };
 
   const tapAction = (item: ExpirationItem) => {
@@ -227,103 +214,97 @@ export default function ExpirationModal({
     item.entityType === "terminal" ? onOpenTerminals() : onOpenEquipment();
   };
 
-  const renderExpSection = (label: string, sectionItems: ExpirationItem[], isDeferred = false) => {
-    if (sectionItems.length === 0) return null;
-    return (
-      <div>
-        <div style={SECTION_HEADER}>{label}</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          {sectionItems.map(item => (
-            <ItemRow key={item.id} item={item} deferred={isDeferred}
-              onTap={() => tapAction(item)} onToggleDefer={() => toggleDefer(item.id)} />
-          ))}
-        </div>
-      </div>
-    );
-  };
+  const loc = selectedCity && selectedState ? `${selectedCity}, ${state}` : selectedCity || selectedState || "";
+  const locLabel = selectedCity && selectedState ? `In ${selectedCity}, ${selectedState}` : selectedCity ? `In ${selectedCity}` : "";
 
-  const loc = selectedCity && selectedState ? `${selectedCity}, ${selectedState}` : selectedCity || selectedState || "";
-  const hasCards = cardActive.length + cardExpired.length + cardNotCarded.length > 0;
-  const hasExpirations = items.length > 0;
-
+  // Group active items
   const activeTrucks    = activeItems.filter(i => i.entityType === "truck");
   const activeTrailers  = activeItems.filter(i => i.entityType === "trailer");
   const activeTerminals = activeItems.filter(i => i.entityType === "terminal");
 
+  // Unique truck/trailer names for section labels
+  const truckNames   = [...new Set(activeTrucks.map(i => i.entityName))].join(", ");
+  const trailerNames = [...new Set(activeTrailers.map(i => i.entityName))].join(", ");
+
+  const renderItems = (items: ExpirationItem[], isDeferred = false, onTap: (i: ExpirationItem) => void) =>
+    items.map(item => {
+      const deferred = isDeferred;
+      const statusColor = deferred ? "rgba(255,255,255,0.22)"
+        : item.expired ? "rgba(239,68,68,0.88)" : "rgba(234,179,8,0.88)";
+      const statusText = item.expired
+        ? `${deferred ? "" : "⛔ "}Expired ${Math.abs(item.daysLeft)}d ago`
+        : `${deferred ? "" : "⚠ "}${item.daysLeft}d left`;
+      return (
+        <ItemRow key={item.id}
+          label={item.label}
+          statusText={statusText} statusColor={statusColor}
+          deferred={deferred}
+          onTap={() => onTap(item)}
+          onToggleDefer={() => toggleDefer(item.id)}
+        />
+      );
+    });
+
+  const hasCards = cardActive.length + cardExpired.length + cardNotCarded.length > 0;
+
   return (
     <FullscreenModal open={open} title="Expirations" onClose={onClose}>
-      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
 
-        {/* ── Expiration alerts ── */}
-        {hasExpirations && (
-          <>
-            {renderExpSection("Truck Documents",   activeTrucks)}
-            {renderExpSection("Trailer Documents",  activeTrailers)}
-            {renderExpSection("Terminal Cards",     activeTerminals)}
-
-            {/* Deferred — collapsed into single row */}
-            {deferredItems.length > 0 && (
-              <div>
-                <button type="button"
-                  onClick={() => setDeferredExpanded(p => !p)}
-                  style={{ background: "none", border: "none", cursor: "pointer", padding: 0, display: "flex", alignItems: "center", gap: 6 }}>
-                  <div style={{ ...SECTION_HEADER, marginBottom: 0 }}>
-                    Deferred ({deferredItems.length})
-                  </div>
-                  <div style={{ fontSize: 10, color: "rgba(255,255,255,0.25)" }}>
-                    {deferredExpanded ? "▲" : "▼"}
-                  </div>
-                </button>
-                {deferredExpanded && (
-                  <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
-                    {deferredItems.map(item => (
-                      <ItemRow key={item.id} item={item} deferred={true}
-                        onTap={() => tapAction(item)} onToggleDefer={() => toggleDefer(item.id)} />
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </>
+        {/* ── Truck docs ── */}
+        {activeTrucks.length > 0 && (
+          <div>
+            <SectionLabel left="Truck Documents" right={truckNames ? `For ${truckNames}` : undefined} />
+            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+              {renderItems(activeTrucks, false, tapAction)}
+            </div>
+          </div>
         )}
 
-        {!hasExpirations && (
-          <div style={{ fontSize: 13, color: "rgba(255,255,255,0.40)" }}>No equipment or terminal expirations.</div>
+        {/* ── Trailer docs ── */}
+        {activeTrailers.length > 0 && (
+          <div>
+            <SectionLabel left="Trailer Documents" right={trailerNames ? `For ${trailerNames}` : undefined} />
+            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+              {renderItems(activeTrailers, false, tapAction)}
+            </div>
+          </div>
         )}
 
-        {/* ── Card directory ── */}
-        {hasCards && (
-          <>
-            <div style={{ borderTop: "1px solid rgba(255,255,255,0.07)", paddingTop: 14 }}>
-              <div style={{ ...SECTION_HEADER, marginBottom: 12 }}>
-                Card Directory{loc ? ` — ${loc}` : ""}
-              </div>
+        {/* ── Terminal cards (expiring) + full directory ── */}
+        {(activeTerminals.length > 0 || hasCards) && (
+          <div>
+            <SectionLabel left="Terminal Cards" right={locLabel || undefined} />
+            <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
 
-              {/* Expired first */}
+              {/* Expiring/expired alerts first */}
+              {activeTerminals.length > 0 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: cardExpired.length + cardActive.length + cardNotCarded.length > 0 ? 8 : 0 }}>
+                  {renderItems(activeTerminals, false, tapAction)}
+                </div>
+              )}
+
+              {/* Expired cards */}
               {cardExpired.length > 0 && (
-                <div style={{ marginBottom: 12 }}>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: "rgba(239,68,68,0.60)", marginBottom: 6, letterSpacing: "0.08em", textTransform: "uppercase" }}>Expired</div>
+                <div style={{ marginBottom: 6 }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: "rgba(239,68,68,0.50)", letterSpacing: "0.08em", textTransform: "uppercase" as const, padding: "4px 0 4px" }}>Expired</div>
                   {cardExpired.map(c => (
-                    <div key={c.expiresISO + c.name} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "5px 0", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: "rgba(255,255,255,0.75)" }}>{c.name}</div>
-                      <div style={{ fontSize: 12, color: "rgba(239,68,68,0.80)", fontWeight: 700, whiteSpace: "nowrap" }}>
-                        {c.expires} · {Math.abs(c.daysLeft)}d ago
-                      </div>
+                    <div key={c.name} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "4px 0", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,0.65)" }}>{c.name}</div>
+                      <div style={{ fontSize: 11, color: "rgba(239,68,68,0.70)", fontWeight: 600, whiteSpace: "nowrap" as const }}>{c.expires} · {Math.abs(c.daysLeft)}d ago</div>
                     </div>
                   ))}
                 </div>
               )}
 
-              {/* Active */}
+              {/* Active cards */}
               {cardActive.length > 0 && (
-                <div style={{ marginBottom: 12 }}>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.30)", marginBottom: 6, letterSpacing: "0.08em", textTransform: "uppercase" }}>Active</div>
+                <div style={{ marginBottom: 6 }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.25)", letterSpacing: "0.08em", textTransform: "uppercase" as const, padding: "4px 0 4px" }}>Active</div>
                   {cardActive.map(c => (
-                    <div key={c.expiresISO + c.name} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "5px 0", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: "rgba(255,255,255,0.75)" }}>{c.name}</div>
-                      <div style={{ fontSize: 12, color: "rgba(255,255,255,0.40)", fontWeight: 600, whiteSpace: "nowrap" }}>
-                        {c.expires} · {c.daysLeft}d
-                      </div>
+                    <div key={c.name} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "4px 0", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,0.65)" }}>{c.name}</div>
+                      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", fontWeight: 600, whiteSpace: "nowrap" as const }}>{c.expires} · {c.daysLeft}d</div>
                     </div>
                   ))}
                 </div>
@@ -332,21 +313,41 @@ export default function ExpirationModal({
               {/* Not carded */}
               {cardNotCarded.length > 0 && (
                 <div>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.20)", marginBottom: 6, letterSpacing: "0.08em", textTransform: "uppercase" }}>Not Carded</div>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.18)", letterSpacing: "0.08em", textTransform: "uppercase" as const, padding: "4px 0 4px" }}>Not Carded</div>
                   {cardNotCarded.map(name => (
-                    <div key={name} style={{ fontSize: 13, color: "rgba(255,255,255,0.28)", padding: "5px 0", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
-                      {name}
-                    </div>
+                    <div key={name} style={{ fontSize: 13, color: "rgba(255,255,255,0.25)", padding: "4px 0", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>{name}</div>
                   ))}
                 </div>
               )}
             </div>
-          </>
+          </div>
+        )}
+
+        {/* ── Deferred — collapsed ── */}
+        {deferredItems.length > 0 && (
+          <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", paddingTop: 10 }}>
+            <button type="button" onClick={() => setDeferredExpanded(p => !p)}
+              style={{ background: "none", border: "none", cursor: "pointer", padding: 0, display: "flex", alignItems: "center", gap: 6 }}>
+              <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.1em", textTransform: "uppercase" as const, color: "rgba(255,255,255,0.20)" }}>
+                Deferred ({deferredItems.length})
+              </div>
+              <div style={{ fontSize: 9, color: "rgba(255,255,255,0.18)" }}>{deferredExpanded ? "▲" : "▼"}</div>
+            </button>
+            {deferredExpanded && (
+              <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 5 }}>
+                {renderItems(deferredItems, true, tapAction)}
+              </div>
+            )}
+          </div>
+        )}
+
+        {items.length === 0 && !hasCards && (
+          <div style={{ fontSize: 13, color: "rgba(255,255,255,0.40)" }}>Nothing to show.</div>
         )}
 
         {/* ── Share ── */}
         <div style={{ borderTop: "1px solid rgba(255,255,255,0.07)", paddingTop: 14 }}>
-          <div style={{ ...SECTION_HEADER, marginBottom: 8 }}>Share Report</div>
+          <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.1em", textTransform: "uppercase" as const, color: "rgba(255,255,255,0.28)", marginBottom: 8 }}>Share Report</div>
           <div style={{ display: "flex", gap: 8 }}>
             <button type="button" onClick={handleCopy} style={BTN}>{copied ? "✓ Copied" : "Copy"}</button>
             <button type="button" onClick={handleShare} style={BTN}>Share / Email</button>
