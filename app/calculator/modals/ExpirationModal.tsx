@@ -214,7 +214,7 @@ export default function ExpirationModal({
     item.entityType === "terminal" ? onOpenTerminals() : onOpenEquipment();
   };
 
-  const loc = selectedCity && selectedState ? `${selectedCity}, ${state}` : selectedCity || selectedState || "";
+  const loc = selectedCity && selectedState ? `${selectedCity}, ${selectedState}` : selectedCity || selectedState || "";
   const locLabel = selectedCity && selectedState ? `In ${selectedCity}, ${selectedState}` : selectedCity ? `In ${selectedCity}` : "";
 
   // Group active items
