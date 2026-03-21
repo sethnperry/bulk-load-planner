@@ -57,9 +57,7 @@ function loadDeferred(): Set<string> {
     const raw = localStorage.getItem(DEFER_KEY);
     if (!raw) return new Set();
     const parsed = JSON.parse(raw);
-    const result = new Set<string>(Array.isArray(parsed) ? parsed : []);
-    console.log("[useExpirations] loadDeferred:", Array.from(result));
-    return result;
+    return new Set<string>(Array.isArray(parsed) ? parsed : []);
   } catch { return new Set(); }
 }
 
@@ -172,19 +170,21 @@ export function useExpirations(opts: {
 
   // Auto-remove from deferred only when data is fully loaded
   // Guards against wiping deferred state during initial load before data arrives
-  const dataLoaded = truckLoaded && trailerLoaded;
+  // dataLoaded: truck+trailer fetched AND terminals data has arrived
+  // We check terminals.length > 0 OR accessDateByTerminalId has keys
+  // to ensure we don't wipe deferred state before terminal data loads
+  const terminalDataReady = Object.keys(accessDateByTerminalId).length > 0 || terminals.length > 0;
+  const dataLoaded = truckLoaded && trailerLoaded && terminalDataReady;
+
   useEffect(() => {
     if (!dataLoaded) return;
     const activeIds = new Set(items.map(i => i.id));
-    console.log("[useExpirations] cleanup check — dataLoaded:", dataLoaded, "items:", Array.from(activeIds), "deferred:", Array.from(loadDeferred()));
     setDeferred(prev => {
+      if (prev.size === 0) return prev;
       const next = new Set(prev);
       let changed = false;
       for (const id of prev) {
-        if (!activeIds.has(id)) {
-          console.log("[useExpirations] removing deferred id (not in items):", id);
-          next.delete(id); changed = true;
-        }
+        if (!activeIds.has(id)) { next.delete(id); changed = true; }
       }
       if (changed) saveDeferred(next);
       return changed ? next : prev;
