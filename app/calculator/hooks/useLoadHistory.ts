@@ -30,6 +30,7 @@ export type LoadHistoryLine = {
   comp_number: number;
   product_id: string | null;
   product_name: string | null;
+  button_code: string | null;
   planned_gallons: number | null;
   actual_gallons: number | null;
   planned_lbs: number | null;
@@ -37,6 +38,7 @@ export type LoadHistoryLine = {
   planned_temp_f: number | null;
   actual_temp_f: number | null;
   planned_api: number | null;
+  planned_api_updated_at: string | null;
   actual_api: number | null;
 };
 
@@ -134,7 +136,7 @@ export function useLoadHistory(authUserId: string) {
         .select(`
           comp_number, product_id, planned_gallons, actual_gallons,
           planned_lbs, actual_lbs, temp_f, actual_temp_f, actual_api,
-          products(product_name, display_name)
+          products(product_name, display_name, button_code)
         `)
         .eq("load_id", loadId)
         .order("comp_number", { ascending: true });
@@ -148,6 +150,7 @@ export function useLoadHistory(authUserId: string) {
             comp_number: comp,
             product_id: l.product_id ?? null,
             product_name: l.products?.product_name ?? l.products?.display_name ?? null,
+            button_code: (l.products as any)?.button_code ?? null,
             planned_gallons: l.planned_gallons != null ? Number(l.planned_gallons) : null,
             actual_gallons:  l.actual_gallons  != null ? Number(l.actual_gallons)  : null,
             planned_lbs:     l.planned_lbs     != null ? Number(l.planned_lbs)     : null,
@@ -166,6 +169,7 @@ export function useLoadHistory(authUserId: string) {
               : (isCompleted && l.temp_f != null ? Number(l.temp_f) : null),
             // Planned API: from snapshot.lines[comp].planned_api (written by updated beginLoad)
             planned_api: snap.planned_api != null ? Number(snap.planned_api) : null,
+            planned_api_updated_at: snap.planned_api_updated_at ?? null,
             // Actual API: now written by the updated complete_load RPC
             actual_api: l.actual_api != null ? Number(l.actual_api) : null,
           };
