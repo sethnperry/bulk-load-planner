@@ -42,17 +42,17 @@ function buildReport(
   cardNotCarded: string[],
 ): string {
   const date = new Date().toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" });
-  const loc = city && state ? `${city}, ${state}` : city || state || "";
   const lines: string[] = [];
 
   const trucks   = activeItems.filter(i => i.entityType === "truck");
   const trailers = activeItems.filter(i => i.entityType === "trailer");
-  const termExp  = activeItems.filter(i => i.entityType === "terminal");
-  const hasEquip = trucks.length + trailers.length + termExp.length > 0;
+  const loc      = city && state ? `${city}, ${state}` : city || state || "";
 
+  // Equipment expiration section
+  const hasEquip = trucks.length + trailers.length > 0;
   if (hasEquip) {
     lines.push(`Expiration Report — ${date}`, "");
-    for (const [label, group] of [["TRUCK", trucks], ["TRAILER", trailers], ["TERMINAL CARDS", termExp]] as [string, ExpirationItem[]][]) {
+    for (const [label, group] of [["TRUCK", trucks], ["TRAILER", trailers]] as [string, ExpirationItem[]][]) {
       if (!group.length) continue;
       lines.push(label);
       for (const i of group) {
@@ -63,14 +63,18 @@ function buildReport(
     }
   }
 
+  // Terminal cards section — all in one block
   const hasCards = cardActive.length + cardExpired.length + cardNotCarded.length > 0;
   if (hasCards) {
-    lines.push(`Terminals${loc ? ` — ${loc}` : ""}  ${date}`, "");
+    const termHeader = loc ? `TERMINAL CARDS — ${loc}` : "TERMINAL CARDS";
+    lines.push(termHeader, "");
+
     if (cardActive.length > 0) {
       lines.push("ACTIVE");
       const maxLen = Math.max(...cardActive.map(c => c.name.length));
       for (const c of cardActive) {
-        lines.push(`${c.name}${" ".repeat(Math.max(1, maxLen - c.name.length + 2))}${c.expires}  ${c.daysLeft}d`);
+        const flag = c.daysLeft <= 7 ? "  ◄" : "";
+        lines.push(`${c.name}${" ".repeat(Math.max(1, maxLen - c.name.length + 2))}${c.expires}  ${c.daysLeft}d${flag}`);
       }
       lines.push("");
     }
