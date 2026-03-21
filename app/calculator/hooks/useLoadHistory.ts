@@ -118,12 +118,13 @@ export function useLoadHistory(authUserId: string) {
     setLinesLoading((prev) => ({ ...prev, [loadId]: true }));
 
     // Build a comp_number → snapshot line map for planned API + planned temp
-    const snapshotByComp: Record<number, { planned_api?: number | null; temp_f?: number | null }> = {};
+    const snapshotByComp: Record<number, { planned_api?: number | null; planned_api_updated_at?: string | null; temp_f?: number | null }> = {};
     const snapshotLines: any[] = plannedSnapshot?.lines ?? [];
     for (const sl of snapshotLines) {
       const c = Number(sl.comp_number);
       if (c) snapshotByComp[c] = {
-        planned_api: sl.planned_api ?? null,  // written by updated beginLoad
+        planned_api: sl.planned_api ?? null,
+        planned_api_updated_at: sl.planned_api_updated_at ?? null,
         temp_f: sl.temp_f ?? null,
       };
     }
