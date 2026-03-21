@@ -20,17 +20,20 @@ export function useTerminalFilters<TMy extends BaseTerminal & { starred?: any },
   const { terminals, terminalCatalog, selectedState, selectedCity, myTerminalIdSet } = args;
 
   const terminalsFiltered = useMemo(() => {
-    return (terminals ?? [])
+    // Return full catalog for the selected city — no need for drivers to manually add terminals.
+    // Access dates are overlaid separately via accessDateByTerminalId.
+    return (terminalCatalog ?? [])
       .filter(
-        (t) => normState(t.state ?? "") === normState(selectedState) && normCity(t.city ?? "") === normCity(selectedCity)
+        (t) => normState((t as any).state ?? "") === normState(selectedState) && normCity((t as any).city ?? "") === normCity(selectedCity)
       )
       .sort((a, b) => {
-        const aStar = Boolean((a as any).starred);
-        const bStar = Boolean((b as any).starred);
-        if (aStar !== bStar) return aStar ? -1 : 1;
+        // Sort: has access date first, then alphabetical
+        const aInMy = myTerminalIdSet.has(String((a as any).terminal_id));
+        const bInMy = myTerminalIdSet.has(String((b as any).terminal_id));
+        if (aInMy !== bInMy) return aInMy ? -1 : 1;
         return String((a as any).terminal_name ?? "").localeCompare(String((b as any).terminal_name ?? ""));
       });
-  }, [terminals, selectedState, selectedCity]);
+  }, [terminalCatalog, selectedState, selectedCity, myTerminalIdSet]);
 
   const catalogTerminalsInCity = useMemo(() => {
     return (terminalCatalog ?? [])
