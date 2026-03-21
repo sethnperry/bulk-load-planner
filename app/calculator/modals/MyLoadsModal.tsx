@@ -60,13 +60,12 @@ function fmtTemp(v: number | null | undefined): string {
 function lineOverUnder(l: LoadHistoryLine): { text: string; color: string } | null {
   if (l.actual_lbs == null || l.planned_lbs == null) return null;
   const diff = Math.round(l.actual_lbs - l.planned_lbs);
-  const color = Math.abs(diff) < 30 ? "#4ade80" : diff > 0 ? "#ef4444" : "#4ade80";
+  const color = diff > 0 ? "#ef4444" : "#4ade80";
   return { text: `${diff >= 0 ? "+" : ""}${diff.toLocaleString()} lbs`, color };
 }
 
 function rowDiffColor(diff: number | null | undefined): string {
   if (diff == null) return "rgba(255,255,255,0.4)";
-  if (Math.abs(Number(diff)) < 50) return "#4ade80";
   return Number(diff) > 0 ? "#ef4444" : "#4ade80";
 }
 
@@ -91,8 +90,8 @@ function buildShareText(row: LoadHistoryRow, lines: LoadHistoryLine[] | undefine
 
   const diffTxt = rowDiffText(row.diff_lbs);
   const diffTag = row.diff_lbs == null ? "" :
-    Math.abs(row.diff_lbs) < 50 ? "  ✓ ON WEIGHT" :
-    row.diff_lbs > 0 ? "  ▲ OVER" : "  ▼ UNDER";
+    row.diff_lbs > 0 ? "  ▲ OVER" :
+    row.diff_lbs === 0 ? "  ✓ ON WEIGHT" : "  ▼ UNDER";
 
   const divider = "─".repeat(48);
   const header = [
@@ -113,8 +112,8 @@ function buildShareText(row: LoadHistoryRow, lines: LoadHistoryLine[] | undefine
     lineBlock = lines.map((l) => {
       const ou = lineOverUnder(l);
       const ouTag = ou == null ? "" :
-        Math.abs(Number(l.actual_lbs) - Number(l.planned_lbs)) < 30 ? "  ✓" :
-        Number(l.actual_lbs) > Number(l.planned_lbs) ? "  ▲ OVER" : "  ▼ UNDER";
+        Number(l.actual_lbs) > Number(l.planned_lbs) ? "  ▲ OVER" :
+        Number(l.actual_lbs) === Number(l.planned_lbs) ? "  ✓" : "  ▼ UNDER";
 
       const rows = [
         `C${l.comp_number}  ${l.product_name ?? "—"}`,
@@ -127,8 +126,8 @@ function buildShareText(row: LoadHistoryRow, lines: LoadHistoryLine[] | undefine
     const totalDiffTxt = totalDiff == null ? "—" :
       `${totalDiff >= 0 ? "+" : ""}${totalDiff.toLocaleString()} lbs`;
     const totalTag = totalDiff == null ? "" :
-      Math.abs(totalDiff) < 50 ? "  ✓ ON WEIGHT" :
-      totalDiff > 0 ? "  ▲ OVER" : "  ▼ UNDER";
+      totalDiff > 0 ? "  ▲ OVER" :
+      totalDiff === 0 ? "  ✓ ON WEIGHT" : "  ▼ UNDER";
 
     lineBlock += `\n\n${divider}\n`;
     lineBlock += `TOTAL  ${fmtGal(lines.reduce((s,l)=>s+(l.planned_gallons??0),0))}\n`;
@@ -279,7 +278,7 @@ function LineRows({ lines, loading }: { lines: LoadHistoryLine[] | undefined; lo
           {hasActual ? fmtLbsBare(totalActualLbs) : "—"}
         </div>
         <div /><div />
-        <div style={{ fontSize: 12, fontWeight: 900, color: totalDiff != null ? (Math.abs(totalDiff) < 50 ? "#4ade80" : totalDiff > 0 ? "#ef4444" : "#4ade80") : "rgba(255,255,255,0.2)", textAlign: "right", whiteSpace: "nowrap" }}>
+        <div style={{ fontSize: 12, fontWeight: 900, color: totalDiff != null ? (totalDiff > 0 ? "#ef4444" : "#4ade80") : "rgba(255,255,255,0.2)", textAlign: "right", whiteSpace: "nowrap" }}>
           {totalDiff != null ? `${totalDiff >= 0 ? "+" : ""}${Math.round(totalDiff).toLocaleString()}` : "—"}
         </div>
       </div>
