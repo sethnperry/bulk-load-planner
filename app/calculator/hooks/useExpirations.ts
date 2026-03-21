@@ -78,11 +78,13 @@ export function useExpirations(opts: {
 
   const [truckRow,   setTruckRow]   = useState<Record<string, any> | null>(null);
   const [trailerRow, setTrailerRow] = useState<Record<string, any> | null>(null);
+  const [truckLoaded,   setTruckLoaded]   = useState(false);
+  const [trailerLoaded, setTrailerLoaded] = useState(false);
   const [deferred,   setDeferred]   = useState<Set<string>>(() => loadDeferred());
 
   // Fetch truck
   useEffect(() => {
-    if (!truckId) { setTruckRow(null); return; }
+    if (!truckId) { setTruckRow(null); setTruckLoaded(true); return; }
     (async () => {
       const cols = Object.keys(TRUCK_EXP_COLS).join(", ");
       const { data } = await supabase
@@ -91,12 +93,13 @@ export function useExpirations(opts: {
         .eq("truck_id", truckId)
         .maybeSingle();
       setTruckRow(data ?? null);
+      setTruckLoaded(true);
     })();
   }, [truckId]);
 
   // Fetch trailer
   useEffect(() => {
-    if (!trailerId) { setTrailerRow(null); return; }
+    if (!trailerId) { setTrailerRow(null); setTrailerLoaded(true); return; }
     (async () => {
       const cols = Object.keys(TRAILER_EXP_COLS).join(", ");
       const { data } = await supabase
@@ -105,6 +108,7 @@ export function useExpirations(opts: {
         .eq("trailer_id", trailerId)
         .maybeSingle();
       setTrailerRow(data ?? null);
+      setTrailerLoaded(true);
     })();
   }, [trailerId]);
 
@@ -164,20 +168,22 @@ export function useExpirations(opts: {
     return out;
   }, [truckRow, trailerRow, truckId, trailerId, truckName, trailerName, accessDateByTerminalId, terminals, addDaysISO_]);
 
-  // Auto-remove from deferred when item resolves (e.g. terminal renewed)
+  // Auto-remove from deferred only when data is fully loaded
+  // Guards against wiping deferred state during initial load before data arrives
+  const dataLoaded = truckLoaded && trailerLoaded;
   useEffect(() => {
+    if (!dataLoaded) return;
     const activeIds = new Set(items.map(i => i.id));
     setDeferred(prev => {
       const next = new Set(prev);
       let changed = false;
       for (const id of prev) {
-        // If the item no longer appears in the list, remove from deferred
         if (!activeIds.has(id)) { next.delete(id); changed = true; }
       }
       if (changed) saveDeferred(next);
       return changed ? next : prev;
     });
-  }, [items]);
+  }, [items, dataLoaded]);
 
   const toggleDefer = useCallback((id: string) => {
     setDeferred(prev => {
