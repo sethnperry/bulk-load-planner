@@ -57,7 +57,9 @@ function loadDeferred(): Set<string> {
     const raw = localStorage.getItem(DEFER_KEY);
     if (!raw) return new Set();
     const parsed = JSON.parse(raw);
-    return new Set(Array.isArray(parsed) ? parsed : []);
+    const result = new Set<string>(Array.isArray(parsed) ? parsed : []);
+    console.log("[useExpirations] loadDeferred:", Array.from(result));
+    return result;
   } catch { return new Set(); }
 }
 
@@ -174,11 +176,15 @@ export function useExpirations(opts: {
   useEffect(() => {
     if (!dataLoaded) return;
     const activeIds = new Set(items.map(i => i.id));
+    console.log("[useExpirations] cleanup check — dataLoaded:", dataLoaded, "items:", Array.from(activeIds), "deferred:", Array.from(loadDeferred()));
     setDeferred(prev => {
       const next = new Set(prev);
       let changed = false;
       for (const id of prev) {
-        if (!activeIds.has(id)) { next.delete(id); changed = true; }
+        if (!activeIds.has(id)) {
+          console.log("[useExpirations] removing deferred id (not in items):", id);
+          next.delete(id); changed = true;
+        }
       }
       if (changed) saveDeferred(next);
       return changed ? next : prev;
