@@ -138,18 +138,28 @@ function buildShareText(row: LoadHistoryRow, lines: LoadHistoryLine[] | undefine
       totalDiff > 0 ? "  ▲ OVER" :
       totalDiff === 0 ? "  ✓ ON WEIGHT" : "  ▼ UNDER";
 
-    // Drain-down calc — always use the rear compartment (highest comp_number with actual data)
+    // Drain-down calc — to legal limit of 80,000 lbs gross
+    // Tare = planned_gross_lbs - planned payload total
+    // Actual gross = tare + actual payload
+    const LEGAL_GROSS = 80000;
     let drainLine = "";
-    if (totalDiff != null && totalDiff > 0 && hasActual) {
-      // Rear = highest comp_number that has actual data
-      const rearComp = [...lines]
-        .filter(l => l.actual_lbs != null && l.actual_gallons != null && l.actual_gallons > 0)
-        .sort((a, b) => b.comp_number - a.comp_number)[0] ?? null;
-      if (rearComp && rearComp.actual_gallons && rearComp.actual_lbs) {
-        const lpg = rearComp.actual_lbs / rearComp.actual_gallons;  // lbs per gal for this product
-        const galToDrain = totalDiff / lpg;
-        const prodLabel = rearComp.button_code ?? rearComp.product_name ?? `C${rearComp.comp_number}`;
-        drainLine = `\n  To correct: drain ~${galToDrain.toFixed(1)} gal from C${rearComp.comp_number} (${prodLabel})`;
+    if (hasActual) {
+      const plannedGross = row.planned_gross_lbs != null ? Number(row.planned_gross_lbs) : null;
+      const plannedPayload = totalPlanned;
+      const tare = plannedGross != null && plannedPayload > 0 ? plannedGross - plannedPayload : null;
+      const actualGross = tare != null ? tare + totalActual : null;
+      if (actualGross != null && actualGross > LEGAL_GROSS) {
+        const lbsToRemove = actualGross - LEGAL_GROSS;
+        // Rear = highest comp_number with actual data
+        const rearComp = [...lines]
+          .filter(l => l.actual_lbs != null && l.actual_gallons != null && l.actual_gallons > 0)
+          .sort((a, b) => b.comp_number - a.comp_number)[0] ?? null;
+        if (rearComp && rearComp.actual_gallons && rearComp.actual_lbs) {
+          const lpg = rearComp.actual_lbs / rearComp.actual_gallons;
+          const galToDrain = lbsToRemove / lpg;
+          const prodLabel = rearComp.button_code ?? rearComp.product_name ?? `C${rearComp.comp_number}`;
+          drainLine = `\n  To correct to 80k lbs: drain ~${galToDrain.toFixed(1)} gal from C${rearComp.comp_number} (${prodLabel})`;
+        }
       }
     }
 
@@ -167,9 +177,9 @@ function buildShareText(row: LoadHistoryRow, lines: LoadHistoryLine[] | undefine
 
 function shareViaClipboard(row: LoadHistoryRow, lines: LoadHistoryLine[] | undefined, onCopied: () => void) {
   const { subject, body } = buildShareText(row, lines);
-  navigator.clipboard.writeText(`${subject}\n\n${body}`)
+  navigator.clipboard.writeText(body)
     .then(onCopied)
-    .catch(() => window.prompt("Copy this report:", `${subject}\n\n${body}`));
+    .catch(() => window.prompt("Copy this report:", body));
 }
 
 function shareViaSMS(row: LoadHistoryRow, lines: LoadHistoryLine[] | undefined) {
