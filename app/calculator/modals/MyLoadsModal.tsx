@@ -389,6 +389,7 @@ export default function MyLoadsModal({
   rows, loading, error,
   linesCache, linesLoading,
   onFetchLines, onFetchRange,
+  terminalCatalog, combos,
 }: Props) {
   const [search, setSearch] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
