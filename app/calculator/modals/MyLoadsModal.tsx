@@ -79,14 +79,15 @@ function rowDiffText(diff: number | null | undefined): string {
 
 function buildShareText(row: LoadHistoryRow, lines: LoadHistoryLine[] | undefined): { subject: string; body: string } {
   const cityState = [row.city_name, row.state_code].filter(Boolean).join(", ");
-  const parts = [
+
+  // Subject line: date · city · terminal · gal (no redundant header line)
+  const subjectParts = [
     fmtDateTime(row.started_at),
-    row.combo_label,
     cityState || null,
-    row.terminal_name,
-    fmtGal(row.planned_total_gal),
+    row.terminal_name || null,
+    row.planned_total_gal != null ? `${Math.round(Number(row.planned_total_gal)).toLocaleString()} gal` : null,
   ].filter(Boolean);
-  const subject = parts.join("  ·  ");
+  const subject = subjectParts.join("  ·  ");
 
   const diffTxt = rowDiffText(row.diff_lbs);
   const diffTag = row.diff_lbs == null ? "" :
@@ -115,9 +116,17 @@ function buildShareText(row: LoadHistoryRow, lines: LoadHistoryLine[] | undefine
         Number(l.actual_lbs) > Number(l.planned_lbs) ? "  ▲ OVER" :
         Number(l.actual_lbs) === Number(l.planned_lbs) ? "  ✓" : "  ▼ UNDER";
 
+      // Planned API with as-of date
+      const plannedApiStr = l.planned_api != null
+        ? `API ${Number(l.planned_api).toFixed(1)}${(l as any).planned_api_updated_at
+            ? ` (as of ${(() => { const d = new Date((l as any).planned_api_updated_at); return `${String(d.getMonth()+1).padStart(2,"0")}/${String(d.getDate()).padStart(2,"0")}`; })()})`
+            : ""}`
+        : "API —";
+
+      const prodLabel = l.button_code ?? l.product_name ?? "—";
       const rows = [
-        `C${l.comp_number}  ${l.product_name ?? "—"}`,
-        `  Planned:  ${fmtLbs(l.planned_lbs)}  ${fmtTemp(l.planned_temp_f)}  API ${l.planned_api?.toFixed(1) ?? "—"}`,
+        `C${l.comp_number}  ${prodLabel}`,
+        `  Planned:  ${fmtLbs(l.planned_lbs)}  ${fmtTemp(l.planned_temp_f)}  ${plannedApiStr}`,
         `  Actual:   ${fmtLbs(l.actual_lbs)}  ${fmtTemp(l.actual_temp_f)}  API ${l.actual_api?.toFixed(1) ?? "—"}  ${ou?.text ?? "—"}${ouTag}`,
       ];
       return rows.join("\n");
@@ -129,11 +138,27 @@ function buildShareText(row: LoadHistoryRow, lines: LoadHistoryLine[] | undefine
       totalDiff > 0 ? "  ▲ OVER" :
       totalDiff === 0 ? "  ✓ ON WEIGHT" : "  ▼ UNDER";
 
+    // Drain-down calc — always use the rear compartment (highest comp_number with actual data)
+    let drainLine = "";
+    if (totalDiff != null && totalDiff > 0 && hasActual) {
+      // Rear = highest comp_number that has actual data
+      const rearComp = [...lines]
+        .filter(l => l.actual_lbs != null && l.actual_gallons != null && l.actual_gallons > 0)
+        .sort((a, b) => b.comp_number - a.comp_number)[0] ?? null;
+      if (rearComp && rearComp.actual_gallons && rearComp.actual_lbs) {
+        const lpg = rearComp.actual_lbs / rearComp.actual_gallons;  // lbs per gal for this product
+        const galToDrain = totalDiff / lpg;
+        const prodLabel = rearComp.button_code ?? rearComp.product_name ?? `C${rearComp.comp_number}`;
+        drainLine = `\n  To correct: drain ~${galToDrain.toFixed(1)} gal from C${rearComp.comp_number} (${prodLabel})`;
+      }
+    }
+
     lineBlock += `\n\n${divider}\n`;
-    lineBlock += `TOTAL  ${fmtGal(lines.reduce((s,l)=>s+(l.planned_gallons??0),0))}\n`;
+    lineBlock += `TOTAL\n`;
     lineBlock += `  Planned: ${fmtLbs(totalPlanned)}\n`;
     lineBlock += `  Actual:  ${hasActual ? fmtLbs(totalActual) : "—"}\n`;
     lineBlock += `  Net:     ${totalDiffTxt}${totalTag}`;
+    if (drainLine) lineBlock += drainLine;
   }
 
   const body = lineBlock ? `${header}\n\n${lineBlock}` : header;
