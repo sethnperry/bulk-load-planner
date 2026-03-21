@@ -21,13 +21,15 @@ function timeAgo(iso: string): string {
   return `${days}d ago`;
 }
 
-/** "Feb 20, 2025  14:32" */
+/** "03/20/26 · 0:19" */
 function fmtDateTime(iso: string): string {
   const d = new Date(iso);
-  const date = d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-  const h = d.getHours();
-  const m = String(d.getMinutes()).padStart(2, "0");
-  return `${date}  ${h}:${m}`;
+  const mo = String(d.getMonth() + 1).padStart(2, "0");
+  const dy = String(d.getDate()).padStart(2, "0");
+  const yr = String(d.getFullYear()).slice(2);
+  const h  = d.getHours();
+  const m  = String(d.getMinutes()).padStart(2, "0");
+  return `${mo}/${dy}/${yr} · ${h}:${m}`;
 }
 
 function fmtGal(v: number | null | undefined): string {
@@ -35,9 +37,19 @@ function fmtGal(v: number | null | undefined): string {
   return `${Math.round(Number(v)).toLocaleString()} gal`;
 }
 
+function fmtGalBare(v: number | null | undefined): string {
+  if (v == null || !Number.isFinite(Number(v))) return "—";
+  return Math.round(Number(v)).toLocaleString();
+}
+
 function fmtLbs(v: number | null | undefined): string {
   if (v == null || !Number.isFinite(Number(v))) return "—";
   return `${Math.round(Number(v)).toLocaleString()} lbs`;
+}
+
+function fmtLbsBare(v: number | null | undefined): string {
+  if (v == null || !Number.isFinite(Number(v))) return "—";
+  return Math.round(Number(v)).toLocaleString();
 }
 
 function fmtTemp(v: number | null | undefined): string {
@@ -196,71 +208,71 @@ function LineRows({ lines, loading }: { lines: LoadHistoryLine[] | undefined; lo
     return <div style={{ padding: "10px 18px 14px", fontSize: 13, color: "rgba(255,255,255,0.3)" }}>No line data</div>;
   }
 
-  // Grid: C# | Product | Gal | PLANNED: Lbs | Temp | API | ACTUAL: Lbs | Temp | API | +/−
-  const COL = "24px 1fr 60px 68px 44px 40px 68px 44px 40px 100px";
-  const GAP = 4;
+  // Grid: C# | Product | Gal | PLANNED Lbs · Temp · API | ACTUAL Lbs · Temp · API | +/−
+  // Bare units — header says gal/lbs so values drop the suffix
+  const COL = "20px 1fr 52px 62px 38px 36px 62px 38px 36px 72px";
+  const GAP = 3;
 
-  // Totals
   const totalPlannedLbs = lines.reduce((s, l) => s + (l.planned_lbs ?? 0), 0);
   const totalActualLbs  = lines.reduce((s, l) => s + (l.actual_lbs  ?? 0), 0);
   const hasActual = lines.some(l => l.actual_lbs != null);
   const totalDiff = hasActual ? totalActualLbs - totalPlannedLbs : null;
 
-  const cellDim: React.CSSProperties  = { fontSize: 13, color: "rgba(255,255,255,0.45)" };
-  const cellBold: React.CSSProperties = { fontSize: 13, fontWeight: 700, color: "rgba(255,255,255,0.85)" };
-  const cellFaint: React.CSSProperties = { fontSize: 13, color: "rgba(255,255,255,0.28)" };
+  const cellDim: React.CSSProperties   = { fontSize: 12, color: "rgba(255,255,255,0.45)", fontVariantNumeric: "tabular-nums" };
+  const cellBold: React.CSSProperties  = { fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.88)", fontVariantNumeric: "tabular-nums" };
+  const cellFaint: React.CSSProperties = { fontSize: 12, color: "rgba(255,255,255,0.28)", fontVariantNumeric: "tabular-nums" };
+  const hdr: React.CSSProperties       = { fontSize: 9, fontWeight: 900, color: "rgba(255,255,255,0.28)", letterSpacing: 0.5 };
 
   return (
     <div style={{ padding: "6px 18px 14px", overflowX: "auto" }}>
-      {/* Spanning group headers */}
-      <div style={{ display: "grid", gridTemplateColumns: COL, gap: GAP, padding: "4px 0 1px", minWidth: 500 }}>
+      {/* Group headers */}
+      <div style={{ display: "grid", gridTemplateColumns: COL, gap: GAP, padding: "4px 0 1px", minWidth: 460 }}>
         <div /><div /><div />
-        <div style={{ gridColumn: "span 3", fontSize: 10, fontWeight: 900, color: "rgba(255,255,255,0.25)", letterSpacing: 0.6 }}>PLANNED</div>
-        <div style={{ gridColumn: "span 3", fontSize: 10, fontWeight: 900, color: "rgba(255,255,255,0.25)", letterSpacing: 0.6 }}>ACTUAL</div>
+        <div style={{ gridColumn: "span 3", ...hdr, color: "rgba(255,255,255,0.22)" }}>PLANNED</div>
+        <div style={{ gridColumn: "span 3", ...hdr, color: "rgba(255,255,255,0.22)" }}>ACTUAL</div>
         <div />
       </div>
-      {/* Column sub-headers */}
-      <div style={{ display: "grid", gridTemplateColumns: COL, gap: GAP, padding: "0 0 6px", borderBottom: "1px solid rgba(255,255,255,0.08)", minWidth: 500 }}>
-        {["C#", "Product", "Gal", "Lbs", "Temp", "API", "Lbs", "Temp", "API", "+/−"].map((h, i) => (
-          <div key={i} style={{ fontSize: 10, fontWeight: 900, color: "rgba(255,255,255,0.3)", letterSpacing: 0.5, textAlign: i === 9 ? "center" : "left" }}>{h}</div>
+      {/* Column headers */}
+      <div style={{ display: "grid", gridTemplateColumns: COL, gap: GAP, padding: "0 0 5px", borderBottom: "1px solid rgba(255,255,255,0.08)", minWidth: 460 }}>
+        {["C#", "Product", "gal", "lbs", "°F", "API", "lbs", "°F", "API", "+/−"].map((h, i) => (
+          <div key={i} style={{ ...hdr, textAlign: i >= 9 ? "right" : "left" }}>{h}</div>
         ))}
       </div>
       {/* Data rows */}
       {lines.map((l) => {
         const ou = lineOverUnder(l);
+        // product: prefer product_name, fallback to product_code or button_code
+        const prodLabel = l.product_name ?? (l as any).product_code ?? (l as any).button_code ?? "—";
         return (
-          <div key={l.comp_number} style={{ display: "grid", gridTemplateColumns: COL, gap: GAP, padding: "8px 0", borderBottom: "1px solid rgba(255,255,255,0.04)", alignItems: "center", minWidth: 500 }}>
-            <div style={{ fontSize: 13, fontWeight: 800, color: "rgba(255,255,255,0.45)" }}>{l.comp_number}</div>
-            <div style={{ fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,0.85)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.product_name ?? "—"}</div>
-            <div style={cellDim}>{fmtGal(l.planned_gallons)}</div>
-            {/* Planned */}
-            <div style={cellDim}>{fmtLbs(l.planned_lbs)}</div>
-            <div style={cellFaint}>{fmtTemp(l.planned_temp_f)}</div>
-            <div style={cellFaint}>{l.planned_api != null ? l.planned_api.toFixed(1) : "—"}</div>
-            {/* Actual */}
-            <div style={l.actual_lbs != null ? cellBold : cellFaint}>{fmtLbs(l.actual_lbs)}</div>
-            <div style={cellFaint}>{fmtTemp(l.actual_temp_f)}</div>
-            <div style={cellFaint}>{l.actual_api != null ? l.actual_api.toFixed(1) : "—"}</div>
-            {/* +/− centered, no wrap */}
-            <div style={{ fontSize: 13, fontWeight: 800, color: ou ? ou.color : "rgba(255,255,255,0.2)", textAlign: "center", whiteSpace: "nowrap" }}>
-              {ou ? ou.text : "—"}
+          <div key={l.comp_number} style={{ display: "grid", gridTemplateColumns: COL, gap: GAP, padding: "7px 0", borderBottom: "1px solid rgba(255,255,255,0.04)", alignItems: "center", minWidth: 460 }}>
+            <div style={{ fontSize: 12, fontWeight: 800, color: "rgba(255,255,255,0.50)" }}>{l.comp_number}</div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: "rgba(255,255,255,0.85)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{prodLabel}</div>
+            <div style={cellDim}>{fmtGalBare(l.planned_gallons)}</div>
+            <div style={cellDim}>{fmtLbsBare(l.planned_lbs)}</div>
+            <div style={cellFaint}>{l.planned_temp_f != null ? `${Math.round(Number(l.planned_temp_f))}` : "—"}</div>
+            <div style={cellFaint}>{l.planned_api != null ? Number(l.planned_api).toFixed(1) : "—"}</div>
+            <div style={l.actual_lbs != null ? cellBold : cellFaint}>{fmtLbsBare(l.actual_lbs)}</div>
+            <div style={cellFaint}>{l.actual_temp_f != null ? `${Math.round(Number(l.actual_temp_f))}` : "—"}</div>
+            <div style={cellFaint}>{l.actual_api != null ? Number(l.actual_api).toFixed(1) : "—"}</div>
+            <div style={{ fontSize: 12, fontWeight: 800, color: ou ? ou.color : "rgba(255,255,255,0.2)", textAlign: "right", whiteSpace: "nowrap" }}>
+              {ou ? ou.text.replace(" lbs", "") : "—"}
             </div>
           </div>
         );
       })}
-      {/* Totals row */}
-      <div style={{ display: "grid", gridTemplateColumns: COL, gap: GAP, padding: "9px 0 2px", borderTop: "1px solid rgba(255,255,255,0.10)", alignItems: "center", minWidth: 500 }}>
+      {/* Totals */}
+      <div style={{ display: "grid", gridTemplateColumns: COL, gap: GAP, padding: "8px 0 2px", borderTop: "1px solid rgba(255,255,255,0.10)", alignItems: "center", minWidth: 460 }}>
         <div />
-        <div style={{ fontSize: 11, fontWeight: 900, color: "rgba(255,255,255,0.35)", letterSpacing: 0.5 }}>TOTAL</div>
-        <div style={{ fontSize: 13, color: "rgba(255,255,255,0.45)" }}>{fmtGal(lines.reduce((s, l) => s + (l.planned_gallons ?? 0), 0))}</div>
-        <div style={{ fontSize: 13, fontWeight: 700, color: "rgba(255,255,255,0.65)" }}>{fmtLbs(totalPlannedLbs)}</div>
+        <div style={{ fontSize: 10, fontWeight: 900, color: "rgba(255,255,255,0.30)", letterSpacing: 0.5 }}>TOTAL</div>
+        <div style={cellDim}>{fmtGalBare(lines.reduce((s, l) => s + (l.planned_gallons ?? 0), 0))}</div>
+        <div style={{ ...cellDim, fontWeight: 700, color: "rgba(255,255,255,0.65)" }}>{fmtLbsBare(totalPlannedLbs)}</div>
         <div /><div />
-        <div style={{ fontSize: 13, fontWeight: 700, color: hasActual ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.25)" }}>
-          {hasActual ? fmtLbs(totalActualLbs) : "—"}
+        <div style={{ ...cellBold, color: hasActual ? "rgba(255,255,255,0.88)" : "rgba(255,255,255,0.25)" }}>
+          {hasActual ? fmtLbsBare(totalActualLbs) : "—"}
         </div>
         <div /><div />
-        <div style={{ fontSize: 13, fontWeight: 900, color: totalDiff != null ? (Math.abs(totalDiff) < 50 ? "#4ade80" : totalDiff > 0 ? "#ef4444" : "#4ade80") : "rgba(255,255,255,0.2)", textAlign: "center", whiteSpace: "nowrap" }}>
-          {totalDiff != null ? `${totalDiff >= 0 ? "+" : ""}${Math.round(totalDiff).toLocaleString()} lbs` : "—"}
+        <div style={{ fontSize: 12, fontWeight: 900, color: totalDiff != null ? (Math.abs(totalDiff) < 50 ? "#4ade80" : totalDiff > 0 ? "#ef4444" : "#4ade80") : "rgba(255,255,255,0.2)", textAlign: "right", whiteSpace: "nowrap" }}>
+          {totalDiff != null ? `${totalDiff >= 0 ? "+" : ""}${Math.round(totalDiff).toLocaleString()}` : "—"}
         </div>
       </div>
     </div>
@@ -280,111 +292,62 @@ function shareBtnStyle(color?: string): React.CSSProperties {
   };
 }
 
-function LoadRow({ row, expanded, onToggle, lines, linesLoading }: {
-  row: LoadHistoryRow; expanded: boolean; onToggle: () => void;
+function LoadRow({ row, expanded, selected, onToggle, lines, linesLoading }: {
+  row: LoadHistoryRow; expanded: boolean; selected: boolean; onToggle: () => void;
   lines: LoadHistoryLine[] | undefined; linesLoading: boolean;
 }) {
-  const [shareOpen, setShareOpen] = React.useState(false);
-  const [copied, setCopied] = React.useState(false);
-
-  function handleCopy(e: React.MouseEvent) {
-    e.stopPropagation();
-    shareViaClipboard(row, lines, () => {
-      setCopied(true);
-      setTimeout(() => { setCopied(false); setShareOpen(false); }, 1800);
-    });
-  }
-  function handleSMS(e: React.MouseEvent) {
-    e.stopPropagation();
-    shareViaSMS(row, lines);
-    setShareOpen(false);
-  }
-  function handleEmail(e: React.MouseEvent) {
-    e.stopPropagation();
-    shareViaEmail(row, lines);
-    setShareOpen(false);
-  }
-
   const cityState = [row.city_name, row.state_code].filter(Boolean).join(", ");
-  const summaryParts: string[] = [
-    fmtDateTime(row.started_at),
-    row.combo_label ?? "",
-    cityState || "",
-    row.terminal_name ?? "",
-    fmtGal(row.planned_total_gal),
-  ].filter(Boolean);
-  const summaryLine = summaryParts.join("  ·  ");
+
+  // Collapsed: date/time · total gal · diff lbs
+  const galText = row.planned_total_gal != null ? `${Math.round(Number(row.planned_total_gal)).toLocaleString()} gal` : "";
+  const diffText = rowDiffText(row.diff_lbs);
+  const diffColor = rowDiffColor(row.diff_lbs);
+
+  // Expanded subtitle: Equipment · City, ST · Terminal
+  const subtitleParts = [row.combo_label, cityState, row.terminal_name].filter(Boolean);
+  const subtitle = subtitleParts.join(" · ");
 
   return (
-    <div style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
+    <div
+      style={{
+        borderBottom: "1px solid rgba(255,255,255,0.07)",
+        background: selected ? "rgba(255,255,255,0.04)" : "transparent",
+        transition: "background 120ms ease",
+      }}
+    >
       <div
         onClick={onToggle}
-        style={{ padding: "13px 18px 12px", cursor: "pointer", display: "flex", flexDirection: "column", gap: 6, background: expanded ? "rgba(255,255,255,0.03)" : "transparent", transition: "background 120ms ease" }}
+        style={{ padding: "11px 18px 10px", cursor: "pointer" }}
       >
-        {/* Line 1: summary · share icon · duration · LOAD button */}
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <div style={{ flex: 1, fontSize: 13, color: "rgba(255,255,255,0.55)", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {summaryLine}
+        {/* Single collapsed line */}
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          {/* Date/time */}
+          <div style={{ fontSize: 13, color: "rgba(255,255,255,0.60)", fontWeight: 500, whiteSpace: "nowrap", flexShrink: 0 }}>
+            {fmtDateTime(row.started_at)}
           </div>
-          {/* Share icon — connected dots */}
-          <button
-            onClick={(e) => { e.stopPropagation(); setShareOpen(v => !v); }}
-            title="Share report"
-            style={{ background: "none", border: "none", padding: "2px 4px", cursor: "pointer", flexShrink: 0, color: shareOpen ? "rgba(255,255,255,0.75)" : "rgba(255,255,255,0.28)", transition: "color 150ms ease", lineHeight: 1 }}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
-              <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
-            </svg>
-          </button>
-          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.30)", whiteSpace: "nowrap", flexShrink: 0 }}>
-            {timeAgo(row.started_at)}
-          </div>
-          <div style={{ fontSize: 10, fontWeight: 900, letterSpacing: 0.8, padding: "3px 7px", borderRadius: 4, border: "1px solid rgba(255,255,255,0.12)", color: expanded ? "rgba(255,255,255,0.7)" : "rgba(255,255,255,0.3)", background: expanded ? "rgba(255,255,255,0.07)" : "transparent", whiteSpace: "nowrap", flexShrink: 0, transition: "all 150ms ease" }}>
-            LOAD {expanded ? "▴" : "▾"}
+          {/* Divider */}
+          <div style={{ color: "rgba(255,255,255,0.18)", flexShrink: 0 }}>·</div>
+          {/* Total gal */}
+          {galText && (
+            <div style={{ fontSize: 13, color: "rgba(255,255,255,0.40)", whiteSpace: "nowrap", flexShrink: 0 }}>
+              {galText}
+            </div>
+          )}
+          {/* Spacer — pushes diff to the right, city/gal truncates */}
+          <div style={{ flex: 1, minWidth: 0 }} />
+          {/* Diff lbs */}
+          <div style={{ fontSize: 13, fontWeight: 800, color: diffColor, whiteSpace: "nowrap", flexShrink: 0 }}>
+            {diffText}
           </div>
         </div>
-        {/* Line 2: diff lbs */}
-        <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-          <div style={{ fontSize: 13, fontWeight: 800, color: rowDiffColor(row.diff_lbs) }}>
-            {rowDiffText(row.diff_lbs)}
+
+        {/* Expanded subtitle */}
+        {expanded && subtitle && (
+          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", marginTop: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {subtitle}
           </div>
-        </div>
+        )}
       </div>
-
-      {/* Share panel — slides open below the summary, above the line rows */}
-      {shareOpen && (
-        <div
-          onClick={(e) => e.stopPropagation()}
-          style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 18px 10px", background: "rgba(255,255,255,0.03)", borderTop: "1px solid rgba(255,255,255,0.06)" }}
-        >
-          <span style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.3)", letterSpacing: 0.4, marginRight: 4 }}>SHARE</span>
-
-          {/* Copy to clipboard */}
-          <button onClick={handleCopy} style={shareBtnStyle(copied ? "#4ade80" : undefined)}>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-            </svg>
-            {copied ? "COPIED!" : "COPY"}
-          </button>
-
-          {/* SMS / Text message */}
-          <button onClick={handleSMS} style={shareBtnStyle()}>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-            </svg>
-            TEXT
-          </button>
-
-          {/* Email */}
-          <button onClick={handleEmail} style={shareBtnStyle()}>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/>
-            </svg>
-            EMAIL
-          </button>
-        </div>
-      )}
 
       {expanded && <LineRows lines={lines} loading={linesLoading} />}
     </div>
@@ -416,13 +379,17 @@ export default function MyLoadsModal({
 }: Props) {
   const [search, setSearch] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [activeDays, setActiveDays] = useState<number | null>(7);
+  const [copied, setCopied] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (open) {
       setSearch("");
       setExpandedId(null);
+      setSelectedId(null);
+      onFetchRange(activeDays);
       setTimeout(() => searchRef.current?.focus(), 180);
     }
   }, [open]);
@@ -433,9 +400,29 @@ export default function MyLoadsModal({
   }
 
   function handleToggle(loadId: string, plannedSnapshot?: any, productTempF?: number | null) {
-    if (expandedId === loadId) { setExpandedId(null); return; }
-    setExpandedId(loadId);
-    onFetchLines(loadId, plannedSnapshot, productTempF);
+    const isExpanded = expandedId === loadId;
+    setExpandedId(isExpanded ? null : loadId);
+    setSelectedId(loadId);
+    if (!isExpanded) onFetchLines(loadId, plannedSnapshot, productTempF);
+  }
+
+  const selectedRow = selectedId ? rows.find(r => r.load_id === selectedId) ?? null : null;
+  const selectedLines = selectedId ? linesCache[selectedId] : undefined;
+
+  function handleCopy() {
+    if (!selectedRow) return;
+    shareViaClipboard(selectedRow, selectedLines, () => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    });
+  }
+  function handleSMS() {
+    if (!selectedRow) return;
+    shareViaSMS(selectedRow, selectedLines);
+  }
+  function handleEmail() {
+    if (!selectedRow) return;
+    shareViaEmail(selectedRow, selectedLines);
   }
 
   const filtered = useMemo(() => {
@@ -464,16 +451,7 @@ export default function MyLoadsModal({
         {/* Header */}
         <div style={{ display: "flex", alignItems: "center", padding: "4px 18px 10px", gap: 10 }}>
           <div style={{ flex: 1, fontSize: 20, fontWeight: 900, color: "rgba(255,255,255,0.92)", letterSpacing: 0.2 }}>My Loads</div>
-          <button
-            onClick={() => onFetchRange(activeDays)}
-            title="Refresh"
-            style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "0 12px", height: 34, color: "rgba(255,255,255,0.55)", fontSize: 11, fontWeight: 800, letterSpacing: 0.5, cursor: "pointer", display: "flex", alignItems: "center", gap: 5, flexShrink: 0, transition: "all 120ms ease" }}
-            onMouseEnter={(e) => (e.currentTarget.style.color = "rgba(255,255,255,0.85)")}
-            onMouseLeave={(e) => (e.currentTarget.style.color = "rgba(255,255,255,0.55)")}
-          >
-            <span style={{ fontSize: 13, lineHeight: 1 }}>↻</span> REFRESH
-          </button>
-          <button onClick={onClose} style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 20, width: 34, height: 34, color: "rgba(255,255,255,0.7)", fontSize: 18, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>×</button>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.85)", fontSize: 22, fontWeight: 900, cursor: "pointer", lineHeight: 1, padding: "0 2px", flexShrink: 0 }}>×</button>
         </div>
 
         {/* Search */}
@@ -493,8 +471,8 @@ export default function MyLoadsModal({
           </div>
         </div>
 
-        {/* Date filter chips + count */}
-        <div style={{ display: "flex", alignItems: "center", gap: 7, padding: "0 18px 12px" }}>
+        {/* Date filter chips + share controls */}
+        <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 18px 12px", flexWrap: "wrap" }}>
           {DATE_RANGES.map(({ label, days }) => {
             const active = activeDays === days;
             return (
@@ -502,7 +480,7 @@ export default function MyLoadsModal({
                 key={label}
                 onClick={() => handleRangeChange(days)}
                 style={{
-                  padding: "6px 14px", borderRadius: 8, border: "1px solid", fontSize: 12, fontWeight: 800,
+                  padding: "6px 12px", borderRadius: 8, border: "1px solid", fontSize: 12, fontWeight: 800,
                   cursor: "pointer", letterSpacing: 0.4, transition: "all 120ms ease",
                   background: active ? "rgba(255,255,255,0.10)" : "transparent",
                   borderColor: active ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.1)",
@@ -514,10 +492,33 @@ export default function MyLoadsModal({
             );
           })}
           {!loading && (
-            <div style={{ marginLeft: "auto", fontSize: 12, color: "rgba(255,255,255,0.25)" }}>
-              {filtered.length} load{filtered.length !== 1 ? "s" : ""}
+            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.25)", marginLeft: 2 }}>
+              {filtered.length}
             </div>
           )}
+          {/* Share controls — enabled only when a load is selected */}
+          <div style={{ marginLeft: "auto", display: "flex", gap: 5, alignItems: "center" }}>
+            {(["copy", "text", "email"] as const).map((type) => {
+              const enabled = !!selectedId;
+              const label = type === "copy" ? (copied ? "✓" : "COPY") : type === "text" ? "TEXT" : "EMAIL";
+              return (
+                <button
+                  key={type}
+                  disabled={!enabled}
+                  onClick={type === "copy" ? handleCopy : type === "text" ? handleSMS : handleEmail}
+                  style={{
+                    padding: "5px 10px", borderRadius: 7, fontSize: 11, fontWeight: 800, letterSpacing: 0.4,
+                    cursor: enabled ? "pointer" : "default", transition: "all 150ms ease",
+                    border: enabled ? "1px solid rgba(255,255,255,0.30)" : "1px solid rgba(255,255,255,0.08)",
+                    background: enabled ? "rgba(255,255,255,0.07)" : "transparent",
+                    color: enabled ? "rgba(255,255,255,0.80)" : "rgba(255,255,255,0.18)",
+                  }}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         {/* List */}
@@ -551,6 +552,7 @@ export default function MyLoadsModal({
               key={row.load_id}
               row={row}
               expanded={expandedId === row.load_id}
+              selected={selectedId === row.load_id}
               onToggle={() => handleToggle(row.load_id, row.planned_snapshot, row.product_temp_f)}
               lines={linesCache[row.load_id]}
               linesLoading={!!linesLoading[row.load_id]}
