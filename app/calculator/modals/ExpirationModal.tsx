@@ -303,15 +303,39 @@ export default function ExpirationModal({
           const activeTerminalAlerts = activeItems.filter(i => i.entityType === "terminal");
           const showSection = hasCards || deferredTerminals.length > 0 || activeTerminalAlerts.length > 0;
           if (!showSection) return null;
-          const hasActiveOrExpired = cardExpired.length + cardActive.length > 0;
+          // Exclude alert items and deferred items from directory to avoid duplication
+          const alertAndDeferredIds = new Set([
+            ...activeTerminalAlerts.map(i => i.entityId),
+            ...deferredTerminals.map(i => i.entityId),
+          ]);
+          const dirExpired = cardExpired.filter(c => {
+            // match by name since CardEntry has no ID — find terminal in allTerminalsInCity
+            return !alertAndDeferredIds.has(String(allTerminalsInCity.find(t => t.terminal_name === c.name)?.terminal_id ?? ""));
+          });
+          const dirActive = cardActive.filter(c => {
+            return !alertAndDeferredIds.has(String(allTerminalsInCity.find(t => t.terminal_name === c.name)?.terminal_id ?? ""));
+          });
+          const hasActiveOrExpired = dirExpired.length + dirActive.length > 0;
           const hasBottom = cardNotCarded.length > 0 || deferredTerminals.length > 0;
           return (
             <div>
               <SectionLabel left="Terminal Cards" right={locLabel || undefined} />
               <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
 
+                {/* Active terminal ExpirationItem alerts — HAS defer toggle */}
+                {activeTerminalAlerts.map(item => (
+                  <ExpirationCard key={item.id}
+                    label={item.entityName}
+                    statusText={item.expired ? `⛔ Expired ${Math.abs(item.daysLeft)}d ago` : `⚠ ${item.daysLeft}d left`}
+                    expired={item.expired} urgent={!item.expired} deferred={false}
+                    onTap={() => tapAction(item)}
+                    onToggleDefer={() => toggleDefer(item.id)}
+                    hideDefer={false}
+                  />
+                ))}
+
                 {/* Expired directory cards — no defer toggle, these are directory entries */}
-                {cardExpired.map(c => (
+                {dirExpired.map(c => (
                   <ExpirationCard key={`exp-${c.name}`}
                     label={c.name}
                     statusText={`⛔ ${c.expires} · ${Math.abs(c.daysLeft)}d ago`}
@@ -323,7 +347,7 @@ export default function ExpirationModal({
                 ))}
 
                 {/* Active directory cards — no defer toggle */}
-                {cardActive.map(c => (
+                {dirActive.map(c => (
                   <ExpirationCard key={`act-${c.name}`}
                     label={c.name}
                     statusText={c.daysLeft <= 7 ? `⚠ ${c.expires} · ${c.daysLeft}d` : `${c.expires} · ${c.daysLeft}d`}
