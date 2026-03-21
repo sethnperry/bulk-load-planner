@@ -111,14 +111,15 @@ function SectionLabel({ left, right }: { left: string; right?: string }) {
 }
 
 // ── Unified card — used for all entity types ──────────────────────────────────
-function ExpirationCard({ label, statusText, expired, urgent, deferred, onTap, onToggleDefer }: {
+function ExpirationCard({ label, statusText, expired, urgent, deferred, onTap, onToggleDefer, hideDefer = false }: {
   label: string;
   statusText: string;
   expired: boolean;
-  urgent: boolean;   // within warning window but not expired
+  urgent: boolean;
   deferred: boolean;
   onTap: () => void;
   onToggleDefer: () => void;
+  hideDefer?: boolean;
 }) {
   const border = deferred
     ? "1px solid rgba(255,255,255,0.05)"
@@ -163,16 +164,18 @@ function ExpirationCard({ label, statusText, expired, urgent, deferred, onTap, o
         {statusText}
       </div>
 
-      {/* Defer toggle */}
-      <button
-        type="button"
-        onClick={(e) => { e.stopPropagation(); onToggleDefer(); }}
-        title={deferred ? "Restore alert" : "Defer alert"}
-        style={{ background: "none", border: "none", cursor: "pointer", padding: "2px 4px", fontSize: 13, color: "rgba(255,255,255,0.18)", flexShrink: 0, lineHeight: 1 }}
-        aria-label={deferred ? "Restore" : "Defer"}
-      >
-        {deferred ? "↩" : "—"}
-      </button>
+      {/* Defer toggle — hidden for directory-only cards */}
+      {!hideDefer && (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onToggleDefer(); }}
+          title={deferred ? "Restore alert" : "Defer alert"}
+          style={{ background: "none", border: "none", cursor: "pointer", padding: "2px 4px", fontSize: 13, color: "rgba(255,255,255,0.18)", flexShrink: 0, lineHeight: 1 }}
+          aria-label={deferred ? "Restore" : "Defer"}
+        >
+          {deferred ? "↩" : "—"}
+        </button>
+      )}
     </div>
   );
 }
@@ -227,8 +230,10 @@ export default function ExpirationModal({
   const locLabel = selectedCity && selectedState ? `In ${selectedCity}, ${selectedState}` : selectedCity ? `In ${selectedCity}` : "";
   const activeTrucks    = activeItems.filter(i => i.entityType === "truck");
   const activeTrailers  = activeItems.filter(i => i.entityType === "trailer");
-  const truckNames      = [...new Set(activeTrucks.map(i => i.entityName))].join(", ");
-  const trailerNames    = [...new Set(activeTrailers.map(i => i.entityName))].join(", ");
+  const allTrucks   = items.filter(i => i.entityType === "truck");
+  const allTrailers = items.filter(i => i.entityType === "trailer");
+  const truckNames   = [...new Set(allTrucks.map(i => i.entityName))].join(", ");
+  const trailerNames = [...new Set(allTrailers.map(i => i.entityName))].join(", ");
   const hasCards = cardActive.length + cardExpired.length + cardNotCarded.length > 0;
 
   // Render a list of ExpirationItems as unified cards
@@ -257,79 +262,106 @@ export default function ExpirationModal({
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
 
         {/* ── Truck docs ── */}
-        {activeTrucks.length > 0 && (
-          <div>
-            <SectionLabel left="Truck Documents" right={truckNames ? `For ${truckNames}` : undefined} />
-            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-              {renderExpCards(activeTrucks)}
+        {(() => {
+          const deferredTrucks = deferredItems.filter(i => i.entityType === "truck");
+          if (activeTrucks.length === 0 && deferredTrucks.length === 0) return null;
+          return (
+            <div>
+              <SectionLabel left="Truck Documents" right={truckNames ? `For ${truckNames}` : undefined} />
+              <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                {renderExpCards(activeTrucks)}
+                {deferredTrucks.length > 0 && activeTrucks.length > 0 && (
+                  <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", marginTop: 2, marginBottom: 2 }} />
+                )}
+                {renderExpCards(deferredTrucks, true)}
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* ── Trailer docs ── */}
-        {activeTrailers.length > 0 && (
-          <div>
-            <SectionLabel left="Trailer Documents" right={trailerNames ? `For ${trailerNames}` : undefined} />
-            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-              {renderExpCards(activeTrailers)}
+        {(() => {
+          const deferredTrailers = deferredItems.filter(i => i.entityType === "trailer");
+          if (activeTrailers.length === 0 && deferredTrailers.length === 0) return null;
+          return (
+            <div>
+              <SectionLabel left="Trailer Documents" right={trailerNames ? `For ${trailerNames}` : undefined} />
+              <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                {renderExpCards(activeTrailers)}
+                {deferredTrailers.length > 0 && activeTrailers.length > 0 && (
+                  <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", marginTop: 2, marginBottom: 2 }} />
+                )}
+                {renderExpCards(deferredTrailers, true)}
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
-        {/* ── Terminal Cards — all terminals in city + deferred merged at bottom ── */}
-        {hasCards && (
-          <div>
-            <SectionLabel left="Terminal Cards" right={locLabel || undefined} />
-            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+        {/* ── Terminal Cards — directory + deferred alert items merged at bottom ── */}
+        {(() => {
+          const deferredTerminals = deferredItems.filter(i => i.entityType === "terminal");
+          const activeTerminalAlerts = activeItems.filter(i => i.entityType === "terminal");
+          const showSection = hasCards || deferredTerminals.length > 0 || activeTerminalAlerts.length > 0;
+          if (!showSection) return null;
+          const hasActiveOrExpired = cardExpired.length + cardActive.length > 0;
+          const hasBottom = cardNotCarded.length > 0 || deferredTerminals.length > 0;
+          return (
+            <div>
+              <SectionLabel left="Terminal Cards" right={locLabel || undefined} />
+              <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
 
-              {/* Expired */}
-              {cardExpired.map(c => (
-                <ExpirationCard key={`exp-${c.name}`}
-                  label={c.name}
-                  statusText={`⛔ ${c.expires} · ${Math.abs(c.daysLeft)}d ago`}
-                  expired={true} urgent={false} deferred={false}
-                  onTap={() => { onClose(); onOpenTerminals(); }}
-                  onToggleDefer={() => {}}
-                />
-              ))}
+                {/* Expired directory cards — no defer toggle, these are directory entries */}
+                {cardExpired.map(c => (
+                  <ExpirationCard key={`exp-${c.name}`}
+                    label={c.name}
+                    statusText={`⛔ ${c.expires} · ${Math.abs(c.daysLeft)}d ago`}
+                    expired={true} urgent={false} deferred={false}
+                    onTap={() => { onClose(); onOpenTerminals(); }}
+                    onToggleDefer={() => {}}
+                    hideDefer={true}
+                  />
+                ))}
 
-              {/* Active — soonest first */}
-              {cardActive.map(c => (
-                <ExpirationCard key={`act-${c.name}`}
-                  label={c.name}
-                  statusText={c.daysLeft <= 7 ? `⚠ ${c.expires} · ${c.daysLeft}d` : `${c.expires} · ${c.daysLeft}d`}
-                  expired={false} urgent={c.daysLeft <= 7} deferred={false}
-                  onTap={() => { onClose(); onOpenTerminals(); }}
-                  onToggleDefer={() => {}}
-                />
-              ))}
+                {/* Active directory cards — no defer toggle */}
+                {cardActive.map(c => (
+                  <ExpirationCard key={`act-${c.name}`}
+                    label={c.name}
+                    statusText={c.daysLeft <= 7 ? `⚠ ${c.expires} · ${c.daysLeft}d` : `${c.expires} · ${c.daysLeft}d`}
+                    expired={false} urgent={c.daysLeft <= 7} deferred={false}
+                    onTap={() => { onClose(); onOpenTerminals(); }}
+                    onToggleDefer={() => {}}
+                    hideDefer={true}
+                  />
+                ))}
 
-              {/* Ghost divider before inactive items */}
-              {(cardNotCarded.length > 0 || deferredItems.length > 0) && (cardExpired.length + cardActive.length > 0) && (
-                <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", marginTop: 2, marginBottom: 2 }} />
-              )}
+                {/* Divider before bottom section */}
+                {hasBottom && hasActiveOrExpired && (
+                  <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", marginTop: 2, marginBottom: 2 }} />
+                )}
 
-              {/* Deferred — ghost style, shows expiry date, ↩ to restore */}
-              {deferredItems.map(item => (
-                <ExpirationCard key={item.id}
-                  label={item.entityName}
-                  statusText={item.expired ? `Expired ${Math.abs(item.daysLeft)}d ago` : `${item.daysLeft}d left`}
-                  expired={false} urgent={false} deferred={true}
-                  onTap={() => tapAction(item)}
-                  onToggleDefer={() => toggleDefer(item.id)}
-                />
-              ))}
+                {/* Deferred terminal ExpirationItems — HAS defer toggle (↩ to restore) */}
+                {deferredTerminals.map(item => (
+                  <ExpirationCard key={item.id}
+                    label={item.entityName}
+                    statusText={item.expired ? `Expired ${Math.abs(item.daysLeft)}d ago` : `${item.daysLeft}d left`}
+                    expired={false} urgent={false} deferred={true}
+                    onTap={() => tapAction(item)}
+                    onToggleDefer={() => toggleDefer(item.id)}
+                    hideDefer={false}
+                  />
+                ))}
 
-              {/* Not carded — ghost, no date */}
-              {cardNotCarded.map(name => (
-                <div key={`nc-${name}`} style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.05)", background: "rgba(255,255,255,0.02)" }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,0.25)" }}>{name}</div>
-                </div>
-              ))}
+                {/* Not carded — ghost, no date, no toggle */}
+                {cardNotCarded.map(name => (
+                  <div key={`nc-${name}`} style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.05)", background: "rgba(255,255,255,0.02)" }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,0.25)" }}>{name}</div>
+                  </div>
+                ))}
 
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {items.length === 0 && !hasCards && (
           <div style={{ fontSize: 13, color: "rgba(255,255,255,0.40)" }}>Nothing to show.</div>
