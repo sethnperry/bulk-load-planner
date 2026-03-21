@@ -210,8 +210,9 @@ function LineRows({ lines, loading }: { lines: LoadHistoryLine[] | undefined; lo
 
   // Grid: C# | Product | Gal | PLANNED Lbs · Temp · API | ACTUAL Lbs · Temp · API | +/−
   // Bare units — header says gal/lbs so values drop the suffix
-  const COL = "20px 1fr 52px 62px 38px 36px 62px 38px 36px 72px";
-  const GAP = 3;
+  // Columns: C# | Product | gal | p.lbs | p.°F | p.API | a.lbs | a.°F | a.API | +/−
+  const COL = "18px 80px 46px 58px 32px 34px 58px 32px 34px 60px";
+  const GAP = 4;
 
   const totalPlannedLbs = lines.reduce((s, l) => s + (l.planned_lbs ?? 0), 0);
   const totalActualLbs  = lines.reduce((s, l) => s + (l.actual_lbs  ?? 0), 0);
@@ -246,7 +247,7 @@ function LineRows({ lines, loading }: { lines: LoadHistoryLine[] | undefined; lo
         return (
           <div key={l.comp_number} style={{ display: "grid", gridTemplateColumns: COL, gap: GAP, padding: "7px 0", borderBottom: "1px solid rgba(255,255,255,0.04)", alignItems: "center", minWidth: 460 }}>
             <div style={{ fontSize: 12, fontWeight: 800, color: "rgba(255,255,255,0.50)" }}>{l.comp_number}</div>
-            <div style={{ fontSize: 12, fontWeight: 600, color: "rgba(255,255,255,0.85)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{prodLabel}</div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.85)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 80 }}>{prodLabel}</div>
             <div style={cellDim}>{fmtGalBare(l.planned_gallons)}</div>
             <div style={cellDim}>{fmtLbsBare(l.planned_lbs)}</div>
             <div style={cellFaint}>{l.planned_temp_f != null ? `${Math.round(Number(l.planned_temp_f))}` : "—"}</div>
@@ -292,11 +293,23 @@ function shareBtnStyle(color?: string): React.CSSProperties {
   };
 }
 
-function LoadRow({ row, expanded, selected, onToggle, lines, linesLoading }: {
+function LoadRow({ row, expanded, selected, onToggle, lines, linesLoading, terminalCatalog, combos }: {
   row: LoadHistoryRow; expanded: boolean; selected: boolean; onToggle: () => void;
   lines: LoadHistoryLine[] | undefined; linesLoading: boolean;
+  terminalCatalog: any[]; combos: any[];
 }) {
   const cityState = [row.city_name, row.state_code].filter(Boolean).join(", ");
+
+  // Resolve labels from catalog if not already on row
+  const resolvedTerminal = row.terminal_name
+    || terminalCatalog.find((t: any) => String(t.terminal_id) === String(row.terminal_id))?.terminal_name
+    || "";
+  const resolvedCombo = row.combo_label
+    || (() => {
+      const c = combos.find((c: any) => String(c.combo_id) === String(row.combo_id));
+      if (!c) return "";
+      return c.combo_name ?? [c.tractor_name, c.trailer_name].filter(Boolean).join(" / ") ?? "";
+    })();
 
   // Collapsed: date/time · total gal · diff lbs
   const galText = row.planned_total_gal != null ? `${Math.round(Number(row.planned_total_gal)).toLocaleString()} gal` : "";
@@ -304,7 +317,7 @@ function LoadRow({ row, expanded, selected, onToggle, lines, linesLoading }: {
   const diffColor = rowDiffColor(row.diff_lbs);
 
   // Expanded subtitle: Equipment · City, ST · Terminal
-  const subtitleParts = [row.combo_label, cityState, row.terminal_name].filter(Boolean);
+  const subtitleParts = [resolvedCombo, cityState, resolvedTerminal].filter(Boolean);
   const subtitle = subtitleParts.join(" · ");
 
   return (
@@ -450,7 +463,10 @@ export default function MyLoadsModal({
 
         {/* Header */}
         <div style={{ display: "flex", alignItems: "center", padding: "4px 18px 10px", gap: 10 }}>
-          <div style={{ flex: 1, fontSize: 20, fontWeight: 900, color: "rgba(255,255,255,0.92)", letterSpacing: 0.2 }}>My Loads</div>
+          <div style={{ flex: 1, display: "flex", alignItems: "baseline", gap: 8 }}>
+            <div style={{ fontSize: 20, fontWeight: 900, color: "rgba(255,255,255,0.92)", letterSpacing: 0.2 }}>My Loads</div>
+            {!loading && <div style={{ fontSize: 13, color: "rgba(255,255,255,0.28)", fontWeight: 600 }}>{filtered.length}</div>}
+          </div>
           <button onClick={onClose} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.85)", fontSize: 22, fontWeight: 900, cursor: "pointer", lineHeight: 1, padding: "0 2px", flexShrink: 0 }}>×</button>
         </div>
 
@@ -472,7 +488,7 @@ export default function MyLoadsModal({
         </div>
 
         {/* Date filter chips + share controls */}
-        <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 18px 12px", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 5, padding: "0 18px 12px", flexWrap: "nowrap", overflowX: "auto" }}>
           {DATE_RANGES.map(({ label, days }) => {
             const active = activeDays === days;
             return (
@@ -480,8 +496,8 @@ export default function MyLoadsModal({
                 key={label}
                 onClick={() => handleRangeChange(days)}
                 style={{
-                  padding: "6px 12px", borderRadius: 8, border: "1px solid", fontSize: 12, fontWeight: 800,
-                  cursor: "pointer", letterSpacing: 0.4, transition: "all 120ms ease",
+                  padding: "5px 10px", borderRadius: 7, border: "1px solid", fontSize: 11, fontWeight: 800,
+                  cursor: "pointer", letterSpacing: 0.3, transition: "all 120ms ease", flexShrink: 0,
                   background: active ? "rgba(255,255,255,0.10)" : "transparent",
                   borderColor: active ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.1)",
                   color: active ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.35)",
@@ -491,11 +507,7 @@ export default function MyLoadsModal({
               </button>
             );
           })}
-          {!loading && (
-            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.25)", marginLeft: 2 }}>
-              {filtered.length}
-            </div>
-          )}
+
           {/* Share controls — enabled only when a load is selected */}
           <div style={{ marginLeft: "auto", display: "flex", gap: 5, alignItems: "center" }}>
             {(["copy", "text", "email"] as const).map((type) => {
@@ -507,7 +519,7 @@ export default function MyLoadsModal({
                   disabled={!enabled}
                   onClick={type === "copy" ? handleCopy : type === "text" ? handleSMS : handleEmail}
                   style={{
-                    padding: "5px 10px", borderRadius: 7, fontSize: 11, fontWeight: 800, letterSpacing: 0.4,
+                    padding: "5px 9px", borderRadius: 7, fontSize: 11, fontWeight: 800, letterSpacing: 0.3, flexShrink: 0,
                     cursor: enabled ? "pointer" : "default", transition: "all 150ms ease",
                     border: enabled ? "1px solid rgba(255,255,255,0.30)" : "1px solid rgba(255,255,255,0.08)",
                     background: enabled ? "rgba(255,255,255,0.07)" : "transparent",
@@ -556,6 +568,8 @@ export default function MyLoadsModal({
               onToggle={() => handleToggle(row.load_id, row.planned_snapshot, row.product_temp_f)}
               lines={linesCache[row.load_id]}
               linesLoading={!!linesLoading[row.load_id]}
+              terminalCatalog={terminalCatalog}
+              combos={combos}
             />
           ))}
           <div style={{ height: 28 }} />

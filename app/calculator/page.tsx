@@ -1058,7 +1058,7 @@ const lastProductInfoById = useMemo(() => {
         linesLoading={loadHistory.linesLoading}
         onFetchLines={loadHistory.fetchLines}
         onFetchRange={loadHistory.fetch}
-        terminalCatalog={[]}
+        terminalCatalog={terminals.terminalCatalog ?? []}
         combos={equipment.combos ?? []}
       />
 
