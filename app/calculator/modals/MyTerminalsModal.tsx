@@ -1,6 +1,25 @@
 "use client";
 
 import React, { useState } from "react";
+
+// ── Terminal avatar helpers ───────────────────────────────────────────────────
+const AVATAR_COLORS: [string, string][] = [
+  ["#1a3a5c", "#4a9eda"], ["#1a3a2a", "#4aad6a"], ["#3a1a2a", "#da4a7a"],
+  ["#2a2a1a", "#c4a030"], ["#2a1a3a", "#7a4ada"], ["#1a3a3a", "#4acadc"],
+  ["#3a2a1a", "#da7a30"], ["#2a1a1a", "#da5050"],
+];
+
+function avatarColor(name: string): string {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) & 0xffffffff;
+  return AVATAR_COLORS[Math.abs(h) % AVATAR_COLORS.length][1];
+}
+
+function avatarInitials(name: string): string {
+  const words = name.trim().split(/\s+/);
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  return (words[0][0] + words[words.length - 1][0]).toUpperCase();
+}
 import { FullscreenModal } from "@/lib/ui/FullscreenModal";
 
 type TerminalRow = any;
@@ -138,12 +157,14 @@ export default function MyTerminalsModal(props: {
                       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); isExpanded ? handleCollapse(tid) : handleExpand(tid); } }}
                       className="flex items-center cursor-pointer select-none hover:bg-white/5"
                     >
-                      <div
-                        className={["shrink-0 h-16 w-14 flex items-center justify-center text-xs font-semibold", active ? "bg-black text-amber-400" : "bg-[#1e1e1e] text-white/40"].join(" ")}
-                        style={{ borderRight: "1px solid rgba(255,255,255,0.08)" }}
-                        aria-hidden="true"
-                      >
-                        Img
+                      <div style={{
+                        flexShrink: 0, width: 28, textAlign: "center" as const,
+                        paddingLeft: 12, fontSize: 11, fontWeight: 800,
+                        color: t.terminal_name
+                          ? avatarColor(String(t.terminal_name))
+                          : "rgba(255,255,255,0.20)",
+                      }}>
+                        {t.terminal_name ? avatarInitials(String(t.terminal_name)) : "—"}
                       </div>
                       <div className="min-w-0 flex-1 px-3 py-2">
                         <div className="text-sm font-semibold text-white truncate">
