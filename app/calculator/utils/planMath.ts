@@ -50,11 +50,6 @@ export function backCorrectApiTo60(
  *   rho_60 = SG_60 * 8.345404          (lbs/gal at 60°F, water = 8.345404)
  *   rho_T  = rho_60 / (1 + alpha * (T - 60))
  */
-// Conservative margin applied to planned density so the plan always comes in
-// slightly under actual weight — driver sees green without manual adjustment.
-// 0.03% reduction ≈ 15-25 lbs light on a typical 54,000 lb payload.
-const DENSITY_CONSERVATIVE_FACTOR = 0.9997;
-
 export function lbsPerGallonAtTemp(
   api60: number,
   alphaPerF: number,
@@ -63,7 +58,7 @@ export function lbsPerGallonAtTemp(
   const sg60 = 141.5 / (api60 + 131.5);
   const rho60 = sg60 * 8.345404; // lbs/gal at 60°F
   const rhoT = rho60 / (1 + alphaPerF * (tempF - 60));
-  return rhoT * DENSITY_CONSERVATIVE_FACTOR;
+  return rhoT;
 }
 
 /**
@@ -167,7 +162,9 @@ export function allocateWithCaps(
     for (const r of active) {
       const want = k * r.weight;
       const room = r.max_gallons - r.planned_gallons;
-      r.planned_gallons += Math.max(0, Math.min(room, want));
+      // Floor to whole gallons — terminal meters in whole gallons,
+      // so any partial gallon in the plan rounds up at the meter → overweight.
+      r.planned_gallons += Math.floor(Math.max(0, Math.min(room, want)));
     }
 
     const plannedNow = rows.reduce((s, r) => s + r.planned_gallons, 0);
