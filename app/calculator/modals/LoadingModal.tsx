@@ -118,8 +118,9 @@ export default function LoadingModal(props: {
 
   productInputs: ProductInputs;
   setProductApi: (productId: string, api: string) => void;
+  setProductTemp: (productId: string, tempF: number) => void;
 
-  onOpenTempDial: (productId: string) => void;
+  onOpenTempDial?: (productId: string) => void;
   onLoaded: () => void;
 
   loadedDisabled?: boolean;
@@ -142,6 +143,7 @@ export default function LoadingModal(props: {
     productHexCodeById,
     productInputs,
     setProductApi,
+    setProductTemp,
     onOpenTempDial,
     onLoaded,
     loadedDisabled,
@@ -324,9 +326,23 @@ useEffect(() => {
                     <div style={{ display: "flex", gap: 8 }}>
                       <input
                         value={apiVal}
-                        onChange={(e) => setProductApi(g.productId, e.target.value)}
+                        onChange={(e) => {
+                          // Strip anything that isn't a digit or decimal point
+                          let v = e.target.value.replace(/[^\d.]/g, "");
+                          // Only allow one decimal point
+                          const parts = v.split(".");
+                          if (parts.length > 2) v = parts[0] + "." + parts.slice(1).join("");
+                          // Limit to 1 decimal place
+                          if (parts[1] !== undefined) v = parts[0] + "." + parts[1].slice(0, 1);
+                          setProductApi(g.productId, v);
+                        }}
+                        onBlur={(e) => {
+                          // Normalize to X.X on blur
+                          const n = parseFloat(e.target.value);
+                          if (Number.isFinite(n)) setProductApi(g.productId, n.toFixed(1));
+                        }}
                         inputMode="decimal"
-                        placeholder="API gravity"
+                        placeholder="37.9"
                         style={{
                           ...styles.input,
                           flex: 1,
@@ -337,21 +353,42 @@ useEffect(() => {
                           textAlign: "center",
                         }}
                       />
-                      <button
-                        type="button"
-                        onClick={() => onOpenTempDial(g.productId)}
-                        style={{
-                          ...styles.smallBtn,
-                          width: 80,
-                          height: 40,
-                          borderRadius: 8,
-                          fontWeight: 800,
-                          fontSize: 14,
-                          flexShrink: 0,
-                        }}
-                      >
-                        {tempVal == null ? "60°F" : `${Math.round(tempVal)}°F`}
-                      </button>
+                      <div style={{ position: "relative", flexShrink: 0, width: 90, height: 40 }}>
+                        <input
+                          value={tempVal == null ? "" : tempVal.toFixed(1)}
+                          onChange={(e) => {
+                            let v = e.target.value.replace(/[^\d.]/g, "");
+                            const parts = v.split(".");
+                            if (parts.length > 2) v = parts[0] + "." + parts.slice(1).join("");
+                            if (parts[1] !== undefined) v = parts[0] + "." + parts[1].slice(0, 1);
+                            const n = parseFloat(v);
+                            if (Number.isFinite(n)) setProductTemp(g.productId, n);
+                            else if (v === "" || v === ".") setProductTemp(g.productId, 0);
+                          }}
+                          onBlur={(e) => {
+                            const n = parseFloat(e.target.value);
+                            if (Number.isFinite(n)) setProductTemp(g.productId, parseFloat(n.toFixed(1)));
+                          }}
+                          inputMode="decimal"
+                          placeholder="60.0"
+                          style={{
+                            ...styles.input,
+                            width: "100%",
+                            height: 40,
+                            borderRadius: 8,
+                            fontWeight: 800,
+                            fontSize: 14,
+                            textAlign: "right",
+                            paddingRight: 22,
+                            boxSizing: "border-box" as const,
+                          }}
+                        />
+                        <span style={{
+                          position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)",
+                          fontSize: 13, fontWeight: 700, color: "rgba(255,255,255,0.45)",
+                          pointerEvents: "none",
+                        }}>°F</span>
+                      </div>
                     </div>
                   </div>
                 );

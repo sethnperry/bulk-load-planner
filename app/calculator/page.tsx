@@ -976,11 +976,8 @@ const lastProductInfoById = useMemo(() => {
                     return <><span style={{ ...subBtnLabel, flex: 1, textAlign: "left" as const }}>{ago} · {gal}</span><span style={subBtnChevron}>›</span></>;
                   })()}
                 </button>
-                {/* Planned / Target / Actual — tappable to reopen loading modal when load active */}
-                <div
-                  onClick={() => { if (loadWorkflow.activeLoadId) loadWorkflow.setLoadingOpen(true); }}
-                  style={{ padding: "8px 12px", display: "flex", flexDirection: "column", gap: 5, flex: 1, cursor: loadWorkflow.activeLoadId ? "pointer" : "default" }}
-                >
+                {/* Planned / Target / Actual */}
+                <div style={{ padding: "8px 12px", display: "flex", flexDirection: "column", gap: 5, flex: 1 }}>
                   {[
                     { label: "Gallons", text: plannedGalText, big: true },
                     { label: "Target",  text: targetText },
@@ -1076,7 +1073,7 @@ const lastProductInfoById = useMemo(() => {
         terminalTimeZone={selectedTerminalTimeZoneResolved}
         lastProductInfoById={lastProductInfoById}
         setProductApi={(productId, api) => setProductInputs((prev) => ({ ...prev, [productId]: { ...(prev[productId] ?? {}), api } }))}
-        onOpenTempDial={(productId) => { setTempDial2ProductId(productId); setTempDial2Open(true); }}
+        setProductTemp={(productId, tempF) => setProductInputs((prev) => ({ ...prev, [productId]: { ...(prev[productId] ?? {}), tempF } }))}
         onLoaded={loadWorkflow.onLoadedFromLoadingModal}
         loadedDisabled={loadWorkflow.completeBusy}
         loadedLabel={loadWorkflow.completeBusy ? "Saving…" : "LOADED"}
