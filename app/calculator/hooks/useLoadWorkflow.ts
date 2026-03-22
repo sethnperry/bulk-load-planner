@@ -94,21 +94,14 @@ export function useLoadWorkflow({
           const gallons = Number(r.planned_gallons ?? 0);
           const lbs = gallons * Number(r.lbsPerGal ?? 0);
           const prod = terminalProducts.find((p) => p.product_id === r.productId);
-          // Capture API and its timestamp at plan time — last_api_updated_at gets
-          // overwritten on load completion, so we must snapshot it now.
-          const plannedApi = prod?.last_api != null ? Number(prod.last_api) : null;
-          const plannedApiUpdatedAt = (prod as any)?.last_api_updated_at ?? null;
           return {
             comp_number: Number(r.comp_number),
             product_id: String(r.productId),
             product_name: prod?.product_name ?? prod?.display_name ?? null,
-            button_code: (prod as any)?.button_code ?? null,
-            un_number: (prod as any)?.un_number ?? null,
+            un_number: (prod as any)?.un_number ?? null,  // for placard residue logic
             planned_gallons: Number.isFinite(gallons) ? gallons : null,
             planned_lbs: Number.isFinite(lbs) ? lbs : null,
             temp_f: tempF ?? null,
-            planned_api: Number.isFinite(plannedApi ?? NaN) ? plannedApi : null,
-            planned_api_updated_at: plannedApiUpdatedAt,
           };
         });
 
@@ -231,7 +224,12 @@ export function useLoadWorkflow({
         continue;
       }
 
-      const lpg = lbsPerGallonAtTemp(apiNum, alpha, tempVal);
+      // Back-correct the observed API to 60°F before computing lbs/gal —
+      // matches the same path used in bestLbsPerGallon during planning.
+      // Without this, plan and actual use different effective API60 values
+      // even when the driver enters the same number, causing a phantom diff.
+      const api60 = apiNum + alpha * (tempVal - 60);
+      const lpg = lbsPerGallonAtTemp(api60, alpha, tempVal);
       const lbs = gallons * lpg;
       nextActualByComp[comp] = { actual_gallons: gallons, actual_lbs: Number.isFinite(lbs) ? lbs : null, temp_f: tempVal };
       if (Number.isFinite(lbs)) actualPayloadLbs += lbs;
