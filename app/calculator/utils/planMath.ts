@@ -162,9 +162,7 @@ export function allocateWithCaps(
     for (const r of active) {
       const want = k * r.weight;
       const room = r.max_gallons - r.planned_gallons;
-      // Floor to whole gallons — terminal meters in whole gallons,
-      // so any partial gallon in the plan rounds up at the meter → overweight.
-      r.planned_gallons += Math.floor(Math.max(0, Math.min(room, want)));
+      r.planned_gallons += Math.max(0, Math.min(room, want));
     }
 
     const plannedNow = rows.reduce((s, r) => s + r.planned_gallons, 0);
