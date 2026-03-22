@@ -45,6 +45,7 @@ import MyTerminalsModal from "./modals/MyTerminalsModal";
 import TerminalCatalogModal from "./modals/TerminalCatalogModal";
 import LoadingModal from "./modals/LoadingModal";
 import MyLoadsModal from "./modals/MyLoadsModal";
+import LoadReportModal from "./modals/LoadReportModal";
 import ProductTempModal from "./modals/ProductTempModal";
 import TempDialModal from "./modals/TempDialModal";
 import CompartmentModal from "./modals/CompartmentModal";
@@ -976,11 +977,8 @@ const lastProductInfoById = useMemo(() => {
                     return <><span style={{ ...subBtnLabel, flex: 1, textAlign: "left" as const }}>{ago} · {gal}</span><span style={subBtnChevron}>›</span></>;
                   })()}
                 </button>
-                {/* Planned / Target / Actual — tap to reopen loading modal when load active */}
-                <div
-                  onClick={() => { if (loadWorkflow.activeLoadId) loadWorkflow.setLoadingOpen(true); }}
-                  style={{ padding: "8px 12px", display: "flex", flexDirection: "column", gap: 5, flex: 1, cursor: loadWorkflow.activeLoadId ? "pointer" : "default" }}
-                >
+                {/* Planned / Target / Actual */}
+                <div style={{ padding: "8px 12px", display: "flex", flexDirection: "column", gap: 5, flex: 1 }}>
                   {[
                     { label: "Gallons", text: plannedGalText, big: true },
                     { label: "Target",  text: targetText },
@@ -992,11 +990,19 @@ const lastProductInfoById = useMemo(() => {
                     </div>
                   ))}
                 </div>
-                {/* Over/Under strip at bottom */}
-                <div style={{ ...subBtnStyle, borderBottom: "none", borderTop: "1px solid rgba(255,255,255,0.07)", cursor: "default" }}>
+                {/* Over/Under strip at bottom — tap to open load report */}
+                <button type="button"
+                  onClick={() => {
+                    if (loadWorkflow.loadReport && loadHistory.rows[0]) {
+                      loadHistory.fetchLines(loadHistory.rows[0].load_id, loadHistory.rows[0].planned_snapshot, loadHistory.rows[0].product_temp_f);
+                      setLoadReportOpen(true);
+                    }
+                  }}
+                  style={{ ...subBtnStyle, borderBottom: "none", borderTop: "1px solid rgba(255,255,255,0.07)", cursor: loadWorkflow.loadReport ? "pointer" : "default" }}
+                >
                   <span style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.35)" }}>Over/Under</span>
                   <span style={{ fontSize: "clamp(11px, 3vw, 16px)", fontWeight: 900, color: diffColor }}>{diffText}</span>
-                </div>
+                </button>
               </div>
             </div>
 
@@ -1049,6 +1055,13 @@ const lastProductInfoById = useMemo(() => {
         selectedComboId={equipment.selectedComboId ?? ""}
         onSelectComboId={(id) => equipment.setSelectedComboId(id)}
         onRefreshCombos={equipment.fetchCombos}
+      />
+
+      <LoadReportModal
+        open={loadReportOpen}
+        onClose={() => setLoadReportOpen(false)}
+        row={loadHistory.rows[0] ?? null}
+        lines={loadHistory.rows[0] ? loadHistory.linesCache[loadHistory.rows[0].load_id] : undefined}
       />
 
       <MyLoadsModal
