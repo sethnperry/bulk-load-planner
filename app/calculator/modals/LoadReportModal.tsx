@@ -138,7 +138,7 @@ export default function LoadReportModal({ open, onClose, row, lines }: Props) {
   }
   function handleSMS() { window.location.href = `sms:?&body=${encodeURIComponent(body)}`; }
   function handleEmail() {
-    const subject = [fmtDateTime(row.started_at), cityState, row.terminal_name].filter(Boolean).join("  ·  ");
+    const subject = [fmtDateTime(row!.started_at), cityState, row!.terminal_name].filter(Boolean).join("  ·  ");
     window.location.href = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   }
 
