@@ -99,7 +99,6 @@ function buildShareText(row: LoadHistoryRow, lines: LoadHistoryLine[] | undefine
     "LOAD REPORT",
     divider,
     subject,
-    `Overall: ${diffTxt}${diffTag}`,
     divider,
   ].join("\n");
 
@@ -123,9 +122,11 @@ function buildShareText(row: LoadHistoryRow, lines: LoadHistoryLine[] | undefine
             : ""}`
         : "API —";
 
-      const prodLabel = l.button_code ?? l.product_name ?? "—";
+      const codeLabel = l.button_code
+        ? `${l.button_code}${l.product_name ? " — " + l.product_name : ""}`
+        : (l.product_name ?? "—");
       const rows = [
-        `C${l.comp_number}  ${prodLabel}`,
+        `C${l.comp_number}  ${codeLabel}`,
         `  Planned:  ${fmtLbs(l.planned_lbs)}  ${fmtTemp(l.planned_temp_f)}  ${plannedApiStr}`,
         `  Actual:   ${fmtLbs(l.actual_lbs)}  ${fmtTemp(l.actual_temp_f)}  API ${l.actual_api?.toFixed(1) ?? "—"}  ${ou?.text ?? "—"}${ouTag}`,
       ];
@@ -158,7 +159,7 @@ function buildShareText(row: LoadHistoryRow, lines: LoadHistoryLine[] | undefine
           const lpg = rearComp.actual_lbs / rearComp.actual_gallons;
           const galToDrain = lbsToRemove / lpg;
           const prodLabel = rearComp.button_code ?? rearComp.product_name ?? `C${rearComp.comp_number}`;
-          drainLine = `\n  To correct to 80k lbs: drain ~${galToDrain.toFixed(1)} gal from C${rearComp.comp_number} (${prodLabel})`;
+          drainLine = `\n\nCorrect to 80k lbs: drain ~${galToDrain.toFixed(1)} gal from C${rearComp.comp_number} (${prodLabel})`;
         }
       }
     }
