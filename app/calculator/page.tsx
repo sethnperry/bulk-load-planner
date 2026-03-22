@@ -295,6 +295,7 @@ export default function CalculatorPage() {
   const [cgSlider, setCgSlider] = useState<number>(0.5);
   const [compPlan, setCompPlan] = useState<Record<number, CompPlanInput>>({});
   const [myLoadsOpen, setMyLoadsOpen]   = useState(false);
+  const [loadReportOpen, setLoadReportOpen] = useState(false);
 
   const loadHistory = useLoadHistory(authUserId ?? "");
   // ── Headspace caps — persisted per trailer ────────────────────────────────
