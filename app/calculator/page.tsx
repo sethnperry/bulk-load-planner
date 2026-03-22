@@ -976,8 +976,11 @@ const lastProductInfoById = useMemo(() => {
                     return <><span style={{ ...subBtnLabel, flex: 1, textAlign: "left" as const }}>{ago} · {gal}</span><span style={subBtnChevron}>›</span></>;
                   })()}
                 </button>
-                {/* Planned / Target / Actual */}
-                <div style={{ padding: "8px 12px", display: "flex", flexDirection: "column", gap: 5, flex: 1 }}>
+                {/* Planned / Target / Actual — tap to reopen loading modal when load active */}
+                <div
+                  onClick={() => { if (loadWorkflow.activeLoadId) loadWorkflow.setLoadingOpen(true); }}
+                  style={{ padding: "8px 12px", display: "flex", flexDirection: "column", gap: 5, flex: 1, cursor: loadWorkflow.activeLoadId ? "pointer" : "default" }}
+                >
                   {[
                     { label: "Gallons", text: plannedGalText, big: true },
                     { label: "Target",  text: targetText },
