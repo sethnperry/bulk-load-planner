@@ -442,7 +442,7 @@ export default function CalculatorPage() {
 
   // Initialize compPlan entries when compartments change
   useEffect(() => {
-    setCompPlan((prev) => {
+    setCompPlan((prev: Record<number, CompPlanInput>) => {
       const next = { ...prev };
       for (const c of compartments) {
         const n = Number(c.comp_number);
