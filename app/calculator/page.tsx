@@ -291,9 +291,59 @@ export default function CalculatorPage() {
   }, [location.selectedTerminalId]);
 
   // ── Planning inputs ────────────────────────────────────────────────────────
-  const [tempF, setTempF] = useState<number>(60);
-  const [cgSlider, setCgSlider] = useState<number>(0.5);
-  const [compPlan, setCompPlan] = useState<Record<number, CompPlanInput>>({});
+  // ── Persisted plan state — survives page refresh ─────────────────────────
+  const [tempF, setTempFRaw] = useState<number>(() => {
+    if (typeof window === "undefined") return 60;
+    try { const v = localStorage.getItem("protankr_tempF_v1"); return v != null ? Number(v) : 60; } catch { return 60; }
+  });
+  const setTempF = useCallback((v: number | ((prev: number) => number)) => {
+    setTempFRaw(prev => {
+      const next = typeof v === "function" ? v(prev) : v;
+      try { localStorage.setItem("protankr_tempF_v1", String(next)); } catch {}
+      return next;
+    });
+  }, []);
+
+  const [cgSlider, setCgSliderRaw] = useState<number>(() => {
+    if (typeof window === "undefined") return 0.5;
+    try { const v = localStorage.getItem("protankr_cgSlider_v1"); return v != null ? Number(v) : 0.5; } catch { return 0.5; }
+  });
+  const setCgSlider = useCallback((v: number | ((prev: number) => number)) => {
+    setCgSliderRaw(prev => {
+      const next = typeof v === "function" ? v(prev) : v;
+      try { localStorage.setItem("protankr_cgSlider_v1", String(next)); } catch {}
+      return next;
+    });
+  }, []);
+
+  // compPlan is keyed per combo+terminal so switching equipment restores the right plan
+  const compPlanKey = useMemo(() => {
+    const cid = equipment.selectedComboId ?? "";
+    const tid = location.selectedTerminalId ?? "";
+    return cid && tid ? `protankr_compPlan_v1:${cid}:${tid}` : null;
+  }, [equipment.selectedComboId, location.selectedTerminalId]);
+
+  const [compPlan, setCompPlanRaw] = useState<Record<number, CompPlanInput>>({});
+
+  // Hydrate compPlan when combo or terminal changes
+  useEffect(() => {
+    if (!compPlanKey) { setCompPlanRaw({}); return; }
+    try {
+      const raw = localStorage.getItem(compPlanKey);
+      if (raw) { const p = JSON.parse(raw); if (p && typeof p === "object") { setCompPlanRaw(p); return; } }
+    } catch {}
+    setCompPlanRaw({});
+  }, [compPlanKey]);
+
+  const setCompPlan = useCallback((updater: any) => {
+    setCompPlanRaw(prev => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      if (compPlanKey) {
+        try { localStorage.setItem(compPlanKey, JSON.stringify(next)); } catch {}
+      }
+      return next;
+    });
+  }, [compPlanKey]);
   const [myLoadsOpen, setMyLoadsOpen]   = useState(false);
   const [loadReportOpen, setLoadReportOpen] = useState(false);
 
