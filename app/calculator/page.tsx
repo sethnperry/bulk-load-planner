@@ -325,7 +325,10 @@ export default function CalculatorPage() {
     setCompPlanRaw((prev: Record<number, CompPlanInput>) => {
       const next = typeof updater === "function" ? updater(prev) : updater;
       if (compPlanKey) {
+        console.log("[compPlan] saving to localStorage key:", compPlanKey, "value:", JSON.stringify(next));
         try { localStorage.setItem(compPlanKey, JSON.stringify(next)); } catch {}
+      } else {
+        console.log("[compPlan] setCompPlan called but no key — not persisting");
       }
       return next;
     });
@@ -343,11 +346,17 @@ export default function CalculatorPage() {
 
   // Hydrate compPlan when combo+terminal key changes
   useEffect(() => {
-    if (!compPlanKey) { setCompPlanRaw({}); return; }
+    if (!compPlanKey) {
+      console.log("[compPlan] key is null — clearing");
+      setCompPlanRaw({});
+      return;
+    }
     try {
       const raw = localStorage.getItem(compPlanKey);
+      console.log("[compPlan] hydrating key:", compPlanKey, "raw:", raw);
       if (raw) { const p = JSON.parse(raw); if (p && typeof p === "object") { setCompPlanRaw(p); return; } }
     } catch {}
+    console.log("[compPlan] nothing found, setting empty");
     setCompPlanRaw({});
   }, [compPlanKey]);
   const [myLoadsOpen, setMyLoadsOpen]   = useState(false);
