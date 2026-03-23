@@ -447,8 +447,9 @@ export default function CalculatorPage() {
   }, [predictedFuelTempF, location.selectedCity, location.selectedState]);
 
   // Initialize compPlan entries when compartments change
+  // Uses setCompPlanRaw so auto-init doesn't overwrite localStorage with empty slots
   useEffect(() => {
-    setCompPlan((prev: Record<number, CompPlanInput>) => {
+    setCompPlanRaw((prev: Record<number, CompPlanInput>) => {
       const next = { ...prev };
       for (const c of compartments) {
         const n = Number(c.comp_number);
