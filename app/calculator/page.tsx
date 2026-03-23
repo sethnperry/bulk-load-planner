@@ -325,10 +325,7 @@ export default function CalculatorPage() {
     setCompPlanRaw((prev: Record<number, CompPlanInput>) => {
       const next = typeof updater === "function" ? updater(prev) : updater;
       if (compPlanKey) {
-        console.log("[compPlan] saving to localStorage key:", compPlanKey, "value:", JSON.stringify(next));
         try { localStorage.setItem(compPlanKey, JSON.stringify(next)); } catch {}
-      } else {
-        console.log("[compPlan] setCompPlan called but no key — not persisting");
       }
       return next;
     });
@@ -344,19 +341,28 @@ export default function CalculatorPage() {
     } catch {}
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Ref holds the hydrated plan so compartments init doesn't overwrite it
+  const hydratedCompPlanRef = useRef<Record<number, CompPlanInput> | null>(null);
+
   // Hydrate compPlan when combo+terminal key changes
   useEffect(() => {
     if (!compPlanKey) {
-      console.log("[compPlan] key is null — clearing");
+      hydratedCompPlanRef.current = null;
       setCompPlanRaw({});
       return;
     }
     try {
       const raw = localStorage.getItem(compPlanKey);
-      console.log("[compPlan] hydrating key:", compPlanKey, "raw:", raw);
-      if (raw) { const p = JSON.parse(raw); if (p && typeof p === "object") { setCompPlanRaw(p); return; } }
+      if (raw) {
+        const p = JSON.parse(raw);
+        if (p && typeof p === "object") {
+          hydratedCompPlanRef.current = p;
+          setCompPlanRaw(p);
+          return;
+        }
+      }
     } catch {}
-    console.log("[compPlan] nothing found, setting empty");
+    hydratedCompPlanRef.current = null;
     setCompPlanRaw({});
   }, [compPlanKey]);
   const [myLoadsOpen, setMyLoadsOpen]   = useState(false);
@@ -456,10 +462,12 @@ export default function CalculatorPage() {
   }, [predictedFuelTempF, location.selectedCity, location.selectedState]);
 
   // Initialize compPlan entries when compartments change
-  // Uses setCompPlanRaw so auto-init doesn't overwrite localStorage with empty slots
+  // Merges with hydratedCompPlanRef so saved products survive even if
+  // this runs in the same batch as hydration (React may see stale prev = {})
   useEffect(() => {
     setCompPlanRaw((prev: Record<number, CompPlanInput>) => {
-      const next = { ...prev };
+      const base = hydratedCompPlanRef.current ?? prev;
+      const next = { ...base };
       for (const c of compartments) {
         const n = Number(c.comp_number);
         if (!Number.isFinite(n)) continue;
