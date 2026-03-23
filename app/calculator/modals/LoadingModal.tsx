@@ -322,42 +322,36 @@ useEffect(() => {
                       </div>
                       <div style={{ color: "rgba(255,255,255,0.60)", fontWeight: 700, fontSize: 12, flexShrink: 0 }}>{Math.round(g.gallons)}</div>
                     </div>
-                    {/* Bottom row: API input + temp button side by side */}
-                    <div style={{ display: "flex", gap: 8 }}>
-                      <input
-                        value={apiVal}
-                        onChange={(e) => {
-                          // Strip anything that isn't a digit or decimal point
-                          let v = e.target.value.replace(/[^\d.]/g, "");
-                          // Only allow one decimal point
-                          const parts = v.split(".");
-                          if (parts.length > 2) v = parts[0] + "." + parts.slice(1).join("");
-                          // Limit to 1 decimal place
-                          if (parts[1] !== undefined) v = parts[0] + "." + parts[1].slice(0, 1);
-                          setProductApi(g.productId, v);
-                        }}
-                        onBlur={(e) => {
-                          // Normalize to X.X on blur
-                          const n = parseFloat(e.target.value);
-                          if (Number.isFinite(n)) setProductApi(g.productId, n.toFixed(1));
-                        }}
-                        inputMode="decimal"
-                        placeholder="37.9"
-                        style={{
-                          ...styles.input,
-                          flex: 1,
-                          height: 40,
-                          borderRadius: 8,
-                          fontWeight: 800,
-                          fontSize: 15,
-                          textAlign: "center",
-                        }}
-                      />
-                      <div style={{ position: "relative", flexShrink: 0, width: 90, height: 40 }}>
+                    {/* Inputs stacked — full width, select-all on focus for easy override */}
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      {/* API */}
+                      <div style={{ position: "relative" }}>
+                        <input
+                          value={apiVal}
+                          onChange={(e) => {
+                            let v = e.target.value.replace(/[^0-9.]/g, "");
+                            const parts = v.split(".");
+                            if (parts.length > 2) v = parts[0] + "." + parts.slice(1).join("");
+                            if (parts[1] !== undefined) v = parts[0] + "." + parts[1].slice(0, 1);
+                            setProductApi(g.productId, v);
+                          }}
+                          onFocus={(e) => e.target.select()}
+                          onBlur={(e) => {
+                            const n = parseFloat(e.target.value);
+                            if (Number.isFinite(n)) setProductApi(g.productId, n.toFixed(1));
+                          }}
+                          inputMode="decimal"
+                          placeholder="37.9"
+                          style={{ ...styles.input, width: "100%", height: 48, borderRadius: 8, fontWeight: 800, fontSize: 18, textAlign: "center", boxSizing: "border-box" as const }}
+                        />
+                        <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.25)", pointerEvents: "none" }}>API</span>
+                      </div>
+                      {/* Temp */}
+                      <div style={{ position: "relative" }}>
                         <input
                           value={tempVal == null ? "" : tempVal.toFixed(1)}
                           onChange={(e) => {
-                            let v = e.target.value.replace(/[^\d.]/g, "");
+                            let v = e.target.value.replace(/[^0-9.]/g, "");
                             const parts = v.split(".");
                             if (parts.length > 2) v = parts[0] + "." + parts.slice(1).join("");
                             if (parts[1] !== undefined) v = parts[0] + "." + parts[1].slice(0, 1);
@@ -365,29 +359,17 @@ useEffect(() => {
                             if (Number.isFinite(n)) setProductTemp(g.productId, n);
                             else if (v === "" || v === ".") setProductTemp(g.productId, 0);
                           }}
+                          onFocus={(e) => e.target.select()}
                           onBlur={(e) => {
                             const n = parseFloat(e.target.value);
                             if (Number.isFinite(n)) setProductTemp(g.productId, parseFloat(n.toFixed(1)));
                           }}
                           inputMode="decimal"
-                          placeholder="60.0"
-                          style={{
-                            ...styles.input,
-                            width: "100%",
-                            height: 40,
-                            borderRadius: 8,
-                            fontWeight: 800,
-                            fontSize: 14,
-                            textAlign: "right",
-                            paddingRight: 22,
-                            boxSizing: "border-box" as const,
-                          }}
+                          placeholder="79.0"
+                          style={{ ...styles.input, width: "100%", height: 48, borderRadius: 8, fontWeight: 800, fontSize: 18, textAlign: "center", boxSizing: "border-box" as const }}
                         />
-                        <span style={{
-                          position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)",
-                          fontSize: 13, fontWeight: 700, color: "rgba(255,255,255,0.45)",
-                          pointerEvents: "none",
-                        }}>°F</span>
+                        <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.25)", pointerEvents: "none" }}>TEMP</span>
+                        <span style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", fontSize: 13, fontWeight: 700, color: "rgba(255,255,255,0.30)", pointerEvents: "none" }}>°F</span>
                       </div>
                     </div>
                   </div>
