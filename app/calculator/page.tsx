@@ -292,10 +292,9 @@ export default function CalculatorPage() {
 
   // ── Planning inputs ────────────────────────────────────────────────────────
   // ── Persisted plan state — survives page refresh ─────────────────────────
-  const [tempF, setTempFRaw] = useState<number>(() => {
-    if (typeof window === "undefined") return 60;
-    try { const v = localStorage.getItem("protankr_tempF_v1"); return v != null ? Number(v) : 60; } catch { return 60; }
-  });
+  // All initialized to defaults; hydrated from localStorage in useEffect after mount
+  // (avoids SSR hydration mismatch — localStorage is client-only)
+  const [tempF, setTempFRaw] = useState<number>(60);
   const setTempF = useCallback((v: number | ((prev: number) => number)) => {
     setTempFRaw(prev => {
       const next = typeof v === "function" ? v(prev) : v;
@@ -304,10 +303,7 @@ export default function CalculatorPage() {
     });
   }, []);
 
-  const [cgSlider, setCgSliderRaw] = useState<number>(() => {
-    if (typeof window === "undefined") return 0.5;
-    try { const v = localStorage.getItem("protankr_cgSlider_v1"); return v != null ? Number(v) : 0.5; } catch { return 0.5; }
-  });
+  const [cgSlider, setCgSliderRaw] = useState<number>(0.5);
   const setCgSlider = useCallback((v: number | ((prev: number) => number)) => {
     setCgSliderRaw(prev => {
       const next = typeof v === "function" ? v(prev) : v;
@@ -325,7 +321,27 @@ export default function CalculatorPage() {
 
   const [compPlan, setCompPlanRaw] = useState<Record<number, CompPlanInput>>({});
 
-  // Hydrate compPlan when combo or terminal changes
+  const setCompPlan = useCallback((updater: any) => {
+    setCompPlanRaw((prev: Record<number, CompPlanInput>) => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      if (compPlanKey) {
+        try { localStorage.setItem(compPlanKey, JSON.stringify(next)); } catch {}
+      }
+      return next;
+    });
+  }, [compPlanKey]);
+
+  // Hydrate tempF and cgSlider once on mount
+  useEffect(() => {
+    try {
+      const t = localStorage.getItem("protankr_tempF_v1");
+      if (t != null && Number.isFinite(Number(t))) setTempFRaw(Number(t));
+      const cg = localStorage.getItem("protankr_cgSlider_v1");
+      if (cg != null && Number.isFinite(Number(cg))) setCgSliderRaw(Number(cg));
+    } catch {}
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Hydrate compPlan when combo+terminal key changes
   useEffect(() => {
     if (!compPlanKey) { setCompPlanRaw({}); return; }
     try {
@@ -333,16 +349,6 @@ export default function CalculatorPage() {
       if (raw) { const p = JSON.parse(raw); if (p && typeof p === "object") { setCompPlanRaw(p); return; } }
     } catch {}
     setCompPlanRaw({});
-  }, [compPlanKey]);
-
-  const setCompPlan = useCallback((updater: any) => {
-    setCompPlanRaw(prev => {
-      const next = typeof updater === "function" ? updater(prev) : updater;
-      if (compPlanKey) {
-        try { localStorage.setItem(compPlanKey, JSON.stringify(next)); } catch {}
-      }
-      return next;
-    });
   }, [compPlanKey]);
   const [myLoadsOpen, setMyLoadsOpen]   = useState(false);
   const [loadReportOpen, setLoadReportOpen] = useState(false);
