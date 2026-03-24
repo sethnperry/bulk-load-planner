@@ -2,6 +2,7 @@
 // modals/ProductTempModal.tsx
 
 import React from "react";
+import { useRouter } from "next/navigation";
 import { FullscreenModal } from "@/lib/ui/FullscreenModal";
 import type { FuelTempConfidence } from "../hooks/useFuelTempPrediction";
 
@@ -115,73 +116,6 @@ function PredictionBanner({
   );
 }
 
-function HowWePredictSection({ confidence }: { confidence: FuelTempConfidence | null }) {
-  const card = (emoji: string, title: string, body: React.ReactNode) => (
-    <div style={{ padding: "10px 12px", borderRadius: 12, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)" }}>
-      <div style={{ fontSize: 12, fontWeight: 800, color: "rgba(255,255,255,0.7)", marginBottom: 4 }}>
-        {emoji}{"  "}{title}
-      </div>
-      <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", lineHeight: 1.55 }}>{body}</div>
-    </div>
-  );
-
-  return (
-    <div style={{ display: "grid", gap: 10 }}>
-      <div style={{ fontWeight: 800, fontSize: 13, letterSpacing: 0.2, color: "rgba(255,255,255,0.85)" }}>
-        How this prediction works
-      </div>
-
-      {card("🌤", "30 hours of weather history",
-        "We pull hourly temperature, wind speed, and cloud cover from OpenWeather for the past 24–30 hours at this terminal's location. This gives the model a full picture of how the environment has been heating or cooling the storage tank."
-      )}
-
-      {card("☀️", "Solar gain calculation",
-        <>Using the terminal's exact latitude and longitude, we calculate the sun's elevation angle for every hour of the past day. Higher sun angle + clear skies = more radiant heat absorbed by the tank surface. Overcast or nighttime hours contribute zero solar gain.</>
-      )}
-
-      {card("🌬", "Wind cooling adjustment",
-        "Wind accelerates how quickly product temperature chases the ambient air. Higher wind speeds increase the effective cooling rate, pulling the prediction closer to ambient on breezy days and reducing the impact of solar heating."
-      )}
-
-      {card("🛢", "Large tank model — intentionally conservative",
-        <>We model a large above-ground storage tank (~1 million gallons). Large tanks have enormous thermal mass — they heat and cool very slowly, lagging well behind ambient swings. This is <strong style={{ color: "rgba(255,255,255,0.65)" }}>intentional</strong>: we'd rather predict the product is colder and denser than it turns out to be, which keeps you safely under your weight limit.</>
-      )}
-
-      {card("🌡", "Live ambient blending",
-        <>The <strong style={{ color: "rgba(255,255,255,0.65)" }}>current ambient temp</strong> shown at the top is gently blended into the final result to account for the last few minutes of temperature change. This keeps the prediction current without overreacting to short-term spikes.</>
-      )}
-
-      {confidence && card(
-        confidence === "high" ? "✅" : confidence === "medium" ? "⚠️" : "❗",
-        "Confidence explained",
-        <>
-          <ConfidenceDot confidence={confidence} />
-          <span style={{ marginLeft: 6 }}>
-            {confidence === "high" &&
-              " — Clear skies and calm winds over the past 24h. Solar gain was predictable and the model is well-constrained. This is as accurate as this approach gets."}
-            {confidence === "medium" &&
-              " — Partly cloudy over the past 24h. Cloud variability introduces some uncertainty in how much solar heat the tank absorbed. Solid estimate — trust your experience if conditions were unusual."}
-            {confidence === "low" &&
-              " — Heavy cloud cover or high winds over the past 24h. These conditions are harder to model. Use the number as a starting point but lean on what you know about this terminal."}
-          </span>
-        </>
-      )}
-
-      <div style={{
-        fontSize: 13, fontWeight: 500, lineHeight: 1.65,
-        color: "#fdba74",
-        background: "rgba(251,146,60,0.08)",
-        border: "1px solid rgba(251,146,60,0.22)",
-        borderLeft: "3px solid #fb923c",
-        borderRadius: "0 10px 10px 0",
-        padding: "10px 14px",
-        marginTop: 2,
-      }}>
-        <strong style={{ color: "#fb923c", fontWeight: 900 }}>⚠ Use your judgement.</strong> Override the prediction freely using the dial — you know your terminal better than any model. However, it is strongly recommended <strong style={{ color: "#fb923c" }}>not to set the planned product temp above ambient</strong> unless you have full confidence from a recent BOL. When in doubt, err on the side of caution and keep your planned temp colder than ambient. A colder planned temp predicts denser product, which protects you from overweight loads.
-      </div>
-    </div>
-  );
-}
 
 // ─── Main modal ───────────────────────────────────────────────────────────────
 
@@ -212,6 +146,8 @@ export default function ProductTempModal(props: {
     fuelTempConfidence = null,
     fuelTempLoading = false,
   } = props;
+
+  const router = useRouter();
 
   // Auto-apply is fully handled by page.tsx.
   // Modal just displays the current tempF (already predicted or user-set)
@@ -263,7 +199,15 @@ export default function ProductTempModal(props: {
             onClick={() => setTempF((v) => Math.round((Number(v) + 0.5) * 10) / 10)}>+0.5</button>
         </div>
 
-        <HowWePredictSection confidence={fuelTempConfidence} />
+        {/* Learn link */}
+        <button
+          type="button"
+          onClick={() => { onClose(); router.push("/learn"); }}
+          style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", padding: "11px 14px", borderRadius: 12, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", cursor: "pointer" }}
+        >
+          <span style={{ fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,0.55)" }}>How this prediction works</span>
+          <span style={{ fontSize: 13, color: "rgba(255,255,255,0.25)" }}>›</span>
+        </button>
 
       </div>
     </FullscreenModal>

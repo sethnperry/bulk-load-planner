@@ -188,6 +188,7 @@ export default function NavMenu() {
             {isAdmin && !isAdmin_ && (
               <NavLink href="/admin" icon="⚙" label="Company Admin" onClick={() => setOpen(false)} />
             )}
+            <NavLink href="/learn" icon="?" label="Learn" onClick={() => setOpen(false)} />
             <NavLink href="#" icon="↩" label="Sign Out"
               onClick={e => { e.preventDefault(); signOut(); }} danger />
           </div>
