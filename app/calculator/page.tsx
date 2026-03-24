@@ -592,6 +592,7 @@ export default function CalculatorPage() {
     onRefreshTerminalProducts: fetchTerminalProducts,
     onRefreshTerminalAccess: terminals.refreshTerminalAccessForUser,
     onPostLoadComplete: planSlots.refreshLastLoad,
+    predictedTempF: predictedFuelTempF,
   });
 
   // ── Terminal filters ───────────────────────────────────────────────────────

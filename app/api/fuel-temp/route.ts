@@ -203,11 +203,37 @@ export async function POST(req: Request) {
       );
     }
 
+    // Look up historical bias correction for this terminal + hour + month
+    let biasCorrectionF = 0;
+    let biasSampleCount = 0;
+    if (supabase && terminalId) {
+      try {
+        const nowDate = new Date(nowTs * 1000);
+        const hourUtc = nowDate.getUTCHours();
+        const monthOfYear = nowDate.getUTCMonth() + 1;
+
+        const { data: biasRow } = await supabase
+          .from("terminal_temp_bias")
+          .select("mean_error, sample_count")
+          .eq("terminal_id", terminalId)
+          .eq("hour_of_day", hourUtc)
+          .eq("month_of_year", monthOfYear)
+          .maybeSingle();
+
+        if (biasRow) {
+          biasCorrectionF = Number(biasRow.mean_error) || 0;
+          biasSampleCount = Number(biasRow.sample_count) || 0;
+        }
+      } catch { /* non-fatal */ }
+    }
+
     const result = predictFuelTempNow(hourlies, resolvedLat, resolvedLon, ambientUsed, nowTs, {
       tankPreset: "large",
       betaSun: 2.0,
       cwWind: 0.04,
       maxWindMultiplier: 2.5,
+      biasCorrectionF,
+      biasSampleCount,
     });
 
     // Back-fill terminal coords if missing (non-fatal)
@@ -230,6 +256,8 @@ export async function POST(req: Request) {
       ambientNowF: ambientUsed,
       predictedFuelTempF: result.predictedFuelTempF,
       confidence: result.confidence,
+      biasApplied: result.biasApplied,
+      biasSampleCount: result.biasSampleCount,
       usedCache,
     });
   } catch (e: any) {

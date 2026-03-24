@@ -15,16 +15,22 @@ export type PredictorParams = {
   betaSun?: number; // °F per hour at peak sun, clear sky (default ~2.0)
   cwWind?: number; // wind sensitivity multiplier per mph (default ~0.04)
   maxWindMultiplier?: number; // default ~2.5
+  // Historical bias correction from terminal_temp_bias table
+  biasCorrectionF?: number;   // mean_error for this terminal+hour+month
+  biasSampleCount?: number;   // how many samples drove this correction
 };
 
 export type FuelTempResult = {
   predictedFuelTempF: number;
   confidence: "high" | "medium" | "low";
+  biasApplied: number;       // correction applied from historical data (°F)
+  biasSampleCount: number;   // how many observations drove this correction
   debug?: {
     seedFuelTempF: number;
     lastSimTs: number;
     k0: number;
     betaSun: number;
+    rawPrediction: number;   // before bias correction
   };
 };
 
@@ -131,7 +137,13 @@ export function predictFuelTempNow(
 ): FuelTempResult {
   if (!hourlies || hourlies.length < 6) {
     // Fallback: slight lag behind ambient
-    return { predictedFuelTempF: round1(ambientNowF - 2), confidence: "low" };
+    const biasF = (params.biasCorrectionF ?? 0);
+    return {
+      predictedFuelTempF: round1(ambientNowF - 2 + biasF),
+      confidence: "low",
+      biasApplied: round1(biasF),
+      biasSampleCount: params.biasSampleCount ?? 0,
+    };
   }
 
   const k0 = tankPresetToK0(params.tankPreset ?? "medium");
@@ -168,9 +180,22 @@ export function predictFuelTempNow(
   const kWithin = 0.35 * k0; // gentle pull
   Tf = Tf + kWithin * (ambientNowF - Tf) * fracHour;
 
+  const rawPrediction = Tf;
+
+  // Apply historical bias correction if we have enough samples
+  // Only trust the correction once we have 3+ observations
+  const biasSamples = params.biasSampleCount ?? 0;
+  const biasRaw = params.biasCorrectionF ?? 0;
+  // Weight the correction by confidence in the sample size (tanh ramp: full weight at ~10 samples)
+  const biasWeight = biasSamples >= 3 ? Math.tanh((biasSamples - 2) / 5) : 0;
+  const biasApplied = biasRaw * biasWeight;
+  Tf = Tf + biasApplied;
+
   return {
     predictedFuelTempF: round1(Tf),
     confidence: confidenceFromCloudAndWind(hourlies),
-    debug: { seedFuelTempF: hourlies[0].tempF, lastSimTs, k0, betaSun },
+    biasApplied: round1(biasApplied),
+    biasSampleCount: biasSamples,
+    debug: { seedFuelTempF: hourlies[0].tempF, lastSimTs, k0, betaSun, rawPrediction: round1(rawPrediction) },
   };
 }

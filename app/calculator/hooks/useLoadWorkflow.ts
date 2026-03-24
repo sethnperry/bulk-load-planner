@@ -32,6 +32,7 @@ type Props = {
   onRefreshTerminalProducts?: () => Promise<void>;  // re-fetch last_api, last_temp_f
   onRefreshTerminalAccess?: () => Promise<void>;    // re-fetch terminal expiry dates
   onPostLoadComplete?: () => Promise<void>;         // re-read load_log for slot 0 / slip seat
+  predictedTempF?: number | null;                  // what the predictor said at plan time
 };
 
 export function useLoadWorkflow({
@@ -44,6 +45,7 @@ export function useLoadWorkflow({
   onRefreshTerminalProducts,
   onRefreshTerminalAccess,
   onPostLoadComplete,
+  predictedTempF,
 }: Props) {
   const [activeLoadId, setActiveLoadId] = useState<string | null>(null);
   const [beginLoadBusy, setBeginLoadBusy] = useState(false);
@@ -266,6 +268,38 @@ export function useLoadWorkflow({
         completed_at: new Date().toISOString(),
         product_updates,
       });
+
+// Update terminal temp bias with the observed error (self-training)
+// error = actual_temp - predicted_temp_at_plan_time
+try {
+  if (selectedTerminalId && predictedTempF != null) {
+    const now = new Date();
+    const hourUtc = now.getUTCHours();
+    const monthOfYear = now.getUTCMonth() + 1;
+
+    // Compute mean actual temp across all compartments for this load
+    const actualTemps = Object.values(nextActualByComp)
+      .map(a => a.temp_f)
+      .filter((t): t is number => t != null && Number.isFinite(t));
+
+    if (actualTemps.length > 0) {
+      const meanActual = actualTemps.reduce((s, t) => s + t, 0) / actualTemps.length;
+      const observedError = meanActual - predictedTempF;
+
+      // Only update if error is plausible (not a data entry mistake)
+      if (Math.abs(observedError) < 25) {
+        await supabase.rpc("update_terminal_temp_bias", {
+          p_terminal_id:   selectedTerminalId,
+          p_hour_of_day:   hourUtc,
+          p_month_of_year: monthOfYear,
+          p_error:         observedError,
+        });
+      }
+    }
+  }
+} catch (e) {
+  console.warn("terminal_temp_bias update failed (non-fatal):", e);
+}
 
 // Fallback: persist "last observed" API/temp so LoadingModal can show previous API on reload
 // (Non-fatal if RLS blocks it)
