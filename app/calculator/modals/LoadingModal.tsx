@@ -322,23 +322,24 @@ useEffect(() => {
                       </div>
                       <div style={{ color: "rgba(255,255,255,0.60)", fontWeight: 700, fontSize: 12, flexShrink: 0 }}>{Math.round(g.gallons)}</div>
                     </div>
-                    {/* Inputs stacked — full width, select-all on focus for easy override */}
+                    {/* Stacked inputs — uncontrolled while typing, normalized on blur */}
                     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                       {/* API */}
                       <div style={{ position: "relative" }}>
                         <input
-                          value={apiVal}
+                          key={`api-${g.productId}-${open ? "open" : "closed"}`}
+                          defaultValue={apiVal}
                           onChange={(e) => {
                             let v = e.target.value.replace(/[^0-9.]/g, "");
                             const parts = v.split(".");
                             if (parts.length > 2) v = parts[0] + "." + parts.slice(1).join("");
-                            if (parts[1] !== undefined) v = parts[0] + "." + parts[1].slice(0, 1);
-                            setProductApi(g.productId, v);
+                            e.target.value = v;
                           }}
                           onFocus={(e) => e.target.select()}
                           onBlur={(e) => {
                             const n = parseFloat(e.target.value);
                             if (Number.isFinite(n)) setProductApi(g.productId, n.toFixed(1));
+                            else setProductApi(g.productId, apiVal);
                           }}
                           inputMode="decimal"
                           placeholder="37.9"
@@ -349,15 +350,13 @@ useEffect(() => {
                       {/* Temp */}
                       <div style={{ position: "relative" }}>
                         <input
-                          value={tempVal == null ? "" : tempVal.toFixed(1)}
+                          key={`temp-${g.productId}-${open ? "open" : "closed"}`}
+                          defaultValue={tempVal == null ? "" : tempVal.toFixed(1)}
                           onChange={(e) => {
                             let v = e.target.value.replace(/[^0-9.]/g, "");
                             const parts = v.split(".");
                             if (parts.length > 2) v = parts[0] + "." + parts.slice(1).join("");
-                            if (parts[1] !== undefined) v = parts[0] + "." + parts[1].slice(0, 1);
-                            const n = parseFloat(v);
-                            if (Number.isFinite(n)) setProductTemp(g.productId, n);
-                            else if (v === "" || v === ".") setProductTemp(g.productId, 0);
+                            e.target.value = v;
                           }}
                           onFocus={(e) => e.target.select()}
                           onBlur={(e) => {
