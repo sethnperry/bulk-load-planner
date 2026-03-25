@@ -138,9 +138,13 @@ export default function LearnPage() {
         <Accordion title="📊 Understanding over/under">
 
           <Section emoji="📉" title="Why you might go over">
-            The most common cause is API drift — the product in the tank today is heavier than the last observed API. This happens when a terminal receives a new shipment between your loads. The self-training model tracks this pattern and will compensate over time.
+            <strong style={{ color: "rgba(255,255,255,0.70)" }}>API drift</strong> is the most common cause — and the hardest to predict. When a terminal receives a new shipment, the product gravity can shift significantly overnight. If the previous driver observed API 37.9 but the new batch came in at 35.0, every gallon is now meaningfully heavier. You have no way of knowing this until you load and measure it yourself.
             <br /><br />
-            The second common cause is temperature — if the product is warmer than planned, it is less dense and you get fewer pounds per gallon. If it is cooler, you get more pounds per gallon and can go over.
+            This is what the load report calls a <strong style={{ color: "rgba(255,255,255,0.70)" }}>black swan event</strong> — a sudden, invisible change in product density that your plan had no way to anticipate. The "as of" date shown next to the planned API in your load report tells you exactly how stale that API reading was when you planned the load. A reading from four days ago is a warning sign.
+            <br /><br />
+            The silver lining: the moment you enter the actual API from the BOL at the scale or loading rack, ProTankr updates that terminal's API for every driver who loads there next. The next driver plans with your fresh observation — the community self-corrects in real time.
+            <br /><br />
+            <strong style={{ color: "rgba(255,255,255,0.70)" }}>Temperature</strong> is the second cause. If the product is cooler than planned it is denser, and more pounds per gallon means you can go over even with a perfect API.
           </Section>
 
           <Section emoji="🪣" title="Drain-down calculation">
