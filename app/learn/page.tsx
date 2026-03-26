@@ -70,6 +70,58 @@ export default function LearnPage() {
       {/* Content */}
       <div style={{ padding: "20px 18px", display: "flex", flexDirection: "column" as const, gap: 12, maxWidth: 600, margin: "0 auto" }}>
 
+
+        {/* ── Getting Started ── */}
+        <Accordion title="🚀 How to set up the planner">
+
+          <div style={{ fontSize: 13, color: "rgba(255,255,255,0.50)", lineHeight: 1.65, padding: "4px 0 8px" }}>
+            Setup takes about five minutes the first time. After that, loading a truck is three taps.
+          </div>
+
+          <Divider label="Step 1 — Equipment  (set it and forget it)" />
+
+          <Section emoji="🚛" title="Select your equipment">
+            Tap the equipment area at the top of the planner and select your truck and trailer combination. This is the most important step — everything in the plan flows from it.
+            <br /><br />
+            <strong style={{ color: "rgba(255,255,255,0.70)" }}>Tare weight</strong> is the empty weight of your truck and trailer combined. The plan subtracts this from your target gross weight to determine how many pounds of product you can legally carry.
+            <br /><br />
+            <strong style={{ color: "rgba(255,255,255,0.70)" }}>Target weight</strong> is your gross vehicle weight goal — set intentionally below the legal limit to give yourself a safety buffer for API drift and temperature variance. A good target leaves 200–400 lbs of room.
+          </Section>
+
+          <Section emoji="🔄" title="Slip seating another driver's truck">
+            If you are taking over a truck someone else drove, select their exact combination. The compartment configuration, tare, and target are all tied to the equipment — not the driver. Selecting the right unit means the math is already dialed in from the previous driver's setup.
+          </Section>
+
+          <Section emoji="🔗" title="Coupling loose units">
+            If your company has individual tractors and trailers that can be mixed and matched, you may need to create a combination in the admin page first. The reason we track them as a pair rather than separately is that tare weight and compartment configuration are specific to the trailer, while axle weights and bridge laws depend on how the tractor and trailer are connected. The combination gives the plan everything it needs to compute a legal, accurate load.
+          </Section>
+
+          <Divider label="Step 2 — Compartment caps  (set it and forget it)" />
+
+          <Section emoji="🛢" title="Setting headspace caps">
+            Each compartment bar in the planner has a headspace setting — the percentage of capacity to leave empty at the top. Terminals require this for product expansion, vapor space, and safe transport regulations.
+            <br /><br />
+            Tap any compartment bar to set its cap. This is saved per trailer so you only do it once. Unless you switch trailers or your terminal changes its requirements, you will never need to touch this again.
+          </Section>
+
+          <Divider label="Step 3 — Plan slots  (per terminal, per product)" />
+
+          <Section emoji="📋" title="What are plan slots?">
+            Plan slots are saved load configurations — which product goes in which compartment, at what quantity. Think of them as presets you build once and reuse every time you load at that terminal.
+            <br /><br />
+            Slots are saved <strong style={{ color: "rgba(255,255,255,0.70)" }}>per terminal</strong> rather than universally because different terminals carry different products, have different rack configurations, and may load compartments in a specific order. A plan that works perfectly at one terminal may be completely wrong at another.
+            <br /><br />
+            Most drivers have two or three slots per terminal — a full load, a split load with two products, and maybe a light load for weight-restricted routes. Build them once and they are there every time you pull into that terminal.
+          </Section>
+
+          <Section emoji="⚡" title="Once you are set up — it's this simple">
+            Open the app. Select your location and terminal. The planner shows your saved slots for that terminal. Tap the one that matches today's load. The plan is built instantly — compartments filled, weight calculated, CG balanced. Tap Load. Done.
+            <br /><br />
+            The whole process from opening the app to starting the load takes under a minute. Everything you set up in steps 1 and 2 runs silently in the background every time.
+          </Section>
+
+        </Accordion>
+
         {/* ── Temperature Prediction ── */}
         <Accordion title="🌡 How the temperature prediction works">
 
