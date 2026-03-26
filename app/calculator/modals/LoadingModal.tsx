@@ -322,27 +322,25 @@ useEffect(() => {
                       </div>
                       <div style={{ color: "rgba(255,255,255,0.60)", fontWeight: 700, fontSize: 12, flexShrink: 0 }}>{Math.round(g.gallons)}</div>
                     </div>
-                    {/* Stacked inputs — uncontrolled while typing, normalized on blur */}
+                    {/* Inputs — clear on focus, type fresh number, save on blur */}
                     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                       {/* API */}
                       <div style={{ position: "relative" }}>
                         <input
                           key={`api-${g.productId}-${open ? "open" : "closed"}`}
                           defaultValue={apiVal}
-                          onChange={(e) => {
-                            let v = e.target.value.replace(/[^0-9.]/g, "");
-                            const parts = v.split(".");
-                            if (parts.length > 2) v = parts[0] + "." + parts.slice(1).join("");
-                            e.target.value = v;
-                          }}
-                          onFocus={(e) => e.target.select()}
+                          onFocus={(e) => { e.target.value = ""; }}
                           onBlur={(e) => {
                             const n = parseFloat(e.target.value);
-                            if (Number.isFinite(n)) setProductApi(g.productId, n.toFixed(1));
-                            else setProductApi(g.productId, apiVal);
+                            if (Number.isFinite(n)) {
+                              setProductApi(g.productId, n.toFixed(1));
+                              e.target.value = n.toFixed(1);
+                            } else {
+                              e.target.value = apiVal;
+                            }
                           }}
                           inputMode="decimal"
-                          placeholder="37.9"
+                          placeholder={apiVal || "37.9"}
                           style={{ ...styles.input, width: "100%", height: 48, borderRadius: 8, fontWeight: 800, fontSize: 18, textAlign: "center", boxSizing: "border-box" as const }}
                         />
                         <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.25)", pointerEvents: "none" }}>API</span>
@@ -352,19 +350,18 @@ useEffect(() => {
                         <input
                           key={`temp-${g.productId}-${open ? "open" : "closed"}`}
                           defaultValue={tempVal == null ? "" : tempVal.toFixed(1)}
-                          onChange={(e) => {
-                            let v = e.target.value.replace(/[^0-9.]/g, "");
-                            const parts = v.split(".");
-                            if (parts.length > 2) v = parts[0] + "." + parts.slice(1).join("");
-                            e.target.value = v;
-                          }}
-                          onFocus={(e) => e.target.select()}
+                          onFocus={(e) => { e.target.value = ""; }}
                           onBlur={(e) => {
                             const n = parseFloat(e.target.value);
-                            if (Number.isFinite(n)) setProductTemp(g.productId, parseFloat(n.toFixed(1)));
+                            if (Number.isFinite(n)) {
+                              setProductTemp(g.productId, parseFloat(n.toFixed(1)));
+                              e.target.value = n.toFixed(1);
+                            } else {
+                              e.target.value = tempVal == null ? "" : tempVal.toFixed(1);
+                            }
                           }}
                           inputMode="decimal"
-                          placeholder="79.0"
+                          placeholder={tempVal == null ? "79.0" : tempVal.toFixed(1)}
                           style={{ ...styles.input, width: "100%", height: 48, borderRadius: 8, fontWeight: 800, fontSize: 18, textAlign: "center", boxSizing: "border-box" as const }}
                         />
                         <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.25)", pointerEvents: "none" }}>TEMP</span>
