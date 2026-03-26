@@ -12,6 +12,7 @@ export default function PlannerControls(props: any) {
     styles, selectedTrailerId, compLoading, compartments, compError,
     headspacePctForComp, effectiveMaxGallonsForComp, plannedGallonsByComp,
     compPlan, terminalProducts, setCompModalComp, setCompModalOpen, snapshotSlots,
+    onTourAdvance,
   } = props;
 
   return (
@@ -75,7 +76,8 @@ export default function PlannerControls(props: any) {
                 return (
                   <div
                     key={String(c.comp_number)}
-                    onClick={() => { setCompModalComp(compNumber); setCompModalOpen(true); }}
+                    id={ordered.indexOf(c) === ordered.length - 1 ? "tour-comp-bar-first" : undefined}
+                    onClick={() => { setCompModalComp(compNumber); setCompModalOpen(true); onTourAdvance?.("tour-comp-bar-first"); }}
                     style={{
                       display: "flex", flexDirection: "column", alignItems: "center",
                       cursor: "pointer", userSelect: "none",

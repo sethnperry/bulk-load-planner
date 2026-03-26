@@ -1,5 +1,7 @@
 "use client";
 import NavMenu from "@/lib/ui/NavMenu";
+import { useTour } from "./hooks/useTour";
+import TourOverlay from "./components/TourOverlay";
 import ExpirationAlertBar from "./components/ExpirationAlertBar";
 import ExpirationModal from "./modals/ExpirationModal";
 import { useExpirations } from "./hooks/useExpirations";
@@ -369,6 +371,22 @@ export default function CalculatorPage() {
   const [loadReportOpen, setLoadReportOpen] = useState(false);
 
   const loadHistory = useLoadHistory(authUserId ?? "");
+
+  // ── Guided tour ───────────────────────────────────────────────────────────
+  const tour = useTour({
+    stateConditions: {
+      "tour-equipment-modal-combo": equipOpen,
+      "tour-location-btn": !equipOpen && !!equipment.selectedComboId,
+      "tour-terminal-btn": !equipOpen && !!location.selectedCity,
+    },
+  });
+
+  // When tour is active and user taps highlighted element, advance
+  function tourAdvanceIfTarget(id: string) {
+    if (tour.active && tour.currentStep?.targetId === id && tour.currentStep?.waitFor === "tap") {
+      tour.advance();
+    }
+  }
   // ── Headspace caps — persisted per trailer ────────────────────────────────
   const HEADSPACE_KEY_PREFIX = "protankr_headspace_v1:";
   const headspaceStorageKey = selectedTrailerId
@@ -794,10 +812,11 @@ const lastProductInfoById = useMemo(() => {
 
           return (
             <button key={n} type="button" disabled={disabled}
+              id={n === 1 ? "tour-plan-slot-A" : undefined}
               onPointerDown={onPressStart}
               onPointerUp={onPressEnd}
               onPointerLeave={onPressEnd}
-              onClick={onTap}
+              onClick={() => { onTap(); tourAdvanceIfTarget("tour-plan-slot-A"); }}
               style={{
                 border: "none", background: "transparent", padding: "4px 10px",
                 color: has ? "rgba(255,255,255,0.90)" : "rgba(255,255,255,0.25)",
@@ -836,7 +855,7 @@ const lastProductInfoById = useMemo(() => {
     <div style={styles.page}>
       {/* Equipment header + nav menu on same line */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, gap: 12 }}>
-        <button type="button" onClick={() => setEquipOpen(true)}
+        <button type="button" id="tour-equipment-btn" onClick={() => { setEquipOpen(true); tourAdvanceIfTarget("tour-equipment-btn"); }}
           style={{
             background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)",
             borderRadius: 14, padding: "8px 16px",
@@ -874,6 +893,7 @@ const lastProductInfoById = useMemo(() => {
         setCompModalComp={setCompModalComp}
         setCompModalOpen={setCompModalOpen}
         snapshotSlots={SnapshotSlots}
+        onTourAdvance={tourAdvanceIfTarget}
       />
 
       <CompartmentModal
@@ -1004,15 +1024,15 @@ const lastProductInfoById = useMemo(() => {
               {/* Combined Location / Terminal card */}
               <div style={{ ...cardBase }}>
                 {/* Location sub-button at top */}
-                <button type="button" onClick={() => setLocOpen(true)} style={subBtnStyle}>
+                <button type="button" id="tour-location-btn" onClick={() => { setLocOpen(true); tourAdvanceIfTarget("tour-location-btn"); }} style={subBtnStyle}>
                   <span style={{ ...subBtnLabel, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
                     {locationSelected ? locationLabel! : "Location"}
                   </span>
                   <span style={subBtnChevron}>›</span>
                 </button>
                 {/* Terminal main area */}
-                <button type="button"
-                  onClick={() => setTermOpen(true)}
+                <button type="button" id="tour-terminal-btn"
+                  onClick={() => { setTermOpen(true); tourAdvanceIfTarget("tour-terminal-btn"); }}
                   disabled={!locationSelected}
                   style={{ flex: 1, background: "transparent", border: "none", cursor: locationSelected ? "pointer" : "default", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "flex-start", padding: "10px 12px", minHeight: 54 }}
                 >
@@ -1123,6 +1143,9 @@ const lastProductInfoById = useMemo(() => {
       })()}
 
             
+      {/* ── Guided tour overlay ── */}
+      <TourOverlay tour={tour} />
+
       {/* ── Modals ── */}
       <EquipmentModal
         open={equipOpen} onClose={() => setEquipOpen(false)}
