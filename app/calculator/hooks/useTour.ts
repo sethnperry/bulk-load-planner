@@ -5,7 +5,7 @@
 // by ID, shows a tooltip, and waits for a completion condition before advancing.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 
 export type TourStep = {
   targetId: string;           // id of the DOM element to highlight
@@ -91,21 +91,22 @@ export function useTour(opts: {
   // Pass true when a condition is met to auto-advance a "state" step
   stateConditions?: Record<string, boolean>;
 }): TourState {
-  const searchParams = useSearchParams();
   const router = useRouter();
   const [tourId, setTourId] = useState<string | null>(null);
   const [stepIndex, setStepIndex] = useState(0);
   const [targetRect, setTargetRect] = useState<DOMRect | null>(null);
   const rafRef = useRef<number>(0);
 
-  // Start tour from URL param
+  // Start tour from URL param — read window.location directly to avoid Suspense requirement
   useEffect(() => {
-    const param = searchParams?.get("tour");
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const param = params.get("tour");
     if (param && TOURS[param]) {
       setTourId(param);
       setStepIndex(0);
     }
-  }, [searchParams]);
+  }, []);
 
   const tour = tourId ? TOURS[tourId] : null;
   const currentStep = tour ? (tour.steps[stepIndex] ?? null) : null;
