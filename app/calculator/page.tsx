@@ -891,7 +891,7 @@ const lastProductInfoById = useMemo(() => {
         compPlan={compPlan}
         terminalProducts={terminalProducts}
         setCompModalComp={setCompModalComp}
-        setCompModalOpen={(open) => {
+        setCompModalOpen={(open: boolean) => {
           setCompModalOpen(open);
           if (open) tourAdvanceIfTarget("tour-comp-area");
         }}
