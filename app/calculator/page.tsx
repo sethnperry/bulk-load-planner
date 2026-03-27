@@ -1154,6 +1154,7 @@ const lastProductInfoById = useMemo(() => {
         selectedComboId={equipment.selectedComboId ?? ""}
         onSelectComboId={(id) => equipment.setSelectedComboId(id)}
         onRefreshCombos={equipment.fetchCombos}
+        onTourAdvance={tourAdvanceIfTarget}
       />
 
       <LoadReportModal
