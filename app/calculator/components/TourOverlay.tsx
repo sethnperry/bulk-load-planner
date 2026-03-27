@@ -129,7 +129,7 @@ export default function TourOverlay({ tour }: Props) {
           >
             Skip tour
           </button>
-          {isCenter ? (
+          {isCenter && currentStep?.waitFor !== "state" ? (
             <button
               type="button"
               onClick={advance}
@@ -137,6 +137,10 @@ export default function TourOverlay({ tour }: Props) {
             >
               Got it →
             </button>
+          ) : isCenter && currentStep?.waitFor === "state" ? (
+            <div style={{ fontSize: 11, color: "rgba(103,232,249,0.55)", fontWeight: 600, fontStyle: "italic" }}>
+              Waiting for you to finish…
+            </div>
           ) : (
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#67e8f9", animation: "tourPulse 1.6s ease-in-out infinite" }} />

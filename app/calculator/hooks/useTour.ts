@@ -51,8 +51,8 @@ const TOURS: Record<string, TourDef> = {
       {
         targetId: "tour-fleet-instruction",
         title: "Find your equipment",
-        message: "If your unit is already coupled, tap the combo card to select it or use Slip Seat. If not coupled yet, pick a region, select a truck and trailer, then tap Couple. Star any combo to pin it for quick access.",
-        waitFor: "tap",
+        message: "If your unit is already coupled, tap the combo card to select it or use Slip Seat. If not yet coupled, pick a region, select a truck and trailer, then tap Couple. Star any combo to pin it for quick access. When done, close the Equipment modal.",
+        waitFor: "state",
         position: "center",
       },
       {

@@ -375,9 +375,10 @@ export default function CalculatorPage() {
   // ── Guided tour ───────────────────────────────────────────────────────────
   const tour = useTour({
     stateConditions: {
-      "tour-equipment-modal-combo": equipOpen,
-      "tour-location-btn": !equipOpen && !!equipment.selectedComboId,
-      "tour-terminal-btn": !equipOpen && !!location.selectedCity,
+      // Step 3: advance when equipment is selected AND modal is closed
+      "tour-fleet-instruction": !!equipment.selectedComboId && !equipOpen,
+      // Step 5: advance when city is selected
+      "tour-terminal-btn": !!location.selectedCity && !equipOpen,
     },
   });
 
