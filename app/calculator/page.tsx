@@ -375,10 +375,9 @@ export default function CalculatorPage() {
   // ── Guided tour ───────────────────────────────────────────────────────────
   const tour = useTour({
     stateConditions: {
-      // Step 3: advance when equipment is selected AND modal is closed
-      "tour-fleet-instruction": !!equipment.selectedComboId && !equipOpen,
-      // Step 5: advance when city is selected
-      "tour-terminal-btn": !!location.selectedCity && !equipOpen,
+      "tour-fleet-instruction":    !!equipment.selectedComboId && !equipOpen,
+      "tour-location-instruction": !!location.selectedCity,
+      "tour-terminal-instruction": !!location.selectedTerminalId && !termOpen,
     },
   });
 
@@ -892,7 +891,10 @@ const lastProductInfoById = useMemo(() => {
         compPlan={compPlan}
         terminalProducts={terminalProducts}
         setCompModalComp={setCompModalComp}
-        setCompModalOpen={setCompModalOpen}
+        setCompModalOpen={(open) => {
+          setCompModalOpen(open);
+          if (open) tourAdvanceIfTarget("tour-comp-area");
+        }}
         snapshotSlots={SnapshotSlots}
         onTourAdvance={tourAdvanceIfTarget}
       />
@@ -1146,6 +1148,11 @@ const lastProductInfoById = useMemo(() => {
             
       {/* ── Guided tour overlay ── */}
       <TourOverlay tour={tour} />
+      {/* Tour anchor elements for state-wait steps */}
+      <div id="tour-location-instruction" style={{ display: "none" }} />
+      <div id="tour-terminal-instruction" style={{ display: "none" }} />
+      <div id="tour-comp-instruction" style={{ display: "none" }} />
+      <div id="tour-fleet-instruction" style={{ display: "none" }} />
 
       {/* ── Modals ── */}
       <EquipmentModal

@@ -1,18 +1,19 @@
 "use client";
 // hooks/useTour.ts
-// Lightweight guided tour engine.
-// Tours are defined as arrays of steps. Each step highlights a DOM element
-// by ID, shows a tooltip, and waits for a completion condition before advancing.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 export type TourStep = {
-  targetId: string;           // id of the DOM element to highlight
-  title: string;              // short heading
-  message: string;            // instruction
-  waitFor?: "tap" | "state"; // "tap" = advance when user taps target; "state" = advance when condition is true
-  position?: "top" | "bottom" | "center"; // tooltip position relative to target
+  targetId: string;
+  title: string;
+  message: string;
+  waitFor?: "tap" | "state";
+  position?: "top" | "bottom" | "center";
+  // center steps only: show "OK I'll do it" to collapse, or "Next compartment / Move on" choice
+  collapseLabel?: string;
+  nextLabel?: string;       // shown as a second button on center steps
+  onNext?: "advance";       // what nextLabel does
 };
 
 export type TourDef = {
@@ -34,52 +35,90 @@ const TOURS: Record<string, TourDef> = {
   setup: {
     id: "setup",
     steps: [
+      // 1 — equipment button
       {
         targetId: "tour-equipment-btn",
-        title: "Select your equipment",
+        title: "Step 1 — Select your equipment",
         message: "Tap here to open the equipment selector.",
         waitFor: "tap",
         position: "bottom",
       },
+      // 2 — browse fleet button (inside equipment modal)
       {
         targetId: "tour-fleet-btn",
-        title: "Browse the fleet",
-        message: "Tap Browse fleet & couple equipment to find your units.",
+        title: "Step 2 — Browse the fleet",
+        message: "Tap here to find and couple your units.",
         waitFor: "tap",
-        position: "bottom",
+        position: "top",
       },
+      // 3 — instruction: pick/couple equipment, hidden while user acts, auto-advances when combo selected + modal closed
       {
         targetId: "tour-fleet-instruction",
-        title: "Find your equipment",
-        message: "If your unit is already coupled, tap the combo card to select it or use Slip Seat. If not yet coupled, pick a region, select a truck and trailer, then tap Couple. Star any combo to pin it for quick access. When done, close the Equipment modal.",
+        title: "Step 3 — Find your equipment",
+        message: "If your unit is already coupled, tap the combo card or use Slip Seat. If not yet coupled, pick a region, select a truck and trailer, then tap Couple. Star a combo to pin it. When done, close the Equipment modal.",
         waitFor: "state",
         position: "center",
+        collapseLabel: "OK, I'll do it",
       },
+      // 4 — location button, tooltip BELOW so it doesn't cover the button
       {
         targetId: "tour-location-btn",
-        title: "Set your location",
-        message: "Tap here to select the state and city you are loading in.",
-        waitFor: "tap",
-        position: "top",
-      },
-      {
-        targetId: "tour-terminal-btn",
-        title: "Select your terminal",
-        message: "Tap here to choose the terminal you are loading at.",
-        waitFor: "tap",
-        position: "top",
-      },
-      {
-        targetId: "tour-comp-bar-first",
-        title: "Set compartment caps",
-        message: "Tap any compartment to set the headspace cap — the percentage to leave empty for expansion. Do this once per trailer.",
+        title: "Step 4 — Set your location",
+        message: "Tap here to pick the state and city you are loading in.",
         waitFor: "tap",
         position: "bottom",
       },
+      // 5 — instruction inside location modal: pick state then city, hidden while user acts
       {
-        targetId: "tour-plan-slot-A",
-        title: "Save a plan slot",
-        message: "Set up a load in the compartments, then hold this button to save it as a preset for this terminal. Next time — just tap to load.",
+        targetId: "tour-location-instruction",
+        title: "Step 5 — Pick your city",
+        message: "Select your state first, then choose the city that has the terminal you are loading at.",
+        waitFor: "state",
+        position: "center",
+        collapseLabel: "OK, I'll do it",
+      },
+      // 6 — terminal button, tooltip ABOVE the button
+      {
+        targetId: "tour-terminal-btn",
+        title: "Step 6 — Select your terminal",
+        message: "Tap here to open My Terminals and pick the terminal you are loading at.",
+        waitFor: "tap",
+        position: "top",
+      },
+      // 6a — instruction inside terminal modal, hidden while user picks
+      {
+        targetId: "tour-terminal-instruction",
+        title: "Step 6a — Pick your terminal",
+        message: "Tap any terminal from the list to select it, then close the modal.",
+        waitFor: "state",
+        position: "center",
+        collapseLabel: "OK, I'll do it",
+      },
+      // 7 — highlight ALL compartments area, tooltip ABOVE
+      {
+        targetId: "tour-comp-area",
+        title: "Step 7 — Configure compartments",
+        message: "Tap each compartment to set its headspace cap and product. Do this once per trailer.",
+        waitFor: "tap",
+        position: "top",
+      },
+      // 7a — instruction inside compartment modal, hidden while user configures
+      //      has two buttons: "Next compartment" (collapse) and "Move to Step 8" (advance)
+      {
+        targetId: "tour-comp-instruction",
+        title: "Step 7a — Set cap and product",
+        message: "Adjust the headspace cap and select a product for this compartment, then tap Done.",
+        waitFor: "tap",
+        position: "center",
+        collapseLabel: "Next compartment",
+        nextLabel: "Move to Step 8",
+        onNext: "advance",
+      },
+      // 8 — plan slots, tooltip ABOVE slots so it doesn't cover them
+      {
+        targetId: "tour-plan-slots",
+        title: "Step 8 — Save a plan slot",
+        message: "Hold any slot (A-E) to save your current plan for this terminal. Next time just tap to load it instantly.",
         waitFor: "tap",
         position: "top",
       },
@@ -88,7 +127,6 @@ const TOURS: Record<string, TourDef> = {
 };
 
 export function useTour(opts: {
-  // Pass true when a condition is met to auto-advance a "state" step
   stateConditions?: Record<string, boolean>;
 }): TourState {
   const router = useRouter();
@@ -97,7 +135,6 @@ export function useTour(opts: {
   const [targetRect, setTargetRect] = useState<DOMRect | null>(null);
   const rafRef = useRef<number>(0);
 
-  // Start tour from URL param — read window.location directly to avoid Suspense requirement
   useEffect(() => {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
@@ -111,14 +148,12 @@ export function useTour(opts: {
   const tour = tourId ? TOURS[tourId] : null;
   const currentStep = tour ? (tour.steps[stepIndex] ?? null) : null;
 
-  // Track target element position (RAF loop so it follows scroll/resize)
   useEffect(() => {
     if (!currentStep) { setTargetRect(null); return; }
     function measure() {
       const el = document.getElementById(currentStep!.targetId);
       if (el) {
-        const rect = el.getBoundingClientRect();
-        setTargetRect(rect);
+        setTargetRect(el.getBoundingClientRect());
       } else {
         setTargetRect(null);
       }
@@ -132,7 +167,6 @@ export function useTour(opts: {
     if (!tour) return;
     const next = stepIndex + 1;
     if (next >= tour.steps.length) {
-      // Tour complete
       setTourId(null);
       router.replace("/calculator");
     } else {
@@ -145,7 +179,7 @@ export function useTour(opts: {
     router.replace("/calculator");
   }, [router]);
 
-  // Auto-advance "state" steps when condition becomes true
+  // Auto-advance state steps when condition fires
   useEffect(() => {
     if (!currentStep || currentStep.waitFor !== "state") return;
     const cond = opts.stateConditions?.[currentStep.targetId];

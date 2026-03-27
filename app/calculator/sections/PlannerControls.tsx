@@ -21,7 +21,7 @@ export default function PlannerControls(props: any) {
       {compError && <div style={styles.error}>Error loading compartments: {compError}</div>}
 
       {selectedTrailerId && !compLoading && !compError && compartments.length > 0 && (
-        <div style={{ marginTop: 14, marginBottom: 4 }}>
+        <div id="tour-comp-area" style={{ marginTop: 14, marginBottom: 4 }}>
           <div style={{
             display: "flex",
             justifyContent: "center",
@@ -76,8 +76,7 @@ export default function PlannerControls(props: any) {
                 return (
                   <div
                     key={String(c.comp_number)}
-                    id={ordered.indexOf(c) === ordered.length - 1 ? "tour-comp-bar-first" : undefined}
-                    onClick={() => { setCompModalComp(compNumber); setCompModalOpen(true); onTourAdvance?.("tour-comp-bar-first"); }}
+                    onClick={() => { setCompModalComp(compNumber); setCompModalOpen(true); onTourAdvance?.("tour-comp-area"); }}
                     style={{
                       display: "flex", flexDirection: "column", alignItems: "center",
                       cursor: "pointer", userSelect: "none",
@@ -176,7 +175,9 @@ export default function PlannerControls(props: any) {
       {/* Plan slots below compartments */}
       {selectedTrailerId && snapshotSlots && (
         <div style={{ display: "flex", justifyContent: "center", marginTop: 12, marginBottom: 2 }}>
-          {snapshotSlots}
+          <div id="tour-plan-slots">
+            {snapshotSlots}
+          </div>
         </div>
       )}
 
