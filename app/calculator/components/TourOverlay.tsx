@@ -81,15 +81,14 @@ export default function TourOverlay({ tour }: Props) {
         }
       `}</style>
 
-      {/* Dim overlay — full dim for center steps, cutout for targeted steps */}
+      {/* Dim overlay — always pointer-events none so taps reach the app */}
       <div
         style={{
           position: "fixed", inset: 0, zIndex: 10490,
-          background: "rgba(0,0,0,0.60)",
+          background: "rgba(0,0,0,0.45)",
           clipPath: isCenter ? undefined : clipPath,
-          pointerEvents: isCenter ? "auto" : "none",
+          pointerEvents: "none",
         }}
-        onClick={isCenter ? undefined : undefined}
       />
 
       {/* Pulsing ring — only for targeted steps */}
