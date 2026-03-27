@@ -32,14 +32,19 @@ export default function TourOverlay({ tour }: Props) {
 
   if (!active || !currentStep || typeof document === "undefined") return null;
 
-  const rect = targetRect ?? prevRectRef.current;
+  const isCenter = currentStep.position === "center";
+  const rect = isCenter ? null : (targetRect ?? prevRectRef.current);
 
   // Tooltip position
-  const tipTop = rect
-    ? currentStep.position === "bottom"
-      ? rect.bottom + RING_PAD + 12
-      : rect.top - RING_PAD - 100
-    : window.innerHeight / 2 - 50;
+  const tipTop = isCenter
+    ? "50%"
+    : rect
+      ? currentStep.position === "bottom"
+        ? rect.bottom + RING_PAD + 12
+        : Math.max(8, rect.top - RING_PAD - 120)
+      : "40%";
+
+  const tipTransform = isCenter ? "translate(-50%, -50%)" : "translateX(-50%)";
 
   const ringStyle: React.CSSProperties = rect ? {
     position: "fixed",
@@ -76,17 +81,18 @@ export default function TourOverlay({ tour }: Props) {
         }
       `}</style>
 
-      {/* Dim overlay with cutout */}
+      {/* Dim overlay — full dim for center steps, cutout for targeted steps */}
       <div
         style={{
           position: "fixed", inset: 0, zIndex: 10490,
           background: "rgba(0,0,0,0.60)",
-          clipPath,
-          pointerEvents: "none",
+          clipPath: isCenter ? undefined : clipPath,
+          pointerEvents: isCenter ? "auto" : "none",
         }}
+        onClick={isCenter ? undefined : undefined}
       />
 
-      {/* Pulsing ring — pointer-events none so taps pass through to the element */}
+      {/* Pulsing ring — only for targeted steps */}
       {rect && <div style={ringStyle} />}
 
       {/* Tooltip */}
@@ -95,7 +101,7 @@ export default function TourOverlay({ tour }: Props) {
           position: "fixed",
           left: "50%",
           top: tipTop,
-          transform: "translateX(-50%)",
+          transform: tipTransform,
           width: "min(320px, calc(100vw - 36px))",
           background: "#111518",
           border: "1px solid rgba(103,232,249,0.25)",
@@ -105,8 +111,7 @@ export default function TourOverlay({ tour }: Props) {
           boxShadow: "0 8px 32px rgba(0,0,0,0.60)",
         }}
       >
-        {/* Step counter */}
-        <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.1em", color: "rgba(103,232,249,0.60)", marginBottom: 6, textTransform: "uppercase" }}>
+        <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.1em", color: "rgba(103,232,249,0.60)", marginBottom: 6, textTransform: "uppercase" as const }}>
           Step {stepIndex + 1}
         </div>
         <div style={{ fontSize: 15, fontWeight: 800, color: "rgba(255,255,255,0.92)", marginBottom: 6 }}>
@@ -116,7 +121,6 @@ export default function TourOverlay({ tour }: Props) {
           {currentStep.message}
         </div>
 
-        {/* Actions */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 14 }}>
           <button
             type="button"
@@ -125,11 +129,20 @@ export default function TourOverlay({ tour }: Props) {
           >
             Skip tour
           </button>
-          {/* "Tap the highlighted area" hint */}
-          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#67e8f9", animation: "tourPulse 1.6s ease-in-out infinite" }} />
-            <span style={{ fontSize: 11, color: "rgba(103,232,249,0.70)", fontWeight: 700 }}>Tap the highlighted area</span>
-          </div>
+          {isCenter ? (
+            <button
+              type="button"
+              onClick={advance}
+              style={{ background: "rgba(103,232,249,0.12)", border: "1px solid rgba(103,232,249,0.30)", borderRadius: 8, padding: "6px 14px", cursor: "pointer", fontSize: 12, fontWeight: 700, color: "#67e8f9" }}
+            >
+              Got it →
+            </button>
+          ) : (
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#67e8f9", animation: "tourPulse 1.6s ease-in-out infinite" }} />
+              <span style={{ fontSize: 11, color: "rgba(103,232,249,0.70)", fontWeight: 700 }}>Tap the highlighted area</span>
+            </div>
+          )}
         </div>
       </div>
     </>,

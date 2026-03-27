@@ -49,11 +49,11 @@ const TOURS: Record<string, TourDef> = {
         position: "bottom",
       },
       {
-        targetId: "tour-fleet-couple",
-        title: "Couple or select",
-        message: "Pick a truck and trailer then tap Couple. Already coupled? Tap the combo or use Slip Seat. Star a combo to pin it for quick access.",
+        targetId: "tour-fleet-instruction",
+        title: "Find your equipment",
+        message: "If your unit is already coupled, tap the combo card to select it or use Slip Seat. If not coupled yet, pick a region, select a truck and trailer, then tap Couple. Star any combo to pin it for quick access.",
         waitFor: "tap",
-        position: "bottom",
+        position: "center",
       },
       {
         targetId: "tour-location-btn",
