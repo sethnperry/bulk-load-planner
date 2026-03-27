@@ -11,11 +11,20 @@ type Props = {
   tour: TourState;
 };
 
+function useCollapsed() {
+  const [collapsed, setCollapsed] = React.useState(false);
+  return { collapsed, setCollapsed };
+}
+
 const RING_PAD = 10; // px padding around target element
 
 export default function TourOverlay({ tour }: Props) {
   const { active, currentStep, targetRect, stepIndex, advance, skip } = tour;
   const prevRectRef = useRef<DOMRect | null>(null);
+  const [collapsed, setCollapsed] = React.useState(false);
+
+  // Un-collapse when step changes
+  useEffect(() => { setCollapsed(false); }, [stepIndex]);
 
   useEffect(() => {
     if (targetRect) prevRectRef.current = targetRect;
@@ -31,6 +40,27 @@ export default function TourOverlay({ tour }: Props) {
   }, [currentStep?.targetId]);
 
   if (!active || !currentStep || typeof document === "undefined") return null;
+
+  // Collapsed: show a small floating tab the user can tap to re-open
+  if (collapsed) {
+    return createPortal(
+      <button
+        type="button"
+        onClick={() => setCollapsed(false)}
+        style={{
+          position: "fixed", bottom: 24, right: 18, zIndex: 10510,
+          background: "#111518", border: "1px solid rgba(103,232,249,0.40)",
+          borderRadius: 20, padding: "8px 14px",
+          display: "flex", alignItems: "center", gap: 7,
+          cursor: "pointer", boxShadow: "0 4px 16px rgba(0,0,0,0.50)",
+        }}
+      >
+        <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#67e8f9", animation: "tourPulse 1.6s ease-in-out infinite" }} />
+        <span style={{ fontSize: 12, fontWeight: 700, color: "#67e8f9" }}>Tour — Step {stepIndex + 1}</span>
+      </button>,
+      document.body
+    );
+  }
 
   const isCenter = currentStep.position === "center";
   const rect = isCenter ? null : (targetRect ?? prevRectRef.current);
@@ -81,18 +111,20 @@ export default function TourOverlay({ tour }: Props) {
         }
       `}</style>
 
-      {/* Dim overlay — always pointer-events none so taps reach the app */}
-      <div
-        style={{
-          position: "fixed", inset: 0, zIndex: 10490,
-          background: "rgba(0,0,0,0.45)",
-          clipPath: isCenter ? undefined : clipPath,
-          pointerEvents: "none",
-        }}
-      />
+      {/* Dim overlay — only shown for targeted steps, never blocks taps */}
+      {!isCenter && (
+        <div
+          style={{
+            position: "fixed", inset: 0, zIndex: 10490,
+            background: "rgba(0,0,0,0.50)",
+            clipPath,
+            pointerEvents: "none",
+          }}
+        />
+      )}
 
       {/* Pulsing ring — only for targeted steps */}
-      {rect && <div style={ringStyle} />}
+      {!isCenter && rect && <div style={ringStyle} />}
 
       {/* Tooltip */}
       <div
@@ -137,9 +169,13 @@ export default function TourOverlay({ tour }: Props) {
               Got it →
             </button>
           ) : isCenter && currentStep?.waitFor === "state" ? (
-            <div style={{ fontSize: 11, color: "rgba(103,232,249,0.55)", fontWeight: 600, fontStyle: "italic" }}>
-              Waiting for you to finish…
-            </div>
+            <button
+              type="button"
+              onClick={() => setCollapsed(true)}
+              style={{ background: "rgba(103,232,249,0.12)", border: "1px solid rgba(103,232,249,0.30)", borderRadius: 8, padding: "6px 14px", cursor: "pointer", fontSize: 12, fontWeight: 700, color: "#67e8f9" }}
+            >
+              OK, I'll do it
+            </button>
           ) : (
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#67e8f9", animation: "tourPulse 1.6s ease-in-out infinite" }} />
