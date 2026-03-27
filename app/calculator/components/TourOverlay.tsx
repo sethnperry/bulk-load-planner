@@ -21,6 +21,15 @@ export default function TourOverlay({ tour }: Props) {
     if (targetRect) prevRectRef.current = targetRect;
   }, [targetRect]);
 
+  // Scroll target into view when step changes
+  useEffect(() => {
+    if (!currentStep) return;
+    const el = document.getElementById(currentStep.targetId);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [currentStep?.targetId]);
+
   if (!active || !currentStep || typeof document === "undefined") return null;
 
   const rect = targetRect ?? prevRectRef.current;
