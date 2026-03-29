@@ -801,7 +801,7 @@ const lastProductInfoById = useMemo(() => {
           const has = !!planSlots.slotHas[n];
           const disabled = !location.selectedTerminalId;
 
-          // Long-press to save, tap to load (mobile-friendly)
+          // Tap to load (if saved), long-press to save/clear, shift+click to clear on desktop
           let pressTimer: ReturnType<typeof setTimeout> | null = null;
           let didLongPress = false;
 
@@ -810,17 +810,23 @@ const lastProductInfoById = useMemo(() => {
             didLongPress = false;
             pressTimer = setTimeout(() => {
               didLongPress = true;
-              planSlots.saveToSlot(n);
-              tourAdvanceIfTarget("tour-plan-slots");
+              if (has) {
+                planSlots.clearSlot(n);
+              } else {
+                planSlots.saveToSlot(n);
+                tourAdvanceIfTarget("tour-plan-slots");
+              }
             }, 600);
           };
           const onPressEnd = () => {
             if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
           };
-          const onTap = () => {
+          const onTap = (e: React.MouseEvent) => {
             if (disabled || didLongPress) return;
+            // Shift+click to clear on desktop
+            if (e.shiftKey && has) { planSlots.clearSlot(n); return; }
             if (has) planSlots.loadFromSlot(n);
-            else planSlots.saveToSlot(n);
+            else { planSlots.saveToSlot(n); tourAdvanceIfTarget("tour-plan-slots"); }
           };
 
           return (
@@ -829,7 +835,7 @@ const lastProductInfoById = useMemo(() => {
               onPointerDown={onPressStart}
               onPointerUp={onPressEnd}
               onPointerLeave={onPressEnd}
-              onClick={() => { onTap(); tourAdvanceIfTarget("tour-plan-slot-A"); }}
+              onClick={(e) => onTap(e)}
               style={{
                 border: "none", background: "transparent", padding: "4px 10px",
                 color: has ? "rgba(255,255,255,0.90)" : "rgba(255,255,255,0.25)",
@@ -837,13 +843,13 @@ const lastProductInfoById = useMemo(() => {
                 opacity: disabled ? 0.4 : 1, fontSize: "clamp(18px, 4.5vw, 26px)", fontWeight: 800,
                 letterSpacing: 0.2,
               }}
-              title={!location.selectedTerminalId ? "Select a terminal first" : has ? "Tap to load · Hold to save" : "Tap to save current plan"}
+              title={!location.selectedTerminalId ? "Select a terminal first" : has ? "Tap to load · Hold to clear · Shift+click to clear" : "Tap to save · Hold to save"}
             >{String.fromCharCode(64 + n)}</button>
           );
         })}
       </div>
       <div style={{ marginTop: 5, fontSize: 11, color: "rgba(255,255,255,0.3)", letterSpacing: 0.2 }}>
-        TAP to load · HOLD to save
+        TAP to load · HOLD to save/clear
       </div>
     </div>
   );
@@ -944,7 +950,7 @@ const lastProductInfoById = useMemo(() => {
         `}</style>
         <div style={{ position: "relative", width: "100%" }}>
           <input type="range" className="cgRange" min={0} max={1} step={0.005} value={cgSlider}
-            onChange={(e) => setCgSlider(Number(e.target.value))}
+            onChange={(e) => { setCgSlider(Number(e.target.value)); tourAdvanceIfTarget("tour-cg-slider"); }}
             style={{ width: "100%" }} disabled={!equipment.selectedCombo}
           />
           {/* CG label — centered vertically on the track (track is 8px tall, thumb area 56px, so track center is at 50%) */}

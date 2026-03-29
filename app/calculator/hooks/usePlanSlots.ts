@@ -99,6 +99,11 @@ export function usePlanSlots({
     catch {}
   }, []);
 
+  const safeDelete = useCallback((key: string) => {
+    try { if (typeof window !== "undefined") window.localStorage.removeItem(key); }
+    catch {}
+  }, []);
+
   // ── Slot has map ──────────────────────────────────────────────────────────
 
   const refreshSlotHas = useCallback(() => {
@@ -457,6 +462,13 @@ export function usePlanSlots({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTerminalId, buildSnapshot, safeWrite, planStoreKey, refreshSlotHas]);
 
+  const clearSlot = useCallback((slot: number) => {
+    if (!selectedTerminalId) return;
+    safeDelete(planStoreKey(slot));
+    refreshSlotHas();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTerminalId, safeDelete, planStoreKey, refreshSlotHas]);
+
   const loadFromSlot = useCallback((slot: number) => {
     if (!selectedTerminalId) return;
     const raw = safeRead(planStoreKey(slot)) as PlanSnapshot | null;
@@ -492,6 +504,7 @@ export function usePlanSlots({
     lastLoadLines,
     fetchLastProductPerComp,
     saveToSlot,
+    clearSlot,
     loadFromSlot,
     refreshLastLoad,
   };
