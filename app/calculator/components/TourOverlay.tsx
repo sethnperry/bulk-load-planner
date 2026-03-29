@@ -145,34 +145,39 @@ export default function TourOverlay({ tour }: Props) {
           {currentStep.message}
         </div>
 
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 14, gap: 8 }}>
-          <button type="button" onClick={skip}
-            style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, color: "rgba(255,255,255,0.25)", padding: 0, flexShrink: 0 }}>
-            Skip tour
-          </button>
-
-          <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-            {/* nextLabel button — moves to next step outright */}
-            {isCenter && nextLabel && (
-              <button type="button" onClick={advance}
-                style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 8, padding: "6px 12px", cursor: "pointer", fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.70)" }}>
-                {nextLabel}
-              </button>
-            )}
-
-            {/* collapseLabel button — for center steps, collapses to tab */}
-            {isCenter ? (
+        {/* Skip link */}
+        <div style={{ marginTop: 14 }}>
+          {isCenter ? (
+            // Center steps: buttons stacked vertically to avoid overflow
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {nextLabel && (
+                <button type="button" onClick={advance}
+                  style={{ width: "100%", background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 8, padding: "9px 12px", cursor: "pointer", fontSize: 13, fontWeight: 700, color: "rgba(255,255,255,0.75)" }}>
+                  {nextLabel}
+                </button>
+              )}
               <button type="button" onClick={() => setCollapsed(true)}
-                style={{ background: "rgba(103,232,249,0.12)", border: "1px solid rgba(103,232,249,0.30)", borderRadius: 8, padding: "6px 14px", cursor: "pointer", fontSize: 12, fontWeight: 700, color: "#67e8f9" }}>
+                style={{ width: "100%", background: "rgba(103,232,249,0.12)", border: "1px solid rgba(103,232,249,0.30)", borderRadius: 8, padding: "9px 14px", cursor: "pointer", fontSize: 13, fontWeight: 700, color: "#67e8f9" }}>
                 {collapseLabel}
               </button>
-            ) : (
+              <button type="button" onClick={skip}
+                style={{ background: "none", border: "none", cursor: "pointer", fontSize: 11, color: "rgba(255,255,255,0.20)", padding: "2px 0", textAlign: "center" as const, width: "100%" }}>
+                Skip tour
+              </button>
+            </div>
+          ) : (
+            // Targeted steps: skip left, pulse hint right
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <button type="button" onClick={skip}
+                style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, color: "rgba(255,255,255,0.25)", padding: 0 }}>
+                Skip tour
+              </button>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#67e8f9", animation: "tourPulse 1.6s ease-in-out infinite" }} />
                 <span style={{ fontSize: 11, color: "rgba(103,232,249,0.70)", fontWeight: 700 }}>Tap the highlighted area</span>
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       </div>
     </>,

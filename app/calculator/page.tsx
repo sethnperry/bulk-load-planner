@@ -799,6 +799,7 @@ const lastProductInfoById = useMemo(() => {
             pressTimer = setTimeout(() => {
               didLongPress = true;
               planSlots.saveToSlot(n);
+              tourAdvanceIfTarget("tour-plan-slots");
             }, 600);
           };
           const onPressEnd = () => {
@@ -915,7 +916,7 @@ const lastProductInfoById = useMemo(() => {
       />
 
       {/* CG Slider — always visible */}
-      <div style={{ marginTop: 10 }}>
+      <div id="tour-cg-slider" style={{ marginTop: 10 }}>
         {unstableLoad && (
           <div style={{ ...styles.error, marginTop: 0, marginBottom: 10, textAlign: "center" }}>
             ⚠️ Unstable load (rear of neutral)

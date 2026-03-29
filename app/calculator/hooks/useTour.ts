@@ -103,7 +103,7 @@ const TOURS: Record<string, TourDef> = {
         position: "top",
       },
       // 7a — instruction inside compartment modal, hidden while user configures
-      //      has two buttons: "Next compartment" (collapse) and "Move to Step 8" (advance)
+      //      has two buttons: "Next compartment" (collapse) and "Move to Step 9" (advance)
       {
         targetId: "tour-comp-instruction",
         title: "Step 7a — Set cap and product",
@@ -111,16 +111,33 @@ const TOURS: Record<string, TourDef> = {
         waitFor: "tap",
         position: "center",
         collapseLabel: "Next compartment",
-        nextLabel: "Move to Step 8",
+        nextLabel: "Move to Step 9",
         onNext: "advance",
       },
-      // 8 — plan slots, tooltip ABOVE slots so it doesn't cover them
+      // 8 — CG slider
       {
-        targetId: "tour-plan-slots",
-        title: "Step 8 — Save a plan slot",
-        message: "Hold any slot (A-E) to save your current plan for this terminal. Next time just tap to load it instantly.",
+        targetId: "tour-cg-slider",
+        title: "Step 8 — Adjust the CG",
+        message: "Slide to shift weight distribution between axles. Center is neutral. Adjust this before saving your plan.",
         waitFor: "tap",
         position: "top",
+      },
+      // 9 — plan slots
+      {
+        targetId: "tour-plan-slots",
+        title: "Step 9 — Save a plan slot",
+        message: "Hold any slot (A-E) to save this plan for this terminal. Next time just tap to load it instantly.",
+        waitFor: "tap",
+        position: "top",
+      },
+      // 10 — completion
+      {
+        targetId: "tour-complete",
+        title: "Setup complete",
+        message: "You are all set. Next time you load here, open the app, select this terminal, and tap your saved slot. The plan loads instantly.",
+        waitFor: "tap",
+        position: "center",
+        collapseLabel: "Done",
       },
     ],
   },
