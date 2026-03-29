@@ -381,6 +381,18 @@ export default function CalculatorPage() {
     },
   });
 
+  // Close comp modal when tour advances past the comp-instruction step
+  const prevTourStepRef = useRef<string | null>(null);
+  useEffect(() => {
+    const prev = prevTourStepRef.current;
+    const curr = tour.currentStep?.targetId ?? null;
+    if (prev === "tour-comp-instruction" && curr !== "tour-comp-instruction") {
+      setCompModalOpen(false);
+      setCompModalComp(null);
+    }
+    prevTourStepRef.current = curr;
+  }, [tour.currentStep?.targetId]);
+
   // When tour is active and user taps highlighted element, advance
   function tourAdvanceIfTarget(id: string) {
     if (tour.active && tour.currentStep?.targetId === id && tour.currentStep?.waitFor === "tap") {
