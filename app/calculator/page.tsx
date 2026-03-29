@@ -376,7 +376,7 @@ export default function CalculatorPage() {
   const tour = useTour({
     stateConditions: {
       "tour-fleet-instruction":    !!equipment.selectedComboId && !equipOpen,
-      "tour-location-instruction": !!location.selectedCity,
+      "tour-location-instruction": !!location.selectedCity && !locOpen,
       "tour-terminal-instruction": !!location.selectedTerminalId && !termOpen,
     },
   });

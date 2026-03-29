@@ -60,7 +60,7 @@ const TOURS: Record<string, TourDef> = {
         position: "center",
         collapseLabel: "OK, I'll do it",
       },
-      // 4 — location button, tooltip BELOW so it doesn't cover the button
+      // 4 — location button tap, then hide tour until city selected + modal closed
       {
         targetId: "tour-location-btn",
         title: "Step 4 — Set your location",
@@ -68,11 +68,11 @@ const TOURS: Record<string, TourDef> = {
         waitFor: "tap",
         position: "bottom",
       },
-      // 5 — instruction inside location modal: pick state then city, hidden while user acts
+      // 5 — hidden while user picks state + city, auto-advances when modal closes with city set
       {
         targetId: "tour-location-instruction",
         title: "Step 5 — Pick your city",
-        message: "Select your state first, then choose the city that has the terminal you are loading at.",
+        message: "Select your state then choose the city you are loading in.",
         waitFor: "state",
         position: "center",
         collapseLabel: "OK, I'll do it",
