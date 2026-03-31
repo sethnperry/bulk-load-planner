@@ -96,7 +96,7 @@ export function useTerminals(
     setCatalogLoading(true);
     const { data, error } = await supabase
       .from("terminals")
-      .select("terminal_id, state, city, terminal_name, timezone, active")
+      .select("terminal_id, state, city, terminal_name, timezone, active, renewal_days")
       .order("state", { ascending: true })
       .order("city", { ascending: true })
       .order("terminal_name", { ascending: true })
@@ -140,24 +140,7 @@ export function useTerminals(
 
   const setAccessDateForTerminal = useCallback(async (terminalId: string, isoDate: string) => {
     if (!authUserId) return;
-
-    // Empty string = deactivate: remove the access date entirely
-    if (!isoDate) {
-      setAccessDateByTerminalId((prev) => {
-        const next = { ...prev };
-        delete next[terminalId];
-        return next;
-      });
-      await supabase
-        .from("terminal_access")
-        .delete()
-        .eq("user_id", authUserId)
-        .eq("terminal_id", terminalId);
-      await loadMyTerminals();
-      return;
-    }
-
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(isoDate)) return;
+    if (!isoDate || !/^\d{4}-\d{2}-\d{2}$/.test(isoDate)) return;
     setAccessDateByTerminalId((prev) => ({ ...prev, [terminalId]: isoDate }));
     const res = await supabase
       .from("terminal_access")
@@ -235,7 +218,7 @@ export function useTerminals(
     const activationISO = accessDateByTerminalId[tid] || (terminalRow as any)?.carded_on || "";
     const expiresISO = (terminalRow as any)?.expires_on || (terminalRow as any)?.expires_at || "";
     const renewalDays = Number(
-      (terminalRow as any)?.renewal_days ?? (cat as any)?.renewal_days ?? 90
+      (terminalRow as any)?.renewal_days ?? cat?.renewal_days ?? 90
     ) || 90;
     const computedExpires =
       activationISO && /^\d{4}-\d{2}-\d{2}$/.test(activationISO)

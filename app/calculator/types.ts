@@ -48,6 +48,7 @@ export type TerminalCatalogRow = {
   terminal_name: string | null;
   timezone?: string | null;
   active: boolean | null;
+  renewal_days?: number | null;
 };
 
 export type StateRow = {
