@@ -103,6 +103,13 @@ function fmtLastApiLine_(args: {
   return `API was ${api}`;
 }
 
+function isApiStale(lastApiUpdatedAt?: string | null, thresholdDays = 7): boolean {
+  if (!lastApiUpdatedAt) return false; // no timestamp = unknown, don't warn
+  const d = new Date(lastApiUpdatedAt);
+  if (isNaN(d.getTime())) return false;
+  return (Date.now() - d.getTime()) > thresholdDays * 24 * 60 * 60 * 1000;
+}
+
 export default function LoadingModal(props: {
   open: boolean;
   onClose: () => void;
@@ -312,35 +319,49 @@ useEffect(() => {
                         <div style={{ fontWeight: 800, fontSize: 14, lineHeight: 1.1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                           {name}
                         </div>
-                        <div style={{ marginTop: 2, color: "rgba(255,255,255,0.50)", fontSize: 11 }}>
-                         {fmtLastApiLine_({
-  lastApi: lastInfo?.last_api,
-  lastApiUpdatedAt: lastInfo?.last_api_updated_at,
-  timeZone: terminalTimeZone ?? null,
-}) ?? "No previous API recorded"}
-                        </div>
+                        {(() => {
+                          const apiLine = fmtLastApiLine_({
+                            lastApi: lastInfo?.last_api,
+                            lastApiUpdatedAt: lastInfo?.last_api_updated_at,
+                            timeZone: terminalTimeZone ?? null,
+                          });
+                          const stale = isApiStale(lastInfo?.last_api_updated_at, 7);
+                          const missing = lastInfo?.last_api == null || !Number.isFinite(Number(lastInfo?.last_api));
+                          const color = missing ? "#f87171"
+                            : stale ? "#fb923c"
+                            : "rgba(255,255,255,0.50)";
+                          return (
+                            <div style={{ marginTop: 2, fontSize: 11, color, fontWeight: (stale || missing) ? 700 : 400 }}>
+                              {missing ? "⚠ No API recorded — enter manually"
+                                : stale ? `⚠ ${apiLine} — may be stale`
+                                : apiLine}
+                            </div>
+                          );
+                        })()}
                       </div>
                       <div style={{ color: "rgba(255,255,255,0.60)", fontWeight: 700, fontSize: 12, flexShrink: 0 }}>{Math.round(g.gallons)}</div>
                     </div>
-                    {/* Inputs — clear on focus, type fresh number, save on blur */}
+                    {/* Stacked inputs — uncontrolled while typing, normalized on blur */}
                     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                       {/* API */}
                       <div style={{ position: "relative" }}>
                         <input
                           key={`api-${g.productId}-${open ? "open" : "closed"}`}
                           defaultValue={apiVal}
-                          onFocus={(e) => { e.target.value = ""; }}
+                          onChange={(e) => {
+                            let v = e.target.value.replace(/[^0-9.]/g, "");
+                            const parts = v.split(".");
+                            if (parts.length > 2) v = parts[0] + "." + parts.slice(1).join("");
+                            e.target.value = v;
+                          }}
+                          onFocus={(e) => e.target.select()}
                           onBlur={(e) => {
                             const n = parseFloat(e.target.value);
-                            if (Number.isFinite(n)) {
-                              setProductApi(g.productId, n.toFixed(1));
-                              e.target.value = n.toFixed(1);
-                            } else {
-                              e.target.value = apiVal;
-                            }
+                            if (Number.isFinite(n)) setProductApi(g.productId, n.toFixed(1));
+                            else setProductApi(g.productId, apiVal);
                           }}
                           inputMode="decimal"
-                          placeholder={apiVal || "37.9"}
+                          placeholder="37.9"
                           style={{ ...styles.input, width: "100%", height: 48, borderRadius: 8, fontWeight: 800, fontSize: 18, textAlign: "center", boxSizing: "border-box" as const }}
                         />
                         <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.25)", pointerEvents: "none" }}>API</span>
@@ -350,18 +371,19 @@ useEffect(() => {
                         <input
                           key={`temp-${g.productId}-${open ? "open" : "closed"}`}
                           defaultValue={tempVal == null ? "" : tempVal.toFixed(1)}
-                          onFocus={(e) => { e.target.value = ""; }}
+                          onChange={(e) => {
+                            let v = e.target.value.replace(/[^0-9.]/g, "");
+                            const parts = v.split(".");
+                            if (parts.length > 2) v = parts[0] + "." + parts.slice(1).join("");
+                            e.target.value = v;
+                          }}
+                          onFocus={(e) => e.target.select()}
                           onBlur={(e) => {
                             const n = parseFloat(e.target.value);
-                            if (Number.isFinite(n)) {
-                              setProductTemp(g.productId, parseFloat(n.toFixed(1)));
-                              e.target.value = n.toFixed(1);
-                            } else {
-                              e.target.value = tempVal == null ? "" : tempVal.toFixed(1);
-                            }
+                            if (Number.isFinite(n)) setProductTemp(g.productId, parseFloat(n.toFixed(1)));
                           }}
                           inputMode="decimal"
-                          placeholder={tempVal == null ? "79.0" : tempVal.toFixed(1)}
+                          placeholder="79.0"
                           style={{ ...styles.input, width: "100%", height: 48, borderRadius: 8, fontWeight: 800, fontSize: 18, textAlign: "center", boxSizing: "border-box" as const }}
                         />
                         <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.25)", pointerEvents: "none" }}>TEMP</span>

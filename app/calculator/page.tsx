@@ -526,6 +526,15 @@ export default function CalculatorPage() {
   }, [headspacePctForComp]);
 
   // ── lbs/gal helper ────────────────────────────────────────────────────────
+  // True if any planned compartment is using the fallback reference API (no driver-observed last_api)
+  const planUsesReferenceApi = useMemo(() => {
+    return Object.values(compPlan).some((slot) => {
+      if (!slot || slot.empty || !slot.productId) return false;
+      const p = terminalProducts.find((p) => p.product_id === slot.productId);
+      return p != null && (p.last_api == null || !Number.isFinite(Number(p.last_api)));
+    });
+  }, [compPlan, terminalProducts]);
+
   const lbsPerGalForProductId = useCallback((productId: string): number | null => {
     const p = terminalProducts.find((x) => x.product_id === productId);
     if (!p || p.api_60 == null || p.alpha_per_f == null) return null;
@@ -1107,6 +1116,11 @@ const lastProductInfoById = useMemo(() => {
                       <div style={{ color: "rgba(255,255,255,0.92)", fontWeight: 900, fontSize: big ? "clamp(13px, 3.5vw, 20px)" : "clamp(11px, 2.8vw, 16px)", lineHeight: 1.1, textAlign: "right" as const, whiteSpace: "nowrap" as const }}>{text}</div>
                     </div>
                   ))}
+                  {planUsesReferenceApi && planRows.length > 0 && (
+                    <div style={{ fontSize: "clamp(8px, 2vw, 10px)", fontWeight: 700, color: "#fb923c", textAlign: "right" as const, marginTop: 2 }}>
+                      ⚠ using ref API
+                    </div>
+                  )}
                 </div>
                 {/* Over/Under strip at bottom — tap to open load report */}
                 <button type="button"
