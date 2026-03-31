@@ -1018,7 +1018,7 @@ export default function AdminPage() {
   const [search,     setSearch]     = useState("");
   const [sortField,  setSortField]  = useState<SortField>("name");
   const [sortDir,    setSortDir]    = useState<SortDir>("asc");
-  const [filterRole, setFilterRole] = useState<"" | "admin" | "driver">("");
+  const [filterRole, setFilterRole] = useState<"" | "none" | "admin" | "lead" | "driver">("none");
 
   const [truckFilter,   setTruckFilter]   = useState<ActiveFilter>("");
   const [truckSearch,   setTruckSearch]   = useState("");
@@ -1181,7 +1181,7 @@ export default function AdminPage() {
 
   const filteredMembers = useMemo(() => {
     let ms = [...members];
-    if (filterRole) ms = ms.filter(m => m.role === filterRole);
+    if (filterRole && filterRole !== "none") ms = ms.filter(m => m.role === filterRole);
     if (search.trim()) {
       const q = search.toLowerCase();
       ms = ms.filter(m => [m.display_name, m.email, m.division, m.region, m.local_area, m.employee_number].some(v => v?.toLowerCase().includes(q)));
@@ -1276,7 +1276,11 @@ export default function AdminPage() {
                 <div style={filterRow}>
                   <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name, email, employee #…" style={{ ...css.input, flex: 1, minWidth: 140, padding: "7px 10px" }} />
                   <select value={filterRole} onChange={e => setFilterRole(e.target.value as any)} style={{ ...css.select, fontSize: 12, padding: "7px 8px" }}>
-                    <option value="">All roles</option><option value="admin">Admin</option><option value="lead">Lead</option><option value="driver">Driver</option>
+                    <option value="none" disabled>Role</option>
+                    <option value="">All roles</option>
+                    <option value="admin">Admin</option>
+                    <option value="lead">Lead</option>
+                    <option value="driver">Driver</option>
                   </select>
                   <select value={`${sortField}:${sortDir}`} onChange={e => { const [f, d] = e.target.value.split(":"); setSortField(f as SortField); setSortDir(d as SortDir); }} style={{ ...css.select, fontSize: 12, padding: "7px 8px" }}>
                     <option value="name:asc">Name A→Z</option><option value="name:desc">Name Z→A</option>
@@ -1284,8 +1288,13 @@ export default function AdminPage() {
                     <option value="region:asc">Region A→Z</option><option value="hire_date:asc">Hire ↑</option><option value="hire_date:desc">Hire ↓</option>
                   </select>
                 </div>
-                {filteredMembers.length === 0 && <div style={{ ...css.card, color: T.muted, fontSize: 13 }}>No members match your search.</div>}
-                {filteredMembers.map(m => <MemberCard key={m.user_id} member={m} companyId={companyId!} onRefresh={loadAll} onEditProfile={(member, onSaved) => setProfileModal({ member, onSaved })} currentUserId={currentUserId} />)}
+                {filterRole === "none" && !search.trim() ? (
+                  <div style={{ ...css.card, color: T.muted, fontSize: 13, textAlign: "center" as const }}>Search or select a role to find users.</div>
+                ) : filteredMembers.length === 0 ? (
+                  <div style={{ ...css.card, color: T.muted, fontSize: 13 }}>No members match your search.</div>
+                ) : (
+                  filteredMembers.map(m => <MemberCard key={m.user_id} member={m} companyId={companyId!} onRefresh={loadAll} onEditProfile={(member, onSaved) => setProfileModal({ member, onSaved })} currentUserId={currentUserId} />)
+                )}
               </>
             )}
           </section>
