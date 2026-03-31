@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { startSetupSession } from "@/lib/setupSession";
 import { supabase } from "@/lib/supabase/client";
 import ComboEditModal from "@/lib/ui/driver/ComboEditModal";
 import { TruckCard, TrailerCard, TruckModal, TrailerModal } from "@/lib/ui/driver/EquipmentDetails";
@@ -992,6 +994,7 @@ function TerminalModal({ terminal, companyId, allProducts, onClose, onDone }: {
 
 export default function AdminPage() {
   const [companyId,     setCompanyId]     = useState<string | null>(null);
+  const router = useRouter();
   const [currentUserId, setCurrentUserId] = useState<string>("");
   const [myRole,        setMyRole]        = useState<string>("");
   const [companyName,   setCompanyName]   = useState<string>("");
@@ -1241,6 +1244,15 @@ export default function AdminPage() {
     return cs;
   }, [combos, comboSearch]);
 
+  function setupForUser(member: Member) {
+    startSetupSession({
+      targetUserId: member.user_id,
+      targetDisplayName: member.display_name ?? member.email ?? member.user_id,
+      adminUserId: currentUserId,
+    });
+    router.push("/calculator");
+  }
+
   if (loading) return <div style={{ ...css.page, display: "flex", alignItems: "center", justifyContent: "center", opacity: 0.6 }}>Loading…</div>;
   if (err)     return <div style={css.page}><Banner msg={err} type="error" /></div>;
 
@@ -1293,7 +1305,20 @@ export default function AdminPage() {
                 ) : filteredMembers.length === 0 ? (
                   <div style={{ ...css.card, color: T.muted, fontSize: 13 }}>No members match your search.</div>
                 ) : (
-                  filteredMembers.map(m => <MemberCard key={m.user_id} member={m} companyId={companyId!} onRefresh={loadAll} onEditProfile={(member, onSaved) => setProfileModal({ member, onSaved })} currentUserId={currentUserId} />)
+                  filteredMembers.map(m => (
+                    <div key={m.user_id} style={{ position: "relative" }}>
+                      <MemberCard member={m} companyId={companyId!} onRefresh={loadAll} onEditProfile={(member, onSaved) => setProfileModal({ member, onSaved })} currentUserId={currentUserId} />
+                      {myRole === "admin" && m.user_id !== currentUserId && (
+                        <button
+                          type="button"
+                          onClick={() => setupForUser(m)}
+                          style={{ position: "absolute", bottom: 10, right: 12, fontSize: 11, fontWeight: 700, padding: "4px 10px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.60)", cursor: "pointer" }}
+                        >
+                          Set up planner →
+                        </button>
+                      )}
+                    </div>
+                  ))
                 )}
               </>
             )}
