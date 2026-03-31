@@ -1007,10 +1007,13 @@ export default function AdminPage() {
   const [err,           setErr]           = useState<string | null>(null);
 
   const [usersOpen,      setUsersOpen]      = useState(false);
-  const [trucksOpen,     setTrucksOpen]     = useState(false);
-  const [trailersOpen,   setTrailersOpen]   = useState(false);
-  const [combosOpen,     setCombosOpen]     = useState(false);
+  const [equipOpen,      setEquipOpen]      = useState(false);
+  const [equipTab,       setEquipTab]       = useState<"trucks"|"trailers"|"combos">("trucks");
   const [terminalsOpen,  setTerminalsOpen]  = useState(false);
+  // keep for compat
+  const trucksOpen   = equipOpen && equipTab === "trucks";
+  const trailersOpen = equipOpen && equipTab === "trailers";
+  const combosOpen   = equipOpen && equipTab === "combos";
 
   const [search,     setSearch]     = useState("");
   const [sortField,  setSortField]  = useState<SortField>("name");
@@ -1242,8 +1245,11 @@ export default function AdminPage() {
   if (err)     return <div style={css.page}><Banner msg={err} type="error" /></div>;
 
   const plusBtn: React.CSSProperties = {
-    ...css.btn("primary"), width: 36, height: 36, padding: 0, fontSize: 20, lineHeight: "1",
+    width: 36, height: 36, padding: 0, fontSize: 22, lineHeight: "1",
     display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+    background: "none", border: "none", cursor: "pointer",
+    color: "rgba(255,255,255,0.45)",
+    borderRadius: 10,
   };
   const filterRow: React.CSSProperties = { display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" };
 
@@ -1287,80 +1293,95 @@ export default function AdminPage() {
         </>
       )}
 
-      {/* ── TRUCKS ── */}
+      {/* ── EQUIPMENT (Trucks, Trailers, Combos) ── */}
       <section style={{ marginBottom: 32, marginTop: 28 }}>
-        <div style={{ ...css.sectionHead, cursor: "pointer", userSelect: "none" }} onClick={() => setTrucksOpen(v => !v)}>
+        <div style={{ ...css.sectionHead, cursor: "pointer", userSelect: "none" }} onClick={() => setEquipOpen(v => !v)}>
           <h2 style={{ ...css.sectionTitle, display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ transition: "transform 150ms", transform: trucksOpen ? "rotate(90deg)" : "none", display: "inline-block" }}>›</span>
-            Trucks ({trucks.filter(t => t.active).length} active)
+            <span style={{ transition: "transform 150ms", transform: equipOpen ? "rotate(90deg)" : "none", display: "inline-block" }}>›</span>
+            Equipment
+            <span style={{ fontWeight: 400, fontSize: 12, color: "rgba(255,255,255,0.35)" }}>
+              {trucks.filter(t=>t.active).length}T · {trailers.filter(t=>t.active).length}TL · {combos.filter(c=>c.active).length} Combos
+            </span>
           </h2>
-          <button style={plusBtn} onClick={e => { e.stopPropagation(); setTruckModal("new"); }}>+</button>
         </div>
-        {trucksOpen && (
+
+        {equipOpen && (
           <>
-            <div style={filterRow}>
-              <input value={truckSearch} onChange={e => setTruckSearch(e.target.value)} placeholder="Search unit, VIN, region, area, status…" style={{ ...css.input, flex: 1, minWidth: 160, padding: "7px 10px" }} />
-              <select value={truckFilter} onChange={e => setTruckFilter(e.target.value as ActiveFilter)} style={{ ...css.select, fontSize: 12, padding: "7px 8px" }}>
-                <option value="">All</option><option value="active">Active</option><option value="inactive">Inactive</option>
-              </select>
-              <select value={truckSort} onChange={e => setTruckSort(e.target.value)} style={{ ...css.select, fontSize: 12, padding: "7px 8px" }}>
-                <option value="name:asc">Name A→Z</option><option value="name:desc">Name Z→A</option>
-                <option value="region:asc">Region A→Z</option><option value="status:asc">Status A→Z</option>
-              </select>
+            {/* Tab bar */}
+            <div style={{ display: "flex", gap: 0, marginBottom: 14, borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+              {([["trucks","Trucks",trucks.filter(t=>t.active).length],["trailers","Trailers",trailers.filter(t=>t.active).length],["combos","Combos",combos.filter(c=>c.active).length]] as const).map(([tab, label, count]) => (
+                <button key={tab} type="button"
+                  onClick={() => setEquipTab(tab)}
+                  style={{ flex: 1, background: "none", border: "none", borderBottom: equipTab === tab ? "2px solid rgba(255,255,255,0.70)" : "2px solid transparent", cursor: "pointer", padding: "8px 4px", fontSize: 13, fontWeight: equipTab === tab ? 800 : 500, color: equipTab === tab ? "rgba(255,255,255,0.90)" : "rgba(255,255,255,0.35)", transition: "all 150ms" }}>
+                  {label} <span style={{ fontSize: 11, opacity: 0.6 }}>({count})</span>
+                </button>
+              ))}
             </div>
-            {filteredTrucks.length === 0 && <div style={{ ...css.card, color: T.muted, fontSize: 13 }}>No trucks match your filter.</div>}
-            {filteredTrucks.map(t => <TruckCard key={t.truck_id} truck={t} companyId={companyId!} onEdit={() => setTruckModal(t)} otherPermits={truckOtherPermits[t.truck_id]} />)}
-          </>
-        )}
-      </section>
 
-      <hr style={css.divider} />
+            {/* Trucks tab */}
+            {equipTab === "trucks" && (
+              <>
+                <div style={{ ...filterRow, alignItems: "center" }}>
+                  <input value={truckSearch} onChange={e => setTruckSearch(e.target.value)} placeholder="Search unit, VIN, region…" style={{ ...css.input, flex: 1, minWidth: 140, padding: "7px 10px" }} />
+                  <select value={truckFilter} onChange={e => setTruckFilter(e.target.value as ActiveFilter)} style={{ ...css.select, fontSize: 12, padding: "7px 8px" }}>
+                    <option value="">All</option><option value="active">Active</option><option value="inactive">Inactive</option>
+                  </select>
+                  <select value={truckSort} onChange={e => setTruckSort(e.target.value)} style={{ ...css.select, fontSize: 12, padding: "7px 8px" }}>
+                    <option value="name:asc">Name A→Z</option><option value="name:desc">Name Z→A</option>
+                    <option value="region:asc">Region A→Z</option><option value="status:asc">Status A→Z</option>
+                  </select>
+                  <button style={plusBtn} onClick={() => setTruckModal("new")} title="Add truck">+</button>
+                </div>
+                {!truckSearch && truckFilter === "" ? (
+                  <div style={{ ...css.card, color: T.muted, fontSize: 13, textAlign: "center" as const }}>Search or filter to find trucks.</div>
+                ) : filteredTrucks.length === 0 ? (
+                  <div style={{ ...css.card, color: T.muted, fontSize: 13 }}>No trucks match your filter.</div>
+                ) : (
+                  filteredTrucks.map(t => <TruckCard key={t.truck_id} truck={t} companyId={companyId!} onEdit={() => setTruckModal(t)} otherPermits={truckOtherPermits[t.truck_id]} />)
+                )}
+              </>
+            )}
 
-      {/* ── TRAILERS ── */}
-      <section style={{ marginBottom: 32, marginTop: 28 }}>
-        <div style={{ ...css.sectionHead, cursor: "pointer", userSelect: "none" }} onClick={() => setTrailersOpen(v => !v)}>
-          <h2 style={{ ...css.sectionTitle, display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ transition: "transform 150ms", transform: trailersOpen ? "rotate(90deg)" : "none", display: "inline-block" }}>›</span>
-            Trailers ({trailers.filter(t => t.active).length} active)
-          </h2>
-          <button style={plusBtn} onClick={e => { e.stopPropagation(); setTrailerModal("new"); }}>+</button>
-        </div>
-        {trailersOpen && (
-          <>
-            <div style={filterRow}>
-              <input value={trailerSearch} onChange={e => setTrailerSearch(e.target.value)} placeholder="Search unit, VIN, region, area, status…" style={{ ...css.input, flex: 1, minWidth: 160, padding: "7px 10px" }} />
-              <select value={trailerFilter} onChange={e => setTrailerFilter(e.target.value as ActiveFilter)} style={{ ...css.select, fontSize: 12, padding: "7px 8px" }}>
-                <option value="">All</option><option value="active">Active</option><option value="inactive">Inactive</option>
-              </select>
-              <select value={trailerSort} onChange={e => setTrailerSort(e.target.value)} style={{ ...css.select, fontSize: 12, padding: "7px 8px" }}>
-                <option value="name:asc">Name A→Z</option><option value="name:desc">Name Z→A</option>
-                <option value="region:asc">Region A→Z</option>
-              </select>
-            </div>
-            {filteredTrailers.length === 0 && <div style={{ ...css.card, color: T.muted, fontSize: 13 }}>No trailers match your filter.</div>}
-            {filteredTrailers.map(t => <TrailerCard key={t.trailer_id} trailer={t} companyId={companyId!} onEdit={() => setTrailerModal(t)} />)}
-          </>
-        )}
-      </section>
+            {/* Trailers tab */}
+            {equipTab === "trailers" && (
+              <>
+                <div style={{ ...filterRow, alignItems: "center" }}>
+                  <input value={trailerSearch} onChange={e => setTrailerSearch(e.target.value)} placeholder="Search unit, VIN, region…" style={{ ...css.input, flex: 1, minWidth: 140, padding: "7px 10px" }} />
+                  <select value={trailerFilter} onChange={e => setTrailerFilter(e.target.value as ActiveFilter)} style={{ ...css.select, fontSize: 12, padding: "7px 8px" }}>
+                    <option value="">All</option><option value="active">Active</option><option value="inactive">Inactive</option>
+                  </select>
+                  <select value={trailerSort} onChange={e => setTrailerSort(e.target.value)} style={{ ...css.select, fontSize: 12, padding: "7px 8px" }}>
+                    <option value="name:asc">Name A→Z</option><option value="name:desc">Name Z→A</option>
+                    <option value="region:asc">Region A→Z</option>
+                  </select>
+                  <button style={plusBtn} onClick={() => setTrailerModal("new")} title="Add trailer">+</button>
+                </div>
+                {!trailerSearch && trailerFilter === "" ? (
+                  <div style={{ ...css.card, color: T.muted, fontSize: 13, textAlign: "center" as const }}>Search or filter to find trailers.</div>
+                ) : filteredTrailers.length === 0 ? (
+                  <div style={{ ...css.card, color: T.muted, fontSize: 13 }}>No trailers match your filter.</div>
+                ) : (
+                  filteredTrailers.map(t => <TrailerCard key={t.trailer_id} trailer={t} companyId={companyId!} onEdit={() => setTrailerModal(t)} />)
+                )}
+              </>
+            )}
 
-      <hr style={css.divider} />
-
-      {/* ── COMBOS ── */}
-      <section style={{ marginTop: 28 }}>
-        <div style={{ ...css.sectionHead, cursor: "pointer", userSelect: "none" }} onClick={() => setCombosOpen(v => !v)}>
-          <h2 style={{ ...css.sectionTitle, display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ transition: "transform 150ms", transform: combosOpen ? "rotate(90deg)" : "none", display: "inline-block" }}>›</span>
-            Equipment Combos ({combos.filter(c => c.active).length} active)
-          </h2>
-          <button style={plusBtn} onClick={e => { e.stopPropagation(); setCoupleModal(true); }}>+</button>
-        </div>
-        {combosOpen && (
-          <>
-            <div style={filterRow}>
-              <input value={comboSearch} onChange={e => setComboSearch(e.target.value)} placeholder="Search truck, trailer, driver…" style={{ ...css.input, flex: 1, minWidth: 160, padding: "7px 10px" }} />
-            </div>
-            {filteredCombos.length === 0 && <div style={{ ...css.card, color: T.muted, fontSize: 13 }}>No active combos.</div>}
-            {filteredCombos.map(c => <ComboCard key={c.combo_id} combo={c} onEdit={() => setComboEditModal(c)} />)}
+            {/* Combos tab */}
+            {equipTab === "combos" && (
+              <>
+                <div style={{ ...filterRow, alignItems: "center" }}>
+                  <input value={comboSearch} onChange={e => setComboSearch(e.target.value)} placeholder="Search truck, trailer, driver…" style={{ ...css.input, flex: 1, minWidth: 140, padding: "7px 10px" }} />
+                  <button style={plusBtn} onClick={() => setCoupleModal(true)} title="New combo">+</button>
+                </div>
+                {!comboSearch ? (
+                  <div style={{ ...css.card, color: T.muted, fontSize: 13, textAlign: "center" as const }}>Search to find combos, or tap + to create one.</div>
+                ) : filteredCombos.length === 0 ? (
+                  <div style={{ ...css.card, color: T.muted, fontSize: 13 }}>No combos match your search.</div>
+                ) : (
+                  filteredCombos.map(c => <ComboCard key={c.combo_id} combo={c} onEdit={() => setComboEditModal(c)} />)
+                )}
+              </>
+            )}
           </>
         )}
       </section>
@@ -1372,24 +1393,27 @@ export default function AdminPage() {
         <div style={{ ...css.sectionHead, cursor: "pointer", userSelect: "none" }} onClick={() => setTerminalsOpen(v => !v)}>
           <h2 style={{ ...css.sectionTitle, display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ transition: "transform 150ms", transform: terminalsOpen ? "rotate(90deg)" : "none", display: "inline-block" }}>›</span>
-            Terminals ({terminals.length}{terminals.filter(t => t.active).length < terminals.length ? `, ${terminals.filter(t=>t.active).length} active` : " active"})
+            Terminals
+            <span style={{ fontWeight: 400, fontSize: 12, color: "rgba(255,255,255,0.35)" }}>
+              {terminals.filter(t=>t.active).length} active
+            </span>
           </h2>
-          <button style={plusBtn} onClick={e => { e.stopPropagation(); setTerminalModal("new"); }}>+</button>
+          <button style={plusBtn} onClick={e => { e.stopPropagation(); setTerminalModal("new"); }} title="Add terminal">+</button>
         </div>
         {terminalsOpen && (
           <>
             <div style={filterRow}>
               <input value={terminalSearch} onChange={e => setTerminalSearch(e.target.value)}
                 placeholder="Search terminal name, city, state…"
-                style={{ ...css.input, flex: 1, minWidth: 160, padding: "7px 10px" }} />
+                style={{ ...css.input, flex: 1, minWidth: 160, padding: "7px 10px" }} autoFocus />
             </div>
-            {(() => {
+            {!terminalSearch.trim() ? (
+              <div style={{ ...css.card, color: T.muted, fontSize: 13, textAlign: "center" as const }}>Type to search terminals.</div>
+            ) : (() => {
               const filtered = terminals.filter(t => {
-                if (!terminalSearch.trim()) return true;
                 const q = terminalSearch.toLowerCase();
                 return [t.terminal_name, t.city, t.state].some(v => v?.toLowerCase().includes(q));
               });
-              // Group by state + city
               const groups: Record<string, Terminal[]> = {};
               for (const t of filtered) {
                 const key = [t.state, t.city].filter(Boolean).join(", ") || "Unknown";
