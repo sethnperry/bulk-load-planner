@@ -1276,7 +1276,7 @@ export default function AdminPage() {
                 <div style={filterRow}>
                   <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name, email, employee #…" style={{ ...css.input, flex: 1, minWidth: 140, padding: "7px 10px" }} />
                   <select value={filterRole} onChange={e => setFilterRole(e.target.value as any)} style={{ ...css.select, fontSize: 12, padding: "7px 8px" }}>
-                    <option value="none" disabled>Role</option>
+                    <option value="none">— Role —</option>
                     <option value="">All roles</option>
                     <option value="admin">Admin</option>
                     <option value="lead">Lead</option>
