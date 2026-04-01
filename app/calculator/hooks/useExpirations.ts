@@ -72,9 +72,10 @@ export function useExpirations(opts: {
   trailerName: string;
   accessDateByTerminalId: Record<string, string | undefined>;
   terminals: any[];
+  terminalCatalog?: any[];
   addDaysISO_: (iso: string, days: number) => string;
 }) {
-  const { truckId, trailerId, truckName, trailerName, accessDateByTerminalId, terminals, addDaysISO_ } = opts;
+  const { truckId, trailerId, truckName, trailerName, accessDateByTerminalId, terminals, terminalCatalog, addDaysISO_ } = opts;
 
   const [truckRow,   setTruckRow]   = useState<Record<string, any> | null>(null);
   const [trailerRow, setTrailerRow] = useState<Record<string, any> | null>(null);
@@ -142,7 +143,8 @@ export function useExpirations(opts: {
 
     for (const [terminalId, lastVisitISO] of Object.entries(accessDateByTerminalId)) {
       if (!lastVisitISO) continue;
-      const terminal = terminals.find((t: any) => String(t.terminal_id) === terminalId);
+      const terminal = terminals.find((t: any) => String(t.terminal_id) === terminalId)
+        ?? terminalCatalog?.find((t: any) => String(t.terminal_id) === terminalId);
       const renewalDays = Number(terminal?.renewal_days ?? terminal?.renewalDays ?? 90) || 90;
       const expiresISO = addDaysISO_(lastVisitISO, renewalDays);
       const days = daysUntil(expiresISO);
@@ -166,14 +168,15 @@ export function useExpirations(opts: {
 
     out.sort((a, b) => a.daysLeft - b.daysLeft);
     return out;
-  }, [truckRow, trailerRow, truckId, trailerId, truckName, trailerName, accessDateByTerminalId, terminals, addDaysISO_]);
+  }, [truckRow, trailerRow, truckId, trailerId, truckName, trailerName, accessDateByTerminalId, terminals, terminalCatalog, addDaysISO_]);
 
-  // Auto-remove deferred IDs only for equipment items (truck/trailer) whose expiration
-  // has genuinely resolved — i.e. the item no longer appears in the list because the
-  // date was updated past the warning window. Terminal items are never auto-cleaned
-  // because their presence in `items` depends on accessDateByTerminalId loading timing
-  // and can cause a race condition that wipes deferred state on refresh.
-  const dataLoaded = truckLoaded && trailerLoaded;
+  // Auto-remove from deferred only when data is fully loaded
+  // Guards against wiping deferred state during initial load before data arrives
+  // dataLoaded: truck+trailer fetched AND terminals data has arrived
+  // We check terminals.length > 0 OR accessDateByTerminalId has keys
+  // to ensure we don't wipe deferred state before terminal data loads
+  const terminalDataReady = Object.keys(accessDateByTerminalId).length > 0 || terminals.length > 0;
+  const dataLoaded = truckLoaded && trailerLoaded && terminalDataReady;
 
   useEffect(() => {
     if (!dataLoaded) return;
@@ -183,8 +186,6 @@ export function useExpirations(opts: {
       const next = new Set(prev);
       let changed = false;
       for (const id of prev) {
-        // Only auto-remove equipment items — never terminals
-        if (id.startsWith("terminal-")) continue;
         if (!activeIds.has(id)) { next.delete(id); changed = true; }
       }
       if (changed) saveDeferred(next);

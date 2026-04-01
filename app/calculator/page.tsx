@@ -1,8 +1,5 @@
 "use client";
 import NavMenu from "@/lib/ui/NavMenu";
-import { getSetupSession, clearSetupSession } from "@/lib/setupSession";
-import type { SetupSession } from "@/lib/setupSession";
-import { useRouter } from "next/navigation";
 import { useTour } from "./hooks/useTour";
 import TourOverlay from "./components/TourOverlay";
 import ExpirationAlertBar from "./components/ExpirationAlertBar";
@@ -151,10 +148,6 @@ export default function CalculatorPage() {
   // ── Auth ───────────────────────────────────────────────────────────────────
   const [authEmail, setAuthEmail] = useState("");
   const [authUserId, setAuthUserId] = useState("");
-  const [setupSession, setSetupSession] = useState<SetupSession | null>(null);
-  const router = useRouter();
-  // When admin is setting up a driver's planner, use their ID for all persistence
-  const effectiveUserId = setupSession?.targetUserId ?? authUserId ?? "";
 
   useEffect(() => {
     (async () => {
@@ -162,9 +155,6 @@ export default function CalculatorPage() {
       setAuthEmail(data.user?.email ?? "");
       setAuthUserId(data.user?.id ?? "");
     })();
-    // Load admin setup session if active
-    const session = getSetupSession();
-    if (session) setSetupSession(session);
   }, []);
 
   // ── Card data (card number + private note, per terminal, per user) ──────────
@@ -177,7 +167,7 @@ export default function CalculatorPage() {
       const { data } = await supabase
         .from("user_terminal_cards")
         .select("terminal_id, card_number, private_note")
-        .eq("user_id", effectiveUserId);
+        .eq("user_id", authUserId);
       if (data) {
         const map: Record<string, { cardNumber: string; privateNote: string }> = {};
         for (const row of data) {
@@ -199,7 +189,7 @@ export default function CalculatorPage() {
     if (!authUserId) return;
     await supabase.from("user_terminal_cards").upsert(
       {
-        user_id: effectiveUserId,
+        user_id: authUserId,
         terminal_id: terminalId,
         card_number: data.cardNumber,
         private_note: data.privateNote,
@@ -226,8 +216,8 @@ export default function CalculatorPage() {
   const [tempDial2ProductId, setTempDial2ProductId] = useState<string | null>(null);
 
   // ── Feature hooks ──────────────────────────────────────────────────────────
-  const equipment = useEquipment(effectiveUserId);
-  const location = useLocation(effectiveUserId);
+  const equipment = useEquipment(authUserId);
+  const location = useLocation(authUserId);
 
   // selectedTerminalTimeZone removed — use selectedTerminalTimeZoneResolved below
 
@@ -380,7 +370,7 @@ export default function CalculatorPage() {
   const [myLoadsOpen, setMyLoadsOpen]   = useState(false);
   const [loadReportOpen, setLoadReportOpen] = useState(false);
 
-  const loadHistory = useLoadHistory(effectiveUserId);
+  const loadHistory = useLoadHistory(authUserId ?? "");
 
   // ── Guided tour ───────────────────────────────────────────────────────────
   const tour = useTour({
@@ -614,7 +604,7 @@ export default function CalculatorPage() {
   // ── Plan slots ─────────────────────────────────────────────────────────────
   // Must be declared BEFORE loadWorkflow so planSlots.refreshLastLoad is defined
   const planSlots = usePlanSlots({
-    authUserId: effectiveUserId, selectedTerminalId: location.selectedTerminalId, selectedComboId: equipment.selectedComboId,
+    authUserId, selectedTerminalId: location.selectedTerminalId, selectedComboId: equipment.selectedComboId,
     tempF, cgSlider, compPlan, setCgSlider, setCompPlan,
     compartmentsLoaded: compartments.length > 0,
   });
@@ -627,7 +617,7 @@ export default function CalculatorPage() {
   }, [terminalProducts]);
 
   const loadWorkflow = useLoadWorkflow({
-    authUserId: effectiveUserId || null,
+    authUserId: authUserId ?? null,
     selectedComboId: equipment.selectedComboId,
     selectedTerminalId: location.selectedTerminalId,
     selectedState: location.selectedState,
@@ -666,6 +656,7 @@ export default function CalculatorPage() {
     trailerName: equipment.trailerNameById[equipment.selectedCombo?.trailer_id ?? ""] ?? "",
     accessDateByTerminalId: terminals.accessDateByTerminalId,
     terminals: terminals.terminals,
+    terminalCatalog: terminals.terminalCatalog,
     addDaysISO_,
   });
 
@@ -677,7 +668,7 @@ export default function CalculatorPage() {
       if (ids.length === 0) return;
       const { data, error } = await supabase
         .from("terminal_access").select("terminal_id, carded_on")
-        .eq("user_id", effectiveUserId).in("terminal_id", ids);
+        .eq("user_id", authUserId).in("terminal_id", ids);
       if (error) return;
       const map: Record<string, string> = {};
       (data ?? []).forEach((r: any) => { if (r?.terminal_id && r?.carded_on) map[String(r.terminal_id)] = String(r.carded_on); });
@@ -891,21 +882,6 @@ const lastProductInfoById = useMemo(() => {
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div style={styles.page}>
-      {/* Admin setup session banner */}
-      {setupSession && (
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 14px", marginBottom: 8, borderRadius: 12, background: "rgba(251,146,60,0.12)", border: "1px solid rgba(251,146,60,0.30)" }}>
-          <div>
-            <div style={{ fontSize: 11, fontWeight: 800, color: "#fb923c", letterSpacing: "0.08em", textTransform: "uppercase" as const }}>Setting up planner for</div>
-            <div style={{ fontSize: 14, fontWeight: 700, color: "rgba(255,255,255,0.90)", marginTop: 1 }}>{setupSession.targetDisplayName}</div>
-          </div>
-          <button type="button"
-            onClick={() => { clearSetupSession(); setSetupSession(null); router.push("/admin"); }}
-            style={{ fontSize: 12, fontWeight: 700, padding: "6px 12px", borderRadius: 8, border: "1px solid rgba(251,146,60,0.40)", background: "rgba(251,146,60,0.15)", color: "#fb923c", cursor: "pointer", whiteSpace: "nowrap" as const }}>
-            ← Return to Admin
-          </button>
-        </div>
-      )}
-
       {/* Equipment header + nav menu on same line */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, gap: 12 }}>
         <button type="button" id="tour-equipment-btn" onClick={() => { setEquipOpen(true); tourAdvanceIfTarget("tour-equipment-btn"); }}
@@ -920,15 +896,22 @@ const lastProductInfoById = useMemo(() => {
         >
           {equipment.equipmentLabel ?? "Select Equipment"}
         </button>
-        <ExpirationAlertBar
-          items={expirations.items}
-          activeItems={expirations.activeItems}
-          expiredCount={expirations.expiredCount}
-          warningCount={expirations.warningCount}
-          mostUrgent={expirations.mostUrgent}
-          allDeferred={expirations.allDeferred}
-          onClick={() => setExpModalOpen(true)}
-        />
+        {(expirations.expiredCount > 0 || expirations.warningCount > 0) ? (
+          <ExpirationAlertBar
+            items={expirations.items}
+            activeItems={expirations.activeItems}
+            expiredCount={expirations.expiredCount}
+            warningCount={expirations.warningCount}
+            mostUrgent={expirations.mostUrgent}
+            allDeferred={expirations.allDeferred}
+            onClick={() => setExpModalOpen(true)}
+          />
+        ) : (
+          <button type="button" onClick={() => setExpModalOpen(true)}
+            style={{ background: "none", border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600, color: "rgba(255,255,255,0.28)", padding: "4px 8px", flexShrink: 0, whiteSpace: "nowrap" as const }}>
+            Expirations
+          </button>
+        )}
         <NavMenu />
       </div>
 
@@ -1215,7 +1198,7 @@ const lastProductInfoById = useMemo(() => {
       {/* ── Modals ── */}
       <EquipmentModal
         open={equipOpen} onClose={() => setEquipOpen(false)}
-        authUserId={effectiveUserId}
+        authUserId={authUserId}
         combos={equipment.combos} combosLoading={equipment.combosLoading} combosError={equipment.combosError}
         selectedComboId={equipment.selectedComboId ?? ""}
         onSelectComboId={(id) => equipment.setSelectedComboId(id)}
@@ -1232,7 +1215,7 @@ const lastProductInfoById = useMemo(() => {
 
       <MyLoadsModal
         open={myLoadsOpen} onClose={() => setMyLoadsOpen(false)}
-        authUserId={effectiveUserId}
+        authUserId={authUserId ?? ""}
         rows={loadHistory.rows}
         loading={loadHistory.loading}
         error={loadHistory.error}
