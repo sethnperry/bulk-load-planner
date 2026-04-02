@@ -678,23 +678,27 @@ export default function CalculatorPage() {
 
   // ── Derived labels ─────────────────────────────────────────────────────────
   const terminalLabel = useMemo(() => {
-    const tid = String(location.selectedTerminalId ?? "");
-    if (!tid) return undefined;
-    // Check my terminals first, then full catalog
-    const t = terminals.terminals.find((t) => String(t.terminal_id) === tid)
-      ?? terminals.terminalCatalog.find((t) => String(t.terminal_id) === tid);
+    if (!location.selectedTerminalId) return undefined;
+    const t = terminals.terminals.find((t) => String(t.terminal_id) === String(location.selectedTerminalId))
+      ?? terminals.terminalCatalog.find((t) => String(t.terminal_id) === String(location.selectedTerminalId));
     return t?.terminal_name ? String(t.terminal_name) : "Terminal";
   }, [terminals.terminals, terminals.terminalCatalog, location.selectedTerminalId]);
 
   const selectedTerminal = useMemo(
-    () => terminals.terminals.find((t) => String(t.terminal_id) === String(location.selectedTerminalId))
+    () => terminals.terminals.find((t) => String(t.terminal_id) === String(location.selectedTerminalId)) ?? null,
+    [terminals.terminals, location.selectedTerminalId]
+  );
+
+  // For display name only — also check catalog for terminals not yet visited
+  const selectedTerminalAny = useMemo(
+    () => selectedTerminal
       ?? terminals.terminalCatalog.find((t) => String(t.terminal_id) === String(location.selectedTerminalId))
       ?? null,
-    [terminals.terminals, terminals.terminalCatalog, location.selectedTerminalId]
+    [selectedTerminal, terminals.terminalCatalog, location.selectedTerminalId]
   );
 
   const terminalDisplayISO = useMemo(() => {
-    if (!selectedTerminal) return null;
+    if (!selectedTerminal) return null; // needs full TerminalRow for expiry calc
     return terminals.terminalDisplayInfo(selectedTerminal, location.selectedTerminalId);
   }, [selectedTerminal, terminals, location.selectedTerminalId]);
 
