@@ -12,7 +12,7 @@ export default function PlannerControls(props: any) {
     styles, selectedTrailerId, compLoading, compartments, compError,
     headspacePctForComp, effectiveMaxGallonsForComp, plannedGallonsByComp,
     compPlan, terminalProducts, setCompModalComp, setCompModalOpen, snapshotSlots,
-    onTourAdvance,
+    onTourAdvance, selectedTerminalId,
   } = props;
 
   return (
@@ -21,7 +21,14 @@ export default function PlannerControls(props: any) {
       {compError && <div style={styles.error}>Error loading compartments: {compError}</div>}
 
       {selectedTrailerId && !compLoading && !compError && compartments.length > 0 && (
-        <div id="tour-comp-area" style={{ marginTop: 14, marginBottom: 4 }}>
+        <div id="tour-comp-area" style={{ marginTop: 14, marginBottom: 4, position: "relative" as const, opacity: selectedTerminalId ? 1 : 0.45, transition: "opacity 200ms" }}>
+          {!selectedTerminalId && (
+            <div style={{ position: "absolute" as const, inset: 0, zIndex: 2, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none" as const }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.50)", background: "rgba(0,0,0,0.55)", borderRadius: 8, padding: "4px 10px" }}>
+                Select a terminal first
+              </div>
+            </div>
+          )}
           <div style={{
             display: "flex",
             justifyContent: "center",
@@ -76,7 +83,13 @@ export default function PlannerControls(props: any) {
                 return (
                   <div
                     key={String(c.comp_number)}
-                    onClick={() => { setCompModalComp(compNumber); setCompModalOpen(true); onTourAdvance?.("tour-comp-area"); }}
+                    onClick={() => {
+                      if (!selectedTerminalId) return;
+                      setCompModalComp(compNumber);
+                      setCompModalOpen(true);
+                      onTourAdvance?.("tour-comp-area");
+                    }}
+                    title={!selectedTerminalId ? "Select a terminal first" : undefined}
                     style={{
                       display: "flex", flexDirection: "column", alignItems: "center",
                       cursor: "pointer", userSelect: "none",
@@ -175,9 +188,7 @@ export default function PlannerControls(props: any) {
       {/* Plan slots below compartments */}
       {selectedTrailerId && snapshotSlots && (
         <div style={{ display: "flex", justifyContent: "center", marginTop: 12, marginBottom: 2 }}>
-          <div id="tour-plan-slots">
-            {snapshotSlots}
-          </div>
+          {snapshotSlots}
         </div>
       )}
 

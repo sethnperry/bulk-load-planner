@@ -678,13 +678,19 @@ export default function CalculatorPage() {
 
   // ── Derived labels ─────────────────────────────────────────────────────────
   const terminalLabel = useMemo(() => {
-    const t = terminals.terminals.find((t) => String(t.terminal_id) === String(location.selectedTerminalId));
-    return t?.terminal_name ? String(t.terminal_name) : location.selectedTerminalId ? "Terminal" : undefined;
-  }, [terminals.terminals, location.selectedTerminalId]);
+    const tid = String(location.selectedTerminalId ?? "");
+    if (!tid) return undefined;
+    // Check my terminals first, then full catalog
+    const t = terminals.terminals.find((t) => String(t.terminal_id) === tid)
+      ?? terminals.terminalCatalog.find((t) => String(t.terminal_id) === tid);
+    return t?.terminal_name ? String(t.terminal_name) : "Terminal";
+  }, [terminals.terminals, terminals.terminalCatalog, location.selectedTerminalId]);
 
   const selectedTerminal = useMemo(
-    () => terminals.terminals.find((t) => String(t.terminal_id) === String(location.selectedTerminalId)) ?? null,
-    [terminals.terminals, location.selectedTerminalId]
+    () => terminals.terminals.find((t) => String(t.terminal_id) === String(location.selectedTerminalId))
+      ?? terminals.terminalCatalog.find((t) => String(t.terminal_id) === String(location.selectedTerminalId))
+      ?? null,
+    [terminals.terminals, terminals.terminalCatalog, location.selectedTerminalId]
   );
 
   const terminalDisplayISO = useMemo(() => {
@@ -928,11 +934,14 @@ const lastProductInfoById = useMemo(() => {
         terminalProducts={terminalProducts}
         setCompModalComp={setCompModalComp}
         setCompModalOpen={(open: boolean) => {
+          // Don't open compartment modal if no terminal selected — products are terminal-specific
+          if (open && !location.selectedTerminalId) return;
           setCompModalOpen(open);
           if (open) tourAdvanceIfTarget("tour-comp-area");
         }}
         snapshotSlots={SnapshotSlots}
         onTourAdvance={tourAdvanceIfTarget}
+        selectedTerminalId={location.selectedTerminalId ?? ""}
       />
 
       <CompartmentModal
