@@ -170,41 +170,52 @@ export default function CalculatorPage() {
     useState<Record<string, { cardNumber: string; privateNote: string }>>({});
 
   useEffect(() => {
-    if (!authUserId) return;
+    if (!effectiveUserId) return;
     (async () => {
-      const { data } = await supabase
-        .from("user_terminal_cards")
-        .select("terminal_id, card_number, private_note")
-        .eq("user_id", effectiveUserId);
-      if (data) {
-        const map: Record<string, { cardNumber: string; privateNote: string }> = {};
-        for (const row of data) {
-          map[String(row.terminal_id)] = {
-            cardNumber: row.card_number ?? "",
-            privateNote: row.private_note ?? "",
-          };
+      if (setupSession) {
+        const { getCardData } = await import("@/lib/adminSetupClient");
+        const r = await getCardData(effectiveUserId);
+        setCardDataByTerminalId(r.cardDataByTerminalId);
+      } else {
+        const { data } = await supabase
+          .from("user_terminal_cards")
+          .select("terminal_id, card_number, private_note")
+          .eq("user_id", effectiveUserId);
+        if (data) {
+          const map: Record<string, { cardNumber: string; privateNote: string }> = {};
+          for (const row of data) {
+            map[String(row.terminal_id)] = {
+              cardNumber: row.card_number ?? "",
+              privateNote: row.private_note ?? "",
+            };
+          }
+          setCardDataByTerminalId(map);
         }
-        setCardDataByTerminalId(map);
       }
     })();
-  }, [authUserId]);
+  }, [effectiveUserId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const setCardDataForTerminal_ = async (
     terminalId: string,
     data: { cardNumber: string; privateNote: string }
   ) => {
     setCardDataByTerminalId(prev => ({ ...prev, [terminalId]: data }));
-    if (!authUserId) return;
-    await supabase.from("user_terminal_cards").upsert(
-      {
-        user_id: effectiveUserId,
-        terminal_id: terminalId,
-        card_number: data.cardNumber,
-        private_note: data.privateNote,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "user_id,terminal_id" }
-    );
+    if (!effectiveUserId) return;
+    if (setupSession) {
+      const { setCardData } = await import("@/lib/adminSetupClient");
+      await setCardData(effectiveUserId, terminalId, data.cardNumber, data.privateNote);
+    } else {
+      await supabase.from("user_terminal_cards").upsert(
+        {
+          user_id: effectiveUserId,
+          terminal_id: terminalId,
+          card_number: data.cardNumber,
+          private_note: data.privateNote,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "user_id,terminal_id" }
+      );
+    }
   };
 
   // ── Modal open/close flags ─────────────────────────────────────────────────
@@ -224,16 +235,17 @@ export default function CalculatorPage() {
   const [tempDial2ProductId, setTempDial2ProductId] = useState<string | null>(null);
 
   // ── Feature hooks ──────────────────────────────────────────────────────────
-  const equipment = useEquipment(effectiveUserId);
+  const equipment = useEquipment(authUserId, setupSession);
   const location = useLocation(effectiveUserId);
 
   // selectedTerminalTimeZone removed — use selectedTerminalTimeZoneResolved below
 
   const terminals = useTerminals(
-    authUserId,
+    effectiveUserId,
     location.selectedTerminalId,
     location.setSelectedTerminalId,
-    null // timezone resolved below
+    null, // timezone resolved below
+    setupSession
   );
 
   // Resolve timezone after both hooks exist
@@ -1235,6 +1247,7 @@ const lastProductInfoById = useMemo(() => {
       <EquipmentModal
         open={equipOpen} onClose={() => setEquipOpen(false)}
         authUserId={effectiveUserId}
+        setupSession={setupSession}
         combos={equipment.combos} combosLoading={equipment.combosLoading} combosError={equipment.combosError}
         selectedComboId={equipment.selectedComboId ?? ""}
         onSelectComboId={(id) => equipment.setSelectedComboId(id)}

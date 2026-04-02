@@ -30,6 +30,7 @@ import { FullscreenModal } from "@/lib/ui/FullscreenModal";
 import DecoupleModal from "./DecoupleModal";
 import ComboEditModal from "@/lib/ui/driver/ComboEditModal";
 import { TruckCard as AdminTruckCard, TrailerCard as AdminTrailerCard, TruckModal as AdminTruckModal, TrailerModal as AdminTrailerModal, type Truck as AdminTruck, type Trailer as AdminTrailer, type OtherPermit as AdminOtherPermit } from "@/lib/ui/driver/EquipmentDetails";
+import type { SetupSession } from "@/lib/setupSession";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -80,6 +81,7 @@ type Props = {
   open: boolean;
   onClose: () => void;
   authUserId: string | null;
+  setupSession?: SetupSession | null;
   combos: ComboRow[];
   combosLoading: boolean;
   combosError: string | null;
@@ -1024,7 +1026,7 @@ function FleetModal({
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function EquipmentModal({
-  open, onClose, authUserId,
+  open, onClose, authUserId, setupSession,
   combos, combosLoading, combosError,
   selectedComboId, onSelectComboId, onRefreshCombos,
   onTourAdvance,
@@ -1092,13 +1094,25 @@ export default function EquipmentModal({
 
   const loadPrimaryEquipment = useCallback(async () => {
     if (!authUserId) return;
-    const [{ data: pt }, { data: ptr }] = await Promise.all([
-      supabase.from("user_primary_trucks").select("truck_id").eq("user_id", authUserId),
-      supabase.from("user_primary_trailers").select("trailer_id").eq("user_id", authUserId),
-    ]);
-    setPrimaryTruckIds(new Set((pt ?? []).map((r: any) => String(r.truck_id))));
-    setPrimaryTrailerIds(new Set((ptr ?? []).map((r: any) => String(r.trailer_id))));
-  }, [authUserId]);
+    if (setupSession) {
+      try {
+        const { getPrimaryEquipment } = await import("@/lib/adminSetupClient");
+        const { primaryTruckIds: tIds, primaryTrailerIds: trIds } =
+          await getPrimaryEquipment(setupSession.targetUserId);
+        setPrimaryTruckIds(new Set(tIds));
+        setPrimaryTrailerIds(new Set(trIds));
+      } catch (e: any) {
+        console.error("loadPrimaryEquipment (setup):", e?.message);
+      }
+    } else {
+      const [{ data: pt }, { data: ptr }] = await Promise.all([
+        supabase.from("user_primary_trucks").select("truck_id").eq("user_id", authUserId),
+        supabase.from("user_primary_trailers").select("trailer_id").eq("user_id", authUserId),
+      ]);
+      setPrimaryTruckIds(new Set((pt ?? []).map((r: any) => String(r.truck_id))));
+      setPrimaryTrailerIds(new Set((ptr ?? []).map((r: any) => String(r.trailer_id))));
+    }
+  }, [authUserId, setupSession]);
 
   const loadProfileNames = useCallback(async (userIds: string[]) => {
     const unique = Array.from(new Set(userIds.filter(Boolean)));
@@ -1168,16 +1182,22 @@ export default function EquipmentModal({
       setPickTruckId("");
       setPickTrailerId("");
       setNewTareLbs("");
-      // Resolve company ID once so FleetModal doesn't re-fetch user_settings independently
+      // Resolve company ID — use proxy when in setup mode so we get the target user's company
       (async () => {
-        const { data: u } = await supabase.auth.getUser();
-        if (u.user) {
-          const { data: s } = await supabase
-            .from("user_settings")
-            .select("active_company_id")
-            .eq("user_id", u.user.id)
-            .maybeSingle();
-          setCompanyId((s?.active_company_id as string | null) ?? null);
+        if (setupSession) {
+          const { getCompanyId } = await import("@/lib/adminSetupClient");
+          const { companyId: cid } = await getCompanyId(setupSession.targetUserId);
+          setCompanyId(cid);
+        } else {
+          const { data: u } = await supabase.auth.getUser();
+          if (u.user) {
+            const { data: s } = await supabase
+              .from("user_settings")
+              .select("active_company_id")
+              .eq("user_id", u.user.id)
+              .maybeSingle();
+            setCompanyId((s?.active_company_id as string | null) ?? null);
+          }
         }
       })();
       loadEquipment();
@@ -1210,23 +1230,39 @@ export default function EquipmentModal({
     if (!authUserId) return;
     const isStarred = primaryTruckIdsRef.current.has(truckId);
     setPrimaryTruckIds((prev) => { const n = new Set(prev); isStarred ? n.delete(truckId) : n.add(truckId); return n; });
-    if (isStarred) {
-      await supabase.from("user_primary_trucks").delete().eq("user_id", authUserId).eq("truck_id", truckId);
+    if (setupSession) {
+      try {
+        const { setPrimaryTruck, removePrimaryTruck } = await import("@/lib/adminSetupClient");
+        if (isStarred) await removePrimaryTruck(setupSession.targetUserId, truckId);
+        else           await setPrimaryTruck(setupSession.targetUserId, truckId);
+      } catch (e: any) { console.error("togglePrimaryTruck (setup):", e?.message); }
     } else {
-      await supabase.from("user_primary_trucks").upsert({ user_id: authUserId, truck_id: truckId }, { onConflict: "user_id,truck_id" });
+      if (isStarred) {
+        await supabase.from("user_primary_trucks").delete().eq("user_id", authUserId).eq("truck_id", truckId);
+      } else {
+        await supabase.from("user_primary_trucks").upsert({ user_id: authUserId, truck_id: truckId }, { onConflict: "user_id,truck_id" });
+      }
     }
-  }, [authUserId]);
+  }, [authUserId, setupSession]);
 
   const togglePrimaryTrailer = useCallback(async (trailerId: string) => {
     if (!authUserId) return;
     const isStarred = primaryTrailerIdsRef.current.has(trailerId);
     setPrimaryTrailerIds((prev) => { const n = new Set(prev); isStarred ? n.delete(trailerId) : n.add(trailerId); return n; });
-    if (isStarred) {
-      await supabase.from("user_primary_trailers").delete().eq("user_id", authUserId).eq("trailer_id", trailerId);
+    if (setupSession) {
+      try {
+        const { setPrimaryTrailer, removePrimaryTrailer } = await import("@/lib/adminSetupClient");
+        if (isStarred) await removePrimaryTrailer(setupSession.targetUserId, trailerId);
+        else           await setPrimaryTrailer(setupSession.targetUserId, trailerId);
+      } catch (e: any) { console.error("togglePrimaryTrailer (setup):", e?.message); }
     } else {
-      await supabase.from("user_primary_trailers").upsert({ user_id: authUserId, trailer_id: trailerId }, { onConflict: "user_id,trailer_id" });
+      if (isStarred) {
+        await supabase.from("user_primary_trailers").delete().eq("user_id", authUserId).eq("trailer_id", trailerId);
+      } else {
+        await supabase.from("user_primary_trailers").upsert({ user_id: authUserId, trailer_id: trailerId }, { onConflict: "user_id,trailer_id" });
+      }
     }
-  }, [authUserId]);
+  }, [authUserId, setupSession]);
 
   // Toggle both truck + trailer in same direction
   const toggleComboPrimary = useCallback(async (c: ComboRow | FleetCombo) => {
@@ -1249,15 +1285,12 @@ export default function EquipmentModal({
   );
 
   // My Equipment: starred OR currently claimed by me OR selected-but-not-stolen
-  // Starred and isMine always show. isSelected is suppressed if another user has claimed it
-  // (eviction effect clears selectedComboId async; this guards the render in the meantime).
   const myEquipmentCombos = useMemo(
     () => coupledCombos.filter((c) => {
       const isStarred     = c.truck_id && primaryTruckIds.has(String(c.truck_id));
       const isMine        = authUserId && String(c.claimed_by ?? "") === String(authUserId);
       const isSelected    = String(c.combo_id) === String(selectedComboId);
       const stolenByOther = !!c.claimed_by && !!authUserId && String(c.claimed_by) !== String(authUserId);
-      // Starred and isMine are always visible; isSelected is only valid if not stolen
       return isStarred || isMine || (isSelected && !stolenByOther);
     }),
     [coupledCombos, primaryTruckIds, authUserId, selectedComboId]
@@ -1281,28 +1314,7 @@ export default function EquipmentModal({
     [trailers, coupledTrailerIds]
   );
 
-  // Filter uncoupled by selected region, then sort starred first
-  const filteredUncoupledTrucks = useMemo(() => {
-    const base = pickRegion ? uncoupledTrucks.filter((t) => t.region === pickRegion) : uncoupledTrucks;
-    return [...base].sort((a, b) => {
-      const as_ = primaryTruckIds.has(String(a.truck_id));
-      const bs_ = primaryTruckIds.has(String(b.truck_id));
-      if (as_ !== bs_) return as_ ? -1 : 1;
-      return a.truck_name.localeCompare(b.truck_name);
-    });
-  }, [uncoupledTrucks, pickRegion, primaryTruckIds]);
-
-  const filteredUncoupledTrailers = useMemo(() => {
-    const base = pickRegion ? uncoupledTrailers.filter((t) => t.region === pickRegion) : uncoupledTrailers;
-    return [...base].sort((a, b) => {
-      const as_ = primaryTrailerIds.has(String(a.trailer_id));
-      const bs_ = primaryTrailerIds.has(String(b.trailer_id));
-      if (as_ !== bs_) return as_ ? -1 : 1;
-      return a.trailer_name.localeCompare(b.trailer_name);
-    });
-  }, [uncoupledTrailers, pickRegion, primaryTrailerIds]);
-
-  // Starred-first sorted lists for FleetModal dropdowns (no region pre-filter — FleetModal handles that)
+  // Starred-first sorted lists for FleetModal dropdowns
   const sortedUncoupledTrucks = useMemo(() =>
     [...uncoupledTrucks].sort((a, b) => {
       const as_ = primaryTruckIds.has(String(a.truck_id));
@@ -1351,19 +1363,24 @@ export default function EquipmentModal({
 
   // ── Actions ────────────────────────────────────────────────────────────────
 
-
-  // Claim an unclaimed combo — server releases any previous hold atomically
+  // Claim an unclaimed combo
   async function handleClaim(comboId: string, truckId?: string, trailerId?: string) {
     if (busy) return;
     setBusy(true); setLocalErr(null);
     try {
-      const { error } = await supabase.rpc("claim_combo", { p_combo_id: comboId });
-      if (error) throw error;
+      if (setupSession) {
+        const { claimCombo } = await import("@/lib/adminSetupClient");
+        await claimCombo(setupSession.targetUserId, comboId);
+      } else {
+        const { error } = await supabase.rpc("claim_combo", { p_combo_id: comboId });
+        if (error) throw error;
+      }
       onSelectComboId(comboId);
       await onRefreshCombos();
     } catch (e: any) { setLocalErr(e?.message ?? "Failed to claim equipment."); }
     finally { setBusy(false); }
   }
+
   function handleDecouple(comboId: string) {
     const combo = coupledCombos.find((c) => String(c.combo_id) === comboId);
     const truckId     = String(combo?.truck_id   ?? "");
@@ -1380,10 +1397,8 @@ export default function EquipmentModal({
     setDecoupleComboPending(null);
     await Promise.all([onRefreshCombos(), loadEquipment()]);
     if (newComboId) {
-      // Swap — select the new combo after refresh
       onSelectComboId(newComboId);
     } else if (wasSelected) {
-      // True decouple of the selected unit — clear selection
       onSelectComboId("");
     }
   }
@@ -1392,8 +1407,13 @@ export default function EquipmentModal({
     if (busy) return;
     setBusy(true); setLocalErr(null);
     try {
-      const { error } = await supabase.rpc("slip_seat_combo", { p_combo_id: comboId });
-      if (error) throw error;
+      if (setupSession) {
+        const { slipSeatCombo } = await import("@/lib/adminSetupClient");
+        await slipSeatCombo(setupSession.targetUserId, comboId);
+      } else {
+        const { error } = await supabase.rpc("slip_seat_combo", { p_combo_id: comboId });
+        if (error) throw error;
+      }
       onSelectComboId(String(comboId));
       await onRefreshCombos();
     } catch (e: any) { setLocalErr(e?.message ?? "Failed to slip seat."); }
