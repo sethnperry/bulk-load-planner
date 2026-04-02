@@ -89,13 +89,12 @@ export default function PlannerControls(props: any) {
                       setCompModalOpen(true);
                       onTourAdvance?.("tour-comp-area");
                     }}
-                    title={!selectedTerminalId ? "Select a terminal first" : undefined}
+                    title={!selectedTerminalId ? "Select a terminal first" : `Comp ${compNumber}`}
                     style={{
                       display: "flex", flexDirection: "column", alignItems: "center",
                       cursor: "pointer", userSelect: "none",
                       width: barW, flexShrink: 0, flexGrow: 0,
                     }}
-                    title={`Comp ${compNumber}`}
                   >
                     {/* Comp number above */}
                     <div style={{
