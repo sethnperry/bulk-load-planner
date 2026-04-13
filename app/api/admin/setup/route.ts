@@ -26,7 +26,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { serviceSupabase } from "@/lib/supabase/serviceClient";
 
-// Verify the caller is authenticated and is an admin/lead for their company.
+// Verify the caller is authenticated and is an admin/lead for their active company.
 async function verifyAdmin(req: NextRequest): Promise<{ adminUserId: string } | NextResponse> {
   const authHeader = req.headers.get("authorization") ?? "";
   const token = authHeader.replace("Bearer ", "").trim();
@@ -41,11 +41,21 @@ async function verifyAdmin(req: NextRequest): Promise<{ adminUserId: string } | 
   const { data: { user }, error } = await userClient.auth.getUser();
   if (error || !user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  // Check they are an admin or lead in user_companies
+  // Get their active company using service role (bypasses RLS)
+  const { data: settings } = await serviceSupabase
+    .from("user_settings")
+    .select("active_company_id")
+    .eq("user_id", user.id)
+    .maybeSingle();
+  const companyId = (settings as any)?.active_company_id as string | null;
+  if (!companyId) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+  // Check they are admin or lead in that specific company
   const { data: membership } = await serviceSupabase
     .from("user_companies")
     .select("role")
     .eq("user_id", user.id)
+    .eq("company_id", companyId)
     .in("role", ["admin", "lead"])
     .maybeSingle();
 
