@@ -1,8 +1,10 @@
 "use client";
 // hooks/useEquipment.ts
 // Owns: equipment_combos fetch, selectedComboId, derived name maps, localStorage persistence.
-// When setupSession is active, primary equipment reads/writes go through /api/admin/setup
-// so they operate as targetUserId rather than the logged-in admin.
+// When setupSession is active:
+//   - localStorage is skipped entirely (no read, no write)
+//   - selectedComboId is derived from whichever combo has claimed_by === targetUserId
+//   - primary equipment reads/writes go through /api/admin/setup
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
@@ -49,15 +51,24 @@ export function useEquipment(authUserId: string, setupSession?: SetupSession | n
   const [combos, setCombos] = useState<ComboRow[]>([]);
   const [combosLoading, setCombosLoading] = useState(true);
   const [combosError, setCombosError] = useState<string | null>(null);
-  const [selectedComboId, setSelectedComboId] = useState("");
+  const [selectedComboId, setSelectedComboIdRaw] = useState("");
 
   const hydratedForKeyRef = useRef("");
   const hydratingRef = useRef(false);
 
   const anonKey = useMemo(() => equipKey("anon"), []);
-  // Key off effectiveUserId so admin's selection is stored separately from target's
-  const userKey = useMemo(() => equipKey(effectiveUserId), [effectiveUserId]);
-  const effectiveKey = effectiveUserId ? userKey : anonKey;
+  const userKey = useMemo(() => equipKey(authUserId), [authUserId]);
+  const effectiveKey = authUserId ? userKey : anonKey;
+
+  // In setup mode, wrap setSelectedComboId to skip localStorage writes
+  const setSelectedComboId = useCallback((id: string) => {
+    setSelectedComboIdRaw(id);
+    if (!isSetup) {
+      // Normal mode — persist to localStorage
+      writePersistedEquip(anonKey, id);
+      if (authUserId) writePersistedEquip(userKey, id);
+    }
+  }, [isSetup, authUserId, anonKey, userKey]);
 
   // ── Primary equipment (starred trucks/trailers) ───────────────────────────
 
@@ -71,7 +82,6 @@ export function useEquipment(authUserId: string, setupSession?: SetupSession | n
   const loadPrimaryEquipment = useCallback(async () => {
     if (!effectiveUserId) return;
     if (isSetup) {
-      // Route through service role proxy
       try {
         const { primaryTruckIds: tIds, primaryTrailerIds: trIds } =
           await getPrimaryEquipment(effectiveUserId);
@@ -159,15 +169,28 @@ export function useEquipment(authUserId: string, setupSession?: SetupSession | n
     if (effectiveUserId) loadPrimaryEquipment();
   }, [effectiveUserId, loadPrimaryEquipment]);
 
-  // ── Restore persisted selection (after combos load) ───────────────────────
+  // ── Selection logic ───────────────────────────────────────────────────────
+  // Setup mode: derive from claimed_by on combos — no localStorage involved
+  // Normal mode: restore from localStorage after combos load
 
   useEffect(() => {
     if (combosLoading) return;
+
+    if (isSetup) {
+      // Derive selection from whichever combo is claimed by the target user
+      const claimed = combos.find(
+        (c) => String(c.claimed_by ?? "") === String(effectiveUserId)
+      );
+      setSelectedComboIdRaw(claimed ? String(claimed.combo_id) : "");
+      return;
+    }
+
+    // Normal mode — restore from localStorage
     if (hydratedForKeyRef.current === effectiveKey) return;
 
     hydratingRef.current = true;
 
-    const fromUser = effectiveUserId ? readPersistedEquip(userKey) : null;
+    const fromUser = authUserId ? readPersistedEquip(userKey) : null;
     const fromAnon = readPersistedEquip(anonKey);
     const saved = fromUser ?? fromAnon;
 
@@ -175,25 +198,25 @@ export function useEquipment(authUserId: string, setupSession?: SetupSession | n
       const exists = combos.some(
         (c) => String(c.combo_id) === String(saved.comboId) && c.active !== false
       );
-      setSelectedComboId(exists ? String(saved.comboId) : "");
+      setSelectedComboIdRaw(exists ? String(saved.comboId) : "");
 
-      if (effectiveUserId && !fromUser && fromAnon) {
+      if (authUserId && !fromUser && fromAnon) {
         writePersistedEquip(userKey, fromAnon.comboId);
       }
     }
 
     hydratedForKeyRef.current = effectiveKey;
     hydratingRef.current = false;
-  }, [effectiveUserId, effectiveKey, userKey, anonKey, combosLoading, combos]);
+  }, [combosLoading, combos, isSetup, effectiveUserId, authUserId, effectiveKey, userKey, anonKey]);
 
-  // ── Persist on change ─────────────────────────────────────────────────────
-
+  // Re-derive setup selection whenever combos refresh (e.g. after claim/slip seat)
   useEffect(() => {
-    if (hydratedForKeyRef.current !== effectiveKey) return;
-    if (hydratingRef.current) return;
-    writePersistedEquip(anonKey, selectedComboId);
-    if (effectiveUserId) writePersistedEquip(userKey, selectedComboId);
-  }, [effectiveUserId, effectiveKey, userKey, anonKey, selectedComboId]);
+    if (!isSetup || combosLoading) return;
+    const claimed = combos.find(
+      (c) => String(c.claimed_by ?? "") === String(effectiveUserId)
+    );
+    setSelectedComboIdRaw(claimed ? String(claimed.combo_id) : "");
+  }, [combos, isSetup, effectiveUserId, combosLoading]);
 
   // ── Derived ───────────────────────────────────────────────────────────────
 
