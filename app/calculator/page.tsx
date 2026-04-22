@@ -1364,6 +1364,7 @@ const lastProductInfoById = useMemo(() => {
         setTerminals={terminals.setTerminals}
         setSelectedTerminalId={location.setSelectedTerminalId}
         setTermOpen={setTermOpen}
+        authUserId={authUserId}
       />
 
       <ExpirationModal
