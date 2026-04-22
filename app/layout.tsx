@@ -16,6 +16,7 @@ export const viewport: Viewport = {
   themeColor: "#111111",
   width: "device-width",
   initialScale: 1,
+  colorScheme: "dark",
 };
 
 export const metadata: Metadata = {
@@ -39,8 +40,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
+    <html lang="en" style={{ colorScheme: "dark" }}>
+      <head>
+        <meta name="color-scheme" content="dark" />
+      </head>
+      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`} style={{ background: "#111111" }}>
         {children}
       </body>
     </html>
