@@ -252,7 +252,7 @@ export default function SourcingModal({ open, onClose, terminalId, terminalName,
                         border: "1px solid rgba(255,255,255,0.14)",
                         background: "rgba(255,255,255,0.06)",
                       }}>
-                        <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+                        <div style={{ display: "flex", gap: 8, marginBottom: 10, minWidth: 0, overflow: "hidden" }}>
                           <input
                             type="text"
                             value={row.account}
@@ -260,7 +260,7 @@ export default function SourcingModal({ open, onClose, terminalId, terminalName,
                             placeholder="Account"
                             autoFocus
                             style={{
-                              flex: "0 0 33%", padding: "10px 12px", borderRadius: 10,
+                              flex: "0 0 33%", minWidth: 0, boxSizing: "border-box" as const, padding: "10px 12px", borderRadius: 10,
                               border: "1px solid rgba(255,255,255,0.14)",
                               background: "rgba(0,0,0,0.40)", color: "rgba(255,255,255,0.92)",
                               fontSize: 15, fontWeight: 700, outline: "none",
@@ -272,7 +272,7 @@ export default function SourcingModal({ open, onClose, terminalId, terminalName,
                             onChange={(e) => updateField(row.id, "number", e.target.value)}
                             placeholder="Number"
                             style={{
-                              flex: "1 1 0", padding: "10px 12px", borderRadius: 10,
+                              flex: "1 1 0", minWidth: 0, boxSizing: "border-box" as const, padding: "10px 12px", borderRadius: 10,
                               border: "1px solid rgba(255,255,255,0.14)",
                               background: "rgba(0,0,0,0.40)", color: "rgba(255,255,255,0.92)",
                               fontSize: 15, fontWeight: 700, outline: "none",

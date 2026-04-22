@@ -63,7 +63,7 @@ export function useEquipment(authUserId: string, setupSession?: SetupSession | n
   // In setup mode, wrap setSelectedComboId to skip localStorage writes
   const setSelectedComboId = useCallback((id: string) => {
     setSelectedComboIdRaw(id);
-    if (!isSetup) {
+    if (!isSetup && id) {
       // Normal mode — persist to localStorage
       writePersistedEquip(anonKey, id);
       if (authUserId) writePersistedEquip(userKey, id);
