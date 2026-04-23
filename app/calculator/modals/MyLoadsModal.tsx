@@ -338,7 +338,8 @@ function shareBtnStyle(color?: string): React.CSSProperties {
 function LoadRow({ row, expanded, selected, onToggle, lines, linesLoading, terminalCatalog, combos }: {
   row: LoadHistoryRow; expanded: boolean; selected: boolean; onToggle: () => void;
   lines: LoadHistoryLine[] | undefined; linesLoading: boolean;
-  terminalCatalog: any[]; combos: any[];
+  terminalCatalog: any[];
+  headerOverride?: string; combos: any[];
 }) {
   const cityState = [row.city_name, row.state_code].filter(Boolean).join(", ");
 
@@ -423,6 +424,7 @@ type Props = {
   onFetchLines: (loadId: string, plannedSnapshot?: any, productTempF?: number | null) => void;
   onFetchRange: (days: number | null) => void;
   terminalCatalog: any[];
+  headerOverride?: string;
   combos: any[];
 };
 
@@ -432,6 +434,7 @@ export default function MyLoadsModal({
   linesCache, linesLoading,
   onFetchLines, onFetchRange,
   terminalCatalog, combos,
+  headerOverride,
 }: Props) {
   const [search, setSearch] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -507,7 +510,7 @@ export default function MyLoadsModal({
         {/* Header */}
         <div style={{ display: "flex", alignItems: "center", padding: "4px 18px 10px", gap: 10 }}>
           <div style={{ flex: 1, display: "flex", alignItems: "baseline", gap: 8 }}>
-            <div style={{ fontSize: 20, fontWeight: 900, color: "rgba(255,255,255,0.92)", letterSpacing: 0.2 }}>My Loads</div>
+            <div style={{ fontSize: 20, fontWeight: 900, color: "rgba(255,255,255,0.92)", letterSpacing: 0.2 }}>{headerOverride ?? "My Loads"}</div>
             {!loading && <div style={{ fontSize: 13, color: "rgba(255,255,255,0.28)", fontWeight: 600 }}>{filtered.length}</div>}
           </div>
           <button onClick={onClose} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.85)", fontSize: 22, fontWeight: 900, cursor: "pointer", lineHeight: 1, padding: "0 2px", flexShrink: 0 }}>×</button>

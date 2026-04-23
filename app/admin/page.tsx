@@ -15,6 +15,7 @@ import { Modal, Field, FieldRow, Banner, SubSectionTitle } from "@/lib/ui/driver
 import { MemberCard } from "@/lib/ui/driver/MemberCard";
 import { DriverProfileModal } from "@/lib/ui/driver/DriverProfileModal";
 import type { Member } from "@/lib/ui/driver/types";
+import AdminLoadsModal from "./AdminLoadsModal";
 
 // ─────────────────────────────────────────────────────────────
 // Types
@@ -1033,6 +1034,7 @@ export default function AdminPage() {
 
   const [inviteModal,  setInviteModal]  = useState(false);
   const [profileModal, setProfileModal] = useState<{ member: Member; onSaved: (u: Partial<Member>) => void } | null>(null);
+  const [loadsModal, setLoadsModal] = useState<{ userId: string; displayName: string } | null>(null);
   const [truckModal,   setTruckModal]   = useState<Truck | null | "new">(null);
   const [trailerModal, setTrailerModal] = useState<Trailer | null | "new">(null);
   const [comboModal,   setComboModal]   = useState<Combo | null | "new">(null);
@@ -1309,13 +1311,25 @@ export default function AdminPage() {
                     <div key={m.user_id} style={{ position: "relative" }}>
                       <MemberCard member={m} companyId={companyId!} onRefresh={loadAll} onEditProfile={(member, onSaved) => setProfileModal({ member, onSaved })} currentUserId={currentUserId} />
                       {myRole === "admin" && m.user_id !== currentUserId && (
-                        <button
-                          type="button"
-                          onClick={() => setupForUser(m)}
-                          style={{ position: "absolute", bottom: 10, right: 12, fontSize: 11, fontWeight: 700, padding: "4px 10px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.60)", cursor: "pointer" }}
-                        >
-                          Set up planner →
-                        </button>
+                        <div style={{ position: "absolute", bottom: 10, right: 12, display: "flex", gap: 6 }}>
+                          <button
+                            type="button"
+                            onClick={() => setLoadsModal({ userId: m.user_id, displayName: m.display_name ?? m.email ?? m.user_id })}
+                            style={{ fontSize: 11, fontWeight: 700, padding: "4px 10px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.45)", cursor: "pointer", whiteSpace: "nowrap" as const }}
+                          >
+                            {(() => {
+                              // No last load info at this level — just show "Loads"
+                              return "Loads";
+                            })()}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setupForUser(m)}
+                            style={{ fontSize: 11, fontWeight: 700, padding: "4px 10px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.60)", cursor: "pointer", whiteSpace: "nowrap" as const }}
+                          >
+                            Set up planner →
+                          </button>
+                        </div>
                       )}
                     </div>
                   ))
@@ -1534,6 +1548,15 @@ export default function AdminPage() {
           />
         );
       })()}
+
+      {loadsModal && (
+        <AdminLoadsModal
+          open={!!loadsModal}
+          onClose={() => setLoadsModal(null)}
+          targetUserId={loadsModal.userId}
+          targetDisplayName={loadsModal.displayName}
+        />
+      )}
     </div>
   );
 }
