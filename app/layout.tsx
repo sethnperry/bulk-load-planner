@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import ServiceWorkerRegistration from "@/components/ServiceWorkerRegistration";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -40,11 +41,18 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" style={{ colorScheme: "dark" }}>
+    <html lang="en" style={{ colorScheme: "dark", background: "#111111" }}>
       <head>
         <meta name="color-scheme" content="dark" />
+        <meta name="theme-color" content="#111111" />
+        <meta name="theme-color" media="(prefers-color-scheme: light)" content="#111111" />
+        <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#111111" />
       </head>
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`} style={{ background: "#111111" }}>
+      <body
+        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        style={{ background: "#111111", colorScheme: "dark" }}
+      >
+        <ServiceWorkerRegistration />
         {children}
       </body>
     </html>
