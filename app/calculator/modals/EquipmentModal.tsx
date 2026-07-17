@@ -1674,6 +1674,16 @@ export default function EquipmentModal({
                         {busy ? "…" : "DECOUPLE"}
                       </button>
                     )}
+                    {mine && !sel && (
+                      <button
+                        type="button"
+                        style={{ ...S.btn, ...S.btnPrimary, opacity: busy ? 0.55 : 1 }}
+                        onClick={(e) => { e.stopPropagation(); handleClaim(cid); }}
+                        disabled={busy}
+                      >
+                        {busy ? "…" : "SELECT"}
+                      </button>
+                    )}
                     {!mine && !inUse && !(sel && !c.claimed_by) && (
                       <button
                         type="button"
