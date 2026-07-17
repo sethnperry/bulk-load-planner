@@ -1,10 +1,12 @@
 "use client";
+import { motion } from "framer-motion";
 import NavMenu from "@/lib/ui/NavMenu";
 import { getSetupSession, clearSetupSession } from "@/lib/setupSession";
 import type { SetupSession } from "@/lib/setupSession";
 import { useRouter } from "next/navigation";
 import { useTour } from "./hooks/useTour";
 import TourOverlay from "./components/TourOverlay";
+import SetupGate from "./components/SetupGate";
 import ExpirationAlertBar from "./components/ExpirationAlertBar";
 import ExpirationModal from "./modals/ExpirationModal";
 import { useExpirations } from "./hooks/useExpirations";
@@ -217,6 +219,15 @@ export default function CalculatorPage() {
       );
     }
   };
+
+  // Framer-motion's layoutId shared-element transitions render a differently
+  // serialized `style` attribute server-side vs. after hydration (e.g. its
+  // color values gain spaces: "rgba(255,255,255,0.45)" -> "rgba(255, 255,
+  // 255, 0.45)"), which is a real, uncorrected hydration mismatch React won't
+  // patch up. Render plain <button>s for SSR/first paint and only swap to
+  // motion.button post-mount, so hydration always diffs identical DOM.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
 
   // ── Modal open/close flags ─────────────────────────────────────────────────
   const [equipOpen, setEquipOpen] = useState(false);
@@ -929,18 +940,30 @@ const lastProductInfoById = useMemo(() => {
 
       {/* Equipment header + nav menu on same line */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, gap: 12 }}>
-        <button type="button" id="tour-equipment-btn" onClick={() => { setEquipOpen(true); tourAdvanceIfTarget("tour-equipment-btn"); }}
-          style={{
-            background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)",
-            borderRadius: 14, padding: "8px 16px",
-            cursor: "pointer", textAlign: "left" as const,
-            color: equipment.selectedCombo ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.45)",
-            fontWeight: 900, fontSize: "clamp(16px, 2.6vw, 24px)", letterSpacing: 0.2,
-          }}
-          aria-label="Select equipment"
-        >
-          {equipment.equipmentLabel ?? "Select Equipment"}
-        </button>
+        {(() => {
+          const equipmentBtnProps = {
+            type: "button" as const,
+            id: "tour-equipment-btn",
+            onClick: () => { setEquipOpen(true); tourAdvanceIfTarget("tour-equipment-btn"); },
+            style: {
+              background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)",
+              borderRadius: 14, padding: "8px 16px",
+              cursor: "pointer", textAlign: "left" as const,
+              color: equipment.selectedCombo ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.45)",
+              fontWeight: 900, fontSize: "clamp(16px, 2.6vw, 24px)", letterSpacing: 0.2,
+            },
+            "aria-label": "Select equipment",
+          };
+          return mounted ? (
+            <motion.button {...equipmentBtnProps} layoutId="setup-equipment-btn">
+              {equipment.equipmentLabel ?? "Select Equipment"}
+            </motion.button>
+          ) : (
+            <button {...equipmentBtnProps}>
+              {equipment.equipmentLabel ?? "Select Equipment"}
+            </button>
+          );
+        })()}
         {(expirations.expiredCount > 0 || expirations.warningCount > 0) ? (
           <ExpirationAlertBar
             items={expirations.items}
@@ -1111,27 +1134,54 @@ const lastProductInfoById = useMemo(() => {
               {/* Combined Location / Terminal card */}
               <div style={{ ...cardBase }}>
                 {/* Location sub-button at top */}
-                <button type="button" id="tour-location-btn" onClick={() => { setLocOpen(true); tourAdvanceIfTarget("tour-location-btn"); }} style={subBtnStyle}>
-                  <span style={{ ...subBtnLabel, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
-                    {locationSelected ? locationLabel! : "Location"}
-                  </span>
-                  <span style={subBtnChevron}>›</span>
-                </button>
+                {(() => {
+                  const locationBtnProps = {
+                    type: "button" as const,
+                    id: "tour-location-btn",
+                    onClick: () => { setLocOpen(true); tourAdvanceIfTarget("tour-location-btn"); },
+                    style: subBtnStyle,
+                  };
+                  const locationBtnChildren = (
+                    <>
+                      <span style={{ ...subBtnLabel, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
+                        {locationSelected ? locationLabel! : "Location"}
+                      </span>
+                      <span style={subBtnChevron}>›</span>
+                    </>
+                  );
+                  return mounted ? (
+                    <motion.button {...locationBtnProps} layoutId="setup-location-btn">{locationBtnChildren}</motion.button>
+                  ) : (
+                    <button {...locationBtnProps}>{locationBtnChildren}</button>
+                  );
+                })()}
                 {/* Terminal main area */}
-                <button type="button" id="tour-terminal-btn"
-                  onClick={() => { setTermOpen(true); tourAdvanceIfTarget("tour-terminal-btn"); }}
-                  disabled={!locationSelected}
-                  style={{ flex: 1, background: "transparent", border: "none", cursor: locationSelected ? "pointer" : "default", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "flex-start", padding: "10px 12px", minHeight: 54 }}
-                >
-                  <div style={{ fontWeight: 700, fontSize: "clamp(12px, 3.2vw, 15px)", color: terminalSelected ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.40)", lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const, width: "100%", textAlign: "center" as const }}>
-                    {terminalSelected ? (terminalLabel ?? "Terminal") : (locationSelected ? "Tap to select" : "Select location first")}
-                  </div>
-                  {terminalSelected && termDuration && (
-                    <div style={{ marginTop: 4, fontSize: "clamp(10px, 2.5vw, 12px)", fontWeight: 600, color: termDurationColor, lineHeight: 1.2, textAlign: "center" as const, width: "100%" }}>
-                      {termDuration === "Expired" ? "Expired" : `Expires in ${termDuration}`}
-                    </div>
-                  )}
-                </button>
+                {(() => {
+                  const terminalBtnProps = {
+                    type: "button" as const,
+                    id: "tour-terminal-btn",
+                    onClick: () => { setTermOpen(true); tourAdvanceIfTarget("tour-terminal-btn"); },
+                    disabled: !locationSelected,
+                    style: { flex: 1, background: "transparent", border: "none", cursor: locationSelected ? "pointer" : "default", display: "flex", flexDirection: "column" as const, justifyContent: "center" as const, alignItems: "flex-start" as const, padding: "10px 12px", minHeight: 54 },
+                  };
+                  const terminalBtnChildren = (
+                    <>
+                      <div style={{ fontWeight: 700, fontSize: "clamp(12px, 3.2vw, 15px)", color: terminalSelected ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.40)", lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const, width: "100%", textAlign: "center" as const }}>
+                        {terminalSelected ? (terminalLabel ?? "Terminal") : (locationSelected ? "Tap to select" : "Select location first")}
+                      </div>
+                      {terminalSelected && termDuration && (
+                        <div style={{ marginTop: 4, fontSize: "clamp(10px, 2.5vw, 12px)", fontWeight: 600, color: termDurationColor, lineHeight: 1.2, textAlign: "center" as const, width: "100%" }}>
+                          {termDuration === "Expired" ? "Expired" : `Expires in ${termDuration}`}
+                        </div>
+                      )}
+                    </>
+                  );
+                  return mounted ? (
+                    <motion.button {...terminalBtnProps} layoutId="setup-terminal-btn">{terminalBtnChildren}</motion.button>
+                  ) : (
+                    <button {...terminalBtnProps}>{terminalBtnChildren}</button>
+                  );
+                })()}
                 {/* Card number strip — matches Over/Under strip on report card */}
                 {(() => {
                   const tid = location.selectedTerminalId ? String(location.selectedTerminalId) : null;
@@ -1237,6 +1287,17 @@ const lastProductInfoById = useMemo(() => {
             
       {/* ── Guided tour overlay ── */}
       <TourOverlay tour={tour} />
+      <SetupGate
+        comboSelected={!!equipment.selectedComboId}
+        locationSelected={!!(location.selectedState && location.selectedCity)}
+        terminalSelected={!!location.selectedTerminalId}
+        equipmentLabel={equipment.equipmentLabel}
+        locationLabel={location.locationLabel}
+        terminalLabel={terminalLabel}
+        onOpenEquipment={() => setEquipOpen(true)}
+        onOpenLocation={() => setLocOpen(true)}
+        onOpenTerminal={() => setTermOpen(true)}
+      />
       {/* Tour anchor elements for state-wait steps */}
       <div id="tour-location-instruction" style={{ display: "none" }} />
       <div id="tour-terminal-instruction" style={{ display: "none" }} />
