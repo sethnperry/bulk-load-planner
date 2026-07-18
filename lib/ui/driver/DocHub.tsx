@@ -108,6 +108,52 @@ export function useAttachments(
 }
 
 // ─────────────────────────────────────────────────────────────
+// usePermitAttachments — same table, grouped by the new dynamic
+// permit_type_id column instead of the old fixed `category` string.
+// Used by the Binder redesign (permit_types/equipment_permits); the
+// category-based useAttachments above is untouched and still backs the
+// old fleet-tier admin screens.
+// ─────────────────────────────────────────────────────────────
+
+export function usePermitAttachments(
+  equipmentType: EquipmentType | null,
+  equipmentId: string | null,
+  companyId: string | null,
+) {
+  const [groups, setGroups]   = useState<Map<string, AttachmentRecord[]>>(new Map());
+  const [loading, setLoading] = useState(false);
+
+  const load = useCallback(async () => {
+    if (!equipmentType || !equipmentId || !companyId) { setGroups(new Map()); return; }
+    setLoading(true);
+    const { data } = await supabase
+      .from("equipment_attachments")
+      .select("id, category, category_label, file_path, original_name, mime_type, page_order, uploaded_at, permit_type_id")
+      .eq("company_id", companyId)
+      .eq("equipment_type", equipmentType)
+      .eq("equipment_id", equipmentId)
+      .not("permit_type_id", "is", null)
+      .order("page_order");
+    setLoading(false);
+    if (!data) return;
+
+    const map = new Map<string, AttachmentRecord[]>();
+    for (const row of data as (AttachmentRecord & { permit_type_id: string })[]) {
+      if (!map.has(row.permit_type_id)) map.set(row.permit_type_id, []);
+      map.get(row.permit_type_id)!.push(row);
+    }
+    setGroups(map);
+  }, [equipmentType, equipmentId, companyId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const pagesFor = useCallback((permitTypeId: string) => groups.get(permitTypeId) ?? [], [groups]);
+  const hasDoc = useCallback((permitTypeId: string) => (groups.get(permitTypeId)?.length ?? 0) > 0, [groups]);
+
+  return { loading, reload: load, pagesFor, hasDoc };
+}
+
+// ─────────────────────────────────────────────────────────────
 // AttachmentIndicator — paperclip shown next to permit rows
 // ─────────────────────────────────────────────────────────────
 

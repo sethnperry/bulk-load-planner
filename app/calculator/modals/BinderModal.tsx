@@ -1,0 +1,732 @@
+"use client";
+// modals/BinderModal.tsx
+//
+// Solo-tier Binder redesign -- equipment-settings-spec.md §7. Replaces the
+// old fixed permit-category system (trucks.reg_expiration_date,
+// trailers.tank_v_expiration_date, etc. -- see CLAUDE.md) with a company-
+// managed permit_types + equipment_permits system, mirroring the
+// service_types pattern exactly: the driver can create, rename, and
+// soft-delete permit categories per unit type (truck/trailer/both), and
+// view/upload documents + edit expiration dates directly here.
+//
+// Deliberately NOT touched by this pass: the old hardcoded columns,
+// truck_other_permits, and the fleet-tier admin equipment screens
+// (app/admin/page.tsx, lib/ui/driver/EquipmentDetails.tsx) -- those keep
+// reading/writing the old columns until a later pass migrates them too,
+// consistent with this app's solo-tier-first rollout.
+
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { supabase } from "@/lib/supabase/client";
+import { FullscreenModal } from "@/lib/ui/FullscreenModal";
+import { CustomSelect } from "@/lib/ui/CustomSelect";
+import {
+  usePermitAttachments, AttachmentIndicator, DocPreviewModal,
+  type AttachmentRecord, type AttachmentGroup,
+} from "@/lib/ui/driver/DocHub";
+
+type PermitType = {
+  permit_type_id: string;
+  name: string;
+  applies_to: "truck" | "trailer" | "both";
+  is_active: boolean;
+};
+type PermitRecord = {
+  equipment_permit_id: string;
+  truck_id: string | null;
+  trailer_id: string | null;
+  permit_type_id: string;
+  expiration_date: string | null;
+  enforcement_date: string | null;
+  notes: string | null;
+};
+
+type UnitDetail = {
+  year: number | null;
+  make: string | null;
+  model: string | null;
+  vin_number: string | null;
+  plate_number: string | null;
+  notes: string | null;
+};
+
+type UnitKind = "truck" | "trailer";
+type Row = {
+  id: string; // `${unitKind}-${permit_type_id}`
+  type: PermitType;
+  record: PermitRecord | null;
+  daysLeft: number | null;
+  expired: boolean;
+};
+
+function fmtDate(iso: string): string {
+  return new Date(iso + "T00:00:00").toLocaleDateString(undefined, { month: "2-digit", day: "2-digit", year: "numeric" });
+}
+function daysUntil(iso: string): number {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const exp = new Date(iso + "T00:00:00");
+  return Math.round((exp.getTime() - today.getTime()) / 86400000);
+}
+function statusColor(row: Row): string {
+  if (!row.record?.expiration_date) return "rgba(255,255,255,0.3)";
+  if (row.expired) return "#ef4444";
+  if (row.daysLeft != null && row.daysLeft <= 30) return "#fbbf24";
+  return "rgba(255,255,255,0.6)";
+}
+function statusText(row: Row): string {
+  if (!row.record?.expiration_date) return "Not set";
+  if (row.expired) return `Expired ${fmtDate(row.record.expiration_date)}`;
+  if (row.daysLeft != null && row.daysLeft <= 30) return `Expires ${fmtDate(row.record.expiration_date)}`;
+  return fmtDate(row.record.expiration_date);
+}
+
+const inputStyle: React.CSSProperties = {
+  width: "100%", borderRadius: 10, padding: "9px 11px", border: "1px solid rgba(255,255,255,0.16)",
+  background: "rgba(0,0,0,0.3)", color: "#fff", fontSize: 14, boxSizing: "border-box",
+};
+const labelStyle: React.CSSProperties = { fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.4)", marginBottom: 4, display: "block" };
+const saveBtnStyle: React.CSSProperties = {
+  flex: 1, padding: "12px 14px", borderRadius: 12, border: "1px solid rgba(255,255,255,0.20)",
+  background: "rgba(255,255,255,0.12)", color: "#fff", fontWeight: 800, fontSize: 14, cursor: "pointer",
+};
+const cancelBtnStyle: React.CSSProperties = {
+  flex: 1, padding: "12px 14px", borderRadius: 12, border: "1px solid rgba(255,255,255,0.14)",
+  background: "rgba(255,255,255,0.06)", color: "#fff", fontWeight: 700, fontSize: 14, cursor: "pointer",
+};
+const dangerBtnStyle: React.CSSProperties = {
+  padding: "12px 14px", borderRadius: 12, border: "1px solid rgba(220,60,60,0.4)",
+  background: "rgba(180,40,40,0.12)", color: "#fca5a5", fontWeight: 800, fontSize: 14, cursor: "pointer",
+};
+
+// ─── Permit type editor (rename / change applies_to / soft-delete) ──────────
+
+function PermitTypeEditorModal({
+  open, onClose, companyId, mode, type, unit, onSaved, onDeleted,
+}: {
+  open: boolean;
+  onClose: () => void;
+  companyId: string;
+  mode: "new" | "edit";
+  type: PermitType | null;
+  unit: UnitKind;
+  onSaved: () => void;
+  onDeleted: () => void;
+}) {
+  const [name, setName] = useState("");
+  const [appliesTo, setAppliesTo] = useState<PermitType["applies_to"]>("both");
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setConfirmingDelete(false);
+    setErr(null);
+    if (mode === "edit" && type) {
+      setName(type.name);
+      setAppliesTo(type.applies_to);
+    } else {
+      setName("");
+      setAppliesTo(unit);
+    }
+  }, [open, mode, type, unit]);
+
+  async function save() {
+    if (!name.trim()) { setErr("Enter a permit name."); return; }
+    setBusy(true);
+    setErr(null);
+    try {
+      if (mode === "edit" && type) {
+        const { error } = await supabase.from("permit_types").update({ name: name.trim(), applies_to: appliesTo }).eq("permit_type_id", type.permit_type_id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from("permit_types").insert({ company_id: companyId, name: name.trim(), applies_to: appliesTo });
+        if (error) throw error;
+      }
+      onSaved();
+    } catch (e: any) {
+      setErr(e?.message ?? "Failed to save permit type.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmDelete() {
+    if (!type) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const { error } = await supabase.from("permit_types").update({ is_active: false }).eq("permit_type_id", type.permit_type_id);
+      if (error) throw error;
+      onDeleted();
+    } catch (e: any) {
+      setErr(e?.message ?? "Failed to delete permit type.");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <FullscreenModal open={open} onClose={onClose} title={mode === "edit" ? "Edit Permit Type" : "New Permit Type"} footer={null}>
+      <div style={{ display: "grid", gap: 14 }}>
+        {err && <div style={{ color: "#fca5a5", fontSize: 13 }}>{err}</div>}
+
+        {!confirmingDelete ? (
+          <>
+            <div>
+              <label style={labelStyle}>Permit name</label>
+              <input placeholder="e.g. Registration, IFTA, Tank V" value={name} onChange={(e) => setName(e.target.value)} style={inputStyle} />
+            </div>
+            <div>
+              <label style={labelStyle}>Applies to</label>
+              <CustomSelect
+                value={appliesTo}
+                onChange={(v) => setAppliesTo(v as any)}
+                options={[
+                  { value: "both", label: "Truck & Trailer" },
+                  { value: "truck", label: "Truck only" },
+                  { value: "trailer", label: "Trailer only" },
+                ]}
+              />
+            </div>
+
+            <button type="button" onClick={save} disabled={busy} style={saveBtnStyle}>{busy ? "Saving…" : "Save"}</button>
+
+            {mode === "edit" && (
+              <button type="button" onClick={() => setConfirmingDelete(true)} disabled={busy} style={{ ...dangerBtnStyle, width: "100%" }}>
+                Delete permit type
+              </button>
+            )}
+          </>
+        ) : (
+          <>
+            <div style={{ fontWeight: 900, fontSize: 16 }}>Delete &quot;{type?.name}&quot;?</div>
+            <div style={{ fontSize: 13, color: "rgba(255,255,255,0.55)", lineHeight: 1.6 }}>
+              This only affects future entries -- it stops showing up as an option going forward. Existing dates and documents already recorded under it are unaffected.
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button type="button" onClick={() => setConfirmingDelete(false)} disabled={busy} style={cancelBtnStyle}>Cancel</button>
+              <button type="button" onClick={confirmDelete} disabled={busy} style={{ ...dangerBtnStyle, flex: 1 }}>
+                {busy ? "Deleting…" : "Delete"}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </FullscreenModal>
+  );
+}
+
+// ─── Unit info row (year/make/model/VIN/plate/notes) ────────────────────────
+// Collapsed, this is just the section header ("Truck · 25184"). Tapping it
+// expands a read-only summary of the unit's own details, with a bottom Edit
+// button that swaps the summary for editable fields (Save/Cancel) --
+// mirroring the same expand-then-edit convention as the permit rows below.
+
+function InfoField({ label, value, full }: { label: string; value: string; full?: boolean }) {
+  return (
+    <div style={{ gridColumn: full ? "1 / -1" : undefined }}>
+      <div style={{ fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.35)", marginBottom: 2, textTransform: "uppercase" as const, letterSpacing: 0.4 }}>{label}</div>
+      <div style={{ fontSize: 13, color: "rgba(255,255,255,0.85)" }}>{value}</div>
+    </div>
+  );
+}
+
+function UnitInfoRow({
+  unitKind, unitId, unitName, detail, isExpanded, onToggleExpand, onSaved,
+}: {
+  unitKind: UnitKind;
+  unitId: string;
+  unitName: string;
+  detail: UnitDetail | null;
+  isExpanded: boolean;
+  onToggleExpand: () => void;
+  onSaved: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [year, setYear] = useState("");
+  const [make, setMake] = useState("");
+  const [model, setModel] = useState("");
+  const [vin, setVin] = useState("");
+  const [plate, setPlate] = useState("");
+  const [notes, setNotes] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isExpanded) { setEditing(false); return; }
+    setYear(detail?.year != null ? String(detail.year) : "");
+    setMake(detail?.make ?? "");
+    setModel(detail?.model ?? "");
+    setVin(detail?.vin_number ?? "");
+    setPlate(detail?.plate_number ?? "");
+    setNotes(detail?.notes ?? "");
+    setErr(null);
+  }, [isExpanded, detail]);
+
+  async function save() {
+    setBusy(true);
+    setErr(null);
+    try {
+      const table = unitKind === "truck" ? "trucks" : "trailers";
+      const idCol = unitKind === "truck" ? "truck_id" : "trailer_id";
+      const patch = {
+        year: year.trim() ? Number(year) : null,
+        make: make.trim() || null,
+        model: model.trim() || null,
+        vin_number: vin.trim() || null,
+        plate_number: plate.trim() || null,
+        notes: notes.trim() || null,
+      };
+      const { error } = await supabase.from(table).update(patch).eq(idCol, unitId);
+      if (error) throw error;
+      setEditing(false);
+      onSaved();
+    } catch (e: any) {
+      setErr(e?.message ?? "Failed to save.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const summary = [detail?.year, detail?.make, detail?.model].filter(Boolean).join(" ");
+
+  return (
+    <div style={{ marginBottom: 8 }}>
+      <div onClick={onToggleExpand} style={{ display: "flex", alignItems: "baseline", gap: 8, cursor: "pointer", padding: "2px 0 8px" }}>
+        <span style={{ fontSize: 13, fontWeight: 800, color: "rgba(255,255,255,0.5)", letterSpacing: 0.5, textTransform: "uppercase" as const }}>
+          {unitKind === "truck" ? "Truck" : "Trailer"} · {unitName}
+        </span>
+        {summary && <span style={{ fontSize: 12, color: "rgba(255,255,255,0.3)", textTransform: "none" as const }}>{summary}</span>}
+      </div>
+
+      {isExpanded && (
+        <div style={{ paddingBottom: 14, borderBottom: "1px solid rgba(255,255,255,0.07)", marginBottom: 4 }} onClick={(e) => e.stopPropagation()}>
+          {err && <div style={{ color: "#fca5a5", fontSize: 12, marginBottom: 8 }}>{err}</div>}
+
+          {!editing ? (
+            <>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 12 }}>
+                <InfoField label="Year" value={detail?.year != null ? String(detail.year) : "—"} />
+                <InfoField label="Make" value={detail?.make || "—"} />
+                <InfoField label="Model" value={detail?.model || "—"} />
+                <InfoField label="Plate" value={detail?.plate_number || "—"} />
+                <InfoField label="VIN" value={detail?.vin_number || "—"} full />
+                {detail?.notes && <InfoField label="Notes" value={detail.notes} full />}
+              </div>
+              <button type="button" onClick={() => setEditing(true)} style={saveBtnStyle}>Edit</button>
+            </>
+          ) : (
+            <>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
+                <div><label style={labelStyle}>Year</label><input type="number" value={year} onChange={(e) => setYear(e.target.value)} style={inputStyle} /></div>
+                <div><label style={labelStyle}>Make</label><input value={make} onChange={(e) => setMake(e.target.value)} style={inputStyle} /></div>
+                <div><label style={labelStyle}>Model</label><input value={model} onChange={(e) => setModel(e.target.value)} style={inputStyle} /></div>
+                <div><label style={labelStyle}>Plate</label><input value={plate} onChange={(e) => setPlate(e.target.value)} style={inputStyle} /></div>
+              </div>
+              <div style={{ marginBottom: 10 }}>
+                <label style={labelStyle}>VIN</label>
+                <input value={vin} onChange={(e) => setVin(e.target.value)} style={inputStyle} />
+              </div>
+              <div style={{ marginBottom: 10 }}>
+                <label style={labelStyle}>Notes</label>
+                <textarea value={notes} onChange={(e) => setNotes(e.target.value)} style={{ ...inputStyle, minHeight: 60, fontFamily: "inherit", resize: "vertical" as const }} />
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button type="button" onClick={() => setEditing(false)} disabled={busy} style={cancelBtnStyle}>Cancel</button>
+                <button type="button" onClick={save} disabled={busy} style={saveBtnStyle}>{busy ? "Saving…" : "Save"}</button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Per-unit permit list section ───────────────────────────────────────────
+
+function UnitSection({
+  unitKind, unitId, unitName, companyId, types, records, detail, expandedId, onToggleExpand,
+  onEditType, onAddType, onSaved,
+}: {
+  unitKind: UnitKind;
+  unitId: string;
+  unitName: string;
+  companyId: string;
+  types: PermitType[];
+  records: PermitRecord[];
+  detail: UnitDetail | null;
+  expandedId: string | null;
+  onToggleExpand: (id: string) => void;
+  onEditType: (t: PermitType) => void;
+  onAddType: () => void;
+  onSaved: () => void;
+}) {
+  const { pagesFor, hasDoc, reload: reloadDocs } = usePermitAttachments(unitKind, unitId, companyId);
+
+  const rows: Row[] = useMemo(() => {
+    const applicable = types.filter((t) => {
+      const usable = t.applies_to === unitKind || t.applies_to === "both";
+      if (!usable) return false;
+      if (t.is_active) return true;
+      // Inactive types still show if this unit already has a recorded date --
+      // deactivating only stops future selection, doesn't hide history.
+      return records.some((r) =>
+        r.permit_type_id === t.permit_type_id &&
+        (unitKind === "truck" ? r.truck_id === unitId : r.trailer_id === unitId)
+      );
+    });
+    return applicable.map((t) => {
+      // Registration/Annual Inspection share one permit_type_id across both
+      // unit types (applies_to='both'), so matching by permit_type_id alone
+      // would grab whichever unit's record happens to come first in the
+      // combined list -- must also check the record actually belongs to
+      // *this* unit.
+      const record = records.find((r) =>
+        r.permit_type_id === t.permit_type_id &&
+        (unitKind === "truck" ? r.truck_id === unitId : r.trailer_id === unitId)
+      ) ?? null;
+      const daysLeft = record?.expiration_date ? daysUntil(record.expiration_date) : null;
+      return { id: `${unitKind}-${t.permit_type_id}`, type: t, record, daysLeft, expired: daysLeft != null && daysLeft < 0 };
+    }).sort((a, b) => {
+      const aNone = a.daysLeft == null, bNone = b.daysLeft == null;
+      if (aNone !== bNone) return aNone ? 1 : -1;
+      if (aNone && bNone) return a.type.name.localeCompare(b.type.name);
+      return (a.daysLeft as number) - (b.daysLeft as number);
+    });
+  }, [types, records, unitKind, unitId]);
+
+  return (
+    <div style={{ marginBottom: 18 }}>
+      <UnitInfoRow
+        unitKind={unitKind} unitId={unitId} unitName={unitName} detail={detail}
+        isExpanded={expandedId === `${unitKind}-info`}
+        onToggleExpand={() => onToggleExpand(`${unitKind}-info`)}
+        onSaved={onSaved}
+      />
+      {rows.map((row) => (
+        <PermitRow
+          key={row.id}
+          row={row}
+          unitKind={unitKind}
+          unitId={unitId}
+          companyId={companyId}
+          isExpanded={expandedId === row.id}
+          onToggleExpand={() => onToggleExpand(row.id)}
+          onEditType={() => onEditType(row.type)}
+          hasDoc={hasDoc(row.type.permit_type_id)}
+          pages={pagesFor(row.type.permit_type_id)}
+          onDocsChanged={reloadDocs}
+          onSaved={onSaved}
+        />
+      ))}
+      <div
+        onClick={onAddType}
+        style={{
+          borderRadius: 10, border: "1px dashed rgba(255,255,255,0.18)", padding: "10px 12px",
+          textAlign: "center" as const, cursor: "pointer", fontSize: 13, fontWeight: 700,
+          color: "rgba(255,255,255,0.35)", marginTop: 4,
+        }}
+      >
+        + Add permit type
+      </div>
+    </div>
+  );
+}
+
+// ─── Single permit row (collapsed + expanded edit/doc/delete) ───────────────
+
+function PermitRow({
+  row, unitKind, unitId, companyId, isExpanded, onToggleExpand, onEditType, hasDoc, pages, onDocsChanged, onSaved,
+}: {
+  row: Row;
+  unitKind: UnitKind;
+  unitId: string;
+  companyId: string;
+  isExpanded: boolean;
+  onToggleExpand: () => void;
+  onEditType: () => void;
+  hasDoc: boolean;
+  pages: AttachmentRecord[];
+  onDocsChanged: () => void;
+  onSaved: () => void;
+}) {
+  const [expDate, setExpDate] = useState("");
+  const [enfDate, setEnfDate] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [previewGroup, setPreviewGroup] = useState<AttachmentGroup | null>(null);
+  const [uploading, setUploading] = useState(false);
+
+  useEffect(() => {
+    if (!isExpanded) return;
+    setExpDate(row.record?.expiration_date ?? "");
+    setEnfDate(row.record?.enforcement_date ?? "");
+    setErr(null);
+    setConfirmingDelete(false);
+  }, [isExpanded, row.record]);
+
+  async function save() {
+    setBusy(true);
+    setErr(null);
+    try {
+      const patch: any = {
+        company_id: companyId,
+        expiration_date: expDate || null,
+        enforcement_date: enfDate || null,
+        permit_type_id: row.type.permit_type_id,
+        truck_id: unitKind === "truck" ? unitId : null,
+        trailer_id: unitKind === "trailer" ? unitId : null,
+      };
+      if (row.record) {
+        const { error } = await supabase.from("equipment_permits").update(patch).eq("equipment_permit_id", row.record.equipment_permit_id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from("equipment_permits").insert(patch);
+        if (error) throw error;
+      }
+      onSaved();
+    } catch (e: any) {
+      setErr(e?.message ?? "Failed to save.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteRecord() {
+    if (!row.record) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      for (const p of pages) {
+        await supabase.storage.from("equipment-docs").remove([p.file_path]);
+        await supabase.from("equipment_attachments").delete().eq("id", p.id);
+      }
+      const { error } = await supabase.from("equipment_permits").delete().eq("equipment_permit_id", row.record.equipment_permit_id);
+      if (error) throw error;
+      onDocsChanged();
+      onSaved();
+    } catch (e: any) {
+      setErr(e?.message ?? "Failed to delete.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function uploadFile(file: File, replace: boolean) {
+    setUploading(true);
+    setErr(null);
+    try {
+      if (replace) {
+        for (const p of pages) {
+          await supabase.storage.from("equipment-docs").remove([p.file_path]);
+          await supabase.from("equipment_attachments").delete().eq("id", p.id);
+        }
+      }
+      const pageOrder = replace ? 0 : pages.length;
+      const ext = file.name.split(".").pop() ?? "bin";
+      const newId = crypto.randomUUID();
+      const filePath = `${companyId}/${unitKind}/${unitId}/permit_${row.type.permit_type_id}/${newId}.${ext}`;
+      const { error: storageErr } = await supabase.storage.from("equipment-docs").upload(filePath, file, { contentType: file.type, upsert: false });
+      if (storageErr) throw storageErr;
+      const { error: dbErr } = await supabase.from("equipment_attachments").insert({
+        id: newId, company_id: companyId, equipment_type: unitKind, equipment_id: unitId,
+        category: row.type.permit_type_id, category_label: row.type.name, permit_type_id: row.type.permit_type_id,
+        file_path: filePath, original_name: file.name, mime_type: file.type || "application/octet-stream", page_order: pageOrder,
+      });
+      if (dbErr) { await supabase.storage.from("equipment-docs").remove([filePath]); throw dbErr; }
+      onDocsChanged();
+    } catch (e: any) {
+      setErr(e?.message ?? "Upload failed.");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function deletePage(page: AttachmentRecord) {
+    setBusy(true);
+    try {
+      await supabase.storage.from("equipment-docs").remove([page.file_path]);
+      await supabase.from("equipment_attachments").delete().eq("id", page.id);
+      onDocsChanged();
+    } catch (e: any) {
+      setErr(e?.message ?? "Failed to remove document.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
+      <div onClick={onToggleExpand} style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 2px", cursor: "pointer" }}>
+        <span style={{ flex: 1, fontSize: 14, fontWeight: 700, color: "rgba(255,255,255,0.85)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
+          {row.type.name}
+        </span>
+        <span style={{ fontSize: 12, fontWeight: 700, color: statusColor(row), flexShrink: 0 }}>{statusText(row)}</span>
+        <AttachmentIndicator hasDoc={hasDoc} onOpen={() => setPreviewGroup({ category: row.type.permit_type_id, label: row.type.name, pages })} />
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onEditType(); }}
+          title={`Edit "${row.type.name}"`}
+          style={{ background: "none", border: "none", color: "rgba(255,255,255,0.3)", fontSize: 14, cursor: "pointer", padding: "0 2px", flexShrink: 0 }}
+        >
+          ✎
+        </button>
+      </div>
+
+      {isExpanded && (
+        <div style={{ padding: "4px 2px 14px" }} onClick={(e) => e.stopPropagation()}>
+          {err && <div style={{ color: "#fca5a5", fontSize: 12, marginBottom: 8 }}>{err}</div>}
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
+            <div>
+              <label style={labelStyle}>Expiration date</label>
+              <input type="date" value={expDate} onChange={(e) => setExpDate(e.target.value)} style={inputStyle} />
+            </div>
+            <div>
+              <label style={labelStyle}>Enforcement date (optional)</label>
+              <input type="date" value={enfDate} onChange={(e) => setEnfDate(e.target.value)} style={inputStyle} />
+            </div>
+          </div>
+
+          <div style={{ marginBottom: 10 }}>
+            <label style={labelStyle}>Document{pages.length > 1 ? "s" : ""}</label>
+            {pages.map((p) => (
+              <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "6px 10px", marginBottom: 4 }}>
+                <span style={{ fontSize: 14 }}>{p.mime_type?.startsWith("image/") ? "🖼" : "📄"}</span>
+                <span style={{ flex: 1, fontSize: 12, color: "rgba(255,255,255,0.8)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>{p.original_name}</span>
+                <button type="button" onClick={() => setPreviewGroup({ category: row.type.permit_type_id, label: row.type.name, pages })} style={{ background: "none", border: "none", color: "#67e8f9", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>View</button>
+                <button type="button" onClick={() => deletePage(p)} disabled={busy} style={{ background: "none", border: "none", color: "#fca5a5", fontSize: 13, cursor: "pointer" }}>✕</button>
+              </div>
+            ))}
+            <label style={{ display: "block", textAlign: "center" as const, padding: "8px", borderRadius: 8, border: "1px dashed rgba(255,255,255,0.18)", fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.4)", cursor: "pointer" }}>
+              {uploading ? "Uploading…" : pages.length ? "+ Add another page" : "+ Add document"}
+              <input
+                type="file" accept="image/*,application/pdf,.pdf" style={{ display: "none" }}
+                disabled={uploading}
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) void uploadFile(f, false); e.target.value = ""; }}
+              />
+            </label>
+          </div>
+
+          {confirmingDelete ? (
+            <>
+              <div style={{ fontSize: 12, color: "rgba(255,255,255,0.55)", lineHeight: 1.5, marginBottom: 10 }}>
+                This clears the date and removes any attached document for {row.type.name}. This can&apos;t be undone.
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button type="button" onClick={() => setConfirmingDelete(false)} disabled={busy} style={cancelBtnStyle}>Cancel</button>
+                <button type="button" onClick={deleteRecord} disabled={busy} style={{ ...dangerBtnStyle, flex: 1 }}>{busy ? "Deleting…" : "Delete"}</button>
+              </div>
+            </>
+          ) : (
+            <div style={{ display: "flex", gap: 8 }}>
+              {row.record && (
+                <button type="button" onClick={() => setConfirmingDelete(true)} disabled={busy} style={dangerBtnStyle}>Delete</button>
+              )}
+              <button type="button" onClick={save} disabled={busy} style={saveBtnStyle}>{busy ? "Saving…" : "Save"}</button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {previewGroup && <DocPreviewModal group={previewGroup} onClose={() => setPreviewGroup(null)} />}
+    </div>
+  );
+}
+
+// ─── Main Binder modal ───────────────────────────────────────────────────────
+
+export default function BinderModal({
+  open, onClose, companyId, truckId, trailerId, truckName, trailerName,
+}: {
+  open: boolean;
+  onClose: () => void;
+  companyId: string;
+  truckId: string | null;
+  trailerId: string | null;
+  truckName?: string | null;
+  trailerName?: string | null;
+}) {
+  const [types, setTypes] = useState<PermitType[]>([]);
+  const [records, setRecords] = useState<PermitRecord[]>([]);
+  const [truckDetail, setTruckDetail] = useState<UnitDetail | null>(null);
+  const [trailerDetail, setTrailerDetail] = useState<UnitDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [typeEditor, setTypeEditor] = useState<{ mode: "new" | "edit"; type: PermitType | null; unit: UnitKind } | null>(null);
+
+  const detailCols = "year, make, model, vin_number, plate_number, notes";
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const [{ data: t }, { data: r }, { data: td }, { data: trd }] = await Promise.all([
+      supabase.from("permit_types").select("permit_type_id, name, applies_to, is_active").eq("company_id", companyId).order("name"),
+      (async () => {
+        if (!truckId && !trailerId) return { data: [] as PermitRecord[] };
+        const [{ data: tr }, { data: trr }] = await Promise.all([
+          truckId ? supabase.from("equipment_permits").select("equipment_permit_id, truck_id, trailer_id, permit_type_id, expiration_date, enforcement_date, notes").eq("truck_id", truckId) : Promise.resolve({ data: [] as PermitRecord[] }),
+          trailerId ? supabase.from("equipment_permits").select("equipment_permit_id, truck_id, trailer_id, permit_type_id, expiration_date, enforcement_date, notes").eq("trailer_id", trailerId) : Promise.resolve({ data: [] as PermitRecord[] }),
+        ]);
+        return { data: [...((tr ?? []) as PermitRecord[]), ...((trr ?? []) as PermitRecord[])] };
+      })(),
+      truckId ? supabase.from("trucks").select(detailCols).eq("truck_id", truckId).maybeSingle() : Promise.resolve({ data: null }),
+      trailerId ? supabase.from("trailers").select(detailCols).eq("trailer_id", trailerId).maybeSingle() : Promise.resolve({ data: null }),
+    ]);
+    setTypes((t ?? []) as PermitType[]);
+    setRecords((r ?? []) as PermitRecord[]);
+    setTruckDetail((td ?? null) as UnitDetail | null);
+    setTrailerDetail((trd ?? null) as UnitDetail | null);
+    setLoading(false);
+  }, [companyId, truckId, trailerId]);
+
+  useEffect(() => {
+    if (!open) return;
+    setExpandedId(null);
+    void load();
+  }, [open, load]);
+
+  function toggleExpand(id: string) {
+    setExpandedId((cur) => (cur === id ? null : id));
+  }
+
+  return (
+    <>
+      <FullscreenModal open={open} onClose={onClose} title="Binder" footer={null}>
+        {loading && <div style={{ textAlign: "center" as const, color: "rgba(255,255,255,0.3)", fontSize: 13, padding: "24px 0" }}>Loading…</div>}
+        {!loading && !truckId && !trailerId && (
+          <div style={{ textAlign: "center" as const, color: "rgba(255,255,255,0.3)", fontSize: 13, padding: "24px 0" }}>Select equipment first.</div>
+        )}
+        {!loading && truckId && (
+          <UnitSection
+            unitKind="truck" unitId={truckId} unitName={truckName ?? "Truck"} companyId={companyId}
+            types={types} records={records} detail={truckDetail} expandedId={expandedId} onToggleExpand={toggleExpand}
+            onEditType={(t) => setTypeEditor({ mode: "edit", type: t, unit: "truck" })}
+            onAddType={() => setTypeEditor({ mode: "new", type: null, unit: "truck" })}
+            onSaved={load}
+          />
+        )}
+        {!loading && trailerId && (
+          <UnitSection
+            unitKind="trailer" unitId={trailerId} unitName={trailerName ?? "Trailer"} companyId={companyId}
+            types={types} records={records} detail={trailerDetail} expandedId={expandedId} onToggleExpand={toggleExpand}
+            onEditType={(t) => setTypeEditor({ mode: "edit", type: t, unit: "trailer" })}
+            onAddType={() => setTypeEditor({ mode: "new", type: null, unit: "trailer" })}
+            onSaved={load}
+          />
+        )}
+      </FullscreenModal>
+
+      <PermitTypeEditorModal
+        open={!!typeEditor}
+        onClose={() => setTypeEditor(null)}
+        companyId={companyId}
+        mode={typeEditor?.mode ?? "new"}
+        type={typeEditor?.type ?? null}
+        unit={typeEditor?.unit ?? "truck"}
+        onSaved={() => { setTypeEditor(null); void load(); }}
+        onDeleted={() => { setTypeEditor(null); void load(); }}
+      />
+    </>
+  );
+}

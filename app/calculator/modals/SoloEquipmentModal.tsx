@@ -26,6 +26,7 @@ import { FullscreenModal } from "@/lib/ui/FullscreenModal";
 import { CustomSelect } from "@/lib/ui/CustomSelect";
 import ScaleTicketModal from "./ScaleTicketModal";
 import RecordHistoryModal from "./RecordHistoryModal";
+import BinderModal from "./BinderModal";
 import { TruckModal as AdminTruckModal, TrailerModal as AdminTrailerModal } from "@/lib/ui/driver/EquipmentDetails";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -998,12 +999,16 @@ export default function SoloEquipmentModal({
         onChanged={() => loadServiceAndWash(selectedTruckId, selectedTrailerId)}
       />
 
-      {/* ── Binder stub (§7 is its own pass) ── */}
-      <FullscreenModal open={binderOpen} onClose={() => setBinderOpen(false)} title="Binder" footer={null}>
-        <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 14, lineHeight: 1.6, padding: "20px 0" }}>
-          Binder redesign (equipment documents/compliance cards) is its own upcoming pass -- see spec §7.
-        </div>
-      </FullscreenModal>
+      {/* ── Binder (§7) ── */}
+      <BinderModal
+        open={binderOpen}
+        onClose={() => setBinderOpen(false)}
+        companyId={companyId}
+        truckId={selectedTruckId}
+        trailerId={selectedTrailerId}
+        truckName={trucks.find((t) => t.truck_id === selectedTruckId)?.truck_name}
+        trailerName={trailers.find((t) => t.trailer_id === selectedTrailerId)?.trailer_name}
+      />
 
       {/* ── Add new truck / trailer ── */}
       {addTruckOpen && (

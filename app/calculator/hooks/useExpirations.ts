@@ -16,27 +16,17 @@ export type ExpirationItem = {
   expired: boolean;
 };
 
-const TRUCK_EXP_COLS: Record<string, string> = {
-  fleet_ins_expiration_date:    "Fleet Insurance",
-  hazmat_lic_expiration_date:   "Hazmat License",
-  ifta_expiration_date:         "IFTA",
-  inner_bridge_expiration_date: "Inner Bridge",
-  inspection_expiration_date:   "Inspection",
-  phmsa_expiration_date:        "PHMSA",
-  reg_expiration_date:          "Registration",
-  alliance_expiration_date:     "Alliance",
-};
-
-const TRAILER_EXP_COLS: Record<string, string> = {
-  tank_i_expiration_date:             "Tank I",
-  tank_k_expiration_date:             "Tank K",
-  tank_l_expiration_date:             "Tank L",
-  tank_p_expiration_date:             "Tank P",
-  tank_t_expiration_date:             "Tank T",
-  tank_uc_expiration_date:            "Tank UC",
-  tank_v_expiration_date:             "Tank V",
-  trailer_inspection_expiration_date: "Trailer Inspection",
-  trailer_reg_expiration_date:        "Trailer Registration",
+// Truck/trailer expirations are read from the dynamic permit_types +
+// equipment_permits system (see supabase/migrations/20260723000000_
+// permit_types_binder.sql) rather than the old hardcoded expiration-date
+// columns -- this keeps the badge in sync with whatever the Binder screen
+// shows, including permit types the driver renamed or added themselves.
+type PermitRow = {
+  equipment_permit_id: string;
+  truck_id: string | null;
+  trailer_id: string | null;
+  expiration_date: string | null;
+  permit_types: { name: string } | null;
 };
 
 const TRUCK_WARN_DAYS    = 30;
@@ -77,38 +67,34 @@ export function useExpirations(opts: {
 }) {
   const { truckId, trailerId, truckName, trailerName, accessDateByTerminalId, terminals, terminalCatalog, addDaysISO_ } = opts;
 
-  const [truckRow,   setTruckRow]   = useState<Record<string, any> | null>(null);
-  const [trailerRow, setTrailerRow] = useState<Record<string, any> | null>(null);
+  const [truckPermits,   setTruckPermits]   = useState<PermitRow[]>([]);
+  const [trailerPermits, setTrailerPermits] = useState<PermitRow[]>([]);
   const [truckLoaded,   setTruckLoaded]   = useState(false);
   const [trailerLoaded, setTrailerLoaded] = useState(false);
   const [deferred,   setDeferred]   = useState<Set<string>>(() => loadDeferred());
 
-  // Fetch truck
+  // Fetch truck permits
   useEffect(() => {
-    if (!truckId) { setTruckRow(null); setTruckLoaded(true); return; }
+    if (!truckId) { setTruckPermits([]); setTruckLoaded(true); return; }
     (async () => {
-      const cols = Object.keys(TRUCK_EXP_COLS).join(", ");
       const { data } = await supabase
-        .from("trucks")
-        .select(`truck_id, truck_name, ${cols}`)
-        .eq("truck_id", truckId)
-        .maybeSingle();
-      setTruckRow(data ?? null);
+        .from("equipment_permits")
+        .select("equipment_permit_id, truck_id, trailer_id, expiration_date, permit_types(name)")
+        .eq("truck_id", truckId);
+      setTruckPermits((data ?? []) as unknown as PermitRow[]);
       setTruckLoaded(true);
     })();
   }, [truckId]);
 
-  // Fetch trailer
+  // Fetch trailer permits
   useEffect(() => {
-    if (!trailerId) { setTrailerRow(null); setTrailerLoaded(true); return; }
+    if (!trailerId) { setTrailerPermits([]); setTrailerLoaded(true); return; }
     (async () => {
-      const cols = Object.keys(TRAILER_EXP_COLS).join(", ");
       const { data } = await supabase
-        .from("trailers")
-        .select(`trailer_id, trailer_name, ${cols}`)
-        .eq("trailer_id", trailerId)
-        .maybeSingle();
-      setTrailerRow(data ?? null);
+        .from("equipment_permits")
+        .select("equipment_permit_id, truck_id, trailer_id, expiration_date, permit_types(name)")
+        .eq("trailer_id", trailerId);
+      setTrailerPermits((data ?? []) as unknown as PermitRow[]);
       setTrailerLoaded(true);
     })();
   }, [trailerId]);
@@ -117,27 +103,25 @@ export function useExpirations(opts: {
   const items = useMemo<ExpirationItem[]>(() => {
     const out: ExpirationItem[] = [];
 
-    if (truckRow) {
-      const name = truckRow.truck_name ? String(truckRow.truck_name) : truckName || "Truck";
-      for (const [col, label] of Object.entries(TRUCK_EXP_COLS)) {
-        const iso = truckRow[col];
-        if (!iso || typeof iso !== "string") continue;
-        const days = daysUntil(iso);
-        if (days <= TRUCK_WARN_DAYS) {
-          out.push({ id: `truck-${truckId}-${col}`, label, entityName: name, entitySubtitle: label, entityType: "truck", entityId: String(truckId), expiresISO: iso, daysLeft: days, expired: days < 0 });
-        }
+    const name_ = truckName || "Truck";
+    for (const row of truckPermits) {
+      const iso = row.expiration_date;
+      if (!iso) continue;
+      const label = row.permit_types?.name ?? "Permit";
+      const days = daysUntil(iso);
+      if (days <= TRUCK_WARN_DAYS) {
+        out.push({ id: `truck-${truckId}-${row.equipment_permit_id}`, label, entityName: name_, entitySubtitle: label, entityType: "truck", entityId: String(truckId), expiresISO: iso, daysLeft: days, expired: days < 0 });
       }
     }
 
-    if (trailerRow) {
-      const name = trailerRow.trailer_name ? String(trailerRow.trailer_name) : trailerName || "Trailer";
-      for (const [col, label] of Object.entries(TRAILER_EXP_COLS)) {
-        const iso = trailerRow[col];
-        if (!iso || typeof iso !== "string") continue;
-        const days = daysUntil(iso);
-        if (days <= TRAILER_WARN_DAYS) {
-          out.push({ id: `trailer-${trailerId}-${col}`, label, entityName: name, entitySubtitle: label, entityType: "trailer", entityId: String(trailerId), expiresISO: iso, daysLeft: days, expired: days < 0 });
-        }
+    const trailerName_ = trailerName || "Trailer";
+    for (const row of trailerPermits) {
+      const iso = row.expiration_date;
+      if (!iso) continue;
+      const label = row.permit_types?.name ?? "Permit";
+      const days = daysUntil(iso);
+      if (days <= TRAILER_WARN_DAYS) {
+        out.push({ id: `trailer-${trailerId}-${row.equipment_permit_id}`, label, entityName: trailerName_, entitySubtitle: label, entityType: "trailer", entityId: String(trailerId), expiresISO: iso, daysLeft: days, expired: days < 0 });
       }
     }
 
@@ -168,7 +152,7 @@ export function useExpirations(opts: {
 
     out.sort((a, b) => a.daysLeft - b.daysLeft);
     return out;
-  }, [truckRow, trailerRow, truckId, trailerId, truckName, trailerName, accessDateByTerminalId, terminals, terminalCatalog, addDaysISO_]);
+  }, [truckPermits, trailerPermits, truckId, trailerId, truckName, trailerName, accessDateByTerminalId, terminals, terminalCatalog, addDaysISO_]);
 
   // Auto-remove from deferred only when data is fully loaded
   // Guards against wiping deferred state during initial load before data arrives
