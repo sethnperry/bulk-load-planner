@@ -14,6 +14,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { FullscreenModal } from "@/lib/ui/FullscreenModal";
+import WeightRecordModal from "./WeightRecordModal";
 
 export type ScaleTicketTarget = {
   combo_id: string;
@@ -41,11 +42,13 @@ const S = {
 };
 
 export default function ScaleTicketModal({
-  open, onClose, combo, truckName, trailerName, onSaved,
+  open, onClose, combo, companyId, authUserId, truckName, trailerName, onSaved,
 }: {
   open: boolean;
   onClose: () => void;
   combo: ScaleTicketTarget | null;
+  companyId: string;
+  authUserId: string | null;
   truckName?: string | null;
   trailerName?: string | null;
   onSaved: () => void;
@@ -54,6 +57,7 @@ export default function ScaleTicketModal({
   const [targetLbs, setTargetLbs] = useState("");
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [weightRecordOpen, setWeightRecordOpen] = useState(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Mirrors of the two fields, updated synchronously on every keystroke.
@@ -183,8 +187,21 @@ export default function ScaleTicketModal({
 
         <div style={{
           padding: "12px 16px 20px", borderTop: "1px solid rgba(255,255,255,0.07)",
-          background: "#000", flexShrink: 0,
+          background: "#000", flexShrink: 0, display: "flex", flexDirection: "column", gap: 10,
         }}>
+          <button
+            type="button"
+            onClick={() => setWeightRecordOpen(true)}
+            style={{
+              width: "100%", borderRadius: 18, padding: "15px 18px",
+              fontWeight: 900, fontSize: 17,
+              border: "1px solid rgba(255,255,255,0.14)",
+              background: "rgba(255,255,255,0.06)",
+              color: "rgba(255,255,255,0.85)", cursor: "pointer",
+            }}
+          >
+            Record Weight
+          </button>
           <button
             type="button"
             onClick={handleClose}
@@ -200,6 +217,21 @@ export default function ScaleTicketModal({
           </button>
         </div>
       </div>
+
+      <WeightRecordModal
+        open={weightRecordOpen}
+        onClose={() => setWeightRecordOpen(false)}
+        companyId={companyId}
+        comboId={combo.combo_id}
+        authUserId={authUserId}
+        currentTareLbs={tareLbs.trim() ? Number(tareLbs) : (combo.tare_lbs ?? null)}
+        truckName={truckName}
+        trailerName={trailerName}
+        onSaved={(newTareLbs) => {
+          if (newTareLbs != null) setTareLbs(String(newTareLbs));
+          onSaved();
+        }}
+      />
     </FullscreenModal>
   );
 }

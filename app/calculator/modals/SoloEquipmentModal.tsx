@@ -25,6 +25,7 @@ import { supabase } from "@/lib/supabase/client";
 import { FullscreenModal } from "@/lib/ui/FullscreenModal";
 import { CustomSelect } from "@/lib/ui/CustomSelect";
 import ScaleTicketModal from "./ScaleTicketModal";
+import ScaleHistoryModal from "./ScaleHistoryModal";
 import RecordHistoryModal from "./RecordHistoryModal";
 import BinderModal from "./BinderModal";
 import { TruckModal as AdminTruckModal, TrailerModal as AdminTrailerModal } from "@/lib/ui/driver/EquipmentDetails";
@@ -508,27 +509,28 @@ function computeUnitServiceDue(
   records: { service_type_id: string; date: string; reading_value: number | null; created_at: string }[],
   types: ServiceType[],
 ): UnitServiceDue {
-  if (!records.length) return { unitLabel, typeName: null, display: "No service recorded" };
+  // A record whose type doesn't apply to this unit only exists here because
+  // it tagged along on a "Both" service with the other unit (see
+  // SimpleServiceModal.save()) -- it's not a real service requirement for
+  // *this* unit, so it can't be "what's next due" here. That companion
+  // context still shows in the full Service History; this compact report
+  // line should never surface a "(with Truck)"-style entry.
+  const applicable = records.filter((r) => {
+    const type = types.find((t) => t.service_type_id === r.service_type_id);
+    return !type || type.applies_to === "both" || type.applies_to === unitLabel.toLowerCase();
+  });
+  if (!applicable.length) return { unitLabel, typeName: null, display: "No service recorded" };
 
   // `date` is a date-only column -- two same-day records for the same unit
   // (a common case, e.g. logging one now and one earlier the same morning)
   // tie on it, so date alone can't tell which was actually entered last.
   // created_at breaks the tie.
-  const latest = records.reduce((a, b) => {
+  const latest = applicable.reduce((a, b) => {
     if (b.date !== a.date) return b.date > a.date ? b : a;
     return b.created_at > a.created_at ? b : a;
   });
   const type = types.find((t) => t.service_type_id === latest.service_type_id) ?? null;
   const typeName = type?.name ?? "Service";
-
-  // A type whose applies_to doesn't match this unit only exists on this
-  // unit's history because it tagged along on a "Both" service with the
-  // other unit (see SimpleServiceModal.save()), so there's no due-at
-  // calculation to show, just that it happened alongside the other unit's.
-  if (type && type.applies_to !== "both" && type.applies_to !== unitLabel.toLowerCase()) {
-    const otherLabel = unitLabel === "Trailer" ? "Truck" : "Trailer";
-    return { unitLabel, typeName, display: `${typeName} (with ${otherLabel})` };
-  }
 
   if (!type || type.interval_kind === "none" || type.interval_value == null) {
     return { unitLabel, typeName, display: `Last serviced ${fmtDate(latest.date)}` };
@@ -586,6 +588,7 @@ export default function SoloEquipmentModal({
   const [washLines, setWashLines] = useState<UnitWash[]>([]);
 
   const [scaleOpen, setScaleOpen] = useState(false);
+  const [scaleHistoryOpen, setScaleHistoryOpen] = useState(false);
   const [serviceOpen, setServiceOpen] = useState(false);
   const [washOpen, setWashOpen] = useState(false);
   const [serviceHistoryOpen, setServiceHistoryOpen] = useState(false);
@@ -879,13 +882,13 @@ export default function SoloEquipmentModal({
           {/* ── Report section (non-scrolling) ── */}
           <div style={{ flexShrink: 0 }}>
             {selectedCombo && Number(selectedCombo.tare_lbs ?? 0) > 0 && (
-              <div style={S.reportLine} onClick={() => setScaleOpen(true)}>
+              <div style={S.reportLine} onClick={() => setScaleHistoryOpen(true)}>
                 <span style={S.reportLabel}>Tare weight</span>
                 <span style={{ fontWeight: 900, color: COLOR_TARE }}>{Number(selectedCombo.tare_lbs).toLocaleString()} lbs</span>
               </div>
             )}
             {selectedCombo && Number(selectedCombo.target_weight ?? 0) > 0 && (
-              <div style={S.reportLine} onClick={() => setScaleOpen(true)}>
+              <div style={S.reportLine} onClick={() => setScaleHistoryOpen(true)}>
                 <span style={S.reportLabel}>Target gross weight</span>
                 <span style={{ fontWeight: 900, color: COLOR_TARE }}>{Number(selectedCombo.target_weight).toLocaleString()} lbs</span>
               </div>
@@ -941,11 +944,22 @@ export default function SoloEquipmentModal({
           open={scaleOpen}
           onClose={() => setScaleOpen(false)}
           combo={selectedCombo}
+          companyId={companyId}
+          authUserId={authUserId}
           truckName={trucks.find((t) => t.truck_id === selectedCombo.truck_id)?.truck_name}
           trailerName={trailers.find((t) => t.trailer_id === selectedCombo.trailer_id)?.trailer_name}
           onSaved={() => { loadEquipment(); onRefreshCombos(); }}
         />
       )}
+
+      {/* ── Scale History -- opened by tapping the Tare/Target report lines above ── */}
+      <ScaleHistoryModal
+        open={scaleHistoryOpen}
+        onClose={() => setScaleHistoryOpen(false)}
+        companyId={companyId}
+        comboId={selectedCombo?.combo_id ?? null}
+        onChanged={() => { loadEquipment(); onRefreshCombos(); }}
+      />
 
       {/* ── Service / Wash (minimal for this pass -- full spec is §2/§3) ── */}
       <SimpleServiceModal
