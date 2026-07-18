@@ -19,18 +19,26 @@ type TempDialProps = {
   onChange: (v: number) => void;
 };
 
+// Single source of truth for confidence -> color, shared by the dot/label and the
+// predicted temp number below. Keeps the two from ever disagreeing again.
+const CONFIDENCE_COLOR: Record<FuelTempConfidence, string> = {
+  high:   "#4ade80",
+  medium: "#fbbf24",
+  low:    "#f87171",
+};
+const CONFIDENCE_LABEL: Record<FuelTempConfidence, string> = {
+  high:   "HIGH CONFIDENCE",
+  medium: "MEDIUM CONFIDENCE",
+  low:    "LOW CONFIDENCE",
+};
+
 function ConfidenceDot({ confidence }: { confidence: FuelTempConfidence | null }) {
   if (!confidence) return null;
-  const map = {
-    high:   { color: "#4ade80", label: "HIGH CONFIDENCE" },
-    medium: { color: "#fbbf24", label: "MEDIUM CONFIDENCE" },
-    low:    { color: "#f87171", label: "LOW CONFIDENCE" },
-  };
-  const s = map[confidence];
+  const color = CONFIDENCE_COLOR[confidence];
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
-      <span style={{ width: 7, height: 7, borderRadius: "50%", background: s.color, flexShrink: 0 }} />
-      <span style={{ fontSize: 10, fontWeight: 800, color: s.color, letterSpacing: 0.6 }}>{s.label}</span>
+      <span style={{ width: 7, height: 7, borderRadius: "50%", background: color, flexShrink: 0 }} />
+      <span style={{ fontSize: 10, fontWeight: 800, color, letterSpacing: 0.6 }}>{CONFIDENCE_LABEL[confidence]}</span>
     </span>
   );
 }
@@ -90,7 +98,7 @@ function PredictionBanner({
           <ConfidenceDot confidence={confidence} />
         </div>
         <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-          <span style={{ fontSize: 32, fontWeight: 900, color: isAccepted ? "#4ade80" : "#67e8f9", lineHeight: 1 }}>
+          <span style={{ fontSize: 32, fontWeight: 900, color: confidence ? CONFIDENCE_COLOR[confidence] : "#67e8f9", lineHeight: 1 }}>
             {predictedTempF.toFixed(1)}°F
           </span>
           <span style={{ fontSize: 11, color: "rgba(255,255,255,0.35)" }}>

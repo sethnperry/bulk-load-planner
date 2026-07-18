@@ -209,7 +209,11 @@ export async function POST(req: Request) {
     if (supabase && terminalId) {
       try {
         const nowDate = new Date(nowTs * 1000);
-        const hourUtc = nowDate.getUTCHours();
+        // Bucketed to a 3-hour window (0,3,6,...,21) rather than the exact UTC hour.
+        // Exact-hour buckets fragmented samples too thinly (a 2:57pm load and a 3:03pm
+        // load never combined), so most buckets stayed under the confidence threshold
+        // indefinitely. Must match the bucketing in useLoadWorkflow.ts's write side.
+        const hourUtc = Math.floor(nowDate.getUTCHours() / 3) * 3;
         const monthOfYear = nowDate.getUTCMonth() + 1;
 
         const { data: biasRow } = await supabase

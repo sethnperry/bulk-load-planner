@@ -28,6 +28,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { supabase } from "@/lib/supabase/client";
 import { FullscreenModal } from "@/lib/ui/FullscreenModal";
 import DecoupleModal from "./DecoupleModal";
+import SoloEquipmentModal from "./SoloEquipmentModal";
 import ComboEditModal from "@/lib/ui/driver/ComboEditModal";
 import { TruckCard as AdminTruckCard, TrailerCard as AdminTrailerCard, TruckModal as AdminTruckModal, TrailerModal as AdminTrailerModal, type Truck as AdminTruck, type Trailer as AdminTrailer, type OtherPermit as AdminOtherPermit } from "@/lib/ui/driver/EquipmentDetails";
 import type { SetupSession } from "@/lib/setupSession";
@@ -1036,6 +1037,7 @@ export default function EquipmentModal({
   const [busy, setBusy] = useState(false);
   const [fleetOpen, setFleetOpen] = useState(false);
   const [companyId, setCompanyId] = useState<string | null>(null);
+  const [isSolo, setIsSolo] = useState<boolean | null>(null);
 
   // Details view (tap a card)
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -1184,10 +1186,10 @@ export default function EquipmentModal({
       setNewTareLbs("");
       // Resolve company ID — use proxy when in setup mode so we get the target user's company
       (async () => {
+        let cid: string | null = null;
         if (setupSession) {
           const { getCompanyId } = await import("@/lib/adminSetupClient");
-          const { companyId: cid } = await getCompanyId(setupSession.targetUserId);
-          setCompanyId(cid);
+          ({ companyId: cid } = await getCompanyId(setupSession.targetUserId));
         } else {
           const { data: u } = await supabase.auth.getUser();
           if (u.user) {
@@ -1196,8 +1198,20 @@ export default function EquipmentModal({
               .select("active_company_id")
               .eq("user_id", u.user.id)
               .maybeSingle();
-            setCompanyId((s?.active_company_id as string | null) ?? null);
+            cid = (s?.active_company_id as string | null) ?? null;
           }
+        }
+        setCompanyId(cid);
+
+        if (cid) {
+          const { data: co } = await supabase
+            .from("companies")
+            .select("is_solo")
+            .eq("company_id", cid)
+            .maybeSingle();
+          setIsSolo(Boolean((co as any)?.is_solo));
+        } else {
+          setIsSolo(null);
         }
       })();
       loadEquipment();
@@ -1459,6 +1473,28 @@ export default function EquipmentModal({
     const target = Number(newTargetLbs) || 80000;
     if (!Number.isFinite(tare) || tare <= 0) { setLocalErr("Enter a valid tare weight (lbs)."); return; }
     await doCouple(tare, target);
+  }
+
+  // isSolo starts null until the company fetch resolves. Falling through to
+  // the fleet JSX below during that gap caused a visible flash of the old
+  // modal before flipping to SoloEquipmentModal on every open. Render
+  // nothing until we actually know which one to show.
+  if (open && isSolo === null) return null;
+
+  // Solo companies get an entirely separate, simpler modal -- no fleet
+  // browsing/region filters/claim-couple UI. See equipment-settings-spec.md §1.
+  if (isSolo && companyId) {
+    return (
+      <SoloEquipmentModal
+        open={open}
+        onClose={onClose}
+        authUserId={authUserId}
+        companyId={companyId}
+        selectedComboId={selectedComboId}
+        onSelectComboId={onSelectComboId}
+        onRefreshCombos={onRefreshCombos}
+      />
+    );
   }
 
   const errNode = (localErr || combosError) ? (

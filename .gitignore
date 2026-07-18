@@ -36,6 +36,13 @@ yarn-error.log*
 # vercel
 .vercel
 
+# supabase CLI local state (project ref / pooler url / version cache)
+/supabase/.temp
+
+# local Claude Code permission grants -- can contain secrets pasted into
+# allow-listed commands (e.g. exported DB passwords)
+/.claude/settings.local.json
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

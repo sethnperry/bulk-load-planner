@@ -182,12 +182,15 @@ export function predictFuelTempNow(
 
   const rawPrediction = Tf;
 
-  // Apply historical bias correction if we have enough samples
-  // Only trust the correction once we have 3+ observations
+  // Apply historical bias correction, weighted by how many observations back it.
+  // Previously this was gated to zero below 3 samples — meaning any terminal/hour/month
+  // bucket with 0-2 samples got the raw uncorrected physics estimate with no learning
+  // applied at all, regardless of how far off that estimate was. A partial correction
+  // from even a single observation is better than none, so we now ramp continuously
+  // from sample 1 (tanh(1/4) ≈ 0.24 weight) up toward full weight by ~8-10 samples.
   const biasSamples = params.biasSampleCount ?? 0;
   const biasRaw = params.biasCorrectionF ?? 0;
-  // Weight the correction by confidence in the sample size (tanh ramp: full weight at ~10 samples)
-  const biasWeight = biasSamples >= 3 ? Math.tanh((biasSamples - 2) / 5) : 0;
+  const biasWeight = biasSamples > 0 ? Math.tanh(biasSamples / 4) : 0;
   const biasApplied = biasRaw * biasWeight;
   Tf = Tf + biasApplied;
 

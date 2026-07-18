@@ -53,6 +53,17 @@ export default function CallbackClient() {
       const { data, err: authErr } = await supabase.auth.getSession() as any;
       if (authErr) { setError("Auth error: " + authErr.message); return; }
       if (!data?.session) { setError("No session found. Open the newest magic link, or request a fresh one."); return; }
+
+      // Ensure every signed-in user has at least one company membership before
+      // landing in the app. Idempotent -- a no-op for anyone already invited
+      // into a real company (e.g. via /api/admin/invite, which creates their
+      // user_companies row before they ever click the link).
+      try {
+        await supabase.rpc("provision_solo_company");
+      } catch (err) {
+        console.warn("provision_solo_company failed (non-fatal):", err);
+      }
+
       router.replace(nextPath);
     })();
   }, [router, searchParams, nextPath]);

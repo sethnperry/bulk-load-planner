@@ -23,10 +23,12 @@ export default function NavMenu() {
   const [activeId,    setActiveId]    = useState("");
   const [myRole,      setMyRole]      = useState("");
   const [switching,   setSwitching]   = useState(false);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
 
   const isPlanner = pathname === "/calculator" || pathname === "/";
   const isProfile = pathname === "/profile";
   const isAdmin_  = pathname === "/admin";
+  const isSuperAdmin_ = pathname === "/superadmin";
   const isAdmin   = myRole === "admin" || myRole === "lead";
 
   useEffect(() => {
@@ -36,7 +38,7 @@ export default function NavMenu() {
       if (!user || cancelled) return;
       setEmail(user.email ?? "");
       setUserId(user.id);
-      const [{ data: mRows }, { data: sRow }] = await Promise.all([
+      const [{ data: mRows }, { data: sRow }, { data: superAdminData }] = await Promise.all([
         supabase
           .from("user_companies")
           .select("company_id, role, company:companies(company_id, company_name)")
@@ -46,6 +48,7 @@ export default function NavMenu() {
           .select("active_company_id")
           .eq("user_id", user.id)
           .maybeSingle(),
+        supabase.rpc("is_super_admin"),
       ]);
       if (cancelled) return;
       const ms = (mRows ?? []) as unknown as Membership[];
@@ -53,6 +56,7 @@ export default function NavMenu() {
       setMemberships(ms);
       setActiveId(current);
       setMyRole(ms.find(m => m.company_id === current)?.role ?? "");
+      setIsSuperAdmin(Boolean(superAdminData));
     }
     load();
     return () => { cancelled = true; };
@@ -187,6 +191,9 @@ export default function NavMenu() {
             )}
             {isAdmin && !isAdmin_ && (
               <NavLink href="/admin" icon="⚙" label="Company Admin" onClick={() => setOpen(false)} />
+            )}
+            {isSuperAdmin && !isSuperAdmin_ && (
+              <NavLink href="/superadmin" icon="◈" label="Super Admin" onClick={() => setOpen(false)} />
             )}
             <NavLink href="/learn" icon="?" label="Learn" onClick={() => setOpen(false)} />
             <NavLink href="#" icon="↩" label="Sign Out"

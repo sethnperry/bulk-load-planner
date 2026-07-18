@@ -274,7 +274,8 @@ export function useLoadWorkflow({
 try {
   if (selectedTerminalId && predictedTempF != null) {
     const now = new Date();
-    const hourUtc = now.getUTCHours();
+    // Bucketed to a 3-hour window — must match app/api/fuel-temp/route.ts's read side.
+    const hourUtc = Math.floor(now.getUTCHours() / 3) * 3;
     const monthOfYear = now.getUTCMonth() + 1;
 
     // Compute mean actual temp across all compartments for this load

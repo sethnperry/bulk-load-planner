@@ -42,7 +42,12 @@ function ConfirmInner() {
 
       if (!tokenHash) {
         const { data: { session } } = await supabase.auth.getSession();
-        if (session) { router.replace("/calculator"); return; }
+        if (session) {
+          try { await supabase.rpc("provision_solo_company"); }
+          catch (err) { console.warn("provision_solo_company failed (non-fatal):", err); }
+          router.replace("/calculator");
+          return;
+        }
         setErrMsg("No token found in this link. It may have already been used or has expired.");
         setStatus("error");
         return;
@@ -53,6 +58,15 @@ function ConfirmInner() {
         setErrMsg(error.message ?? "This link is invalid or has expired.");
         setStatus("error");
         return;
+      }
+
+      // Ensure every signed-in user has at least one company membership before
+      // landing in the app. Idempotent -- a no-op for anyone already invited
+      // into a real company.
+      try {
+        await supabase.rpc("provision_solo_company");
+      } catch (err) {
+        console.warn("provision_solo_company failed (non-fatal):", err);
       }
 
       router.replace("/calculator");
