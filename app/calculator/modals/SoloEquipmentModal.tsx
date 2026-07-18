@@ -23,6 +23,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { FullscreenModal } from "@/lib/ui/FullscreenModal";
+import { CustomSelect } from "@/lib/ui/CustomSelect";
 import ScaleTicketModal from "./ScaleTicketModal";
 import RecordHistoryModal from "./RecordHistoryModal";
 import { TruckModal as AdminTruckModal, TrailerModal as AdminTrailerModal } from "@/lib/ui/driver/EquipmentDetails";
@@ -44,6 +45,8 @@ type ServiceType = {
   name: string;
   interval_kind: "miles" | "hours" | "duration" | "none";
   interval_value: number | null;
+  applies_to: "truck" | "trailer" | "both";
+  is_active: boolean;
 };
 type UnitServiceDue = {
   unitLabel: "Truck" | "Trailer";
@@ -207,21 +210,203 @@ function createLongPress(onLongPress: () => void, ms = 600) {
   };
 }
 
-// ─── Custom dropdown ──────────────────────────────────────────────────────────
-// Native <select> only lets CSS style the closed control -- the open option
-// list is rendered natively by the OS/browser and stays gray-background/
-// blue-highlight regardless of appearance/color-scheme CSS on the select
-// itself (confirmed live: color-scheme: dark is set globally in
-// globals.css, and the popup still rendered light). Full control over the
-// open list's colors requires not using a native <select> popup at all.
+// CustomSelect itself now lives in lib/ui/CustomSelect.tsx (shared with
+// RecordHistoryModal.tsx's record-edit form -- importing it locally per-file
+// is how the native-<select> popup styling bug crept back in once already).
 
-function CustomSelect({
-  value, onChange, options, disabled,
+// ─── Service type editor (rename / change interval / soft-delete) ───────────
+// Deleting a type only sets is_active = false -- existing service_records
+// keep referencing it untouched by name/interval, it just stops being
+// offered when logging a *new* entry. Decoupled from SimpleServiceModal's
+// own save flow so "editing a type" and "logging a service" are never
+// conflated into the same submit action.
+
+function ServiceTypeEditorModal({
+  open, onClose, companyId, mode, type, unit, onSaved, onDeleted,
+}: {
+  open: boolean;
+  onClose: () => void;
+  companyId: string;
+  mode: "new" | "edit";
+  type: ServiceType | null;
+  unit: "truck" | "trailer" | "both";
+  onSaved: (fresh: ServiceType[], savedId: string) => void;
+  onDeleted: (fresh: ServiceType[], deletedId: string) => void;
+}) {
+  const [name, setName] = useState("");
+  const [kind, setKind] = useState<ServiceType["interval_kind"]>("duration");
+  const [value, setValue] = useState("");
+  const [appliesTo, setAppliesTo] = useState<ServiceType["applies_to"]>("both");
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setConfirmingDelete(false);
+    setErr(null);
+    if (mode === "edit" && type) {
+      setName(type.name);
+      setKind(type.interval_kind);
+      setValue(type.interval_value != null ? String(type.interval_value) : "");
+      setAppliesTo(type.applies_to);
+    } else {
+      setName("");
+      setKind("duration");
+      setValue("");
+      setAppliesTo(unit === "truck" ? "truck" : unit === "trailer" ? "trailer" : "both");
+    }
+  }, [open, mode, type, unit]);
+
+  async function refetchTypes(): Promise<ServiceType[]> {
+    const { data } = await supabase
+      .from("service_types")
+      .select("service_type_id, name, interval_kind, interval_value, applies_to, is_active")
+      .eq("company_id", companyId)
+      .order("name");
+    return (data ?? []) as ServiceType[];
+  }
+
+  async function save() {
+    if (!name.trim()) { setErr("Enter a type name."); return; }
+    setBusy(true);
+    setErr(null);
+    try {
+      const patch = {
+        name: name.trim(),
+        interval_kind: kind,
+        interval_value: kind === "none" ? null : Number(value) || null,
+        applies_to: appliesTo,
+      };
+      let savedId: string;
+      if (mode === "edit" && type) {
+        const { error } = await supabase.from("service_types").update(patch).eq("service_type_id", type.service_type_id);
+        if (error) throw error;
+        savedId = type.service_type_id;
+      } else {
+        const { data, error } = await supabase.from("service_types").insert({ company_id: companyId, ...patch }).select("service_type_id").single();
+        if (error) throw error;
+        savedId = String((data as any).service_type_id);
+      }
+      const fresh = await refetchTypes();
+      onSaved(fresh, savedId);
+    } catch (e: any) {
+      setErr(e?.message ?? "Failed to save service type.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmDelete() {
+    if (!type) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const { error } = await supabase.from("service_types").update({ is_active: false }).eq("service_type_id", type.service_type_id);
+      if (error) throw error;
+      const fresh = await refetchTypes();
+      onDeleted(fresh, type.service_type_id);
+    } catch (e: any) {
+      setErr(e?.message ?? "Failed to delete service type.");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <FullscreenModal open={open} onClose={onClose} title={mode === "edit" ? "Edit Service Type" : "New Service Type"} footer={null}>
+      <div style={{ display: "grid", gap: 14 }}>
+        {err && <div style={{ color: "#fca5a5", fontSize: 13 }}>{err}</div>}
+
+        {!confirmingDelete ? (
+          <>
+            <div>
+              <label style={S.reportLabel}>Type name</label>
+              <input placeholder="e.g. Wet, Dry, Clean &amp; Purge" value={name} onChange={(e) => setName(e.target.value)} style={inputStyle} />
+            </div>
+            <div>
+              <label style={S.reportLabel}>Interval</label>
+              <CustomSelect
+                value={kind}
+                onChange={(v) => setKind(v as any)}
+                options={[
+                  { value: "miles", label: "Miles" },
+                  { value: "hours", label: "Hours" },
+                  { value: "duration", label: "Duration (days)" },
+                  { value: "none", label: "None" },
+                ]}
+              />
+            </div>
+            {kind !== "none" && (
+              <div>
+                <label style={S.reportLabel}>Interval value</label>
+                <input placeholder="e.g. 65000" type="number" value={value} onChange={(e) => setValue(e.target.value)} style={inputStyle} />
+              </div>
+            )}
+            <div>
+              <label style={S.reportLabel}>Applies to</label>
+              <CustomSelect
+                value={appliesTo}
+                onChange={(v) => setAppliesTo(v as any)}
+                options={[
+                  { value: "both", label: "Truck & Trailer" },
+                  { value: "truck", label: "Truck only" },
+                  { value: "trailer", label: "Trailer only" },
+                ]}
+              />
+              <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginTop: 6, lineHeight: 1.5 }}>
+                If logged on both units at once, the unit this doesn't apply to just shows it was done alongside the other one.
+              </div>
+            </div>
+
+            <button type="button" onClick={save} disabled={busy} style={saveBtnStyle}>{busy ? "Saving…" : "Save"}</button>
+
+            {mode === "edit" && (
+              <button
+                type="button"
+                onClick={() => setConfirmingDelete(true)}
+                disabled={busy}
+                style={{ width: "100%", padding: "12px 18px", borderRadius: 14, border: "1px solid rgba(220,60,60,0.4)", background: "rgba(180,40,40,0.12)", color: "#fca5a5", fontWeight: 800, fontSize: 14, cursor: "pointer" }}
+              >
+                Delete type
+              </button>
+            )}
+          </>
+        ) : (
+          <>
+            <div style={{ fontWeight: 900, fontSize: 16 }}>Delete &quot;{type?.name}&quot;?</div>
+            <div style={{ fontSize: 13, color: "rgba(255,255,255,0.55)", lineHeight: 1.6 }}>
+              This only affects future entries -- it stops showing up when logging a new service. Existing records that already used it keep their history.
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button type="button" onClick={() => setConfirmingDelete(false)} disabled={busy}
+                style={{ flex: 1, padding: "12px 14px", borderRadius: 12, border: "1px solid rgba(255,255,255,0.14)", background: "rgba(255,255,255,0.06)", color: "#fff", cursor: "pointer" }}>
+                Cancel
+              </button>
+              <button type="button" onClick={confirmDelete} disabled={busy}
+                style={{ flex: 1, padding: "12px 14px", borderRadius: 12, border: "1px solid rgba(220,60,60,0.5)", background: "rgba(180,40,40,0.25)", color: "#fff", fontWeight: 800, cursor: "pointer" }}>
+                {busy ? "Deleting…" : "Delete"}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </FullscreenModal>
+  );
+}
+
+// ─── Service type dropdown (adds a minus-to-edit affordance per option) ─────
+// Can't reuse the generic CustomSelect here -- it needs a second interactive
+// target (the minus button) inside each option row, which the generic
+// component's plain {value,label} options don't support.
+
+function ServiceTypeSelect({
+  value, onChange, types, onEditType, onNewType,
 }: {
   value: string;
   onChange: (v: string) => void;
-  options: { value: string; label: string }[];
-  disabled?: boolean;
+  types: ServiceType[];
+  onEditType: (t: ServiceType) => void;
+  onNewType: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [hoverValue, setHoverValue] = useState<string | null>(null);
@@ -236,42 +421,70 @@ function CustomSelect({
     return () => document.removeEventListener("mousedown", onDocMouseDown);
   }, [open]);
 
-  const selected = options.find((o) => o.value === value);
+  const selectedLabel = value === "" ? "Select…" : types.find((t) => t.service_type_id === value)?.name ?? "";
 
   return (
     <div ref={ref} style={{ position: "relative" }}>
       <button
         type="button"
-        onClick={() => !disabled && setOpen((o) => !o)}
-        disabled={disabled}
-        style={{
-          ...selectStyle,
-          display: "flex", alignItems: "center", justifyContent: "space-between",
-          textAlign: "left" as const, cursor: disabled ? "not-allowed" : "pointer",
-        }}
+        onClick={() => setOpen((o) => !o)}
+        style={{ ...selectStyle, display: "flex", alignItems: "center", justifyContent: "space-between", textAlign: "left" as const, cursor: "pointer" }}
       >
-        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>{selected?.label ?? ""}</span>
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>{selectedLabel}</span>
       </button>
       {open && (
         <div style={{
           position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 50,
           background: "#0a0a0a", border: "1px solid rgba(255,255,255,0.16)", borderRadius: 12,
-          maxHeight: 240, overflowY: "auto", boxShadow: "0 8px 24px rgba(0,0,0,0.55)", padding: 4,
+          maxHeight: 280, overflowY: "auto", boxShadow: "0 8px 24px rgba(0,0,0,0.55)", padding: 4,
         }}>
-          {options.map((o) => (
+          <div
+            onClick={() => { onChange(""); setOpen(false); }}
+            onMouseEnter={() => setHoverValue("")}
+            onMouseLeave={() => setHoverValue((v) => (v === "" ? null : v))}
+            style={{ padding: "10px 12px", fontSize: 15, color: "#fff", cursor: "pointer", borderRadius: 8, background: hoverValue === "" ? "rgba(255,255,255,0.10)" : "transparent" }}
+          >
+            Select…
+          </div>
+          {types.map((t) => (
             <div
-              key={o.value}
-              onClick={() => { onChange(o.value); setOpen(false); }}
-              onMouseEnter={() => setHoverValue(o.value)}
-              onMouseLeave={() => setHoverValue((v) => (v === o.value ? null : v))}
+              key={t.service_type_id}
               style={{
-                padding: "10px 12px", fontSize: 15, color: "#fff", cursor: "pointer", borderRadius: 8,
-                background: hoverValue === o.value ? "rgba(255,255,255,0.10)" : o.value === value ? "rgba(255,255,255,0.05)" : "transparent",
+                display: "flex", alignItems: "center", gap: 6, borderRadius: 8,
+                background: hoverValue === t.service_type_id ? "rgba(255,255,255,0.10)" : t.service_type_id === value ? "rgba(255,255,255,0.05)" : "transparent",
               }}
+              onMouseEnter={() => setHoverValue(t.service_type_id)}
+              onMouseLeave={() => setHoverValue((v) => (v === t.service_type_id ? null : v))}
             >
-              {o.label}
+              <div
+                onClick={() => { onChange(t.service_type_id); setOpen(false); }}
+                style={{ flex: 1, padding: "10px 12px", fontSize: 15, color: "#fff", cursor: "pointer" }}
+              >
+                {t.name}
+              </div>
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setOpen(false); onEditType(t); }}
+                title={`Edit "${t.name}"`}
+                style={{
+                  width: 26, height: 26, marginRight: 6, flexShrink: 0, borderRadius: "50%",
+                  border: "1px solid rgba(220,60,60,0.5)", background: "rgba(180,40,40,0.18)",
+                  color: "#fca5a5", fontWeight: 900, fontSize: 15, lineHeight: 1, cursor: "pointer",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                }}
+              >
+                −
+              </button>
             </div>
           ))}
+          <div
+            onClick={() => { setOpen(false); onNewType(); }}
+            onMouseEnter={() => setHoverValue("__new__")}
+            onMouseLeave={() => setHoverValue((v) => (v === "__new__" ? null : v))}
+            style={{ padding: "10px 12px", fontSize: 15, color: "rgba(255,255,255,0.65)", cursor: "pointer", borderRadius: 8, background: hoverValue === "__new__" ? "rgba(255,255,255,0.10)" : "transparent" }}
+          >
+            + New type
+          </div>
         </div>
       )}
     </div>
@@ -307,12 +520,13 @@ function computeUnitServiceDue(
   const type = types.find((t) => t.service_type_id === latest.service_type_id) ?? null;
   const typeName = type?.name ?? "Service";
 
-  // Trailers don't track mileage/hours -- a miles/hours-type record on a
-  // trailer only ever exists because it tagged along on a "Both" service
-  // with the truck (see SimpleServiceModal.save()), so there's no due-at
-  // calculation to show, just that it happened alongside the truck's.
-  if (unitLabel === "Trailer" && type && (type.interval_kind === "miles" || type.interval_kind === "hours")) {
-    return { unitLabel, typeName, display: `${typeName} (with Truck)` };
+  // A type whose applies_to doesn't match this unit only exists on this
+  // unit's history because it tagged along on a "Both" service with the
+  // other unit (see SimpleServiceModal.save()), so there's no due-at
+  // calculation to show, just that it happened alongside the other unit's.
+  if (type && type.applies_to !== "both" && type.applies_to !== unitLabel.toLowerCase()) {
+    const otherLabel = unitLabel === "Trailer" ? "Truck" : "Trailer";
+    return { unitLabel, typeName, display: `${typeName} (with ${otherLabel})` };
   }
 
   if (!type || type.interval_kind === "none" || type.interval_value == null) {
@@ -410,10 +624,12 @@ export default function SoloEquipmentModal({
   const loadServiceTypes = useCallback(async () => {
     const { data } = await supabase
       .from("service_types")
-      .select("service_type_id, name, interval_kind, interval_value")
+      .select("service_type_id, name, interval_kind, interval_value, applies_to, is_active")
       .eq("company_id", companyId)
       .order("name");
-    setServiceTypes((data ?? []) as ServiceType[]);
+    const fresh = (data ?? []) as ServiceType[];
+    setServiceTypes(fresh);
+    return fresh;
   }, [companyId]);
 
   // Fetches service_types fresh on every call rather than reading the
@@ -427,7 +643,7 @@ export default function SoloEquipmentModal({
     if (!truckId && !trailerId) { setServiceLines([]); setWashLines([]); return; }
 
     const { data: typesData } = await supabase
-      .from("service_types").select("service_type_id, name, interval_kind, interval_value").eq("company_id", companyId);
+      .from("service_types").select("service_type_id, name, interval_kind, interval_value, applies_to, is_active").eq("company_id", companyId);
     const types = (typesData ?? []) as ServiceType[];
 
     const serviceResults: UnitServiceDue[] = [];
@@ -767,6 +983,7 @@ export default function SoloEquipmentModal({
         trailerId={selectedTrailerId}
         trucks={trucks}
         trailers={trailers}
+        onChanged={() => loadServiceAndWash(selectedTruckId, selectedTrailerId)}
       />
       <RecordHistoryModal
         open={washHistoryOpen}
@@ -778,6 +995,7 @@ export default function SoloEquipmentModal({
         trailerId={selectedTrailerId}
         trucks={trucks}
         trailers={trailers}
+        onChanged={() => loadServiceAndWash(selectedTruckId, selectedTrailerId)}
       />
 
       {/* ── Binder stub (§7 is its own pass) ── */}
@@ -871,9 +1089,7 @@ function SimpleServiceModal({
 }) {
   const [unit, setUnit] = useState<"truck" | "trailer" | "both">("both");
   const [typeId, setTypeId] = useState("");
-  const [newTypeName, setNewTypeName] = useState("");
-  const [newTypeKind, setNewTypeKind] = useState<ServiceType["interval_kind"]>("duration");
-  const [newTypeValue, setNewTypeValue] = useState("");
+  const [typeEditor, setTypeEditor] = useState<{ mode: "new" | "edit"; type: ServiceType | null } | null>(null);
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [shopName, setShopName] = useState("");
   const [location, setLocation] = useState("");
@@ -886,7 +1102,6 @@ function SimpleServiceModal({
     if (open) {
       setUnit(truckId && trailerId ? "both" : trailerId ? "trailer" : "truck");
       setTypeId("");
-      setNewTypeName("");
       setDate(new Date().toISOString().slice(0, 10));
       setShopName("");
       setLocation("");
@@ -897,16 +1112,11 @@ function SimpleServiceModal({
   }, [open, truckId, trailerId]);
 
   const availableTypes = useMemo(
-    () => (unit === "trailer" ? serviceTypes.filter((t) => t.interval_kind !== "miles") : serviceTypes),
+    () => serviceTypes.filter((t) => t.is_active && (unit === "both" || t.applies_to === "both" || t.applies_to === unit)),
     [serviceTypes, unit]
   );
   const selectedType = availableTypes.find((t) => t.service_type_id === typeId);
-  // A brand-new type (typeId === "__new__") never matches an existing type
-  // in availableTypes, so selectedType is undefined for it -- checking only
-  // selectedType?.interval_kind here meant the reading field never appeared
-  // when creating a new miles/hours type inline, which is exactly how the
-  // "Wet" type ended up with no reading_value recorded on its first uses.
-  const effectiveKind = typeId === "__new__" ? newTypeKind : selectedType?.interval_kind;
+  const effectiveKind = selectedType?.interval_kind;
   const needsReading = effectiveKind === "miles" || effectiveKind === "hours";
 
   async function save() {
@@ -916,19 +1126,8 @@ function SimpleServiceModal({
       if (needsReading && !reading.trim()) {
         throw new Error(effectiveKind === "miles" ? "Enter the odometer reading." : "Enter the engine hours.");
       }
-
-      let finalTypeId = typeId;
-      if (typeId === "__new__") {
-        if (!newTypeName.trim()) throw new Error("Enter a type name.");
-        const { data, error } = await supabase.from("service_types").insert({
-          company_id: companyId, name: newTypeName.trim(), interval_kind: newTypeKind,
-          interval_value: newTypeKind === "none" ? null : Number(newTypeValue) || null,
-        }).select("service_type_id").single();
-        if (error) throw error;
-        finalTypeId = String((data as any).service_type_id);
-        onTypesChanged();
-      }
-      if (!finalTypeId) throw new Error("Select a service type.");
+      if (!typeId) throw new Error("Select a service type.");
+      const finalTypeId = typeId;
 
       const rows: any[] = [];
       if (unit === "both" || unit === "truck") {
@@ -982,35 +1181,14 @@ function SimpleServiceModal({
 
         <div>
           <label style={S.reportLabel}>Type</label>
-          <CustomSelect
+          <ServiceTypeSelect
             value={typeId}
             onChange={setTypeId}
-            options={[
-              { value: "", label: "Select…" },
-              ...availableTypes.map((t) => ({ value: t.service_type_id, label: t.name })),
-              { value: "__new__", label: "+ New type" },
-            ]}
+            types={availableTypes}
+            onEditType={(t) => setTypeEditor({ mode: "edit", type: t })}
+            onNewType={() => setTypeEditor({ mode: "new", type: null })}
           />
         </div>
-
-        {typeId === "__new__" && (
-          <div style={{ display: "grid", gap: 10, paddingLeft: 12, borderLeft: "2px solid rgba(255,255,255,0.1)" }}>
-            <input placeholder="Type name" value={newTypeName} onChange={(e) => setNewTypeName(e.target.value)} style={inputStyle} />
-            <CustomSelect
-              value={newTypeKind}
-              onChange={(v) => setNewTypeKind(v as any)}
-              options={[
-                ...(unit !== "trailer" ? [{ value: "miles", label: "Miles" }] : []),
-                ...(unit !== "trailer" ? [{ value: "hours", label: "Hours" }] : []),
-                { value: "duration", label: "Duration (days)" },
-                { value: "none", label: "None" },
-              ]}
-            />
-            {newTypeKind !== "none" && (
-              <input placeholder="Interval value" type="number" value={newTypeValue} onChange={(e) => setNewTypeValue(e.target.value)} style={inputStyle} />
-            )}
-          </div>
-        )}
 
         {selectedType && selectedType.interval_kind !== "none" && (
           <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>
@@ -1045,6 +1223,17 @@ function SimpleServiceModal({
 
         <button type="button" onClick={save} disabled={busy} style={saveBtnStyle}>{busy ? "Saving…" : "Save"}</button>
       </div>
+
+      <ServiceTypeEditorModal
+        open={!!typeEditor}
+        onClose={() => setTypeEditor(null)}
+        companyId={companyId}
+        mode={typeEditor?.mode ?? "new"}
+        type={typeEditor?.type ?? null}
+        unit={unit}
+        onSaved={(_fresh, savedId) => { onTypesChanged(); setTypeEditor(null); setTypeId(savedId); }}
+        onDeleted={(_fresh, deletedId) => { onTypesChanged(); setTypeEditor(null); setTypeId((cur) => (cur === deletedId ? "" : cur)); }}
+      />
     </FullscreenModal>
   );
 }
