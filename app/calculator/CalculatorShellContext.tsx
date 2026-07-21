@@ -1,0 +1,184 @@
+"use client";
+// CalculatorShellContext.tsx
+//
+// Redesign shell (equipment-settings-spec.md ~= "ProTankr mobile app design"
+// handoff, Phase 1): the new header (hamburger/bell/gear + alerts cluster)
+// and the Planner/Cards/Vault tab bar live in a shared layout
+// (`app/calculator/layout.tsx`) above all three tab routes, but the
+// gear icon opens the SAME Equipment sheet the Planner tab's own info card
+// opens, and the bell icon needs the SAME expirations data Planner already
+// computes -- both need one shared instance of `useEquipment`/`useLocation`/
+// `useTerminals`/`useExpirations`, not a second independent copy.
+//
+// Why this matters: useEquipment's selectedComboId is plain
+// mount-time-hydrated localStorage state with no cross-instance sync (no
+// storage-event listener, no realtime subscription) -- two separate calls
+// to useEquipment() in the same page view (one in the layout, one in
+// page.tsx) would NOT reflect each other's changes without a reload. This
+// context hoists exactly the hooks the header needs to one instance,
+// shared via context; everything else (compartments, plan math, presets,
+// load workflow, temp prediction) stays local to page.tsx as before.
+
+import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { supabase } from "@/lib/supabase/client";
+import { getSetupSession } from "@/lib/setupSession";
+import type { SetupSession } from "@/lib/setupSession";
+import { useEquipment } from "./hooks/useEquipment";
+import { useLocation } from "./hooks/useLocation";
+import { useTerminals } from "./hooks/useTerminals";
+import { useExpirations } from "./hooks/useExpirations";
+import { useTerminalFilters } from "./hooks/useTerminalFilters";
+import { addDaysISO_ } from "./utils/dates";
+import type { TerminalRow, TerminalCatalogRow } from "./types";
+
+export type CardData = { cardNumber: string; privateNote: string; pin: string };
+
+type ShellValue = {
+  authEmail: string;
+  authUserId: string;
+  setupSession: SetupSession | null;
+  effectiveUserId: string;
+  equipment: ReturnType<typeof useEquipment>;
+  location: ReturnType<typeof useLocation>;
+  terminals: ReturnType<typeof useTerminals>;
+  expirations: ReturnType<typeof useExpirations>;
+  myTerminalIdSet: Set<string>;
+  terminalFilters: ReturnType<typeof useTerminalFilters<TerminalRow, TerminalCatalogRow>>;
+  equipOpen: boolean;
+  setEquipOpen: (v: boolean) => void;
+  expModalOpen: boolean;
+  setExpModalOpen: (v: boolean) => void;
+  termOpen: boolean;
+  setTermOpen: (v: boolean) => void;
+  cardDataByTerminalId: Record<string, CardData>;
+  setCardDataForTerminal_: (terminalId: string, data: CardData) => Promise<void>;
+};
+
+const ShellContext = createContext<ShellValue | null>(null);
+
+export function useCalculatorShell(): ShellValue {
+  const ctx = useContext(ShellContext);
+  if (!ctx) throw new Error("useCalculatorShell must be used within CalculatorShellProvider");
+  return ctx;
+}
+
+export function CalculatorShellProvider({ children }: { children: React.ReactNode }) {
+  const [authEmail, setAuthEmail] = useState("");
+  const [authUserId, setAuthUserId] = useState("");
+  const [setupSession, setSetupSession] = useState<SetupSession | null>(null);
+  const effectiveUserId = setupSession?.targetUserId ?? authUserId ?? "";
+
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.auth.getUser();
+      setAuthEmail(data.user?.email ?? "");
+      setAuthUserId(data.user?.id ?? "");
+    })();
+    const session = getSetupSession();
+    if (session) setSetupSession(session);
+  }, []);
+
+  const equipment = useEquipment(authUserId, setupSession);
+  const location = useLocation(effectiveUserId);
+  const terminals = useTerminals(
+    effectiveUserId,
+    location.selectedTerminalId,
+    location.setSelectedTerminalId,
+    null,
+    setupSession
+  );
+
+  const expirations = useExpirations({
+    truckId: equipment.selectedCombo?.truck_id ?? null,
+    trailerId: equipment.selectedCombo?.trailer_id ?? null,
+    truckName: equipment.truckNameById[equipment.selectedCombo?.truck_id ?? ""] ?? "",
+    trailerName: equipment.trailerNameById[equipment.selectedCombo?.trailer_id ?? ""] ?? "",
+    accessDateByTerminalId: terminals.accessDateByTerminalId,
+    terminals: terminals.terminals,
+    terminalCatalog: terminals.terminalCatalog,
+    addDaysISO_,
+  });
+
+  const myTerminalIdSet = useMemo(
+    () => new Set((terminals.terminals ?? []).map((x: any) => String(x.terminal_id))),
+    [terminals.terminals]
+  );
+
+  const terminalFilters = useTerminalFilters({
+    terminals: terminals.terminals,
+    terminalCatalog: terminals.terminalCatalog,
+    selectedState: location.selectedState,
+    selectedCity: location.selectedCity,
+    myTerminalIdSet,
+  });
+
+  const [equipOpen, setEquipOpen] = useState(false);
+  const [expModalOpen, setExpModalOpen] = useState(false);
+  const [termOpen, setTermOpen] = useState(false);
+
+  // ── Card data (card number + PIN + private note, per terminal, per user) ──
+  // Shared here (not local to the Planner page) because the new Cards tab
+  // route needs the same data -- two independent fetches would risk the same
+  // desync class of bug the equipment/location/terminals hooks were already
+  // hoisted here to avoid.
+  const [cardDataByTerminalId, setCardDataByTerminalId] = useState<Record<string, CardData>>({});
+
+  useEffect(() => {
+    if (!effectiveUserId) return;
+    (async () => {
+      if (setupSession) {
+        const { getCardData } = await import("@/lib/adminSetupClient");
+        const r = await getCardData(effectiveUserId);
+        setCardDataByTerminalId(r.cardDataByTerminalId);
+      } else {
+        const { data } = await supabase
+          .from("user_terminal_cards")
+          .select("terminal_id, card_number, private_note, pin")
+          .eq("user_id", effectiveUserId);
+        if (data) {
+          const map: Record<string, CardData> = {};
+          for (const row of data as any[]) {
+            map[String(row.terminal_id)] = {
+              cardNumber: row.card_number ?? "",
+              privateNote: row.private_note ?? "",
+              pin: row.pin ?? "",
+            };
+          }
+          setCardDataByTerminalId(map);
+        }
+      }
+    })();
+  }, [effectiveUserId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const setCardDataForTerminal_ = async (terminalId: string, data: CardData) => {
+    setCardDataByTerminalId(prev => ({ ...prev, [terminalId]: data }));
+    if (!effectiveUserId) return;
+    if (setupSession) {
+      const { setCardData } = await import("@/lib/adminSetupClient");
+      await setCardData(effectiveUserId, terminalId, data.cardNumber, data.privateNote, data.pin);
+    } else {
+      await supabase.from("user_terminal_cards").upsert(
+        {
+          user_id: effectiveUserId,
+          terminal_id: terminalId,
+          card_number: data.cardNumber,
+          private_note: data.privateNote,
+          pin: data.pin || null,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "user_id,terminal_id" }
+      );
+    }
+  };
+
+  const value: ShellValue = {
+    authEmail, authUserId, setupSession, effectiveUserId,
+    equipment, location, terminals, expirations,
+    myTerminalIdSet, terminalFilters,
+    equipOpen, setEquipOpen, expModalOpen, setExpModalOpen,
+    termOpen, setTermOpen,
+    cardDataByTerminalId, setCardDataForTerminal_,
+  };
+
+  return <ShellContext.Provider value={value}>{children}</ShellContext.Provider>;
+}

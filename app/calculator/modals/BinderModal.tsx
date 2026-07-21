@@ -342,6 +342,129 @@ function UnitInfoRow({
   );
 }
 
+// ─── Compartments (trailer only) ────────────────────────────────────────────
+// max_gallons ("total volume") stays informational only; cap_gallons is the
+// real ceiling the load-planning solver uses. Confirmed with user: the
+// planner's per-load drag handle only ever adjusts a *temporary* override
+// bounded to this cap -- it never exceeds it -- so this is the one place
+// the cap itself gets configured.
+
+type CompartmentRow = {
+  trailer_id: string;
+  comp_number: number;
+  max_gallons: number;
+  cap_gallons: number | null;
+};
+
+function CompartmentRowItem({
+  comp, isExpanded, onToggleExpand, onSaved,
+}: {
+  comp: CompartmentRow;
+  isExpanded: boolean;
+  onToggleExpand: () => void;
+  onSaved: () => void;
+}) {
+  const [cap, setCap] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isExpanded) return;
+    setCap(comp.cap_gallons != null ? String(comp.cap_gallons) : String(comp.max_gallons));
+    setErr(null);
+  }, [isExpanded, comp]);
+
+  async function save() {
+    const val = Number(cap);
+    if (!Number.isFinite(val) || val <= 0) { setErr("Enter a valid capacity."); return; }
+    if (val > comp.max_gallons) { setErr(`Cap can't exceed the total volume (${Math.round(comp.max_gallons).toLocaleString()} gal).`); return; }
+    setBusy(true);
+    setErr(null);
+    try {
+      const { error } = await supabase
+        .from("trailer_compartments")
+        .update({ cap_gallons: val })
+        .eq("trailer_id", comp.trailer_id)
+        .eq("comp_number", comp.comp_number);
+      if (error) throw error;
+      onSaved();
+    } catch (e: any) {
+      setErr(e?.message ?? "Failed to save.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const effectiveCap = comp.cap_gallons ?? comp.max_gallons;
+
+  return (
+    <div style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
+      <div onClick={onToggleExpand} style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 2px", cursor: "pointer" }}>
+        <span style={{ flex: 1, fontSize: 14, fontWeight: 700, color: "rgba(255,255,255,0.85)" }}>Comp {comp.comp_number}</span>
+        <span style={{ fontSize: 12, color: "rgba(255,255,255,0.5)" }}>{Math.round(effectiveCap).toLocaleString()} gal cap</span>
+      </div>
+      {isExpanded && (
+        <div style={{ padding: "4px 2px 14px" }} onClick={(e) => e.stopPropagation()}>
+          {err && <div style={{ color: "#fca5a5", fontSize: 12, marginBottom: 8 }}>{err}</div>}
+          <div style={{ marginBottom: 10 }}>
+            <label style={labelStyle}>Total volume (informational only)</label>
+            <div style={{ fontSize: 14, color: "rgba(255,255,255,0.55)" }}>{Math.round(comp.max_gallons).toLocaleString()} gal</div>
+          </div>
+          <div style={{ marginBottom: 10 }}>
+            <label style={labelStyle}>Cap (overflow prevention -- used for load planning)</label>
+            <input type="number" value={cap} onChange={(e) => setCap(e.target.value)} style={inputStyle} />
+          </div>
+          <button type="button" onClick={save} disabled={busy} style={saveBtnStyle}>{busy ? "Saving…" : "Save"}</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CompartmentsSection({
+  trailerId, expandedId, onToggleExpand,
+}: {
+  trailerId: string;
+  expandedId: string | null;
+  onToggleExpand: (id: string) => void;
+}) {
+  const [compartments, setCompartments] = useState<CompartmentRow[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const { data } = await supabase
+      .from("trailer_compartments")
+      .select("trailer_id, comp_number, max_gallons, cap_gallons")
+      .eq("trailer_id", trailerId)
+      .eq("active", true)
+      .order("comp_number");
+    setCompartments((data ?? []) as CompartmentRow[]);
+    setLoading(false);
+  }, [trailerId]);
+
+  useEffect(() => { void load(); }, [load]);
+
+  if (loading || !compartments.length) return null;
+
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ fontSize: 12, fontWeight: 800, color: "rgba(255,255,255,0.4)", textTransform: "uppercase" as const, letterSpacing: 0.5, marginBottom: 4 }}>
+        Compartments
+      </div>
+      {compartments.map((c) => (
+        <CompartmentRowItem
+          key={c.comp_number}
+          comp={c}
+          isExpanded={expandedId === `trailer-comp-${c.comp_number}`}
+          onToggleExpand={() => onToggleExpand(`trailer-comp-${c.comp_number}`)}
+          onSaved={load}
+        />
+      ))}
+    </div>
+  );
+}
+
 // ─── Per-unit permit list section ───────────────────────────────────────────
 
 function UnitSection({
@@ -403,6 +526,9 @@ function UnitSection({
         onToggleExpand={() => onToggleExpand(`${unitKind}-info`)}
         onSaved={onSaved}
       />
+      {unitKind === "trailer" && (
+        <CompartmentsSection trailerId={unitId} expandedId={expandedId} onToggleExpand={onToggleExpand} />
+      )}
       {rows.map((row) => (
         <PermitRow
           key={row.id}

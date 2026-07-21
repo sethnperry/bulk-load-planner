@@ -25,7 +25,7 @@ export default function NavMenu() {
   const [switching,   setSwitching]   = useState(false);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
 
-  const isPlanner = pathname === "/calculator" || pathname === "/";
+  const isPlanner = pathname === "/" || pathname === "/calculator" || Boolean(pathname?.startsWith("/calculator/"));
   const isProfile = pathname === "/profile";
   const isAdmin_  = pathname === "/admin";
   const isSuperAdmin_ = pathname === "/superadmin";
@@ -102,15 +102,15 @@ export default function NavMenu() {
         style={{
           display: "flex", flexDirection: "column", justifyContent: "center",
           alignItems: "center", gap: 5, width: 36, height: 36, borderRadius: 10,
-          border: open ? "1px solid rgba(255,255,255,0.2)" : "1px solid rgba(255,255,255,0.08)",
-          background: open ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.04)",
+          border: isPlanner ? "none" : open ? "1px solid rgba(255,255,255,0.2)" : "1px solid rgba(255,255,255,0.08)",
+          background: isPlanner ? "none" : open ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.04)",
           cursor: "pointer", padding: 0, transition: "background 150ms, border 150ms", flexShrink: 0,
         }}
       >
         {[0, 1, 2].map(i => (
           <span key={i} style={{
-            display: "block", width: 16, height: 1.5, borderRadius: 2,
-            background: "rgba(255,255,255,0.7)",
+            display: "block", width: isPlanner ? 18 : 16, height: isPlanner ? 2 : 1.5, borderRadius: 2,
+            background: isPlanner ? "rgba(0,0,0,0.85)" : "rgba(255,255,255,0.7)",
             transition: "transform 200ms, opacity 200ms",
             transform: open
               ? i === 0 ? "translateY(6.5px) rotate(45deg)"

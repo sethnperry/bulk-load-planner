@@ -1,16 +1,12 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Outfit } from "next/font/google";
 import "./globals.css";
 import ServiceWorkerRegistration from "@/components/ServiceWorkerRegistration";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const outfit = Outfit({
+  variable: "--font-outfit",
   subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
+  weight: ["400", "500", "600", "700", "800", "900"],
 });
 
 export const viewport: Viewport = {
@@ -26,7 +22,7 @@ export const metadata: Metadata = {
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
-    statusBarStyle: "black-translucent",
+    statusBarStyle: "default",
     title: "ProTankr",
   },
   icons: {
@@ -43,13 +39,14 @@ export default function RootLayout({
   return (
     <html lang="en" style={{ colorScheme: "dark", background: "#111111" }}>
       <head>
+        {/* theme-color itself comes from the `viewport` export below (Next's
+            Metadata API) rather than a hardcoded tag here -- nested layouts
+            (e.g. app/calculator/layout.tsx) override it per-route, and a
+            static tag here would coexist with that override ambiguously. */}
         <meta name="color-scheme" content="dark" />
-        <meta name="theme-color" content="#111111" />
-        <meta name="theme-color" media="(prefers-color-scheme: light)" content="#111111" />
-        <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#111111" />
       </head>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        className={`${outfit.variable} antialiased`}
         style={{ background: "#111111", colorScheme: "dark" }}
       >
         <ServiceWorkerRegistration />

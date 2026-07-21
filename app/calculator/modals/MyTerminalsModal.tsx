@@ -24,7 +24,7 @@ function avatarInitials(name: string): string {
 import { FullscreenModal } from "@/lib/ui/FullscreenModal";
 
 type TerminalRow = any;
-type CardData = { cardNumber: string; privateNote: string; };
+type CardData = { cardNumber: string; privateNote: string; pin: string; };
 
 export default function MyTerminalsModal(props: {
   open: boolean;
@@ -49,6 +49,7 @@ export default function MyTerminalsModal(props: {
   setSelectedTerminalId: (id: string) => void;
   setTermOpen: (open: boolean) => void;
   authUserId: string;
+  onChangeLocation?: () => void;
 }) {
   const {
     open, onClose,
@@ -60,7 +61,7 @@ export default function MyTerminalsModal(props: {
     cardDataByTerminalId, setCardDataForTerminal_,
     myTerminalIds, setMyTerminalIds, setTerminals,
     setSelectedTerminalId, setTermOpen,
-    authUserId,
+    authUserId, onChangeLocation,
   } = props;
 
   const [draftCards, setDraftCards] = useState<Record<string, CardData>>({});
@@ -72,7 +73,7 @@ export default function MyTerminalsModal(props: {
   const getDraft = (tid: string): CardData => {
     if (draftCards[tid]) return draftCards[tid];
     const saved = cardDataByTerminalId[tid];
-    return { cardNumber: saved?.cardNumber ?? "", privateNote: saved?.privateNote ?? "" };
+    return { cardNumber: saved?.cardNumber ?? "", privateNote: saved?.privateNote ?? "", pin: saved?.pin ?? "" };
   };
   const updateDraft = (tid: string, patch: Partial<CardData>) =>
     setDraftCards(prev => ({ ...prev, [tid]: { ...getDraft(tid), ...patch } }));
@@ -123,9 +124,20 @@ export default function MyTerminalsModal(props: {
           <div className="text-sm text-white/60">Select a city first.</div>
         ) : (
           <div className="space-y-3">
-            <div className="text-sm text-white/70">
-              Showing terminals in{" "}
-              <span className="text-white">{selectedCity}, {selectedState}</span>
+            <div className="text-sm text-white/70 flex items-center justify-between gap-2">
+              <span>
+                Showing terminals in{" "}
+                <span className="text-white">{selectedCity}, {selectedState}</span>
+              </span>
+              {onChangeLocation && (
+                <button
+                  type="button"
+                  onClick={onChangeLocation}
+                  className="shrink-0 text-xs font-semibold text-white/45 hover:text-white/70"
+                >
+                  Change
+                </button>
+              )}
             </div>
 
             {termError && <div className="text-sm text-red-400">{termError}</div>}
@@ -190,29 +202,31 @@ export default function MyTerminalsModal(props: {
                       {isExpanded && (
                         <div className="border-t border-white/10 px-3 pt-3 pb-3 space-y-3" onClick={(e) => e.stopPropagation()}>
 
-                          {/* Last Visit + Card Number */}
-                          <div className="flex gap-2">
-                            <div className="flex-1 min-w-0">
-                              <div className="text-xs text-white/40 mb-1 font-medium">Last Visit</div>
-                              <div className="flex gap-1">
-                                <input
-                                  type="date"
-                                  value={lastVisitISO}
-                                  onChange={(e) => setAccessDateForTerminal_(tid, e.target.value)}
-                                  className="flex-1 min-w-0 rounded-lg border border-white/10 bg-black/40 px-2 py-1.5 text-xs text-white"
-                                />
-                                <button type="button"
-                                  onClick={() => setAccessDateForTerminal_(tid, isoToday())}
-                                  className="rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-xs text-white/70 hover:bg-white/10 whitespace-nowrap">
-                                  Today
-                                </button>
-                              </div>
-                              {expiresISO && (
-                                <div className={["mt-1 text-xs tabular-nums", expired ? "text-red-400" : "text-white/35"].join(" ")}>
-                                  Expires {formatMDYWithCountdown_(expiresISO)}
-                                </div>
-                              )}
+                          {/* Last Visit */}
+                          <div>
+                            <div className="text-xs text-white/40 mb-1 font-medium">Last Visit</div>
+                            <div className="flex gap-1">
+                              <input
+                                type="date"
+                                value={lastVisitISO}
+                                onChange={(e) => setAccessDateForTerminal_(tid, e.target.value)}
+                                className="flex-1 min-w-0 rounded-lg border border-white/10 bg-black/40 px-2 py-1.5 text-xs text-white"
+                              />
+                              <button type="button"
+                                onClick={() => setAccessDateForTerminal_(tid, isoToday())}
+                                className="rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-xs text-white/70 hover:bg-white/10 whitespace-nowrap">
+                                Today
+                              </button>
                             </div>
+                            {expiresISO && (
+                              <div className={["mt-1 text-xs tabular-nums", expired ? "text-red-400" : "text-white/35"].join(" ")}>
+                                Expires {formatMDYWithCountdown_(expiresISO)}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Card Number + PIN */}
+                          <div className="flex gap-2">
                             <div className="flex-1 min-w-0">
                               <div className="text-xs text-white/40 mb-1 font-medium">Card Number</div>
                               <input
@@ -220,6 +234,16 @@ export default function MyTerminalsModal(props: {
                                 value={draft.cardNumber}
                                 onChange={(e) => updateDraft(tid, { cardNumber: e.target.value })}
                                 placeholder="Enter card #"
+                                className="w-full rounded-lg border border-white/10 bg-black/40 px-2 py-1.5 text-xs text-white placeholder:text-white/20"
+                              />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="text-xs text-white/40 mb-1 font-medium">PIN</div>
+                              <input
+                                type="text"
+                                value={draft.pin}
+                                onChange={(e) => updateDraft(tid, { pin: e.target.value })}
+                                placeholder="Enter PIN"
                                 className="w-full rounded-lg border border-white/10 bg-black/40 px-2 py-1.5 text-xs text-white placeholder:text-white/20"
                               />
                             </div>

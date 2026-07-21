@@ -321,7 +321,22 @@ export function usePlanSlots({
           const localRaw = typeof window !== "undefined" ? localStorage.getItem(planStoreKey(s)) : null;
           const lp = parsePlanPayload(localRaw, selectedTerminalId, selectedComboId);
           if (!lp || compareSavedAt(sp, lp) > 0) {
-            try { localStorage.setItem(planStoreKey(s), JSON.stringify(sp)); setSlotBump((v) => v + 1); } catch {}
+            // Normalize into the same { v: 1, savedAt, ... } shape buildSnapshot
+            // produces -- the server's own payload shape (version/savedAtISO)
+            // is a different, older schema, and loadFromSlot only recognizes
+            // v:1. Writing the raw server shape here made freshly-pulled slots
+            // (e.g. a brand-new device, or any slot re-pulled after a local
+            // cache clear) silently fail to load on tap until a save from that
+            // device produced a compliant local entry.
+            const normalized = {
+              v: 1,
+              savedAt: sp.savedAtISO ? (Date.parse(String(sp.savedAtISO)) || Date.now()) : Date.now(),
+              terminalId: String(sp.terminalId ?? selectedTerminalId),
+              tempF: typeof sp.tempF === "number" ? sp.tempF : 60,
+              cgSlider: typeof sp.cgSlider === "number" ? sp.cgSlider : 0.25,
+              compPlan: sp.compPlan ?? {},
+            };
+            try { localStorage.setItem(planStoreKey(s), JSON.stringify(normalized)); setSlotBump((v) => v + 1); } catch {}
           }
         }
 

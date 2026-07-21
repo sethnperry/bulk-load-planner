@@ -4,6 +4,12 @@
 export type CompPlanInput = {
   empty: boolean;
   productId: string; // "" means none selected
+  // Temporary per-load ceiling, bounded to the compartment's configured
+  // cap_gallons -- never exceeds it. null/undefined = use the full
+  // configured cap. Lives here (not separate state) so it rides along with
+  // the rest of compPlan's existing localStorage + preset persistence for
+  // free (usePlanSlots serializes compPlan wholesale).
+  capOverride?: number | null;
 };
 
 export type PlanRow = {
@@ -67,7 +73,8 @@ export type CityRow = {
 export type CompRow = {
   trailer_id: string;
   comp_number: number;
-  max_gallons: number | null;
+  max_gallons: number | null; // total physical volume -- informational only
+  cap_gallons: number | null; // overflow-prevention ceiling -- this is what the solver uses
   position: number | null;
   active: boolean | null;
 };

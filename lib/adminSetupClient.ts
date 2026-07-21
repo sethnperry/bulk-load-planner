@@ -84,7 +84,7 @@ export async function removeMyTerminal(targetUserId: string, terminalId: string)
 // ── Card data ────────────────────────────────────────────────────────────────
 
 export async function getCardData(targetUserId: string) {
-  return setupFetch<{ cardDataByTerminalId: Record<string, { cardNumber: string; privateNote: string }> }>(
+  return setupFetch<{ cardDataByTerminalId: Record<string, { cardNumber: string; privateNote: string; pin: string }> }>(
     "get_card_data", targetUserId
   );
 }
@@ -93,9 +93,10 @@ export async function setCardData(
   targetUserId: string,
   terminalId: string,
   cardNumber: string,
-  privateNote: string
+  privateNote: string,
+  pin: string
 ) {
-  return setupFetch("set_card_data", targetUserId, { terminalId, cardNumber, privateNote });
+  return setupFetch("set_card_data", targetUserId, { terminalId, cardNumber, privateNote, pin });
 }
 
 // ── Company ID ───────────────────────────────────────────────────────────────

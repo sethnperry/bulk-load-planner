@@ -1,15 +1,11 @@
 "use client";
 import { motion } from "framer-motion";
-import NavMenu from "@/lib/ui/NavMenu";
-import { getSetupSession, clearSetupSession } from "@/lib/setupSession";
-import type { SetupSession } from "@/lib/setupSession";
+import { clearSetupSession } from "@/lib/setupSession";
 import { useRouter } from "next/navigation";
 import { useTour } from "./hooks/useTour";
 import TourOverlay from "./components/TourOverlay";
 import SetupGate from "./components/SetupGate";
-import ExpirationAlertBar from "./components/ExpirationAlertBar";
-import ExpirationModal from "./modals/ExpirationModal";
-import { useExpirations } from "./hooks/useExpirations";
+import { useCalculatorShell } from "./CalculatorShellContext";
 
 /**
  * page.tsx — CalculatorPage
@@ -32,21 +28,17 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties }
 import { supabase } from "@/lib/supabase/client";
 
 // ── Hooks ──────────────────────────────────────────────────────────────────────
-import { useEquipment } from "./hooks/useEquipment";
-import { useLocation } from "./hooks/useLocation";
-import { useTerminals } from "./hooks/useTerminals";
 import { usePlanSlots } from "./hooks/usePlanSlots";
 import { useLoadWorkflow } from "./hooks/useLoadWorkflow";
 import { usePlanRows } from "./hooks/usePlanRows";
-import { useTerminalFilters } from "./hooks/useTerminalFilters";
 import { useFuelTempPrediction } from "./hooks/useFuelTempPrediction";
 import { useLoadHistory } from "./hooks/useLoadHistory";
 
 // ── Sections ───────────────────────────────────────────────────────────────────
 import PlannerControls from "./sections/PlannerControls";
+import PresetDial from "./sections/PresetDial";
 
 // ── Modals ─────────────────────────────────────────────────────────────────────
-import EquipmentModal from "./modals/EquipmentModal";
 import LocationModal from "./modals/LocationModal";
 import MyTerminalsModal from "./modals/MyTerminalsModal";
 import TerminalCatalogModal from "./modals/TerminalCatalogModal";
@@ -54,7 +46,6 @@ import LoadingModal from "./modals/LoadingModal";
 import MyLoadsModal from "./modals/MyLoadsModal";
 import LoadReportModal from "./modals/LoadReportModal";
 import ProductTempModal from "./modals/ProductTempModal";
-import TempDialModal from "./modals/TempDialModal";
 import CompartmentModal from "./modals/CompartmentModal";
 
 // ── UI ─────────────────────────────────────────────────────────────────────────
@@ -150,75 +141,19 @@ function TempDial({ value, min, max, step, onChange }: TempDialProps) {
 
 
 export default function CalculatorPage() {
-  // ── Auth ───────────────────────────────────────────────────────────────────
-  const [authEmail, setAuthEmail] = useState("");
-  const [authUserId, setAuthUserId] = useState("");
-  const [setupSession, setSetupSession] = useState<SetupSession | null>(null);
+  // ── Shared shell state (equipment/location/terminals/expirations) ──────────
+  // Owned once in CalculatorShellContext (layout.tsx) so the header's gear/
+  // bell icons and this page's own planning logic never see two
+  // independently-hydrated copies of the same selection state.
+  const shell = useCalculatorShell();
+  const { authUserId, setupSession, effectiveUserId, equipment, location, terminals, expirations } = shell;
   const router = useRouter();
-  const effectiveUserId = setupSession?.targetUserId ?? authUserId ?? "";
 
-  useEffect(() => {
-    (async () => {
-      const { data } = await supabase.auth.getUser();
-      setAuthEmail(data.user?.email ?? "");
-      setAuthUserId(data.user?.id ?? "");
-    })();
-    const session = getSetupSession();
-    if (session) setSetupSession(session);
-  }, []);
-
-  // ── Card data (card number + private note, per terminal, per user) ──────────
-  const [cardDataByTerminalId, setCardDataByTerminalId] =
-    useState<Record<string, { cardNumber: string; privateNote: string }>>({});
-
-  useEffect(() => {
-    if (!effectiveUserId) return;
-    (async () => {
-      if (setupSession) {
-        const { getCardData } = await import("@/lib/adminSetupClient");
-        const r = await getCardData(effectiveUserId);
-        setCardDataByTerminalId(r.cardDataByTerminalId);
-      } else {
-        const { data } = await supabase
-          .from("user_terminal_cards")
-          .select("terminal_id, card_number, private_note")
-          .eq("user_id", effectiveUserId);
-        if (data) {
-          const map: Record<string, { cardNumber: string; privateNote: string }> = {};
-          for (const row of data) {
-            map[String(row.terminal_id)] = {
-              cardNumber: row.card_number ?? "",
-              privateNote: row.private_note ?? "",
-            };
-          }
-          setCardDataByTerminalId(map);
-        }
-      }
-    })();
-  }, [effectiveUserId]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const setCardDataForTerminal_ = async (
-    terminalId: string,
-    data: { cardNumber: string; privateNote: string }
-  ) => {
-    setCardDataByTerminalId(prev => ({ ...prev, [terminalId]: data }));
-    if (!effectiveUserId) return;
-    if (setupSession) {
-      const { setCardData } = await import("@/lib/adminSetupClient");
-      await setCardData(effectiveUserId, terminalId, data.cardNumber, data.privateNote);
-    } else {
-      await supabase.from("user_terminal_cards").upsert(
-        {
-          user_id: effectiveUserId,
-          terminal_id: terminalId,
-          card_number: data.cardNumber,
-          private_note: data.privateNote,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "user_id,terminal_id" }
-      );
-    }
-  };
+  // ── Card data (card number + PIN + private note, per terminal, per user) ──
+  // Owned in CalculatorShellContext now -- the new Cards tab route needs the
+  // same data, so it's shared rather than fetched twice (same pattern as
+  // equipment/location/terminals above).
+  const { cardDataByTerminalId, setCardDataForTerminal_ } = shell;
 
   // Framer-motion's layoutId shared-element transitions render a differently
   // serialized `style` attribute server-side vs. after hydration (e.g. its
@@ -230,34 +165,32 @@ export default function CalculatorPage() {
   useEffect(() => { setMounted(true); }, []);
 
   // ── Modal open/close flags ─────────────────────────────────────────────────
-  const [equipOpen, setEquipOpen] = useState(false);
+  // equipOpen/expModalOpen/termOpen live in the shared shell context now --
+  // the header (layout.tsx) needs to trigger the same Equipment/Expirations/
+  // Terminals sheets this page renders (ExpirationModal's "resolve" links
+  // open Terminals, so it has to be a shared boolean, not local to either).
+  const { equipOpen, setEquipOpen, termOpen, setTermOpen } = shell;
   const [locOpen, setLocOpen] = useState(false);
-  const [termOpen, setTermOpen] = useState(false);
   const [catalogOpen, setCatalogOpen] = useState(false);
   const [catalogExpandedId, setCatalogExpandedId] = useState<string | null>(null);
   const [catalogEditingDateId, setCatalogEditingDateId] = useState<string | null>(null);
   const [expandedTerminalId, setExpandedTerminalId] = useState<string | null>(null);
-  const [expModalOpen, setExpModalOpen] = useState(false);
   const [statePickerOpen, setStatePickerOpen] = useState(false);
   const [compModalOpen, setCompModalOpen] = useState(false);
   const [compModalComp, setCompModalComp] = useState<number | null>(null);
   const [tempDialOpen, setTempDialOpen] = useState(false);
-  const [tempDial2Open, setTempDial2Open] = useState(false);
-  const [tempDial2ProductId, setTempDial2ProductId] = useState<string | null>(null);
+
+  // ── Action row state ────────────────────────────────────────────────────────
+  // activeSlotLetter mirrors PresetDial's own (cosmetic) centered/last-tapped
+  // slot, so "Save plan {letter}" always names the right preset. selectedComp
+  // is which compartment bar was last tapped (tapping a bar now selects it
+  // instead of opening the product picker directly -- the picker only opens
+  // via the "Edit Comp N Product" action button, per the design handoff).
+  const [activeSlotLetter, setActiveSlotLetter] = useState(1);
+  const [selectedComp, setSelectedComp] = useState<number | null>(null);
 
   // ── Feature hooks ──────────────────────────────────────────────────────────
-  const equipment = useEquipment(authUserId, setupSession);
-  const location = useLocation(effectiveUserId);
-
-  // selectedTerminalTimeZone removed — use selectedTerminalTimeZoneResolved below
-
-  const terminals = useTerminals(
-    effectiveUserId,
-    location.selectedTerminalId,
-    location.setSelectedTerminalId,
-    null, // timezone resolved below
-    setupSession
-  );
+  // equipment/location/terminals come from the shared shell context (see above).
 
   // Resolve timezone after both hooks exist
   const selectedTerminalTimeZoneResolved = useMemo(() => {
@@ -282,7 +215,7 @@ export default function CalculatorPage() {
       setCompLoading(true);
       const { data, error } = await supabase
         .from("trailer_compartments")
-        .select("trailer_id, comp_number, max_gallons, position, active")
+        .select("trailer_id, comp_number, max_gallons, cap_gallons, position, active")
         .eq("trailer_id", selectedTrailerId)
         .order("comp_number", { ascending: true });
       if (error) { setCompError(error.message); setCompartments([]); }
@@ -290,6 +223,29 @@ export default function CalculatorPage() {
       setCompLoading(false);
     })();
   }, [selectedTrailerId]);
+
+  // ── Equipment details (truck/trailer name + make, for the Equipment info card) ──
+  const [equipmentDetails, setEquipmentDetails] = useState({ truckName: "", truckMake: "", trailerName: "", trailerMake: "" });
+  const selectedTruckId = equipment.selectedCombo?.truck_id ?? null;
+
+  useEffect(() => {
+    (async () => {
+      if (!selectedTruckId && !selectedTrailerId) {
+        setEquipmentDetails({ truckName: "", truckMake: "", trailerName: "", trailerMake: "" });
+        return;
+      }
+      const [truckRes, trailerRes] = await Promise.all([
+        selectedTruckId ? supabase.from("trucks").select("truck_name, make").eq("truck_id", selectedTruckId).maybeSingle() : Promise.resolve({ data: null }),
+        selectedTrailerId ? supabase.from("trailers").select("trailer_name, make").eq("trailer_id", selectedTrailerId).maybeSingle() : Promise.resolve({ data: null }),
+      ]);
+      setEquipmentDetails({
+        truckName: (truckRes as any)?.data?.truck_name ?? "",
+        truckMake: (truckRes as any)?.data?.make ?? "",
+        trailerName: (trailerRes as any)?.data?.trailer_name ?? "",
+        trailerMake: (trailerRes as any)?.data?.make ?? "",
+      });
+    })();
+  }, [selectedTruckId, selectedTrailerId]);
 
   // ── Terminal products ──────────────────────────────────────────────────────
   const [terminalProducts, setTerminalProducts] = useState<ProductRow[]>([]);
@@ -430,51 +386,6 @@ export default function CalculatorPage() {
       tour.advance();
     }
   }
-  // ── Headspace caps — persisted per trailer ────────────────────────────────
-  const HEADSPACE_KEY_PREFIX = "protankr_headspace_v1:";
-  const headspaceStorageKey = selectedTrailerId
-    ? `${HEADSPACE_KEY_PREFIX}${selectedTrailerId}`
-    : null;
-
-  const [compHeadspacePct, setCompHeadspacePctRaw] = useState<Record<number, number>>(() => {
-    // Eagerly load from localStorage on first render
-    if (typeof window === "undefined") return {};
-    try {
-      // We don't know selectedTrailerId yet at init time, so start empty
-      // and hydrate in the effect below
-      return {};
-    } catch { return {}; }
-  });
-
-  // Hydrate when trailer changes
-  useEffect(() => {
-    if (!headspaceStorageKey) {
-      setCompHeadspacePctRaw({});
-      return;
-    }
-    try {
-      const raw = localStorage.getItem(headspaceStorageKey);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed === "object") {
-          setCompHeadspacePctRaw(parsed);
-          return;
-        }
-      }
-    } catch {}
-    setCompHeadspacePctRaw({});
-  }, [headspaceStorageKey]);
-
-  // Persist on every change
-  const setCompHeadspacePct = useCallback((updater: any) => {
-    setCompHeadspacePctRaw((prev) => {
-      const next = typeof updater === "function" ? updater(prev) : updater;
-      if (headspaceStorageKey) {
-        try { localStorage.setItem(headspaceStorageKey, JSON.stringify(next)); } catch {}
-      }
-      return next;
-    });
-  }, [headspaceStorageKey]);
   const [productInputs, setProductInputs] = useState<Record<string, { api?: string; tempF?: number }>>({});
 
   // Fuel temp prediction — drives temp button border color and pre-fills ProductTempModal
@@ -546,15 +457,24 @@ export default function CalculatorPage() {
   const cgBias = useMemo(() => cgSliderToBias(cgSlider), [cgSlider]);
   const unstableLoad = cgSlider < CG_NEUTRAL;
 
-  // ── Headspace helpers ──────────────────────────────────────────────────────
-  const headspacePctForComp = useCallback((compNumber: number) => {
-    const raw = Number(compHeadspacePct[compNumber] ?? 0);
-    return Number.isFinite(raw) ? Math.max(0, Math.min(0.3, raw)) : 0;
-  }, [compHeadspacePct]);
+  // ── Cap helpers ────────────────────────────────────────────────────────────
+  // cap_gallons (configured in Binder's Compartments section) is the real
+  // ceiling used for load planning -- max_gallons is informational only.
+  // compPlan[n].capOverride is a temporary, per-load reduction on top of
+  // that cap (never above it), set by dragging a compartment's handle in
+  // the planner; clearing it restores the full configured cap.
+  const persistedCapForComp = useCallback((compNumber: number) => {
+    const c = compartments.find((x) => Number(x.comp_number) === compNumber);
+    if (!c) return 0;
+    const cap = c.cap_gallons != null ? Number(c.cap_gallons) : Number(c.max_gallons ?? 0);
+    return Number.isFinite(cap) ? Math.max(0, cap) : 0;
+  }, [compartments]);
 
-  const effectiveMaxGallonsForComp = useCallback((compNumber: number, trueMaxGallons: number) => {
-    return Math.max(0, Math.floor(trueMaxGallons * (1 - headspacePctForComp(compNumber))));
-  }, [headspacePctForComp]);
+  const effectiveMaxGallonsForComp = useCallback((compNumber: number, persistedCap: number) => {
+    const override = compPlan[compNumber]?.capOverride;
+    if (override == null) return Math.max(0, Math.floor(persistedCap));
+    return Math.max(0, Math.floor(Math.min(Number(override), persistedCap)));
+  }, [compPlan]);
 
   // ── lbs/gal helper ────────────────────────────────────────────────────────
   // True if any planned compartment is using the fallback reference API (no driver-observed last_api)
@@ -586,8 +506,8 @@ export default function CalculatorPage() {
     const out: ActiveComp[] = [];
     for (const c of compartments) {
       const compNumber = Number(c.comp_number);
-      const trueMaxGallons = Number(c.max_gallons ?? 0);
-      const maxGallons = effectiveMaxGallonsForComp(compNumber, trueMaxGallons);
+      const persistedCap = persistedCapForComp(compNumber);
+      const maxGallons = effectiveMaxGallonsForComp(compNumber, persistedCap);
       const position = -(Number(c.position ?? 0)); // DB +position = REAR → flip to FRONT
       if (!Number.isFinite(compNumber) || maxGallons <= 0) continue;
       const sel = compPlan[compNumber];
@@ -665,31 +585,11 @@ export default function CalculatorPage() {
     predictedTempF: predictedFuelTempF,
   });
 
-  // ── Terminal filters ───────────────────────────────────────────────────────
-  const myTerminalIdSet = useMemo(
-    () => new Set((terminals.terminals ?? []).map((x) => String(x.terminal_id))),
-    [terminals.terminals]
-  );
-
-  const { terminalsFiltered, catalogTerminalsInCity } = useTerminalFilters({
-    terminals: terminals.terminals,
-    terminalCatalog: terminals.terminalCatalog,
-    selectedState: location.selectedState,
-    selectedCity: location.selectedCity,
-    myTerminalIdSet,
-  });
-
-  // ── Expiration alerts ─────────────────────────────────────────────────────
-  const expirations = useExpirations({
-    truckId: equipment.selectedCombo?.truck_id ?? null,
-    trailerId: equipment.selectedCombo?.trailer_id ?? null,
-    truckName: equipment.truckNameById[equipment.selectedCombo?.truck_id ?? ""] ?? "",
-    trailerName: equipment.trailerNameById[equipment.selectedCombo?.trailer_id ?? ""] ?? "",
-    accessDateByTerminalId: terminals.accessDateByTerminalId,
-    terminals: terminals.terminals,
-    terminalCatalog: terminals.terminalCatalog,
-    addDaysISO_,
-  });
+  // ── Terminal filters / expirations ────────────────────────────────────────
+  // Also shared via context (see above) -- myTerminalIdSet, terminalFilters,
+  // expirations all come from `shell` now.
+  const { myTerminalIdSet, terminalFilters } = shell;
+  const { terminalsFiltered, catalogTerminalsInCity } = terminalFilters;
 
   // Fetch terminal access dates for city terminals
   useEffect(() => {
@@ -844,67 +744,6 @@ const lastProductInfoById = useMemo(() => {
     badge: { ...styles.badge, marginRight: 10 },
   }), []);
 
-  // ── Snapshot slots JSX (injected into PlannerControls) ────────────────────
-  const SnapshotSlots = (
-    <div style={{ marginTop: 10, display: "flex", flexDirection: "column", alignItems: "center" }}>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
-        {planSlots.PLAN_SLOTS.map((n) => {
-          const has = !!planSlots.slotHas[n];
-          const disabled = !location.selectedTerminalId;
-
-          // Tap to load (if saved), long-press to save/clear, shift+click to clear on desktop
-          let pressTimer: ReturnType<typeof setTimeout> | null = null;
-          let didLongPress = false;
-
-          const onPressStart = () => {
-            if (disabled) return;
-            didLongPress = false;
-            pressTimer = setTimeout(() => {
-              didLongPress = true;
-              if (has) {
-                planSlots.clearSlot(n);
-              } else {
-                planSlots.saveToSlot(n);
-                tourAdvanceIfTarget("tour-plan-slots");
-              }
-            }, 600);
-          };
-          const onPressEnd = () => {
-            if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
-          };
-          const onTap = (e: React.MouseEvent) => {
-            if (disabled || didLongPress) return;
-            // Shift+click to clear on desktop
-            if (e.shiftKey && has) { planSlots.clearSlot(n); return; }
-            if (has) planSlots.loadFromSlot(n);
-            else { planSlots.saveToSlot(n); tourAdvanceIfTarget("tour-plan-slots"); }
-          };
-
-          return (
-            <button key={n} type="button" disabled={disabled}
-              id={n === 1 ? "tour-plan-slot-A" : undefined}
-              onPointerDown={onPressStart}
-              onPointerUp={onPressEnd}
-              onPointerLeave={onPressEnd}
-              onClick={(e) => onTap(e)}
-              style={{
-                border: "none", background: "transparent", padding: "4px 10px",
-                color: has ? "rgba(255,255,255,0.90)" : "rgba(255,255,255,0.25)",
-                cursor: disabled ? "not-allowed" : "pointer",
-                opacity: disabled ? 0.4 : 1, fontSize: "clamp(18px, 4.5vw, 26px)", fontWeight: 800,
-                letterSpacing: 0.2,
-              }}
-              title={!location.selectedTerminalId ? "Select a terminal first" : has ? "Tap to load · Hold to clear · Shift+click to clear" : "Tap to save · Hold to save"}
-            >{String.fromCharCode(64 + n)}</button>
-          );
-        })}
-      </div>
-      <div style={{ marginTop: 5, fontSize: 11, color: "rgba(255,255,255,0.3)", letterSpacing: 0.2 }}>
-        TAP to load · HOLD to save/clear
-      </div>
-    </div>
-  );
-
   // ── Derived load state ─────────────────────────────────────────────────────
   const loadDisabled =
     loadWorkflow.beginLoadBusy ||
@@ -931,77 +770,79 @@ const lastProductInfoById = useMemo(() => {
             <div style={{ fontSize: 14, fontWeight: 700, color: "rgba(255,255,255,0.90)", marginTop: 1 }}>{setupSession.targetDisplayName}</div>
           </div>
           <button type="button"
-            onClick={() => { clearSetupSession(); setSetupSession(null); router.push("/admin"); }}
+            onClick={() => { clearSetupSession(); router.push("/admin"); }}
             style={{ fontSize: 12, fontWeight: 700, padding: "6px 12px", borderRadius: 8, border: "1px solid rgba(251,146,60,0.40)", background: "rgba(251,146,60,0.15)", color: "#fb923c", cursor: "pointer", whiteSpace: "nowrap" as const }}>
             ← Return to Admin
           </button>
         </div>
       )}
 
-      {/* Equipment header + nav menu on same line */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, gap: 12 }}>
-        {(() => {
-          const equipmentBtnProps = {
-            type: "button" as const,
-            id: "tour-equipment-btn",
-            onClick: () => { setEquipOpen(true); tourAdvanceIfTarget("tour-equipment-btn"); },
-            style: {
-              background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)",
-              borderRadius: 14, padding: "8px 16px",
-              cursor: "pointer", textAlign: "left" as const,
-              color: equipment.selectedCombo ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.45)",
-              fontWeight: 900, fontSize: "clamp(16px, 2.6vw, 24px)", letterSpacing: 0.2,
-            },
-            "aria-label": "Select equipment",
-          };
-          return mounted ? (
-            <motion.button {...equipmentBtnProps} layoutId="setup-equipment-btn">
-              {equipment.equipmentLabel ?? "Select Equipment"}
-            </motion.button>
-          ) : (
-            <button {...equipmentBtnProps}>
-              {equipment.equipmentLabel ?? "Select Equipment"}
-            </button>
-          );
-        })()}
-        {(expirations.expiredCount > 0 || expirations.warningCount > 0) ? (
-          <ExpirationAlertBar
-            items={expirations.items}
-            activeItems={expirations.activeItems}
-            expiredCount={expirations.expiredCount}
-            warningCount={expirations.warningCount}
-            mostUrgent={expirations.mostUrgent}
-            allDeferred={expirations.allDeferred}
-            onClick={() => setExpModalOpen(true)}
-          />
-        ) : (
-          <button type="button" onClick={() => setExpModalOpen(true)}
-            style={{ background: "none", border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600, color: "rgba(255,255,255,0.28)", padding: "4px 8px", flexShrink: 0, whiteSpace: "nowrap" as const }}>
-            Expirations
-          </button>
-        )}
-        <NavMenu />
+      {/* Preset dial -- sits directly under the Planner/Cards/Vault tab bar,
+          per the design handoff (Preset dial is listed first in the
+          Planner tab's content, above the compartment strip). */}
+      <div id="tour-plan-slots">
+        <PresetDial
+          slots={planSlots.PLAN_SLOTS}
+          slotHas={planSlots.slotHas}
+          disabled={!location.selectedTerminalId}
+          onLoad={planSlots.loadFromSlot}
+          onSave={planSlots.saveToSlot}
+          onClear={planSlots.clearSlot}
+          onTourAdvance={tourAdvanceIfTarget}
+          onActiveChange={setActiveSlotLetter}
+        />
       </div>
 
-<PlannerControls
+      {/* Action row -- left: "Save plan {letter}" once a temporary cap
+          override exists anywhere (a concrete "diverges from saved" signal);
+          right: "Edit Comp N Product" once a compartment bar has been
+          tapped/selected. Both above the compartment strip. */}
+      {(() => {
+        const hasCapOverride = Object.values(compPlan as Record<number, CompPlanInput>).some((c) => c?.capOverride != null);
+        const activeLetter = String.fromCharCode(64 + activeSlotLetter);
+        if (!hasCapOverride && selectedComp == null) return null;
+        return (
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10, minHeight: 18 }}>
+            <div>
+              {hasCapOverride && (
+                <button type="button"
+                  onClick={() => planSlots.saveToSlot(activeSlotLetter)}
+                  style={{ background: "none", border: "none", padding: 0, color: "rgba(255,255,255,0.75)", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+                  Save plan {activeLetter}
+                </button>
+              )}
+            </div>
+            <div>
+              {selectedComp != null && (
+                <button type="button"
+                  onClick={() => { setCompModalComp(selectedComp); setCompModalOpen(true); tourAdvanceIfTarget("tour-comp-area"); }}
+                  style={{ background: "none", border: "none", padding: 0, color: "rgba(255,255,255,0.75)", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+                  Edit Comp {selectedComp} Product
+                </button>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
+      <PlannerControls
         styles={styles}
         selectedTrailerId={selectedTrailerId}
         compLoading={compLoading}
         compartments={compartments}
         compError={compError}
-        headspacePctForComp={headspacePctForComp}
+        persistedCapForComp={persistedCapForComp}
         effectiveMaxGallonsForComp={effectiveMaxGallonsForComp}
         plannedGallonsByComp={plannedGallonsByComp}
         compPlan={compPlan}
+        setCompPlan={setCompPlan}
         terminalProducts={terminalProducts}
-        setCompModalComp={setCompModalComp}
-        setCompModalOpen={(open: boolean) => {
-          // Don't open compartment modal if no terminal selected — products are terminal-specific
-          if (open && !location.selectedTerminalId) return;
-          setCompModalOpen(open);
-          if (open) tourAdvanceIfTarget("tour-comp-area");
+        selectedComp={selectedComp}
+        onSelectComp={(n: number) => {
+          if (!location.selectedTerminalId) return;
+          setSelectedComp(n);
+          tourAdvanceIfTarget("tour-comp-area");
         }}
-        snapshotSlots={SnapshotSlots}
         onTourAdvance={tourAdvanceIfTarget}
         selectedTerminalId={location.selectedTerminalId ?? ""}
       />
@@ -1010,56 +851,53 @@ const lastProductInfoById = useMemo(() => {
         open={compModalOpen}
         compNumber={compModalComp}
         compartments={compartments}
-        headspacePctForComp={headspacePctForComp}
-        effectiveMaxGallonsForComp={effectiveMaxGallonsForComp}
         compPlan={compPlan}
-        plannedGallonsByComp={plannedGallonsByComp}
         terminalProducts={terminalProducts}
         styles={styles}
-        setCompHeadspacePct={setCompHeadspacePct}
         setCompPlan={setCompPlan}
-        onClose={() => { setCompModalOpen(false); setCompModalComp(null); }}
+        onClose={() => { setCompModalOpen(false); setCompModalComp(null); setSelectedComp(null); }}
       />
 
       {/* CG Slider — always visible */}
-      <div id="tour-cg-slider" style={{ marginTop: 10 }}>
+      <div id="tour-cg-slider" style={{ marginTop: 8 }}>
         {unstableLoad && (
           <div style={{ ...styles.error, marginTop: 0, marginBottom: 10, textAlign: "center" }}>
             ⚠️ Unstable load (rear of neutral)
           </div>
         )}
         <style jsx global>{`
-          input.cgRange { -webkit-appearance: none; appearance: none; background: transparent; height: 56px; }
+          input.cgRange { -webkit-appearance: none; appearance: none; background: transparent; height: 24px; }
           input.cgRange:focus { outline: none; }
-          input.cgRange::-webkit-slider-runnable-track { height: 8px; border-radius: 999px; background: rgba(255,255,255,0.07); border: none; }
-          input.cgRange::-webkit-slider-thumb { -webkit-appearance: none; width: 28px; height: 28px; margin-top: -10px; background: transparent; border: none; opacity: 0; }
-          input.cgRange::-moz-range-track { height: 8px; border-radius: 999px; background: rgba(255,255,255,0.07); border: none; }
-          input.cgRange::-moz-range-thumb { width: 28px; height: 28px; background: transparent; border: none; opacity: 0; }
+          input.cgRange::-webkit-slider-runnable-track { height: 4px; border-radius: 999px; background: rgba(255,255,255,0.10); border: none; }
+          input.cgRange::-webkit-slider-thumb { -webkit-appearance: none; width: 22px; height: 22px; margin-top: -9px; background: transparent; border: none; opacity: 0; }
+          input.cgRange::-moz-range-track { height: 4px; border-radius: 999px; background: rgba(255,255,255,0.10); border: none; }
+          input.cgRange::-moz-range-thumb { width: 22px; height: 22px; background: transparent; border: none; opacity: 0; }
         `}</style>
         <div style={{ position: "relative", width: "100%" }}>
           <input type="range" className="cgRange" min={0} max={1} step={0.005} value={cgSlider}
             onChange={(e) => { setCgSlider(Number(e.target.value)); tourAdvanceIfTarget("tour-cg-slider"); }}
             style={{ width: "100%" }} disabled={!equipment.selectedCombo}
           />
-          {/* CG label — centered vertically on the track (track is 8px tall, thumb area 56px, so track center is at 50%) */}
+          {/* Puck — plain light-gray circle, no label, centered on the 4px track */}
           <div aria-hidden style={{
             position: "absolute",
             left: `${Math.max(0, Math.min(1, cgSlider)) * 100}%`,
             top: "50%",
             transform: "translate(-50%, -50%)",
-            width: 36, height: 36,
-            display: "grid", placeItems: "center",
-            pointerEvents: "none",
-            fontWeight: 900, fontSize: 13,
-            color: "rgba(255,255,255,0.65)",
-            background: "rgba(255,255,255,0.10)",
+            width: 22, height: 22,
             borderRadius: "50%",
-            boxShadow: "0 1px 4px rgba(0,0,0,0.5)",
-          }}>CG</div>
+            background: "#d9d9d9",
+            pointerEvents: "none",
+            boxShadow: "0 1px 4px rgba(0,0,0,0.4)",
+          }} />
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", padding: "0 2px", marginTop: 2 }}>
+          <span style={{ fontSize: 10, fontWeight: 500, color: "rgba(255,255,255,0.3)" }}>Rear</span>
+          <span style={{ fontSize: 10, fontWeight: 500, color: "rgba(255,255,255,0.3)" }}>Front</span>
         </div>
       </div>
 
-      {/* ── Action grid ── */}
+      {/* ── Info cards, Load button, Load summary ── */}
       {(() => {
         const { loadReport } = loadWorkflow;
         const plannedGal = loadReport?.planned_total_gal ?? (planRows.length ? plannedGallonsTotal : null);
@@ -1068,223 +906,203 @@ const lastProductInfoById = useMemo(() => {
         const actualText = loadReport?.actual_gross_lbs == null ? "—" : `${Math.round(loadReport.actual_gross_lbs).toLocaleString()} lbs`;
         const diff = loadReport?.diff_lbs ?? null;
         const diffText = diff == null ? "—" : `${diff >= 0 ? "+" : ""}${Math.round(diff).toLocaleString()} lbs`;
-        const diffColor = diff == null ? "rgba(255,255,255,0.90)" : diff > 0 ? "#ef4444" : "#4ade80";
+        const diffColor = diff == null ? "rgba(255,255,255,0.85)" : diff > 0 ? "#ef4444" : "#4ade80";
 
-        // Temp button confidence colors
         // isOverride = user manually moved temp away from prediction after it auto-applied
         const isOverride = userAdjustedTempRef.current && predictedFuelTempF != null && Math.abs(tempF - predictedFuelTempF) > 0.5;
-        const tempBorderColor = isOverride              ? "#fb923c"
-          : fuelTempConfidence === "high"               ? "#4ade80"
-          : fuelTempConfidence === "medium"             ? "#fbbf24"
-          : fuelTempConfidence === "low"                ? "#f87171"
+        const isHighConfidence = !isOverride && fuelTempConfidence === "high";
+        const tempPrimaryColor = isHighConfidence ? "rgba(255,255,255,0.55)" : "#fff";
+        const tempSubColor = isOverride ? "#fb923c"
+          : fuelTempConfidence === "high"   ? "#4ade80"
+          : fuelTempConfidence === "medium" ? "#eab308"
+          : fuelTempConfidence === "low"    ? "#ef4444"
           : "rgba(255,255,255,0.35)";
-        const tempGlowColor = isOverride                ? "rgba(251,146,60,0.28)"
-          : fuelTempConfidence === "high"               ? "rgba(74,222,128,0.28)"
-          : fuelTempConfidence === "medium"             ? "rgba(251,191,36,0.28)"
-          : fuelTempConfidence === "low"                ? "rgba(248,113,113,0.28)"
-          : "rgba(255,255,255,0.08)";
-
-        // Load button colors
-        const loadBg = loadReport ? "rgba(103,232,249,0.12)" : "rgba(30,60,80,0.60)";
-        const loadBorderColor = loadReport ? "#67e8f9" : "rgba(40,120,180,0.55)";
-        const loadTextColor = loadReport ? "#67e8f9" : "rgba(255,255,255,0.92)";
-
-        // Terminal duration only — strip date, keep "(N days)" or "Expired"
-        const termDuration = (() => {
-          if (!terminalCardedText) return undefined;
-          if (isPastISO_(terminalDisplayISO!)) return "Expired";
-          const m = terminalCardedText.match(/\(([^)]+)\)/);
-          return m ? m[1] : terminalCardedText;
-        })();
-        const termDurationColor = (() => {
-          if (!termDuration) return "rgba(255,255,255,0.45)";
-          if (termDuration === "Expired") return "#ef4444";
-          const d = parseInt(termDuration);
-          if (!isNaN(d) && d <= 7) return "#f97316";
-          return "rgba(255,255,255,0.45)";
-        })();
-
-        const subBtnStyle: React.CSSProperties = {
-          display: "flex", alignItems: "center", justifyContent: "space-between",
-          width: "100%", padding: "5px 12px",
-          background: "rgba(255,255,255,0.04)", border: "none",
-          borderBottom: "1px solid rgba(255,255,255,0.07)",
-          cursor: "pointer", flexShrink: 0,
-        };
-        const subBtnLabel: React.CSSProperties = { fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.45)" };
-        const subBtnChevron: React.CSSProperties = { fontSize: 11, color: "rgba(255,255,255,0.22)" };
-
-        const cardBase: React.CSSProperties = {
-          borderRadius: 20, border: "1px solid rgba(255,255,255,0.10)",
-          background: "rgba(255,255,255,0.03)",
-          boxShadow: "0 14px 34px rgba(0,0,0,0.40)",
-          display: "flex", flexDirection: "column", overflow: "hidden",
-        };
+        const tempSubLabel = isOverride ? "Manual override"
+          : fuelTempConfidence === "high"   ? "High confidence"
+          : fuelTempConfidence === "medium" ? "Medium confidence"
+          : fuelTempConfidence === "low"    ? "Low confidence"
+          : "—";
+        const tempBgAlpha = fuelTempConfidence === "high" ? 0.02 : fuelTempConfidence === "medium" ? 0.045 : 0.07;
 
         const locationLabel = location.locationLabel ?? null;
         const locationSelected = Boolean(location.selectedCity && location.selectedState);
         const terminalSelected = Boolean(location.selectedTerminalId);
+        const tid = location.selectedTerminalId ? String(location.selectedTerminalId) : null;
+        const cardNum = tid ? (cardDataByTerminalId[tid]?.cardNumber ?? "") : "";
+        const cardPin = tid ? (cardDataByTerminalId[tid]?.pin ?? "") : "";
+        const terminalSub = terminalSelected
+          ? [locationLabel, cardNum ? `Card # ${cardNum}` : null, cardPin ? `PIN ${cardPin}` : null].filter(Boolean).join(" · ")
+          : null;
+
+        const infoCard: React.CSSProperties = {
+          borderRadius: 16, border: "1px solid rgba(255,255,255,0.10)",
+          background: "rgba(255,255,255,0.03)", padding: "10px 14px",
+          // Explicit "none" -- without it, framer-motion's shared layoutId
+          // transition from SetupGate's cyan-glow CTA (boxShadow:
+          // "0 0 0 4px rgba(103,232,249,0.10)") leaves that glow as a
+          // permanent residual inline style on this button once the gate
+          // closes, since nothing here ever told it what to animate back to.
+          boxShadow: "none",
+        };
+        const chevron: React.CSSProperties = { fontSize: 16, color: "rgba(255,255,255,0.25)", flexShrink: 0 };
+
+        const hasEquipment = Boolean(equipment.selectedCombo);
 
         return (
-          <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 4 }}>
 
-            {/* Row 1: Location+Terminal card | Report card */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-
-              {/* Combined Location / Terminal card */}
-              <div style={{ ...cardBase }}>
-                {/* Location sub-button at top */}
-                {(() => {
-                  const locationBtnProps = {
-                    type: "button" as const,
-                    id: "tour-location-btn",
-                    onClick: () => { setLocOpen(true); tourAdvanceIfTarget("tour-location-btn"); },
-                    style: subBtnStyle,
-                  };
-                  const locationBtnChildren = (
-                    <>
-                      <span style={{ ...subBtnLabel, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
-                        {locationSelected ? locationLabel! : "Location"}
-                      </span>
-                      <span style={subBtnChevron}>›</span>
-                    </>
-                  );
-                  return mounted ? (
-                    <motion.button {...locationBtnProps} layoutId="setup-location-btn">{locationBtnChildren}</motion.button>
-                  ) : (
-                    <button {...locationBtnProps}>{locationBtnChildren}</button>
-                  );
-                })()}
-                {/* Terminal main area */}
-                {(() => {
-                  const terminalBtnProps = {
-                    type: "button" as const,
-                    id: "tour-terminal-btn",
-                    onClick: () => { setTermOpen(true); tourAdvanceIfTarget("tour-terminal-btn"); },
-                    disabled: !locationSelected,
-                    style: { flex: 1, background: "transparent", border: "none", cursor: locationSelected ? "pointer" : "default", display: "flex", flexDirection: "column" as const, justifyContent: "center" as const, alignItems: "flex-start" as const, padding: "10px 12px", minHeight: 54 },
-                  };
-                  const terminalBtnChildren = (
-                    <>
-                      <div style={{ fontWeight: 700, fontSize: "clamp(12px, 3.2vw, 15px)", color: terminalSelected ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.40)", lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const, width: "100%", textAlign: "center" as const }}>
-                        {terminalSelected ? (terminalLabel ?? "Terminal") : (locationSelected ? "Tap to select" : "Select location first")}
+            {/* Equipment card — two-up Truck / Trailer */}
+            {(() => {
+              const equipBtnProps = {
+                type: "button" as const,
+                id: "tour-equipment-btn",
+                onClick: () => { setEquipOpen(true); tourAdvanceIfTarget("tour-equipment-btn"); },
+                style: { ...infoCard, width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, cursor: "pointer", textAlign: "left" as const },
+              };
+              const children = !hasEquipment ? (
+                <>
+                  <span style={{ fontSize: 14, fontWeight: 600, color: "rgba(255,255,255,0.35)" }}>Select Equipment</span>
+                  <span style={chevron}>›</span>
+                </>
+              ) : (
+                <>
+                  <div style={{ display: "flex", flex: 1, gap: 20, minWidth: 0 }}>
+                    <div style={{ minWidth: 0, overflow: "hidden" }}>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
+                        Truck{equipmentDetails.truckName ? ` · ${equipmentDetails.truckName}` : ""}
                       </div>
-                      {terminalSelected && termDuration && (
-                        <div style={{ marginTop: 4, fontSize: "clamp(10px, 2.5vw, 12px)", fontWeight: 600, color: termDurationColor, lineHeight: 1.2, textAlign: "center" as const, width: "100%" }}>
-                          {termDuration === "Expired" ? "Expired" : `Expires in ${termDuration}`}
-                        </div>
-                      )}
-                    </>
-                  );
-                  return mounted ? (
-                    <motion.button {...terminalBtnProps} layoutId="setup-terminal-btn">{terminalBtnChildren}</motion.button>
-                  ) : (
-                    <button {...terminalBtnProps}>{terminalBtnChildren}</button>
-                  );
-                })()}
-                {/* Card number strip — matches Over/Under strip on report card */}
-                {(() => {
-                  const tid = location.selectedTerminalId ? String(location.selectedTerminalId) : null;
-                  const cardNum = tid ? (cardDataByTerminalId[tid]?.cardNumber ?? "") : "";
-                  return (
-                    <div style={{ ...subBtnStyle, borderBottom: "none", borderTop: "1px solid rgba(255,255,255,0.07)", cursor: "default" }}>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.35)" }}>Card #</span>
-                      <span style={{ fontSize: "clamp(11px, 3vw, 16px)", fontWeight: 900, color: cardNum ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.18)" }}>
-                        {cardNum || "—"}
-                      </span>
+                      <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
+                        {equipmentDetails.truckMake || " "}
+                      </div>
                     </div>
-                  );
-                })()}
-              </div>
+                    <div style={{ minWidth: 0, overflow: "hidden" }}>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
+                        Trailer{equipmentDetails.trailerName ? ` · ${equipmentDetails.trailerName}` : ""}
+                      </div>
+                      <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
+                        {equipmentDetails.trailerMake || " "}
+                      </div>
+                    </div>
+                  </div>
+                  <span style={chevron}>›</span>
+                </>
+              );
+              return mounted ? (
+                <motion.button {...equipBtnProps} layoutId="setup-equipment-btn">{children}</motion.button>
+              ) : (
+                <button {...equipBtnProps}>{children}</button>
+              );
+            })()}
 
-              {/* Report card — history sub-button at top, over/under at bottom */}
-              <div style={{ ...cardBase, justifyContent: "space-between" }}>
-                {/* History sub-button */}
-                <button type="button" onClick={() => { setMyLoadsOpen(true); loadHistory.fetch(); }} style={subBtnStyle}>
-                  {(() => {
-                    const last = loadHistory.rows[0];
-                    if (!last) return <><span style={subBtnLabel}>My Loads</span><span style={subBtnChevron}>›</span></>;
-                    const mins = Math.floor((Date.now() - new Date(last.started_at).getTime()) / 60000);
-                    const ago = mins < 60 ? `${mins}m ago` : mins < 1440 ? `${Math.floor(mins/60)}h ago` : "yesterday";
-                    const gal = last.planned_total_gal != null ? `${Math.round(last.planned_total_gal).toLocaleString()} gal` : "—";
-                    return <><span style={{ ...subBtnLabel, flex: 1, textAlign: "left" as const }}>{ago} · {gal}</span><span style={subBtnChevron}>›</span></>;
-                  })()}
-                </button>
-                {/* Planned / Target / Actual */}
-                <div style={{ padding: "8px 12px", display: "flex", flexDirection: "column", gap: 5, flex: 1 }}>
-                  {[
-                    { label: "Gallons", text: plannedGalText, big: true },
-                    { label: "Target",  text: targetText },
-                    { label: "Actual",  text: actualText },
-                  ].map(({ label, text, big }) => (
-                    <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 4 }}>
-                      <div style={{ color: "rgba(255,255,255,0.45)", fontWeight: 700, fontSize: "clamp(9px, 2.2vw, 11px)", whiteSpace: "nowrap" as const }}>{label}</div>
-                      <div style={{ color: "rgba(255,255,255,0.92)", fontWeight: 900, fontSize: big ? "clamp(13px, 3.5vw, 20px)" : "clamp(11px, 2.8vw, 16px)", lineHeight: 1.1, textAlign: "right" as const, whiteSpace: "nowrap" as const }}>{text}</div>
+            {/* Location / Terminal card — one undivided button, same shape as
+                Equipment/Temp/Load. Steps through Location -> Terminal; once
+                a location is set the button always opens the terminal picker
+                (re-opening Location itself happens from a "Change" link
+                inside that picker, not a second tap zone here). */}
+            {(() => {
+              const step: "location" | "terminal" = locationSelected ? "terminal" : "location";
+              const locTermBtnProps = {
+                type: "button" as const,
+                id: step === "location" ? "tour-location-btn" : "tour-terminal-btn",
+                onClick: () => {
+                  if (step === "location") { setLocOpen(true); tourAdvanceIfTarget("tour-location-btn"); }
+                  else { setTermOpen(true); tourAdvanceIfTarget("tour-terminal-btn"); }
+                },
+                style: { ...infoCard, width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, cursor: "pointer", textAlign: "left" as const },
+              };
+              const children = step === "location" ? (
+                <>
+                  <span style={{ fontSize: 14, fontWeight: 600, color: "rgba(255,255,255,0.35)" }}>Select Location</span>
+                  <span style={chevron}>›</span>
+                </>
+              ) : (
+                <>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: terminalSelected ? "#fff" : "rgba(255,255,255,0.35)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
+                      {terminalSelected ? (terminalLabel ?? "Terminal") : "Select terminal"}
                     </div>
-                  ))}
-                  {planUsesReferenceApi && planRows.length > 0 && (
-                    <div style={{ fontSize: "clamp(8px, 2vw, 10px)", fontWeight: 700, color: "#fb923c", textAlign: "right" as const, marginTop: 2 }}>
-                      ⚠ using ref API
-                    </div>
-                  )}
+                    {terminalSub && (
+                      <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
+                        {terminalSub}
+                      </div>
+                    )}
+                  </div>
+                  <span style={chevron}>›</span>
+                </>
+              );
+              return mounted ? (
+                <motion.button {...locTermBtnProps} layoutId={step === "location" ? "setup-location-btn" : "setup-terminal-btn"}>{children}</motion.button>
+              ) : (
+                <button {...locTermBtnProps}>{children}</button>
+              );
+            })()}
+
+            {/* Temp confidence card */}
+            <button type="button" onClick={() => setTempDialOpen(true)}
+              style={{
+                borderRadius: 16, border: "1px solid rgba(255,255,255,0.08)",
+                background: `rgba(255,255,255,${tempBgAlpha})`, padding: "10px 14px", width: "100%",
+                textAlign: "left" as const, cursor: "pointer",
+                display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
+              }}
+            >
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: tempPrimaryColor }}>
+                  {Math.round(tempF)}°F predicted product temp
                 </div>
-                {/* Over/Under strip at bottom — tap to open load report */}
+                <div style={{ fontSize: 12, fontWeight: 600, color: tempSubColor, marginTop: 2 }}>{tempSubLabel}</div>
+              </div>
+              <span style={chevron}>›</span>
+            </button>
+
+            {/* Load button */}
+            <button type="button" onClick={loadWorkflow.beginLoadToSupabase} disabled={loadDisabled}
+              style={{
+                borderRadius: 16, border: "none", background: "#fff", padding: "10px 14px", width: "100%",
+                cursor: loadDisabled ? "not-allowed" : "pointer", opacity: loadDisabled ? 0.5 : 1,
+                textAlign: "center" as const,
+              }}
+            >
+              <span style={{ fontSize: 16, fontWeight: 700, color: "#000", letterSpacing: 0.3 }}>{loadLabel}</span>
+            </button>
+
+            {/* Load summary */}
+            <div style={{ borderRadius: 16, background: "rgba(255,255,255,0.03)", padding: "10px 14px" }}>
+              <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8 }}>
+                <div style={{ fontSize: 20, fontWeight: 700, color: "#fff" }}>{plannedGalText}</div>
                 <button type="button"
                   onClick={() => {
                     if (loadWorkflow.loadReport && loadHistory.rows[0]) {
                       loadHistory.fetchLines(loadHistory.rows[0].load_id, loadHistory.rows[0].planned_snapshot, loadHistory.rows[0].product_temp_f);
                       setLoadReportOpen(true);
+                    } else {
+                      setMyLoadsOpen(true);
+                      loadHistory.fetch();
                     }
                   }}
-                  style={{ ...subBtnStyle, borderBottom: "none", borderTop: "1px solid rgba(255,255,255,0.07)", cursor: loadWorkflow.loadReport ? "pointer" : "default" }}
+                  style={{ fontSize: 12, fontWeight: 600, color: "rgba(255,255,255,0.45)", background: "none", border: "none", cursor: "pointer", padding: 0, whiteSpace: "nowrap" as const }}
                 >
-                  <span style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.35)" }}>Over/Under</span>
-                  <span style={{ fontSize: "clamp(11px, 3vw, 16px)", fontWeight: 900, color: diffColor }}>{diffText}</span>
+                  My Loads ›
                 </button>
               </div>
+              <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginTop: 4 }}>
+                Target {targetText} · Actual {actualText} · <span style={{ color: diffColor, fontWeight: 600 }}>Diff {diffText}</span>
+              </div>
+              {planUsesReferenceApi && planRows.length > 0 && (
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#fb923c", marginTop: 4 }}>⚠ using ref API</div>
+              )}
             </div>
 
-            {/* Row 2: Temp | Load — no sub-buttons */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-              {/* Temp button — glow style */}
-              <button type="button" onClick={() => setTempDialOpen(true)}
-                style={{
-                  ...cardBase,
-                  border: "1px solid rgba(255,255,255,0.08)",
-                  background: `radial-gradient(ellipse at 50% 120%, ${tempGlowColor} 0%, rgba(0,0,0,0) 70%), rgba(18,18,18,0.95)`,
-                  alignItems: "center", justifyContent: "center", padding: "20px 10px",
-                  cursor: "pointer",
-                  boxShadow: `0 4px 24px ${tempGlowColor}, inset 0 1px 0 rgba(255,255,255,0.06), inset 0 -1px 0 rgba(0,0,0,0.3)`,
-                }}
-              >
-                <div style={{ fontSize: "clamp(20px, 5.5vw, 34px)", fontWeight: 900, color: tempBorderColor, lineHeight: 1 }}>
-                  {Math.round(tempF)}°F
-                </div>
-              </button>
-
-              {/* Load button — glow style */}
-              <button type="button" onClick={loadWorkflow.beginLoadToSupabase} disabled={loadDisabled}
-                style={{
-                  ...cardBase,
-                  border: "1px solid rgba(255,255,255,0.08)",
-                  background: `radial-gradient(ellipse at 50% 120%, ${loadDisabled ? "rgba(20,50,70,0.4)" : "rgba(30,100,140,0.35)"} 0%, rgba(0,0,0,0) 70%), rgba(18,18,18,0.95)`,
-                  alignItems: "center", justifyContent: "center", padding: "20px 10px",
-                  cursor: loadDisabled ? "not-allowed" : "pointer",
-                  boxShadow: loadDisabled ? "none" : `0 4px 24px ${loadBorderColor}30, inset 0 1px 0 rgba(255,255,255,0.06), inset 0 -1px 0 rgba(0,0,0,0.3)`,
-                  opacity: loadDisabled ? 0.55 : 1,
-                }}
-              >
-                <div style={{ fontWeight: 1000, letterSpacing: 0.6, fontSize: "clamp(22px, 6vw, 42px)", lineHeight: 1, color: loadTextColor }}>
-                  {loadLabel}
-                </div>
-              </button>
+            {/* Footnote */}
+            <div style={{ fontSize: 10, color: "rgba(255,255,255,0.32)", textAlign: "center" as const, lineHeight: 1.4 }}>
+              Product API & temp confirm automatically after this load — sharpens the number for the next driver at this terminal.
             </div>
 
           </div>
         );
       })()}
 
-            
+
       {/* ── Guided tour overlay ── */}
       <TourOverlay tour={tour} />
       <SetupGate
@@ -1305,17 +1123,6 @@ const lastProductInfoById = useMemo(() => {
       <div id="tour-fleet-instruction" style={{ display: "none" }} />
 
       {/* ── Modals ── */}
-      <EquipmentModal
-        open={equipOpen} onClose={() => setEquipOpen(false)}
-        authUserId={effectiveUserId}
-        setupSession={setupSession}
-        combos={equipment.combos} combosLoading={equipment.combosLoading} combosError={equipment.combosError}
-        selectedComboId={equipment.selectedComboId ?? ""}
-        onSelectComboId={(id) => equipment.setSelectedComboId(id)}
-        onRefreshCombos={equipment.fetchCombos}
-        onTourAdvance={tourAdvanceIfTarget}
-      />
-
       <LoadReportModal
         open={loadReportOpen}
         onClose={() => setLoadReportOpen(false)}
@@ -1352,13 +1159,6 @@ const lastProductInfoById = useMemo(() => {
         onLoaded={loadWorkflow.onLoadedFromLoadingModal}
         loadedDisabled={loadWorkflow.completeBusy}
         loadedLabel={loadWorkflow.completeBusy ? "Saving…" : "LOADED"}
-      />
-
-      <TempDialModal
-        open={tempDial2Open} onClose={() => setTempDial2Open(false)} title="Temp"
-        value={tempDial2ProductId ? Number(productInputs[tempDial2ProductId]?.tempF ?? 60) : 60}
-        onChange={(v) => { const pid = tempDial2ProductId; if (!pid) return; setProductInputs((prev) => ({ ...prev, [pid]: { ...(prev[pid] ?? {}), tempF: v } })); }}
-        TempDial={TempDial}
       />
 
       <ProductTempModal
@@ -1426,24 +1226,7 @@ const lastProductInfoById = useMemo(() => {
         setSelectedTerminalId={location.setSelectedTerminalId}
         setTermOpen={setTermOpen}
         authUserId={authUserId}
-      />
-
-      <ExpirationModal
-        open={expModalOpen}
-        onClose={() => setExpModalOpen(false)}
-        items={expirations.items}
-        activeItems={expirations.activeItems}
-        deferredItems={expirations.deferredItems}
-        toggleDefer={expirations.toggleDefer}
-        onOpenEquipment={() => setEquipOpen(true)}
-        onOpenTerminals={() => setTermOpen(true)}
-        selectedCity={location.selectedCity}
-        selectedState={location.selectedState}
-        allTerminalsInCity={catalogTerminalsInCity}
-        accessDateByTerminalId={terminals.accessDateByTerminalId}
-        addDaysISO_={addDaysISO_}
-        isPastISO_={isPastISO_}
-        formatMDYWithCountdown_={formatMDYWithCountdown_}
+        onChangeLocation={() => { setTermOpen(false); setLocOpen(true); }}
       />
 
       <TerminalCatalogModal

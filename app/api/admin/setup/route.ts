@@ -206,21 +206,22 @@ export async function POST(req: NextRequest) {
       case "get_card_data": {
         const { data, error } = await serviceSupabase
           .from("user_terminal_cards")
-          .select("terminal_id, card_number, private_note")
+          .select("terminal_id, card_number, private_note, pin")
           .eq("user_id", targetUserId);
         if (error) throw error;
-        const map: Record<string, { cardNumber: string; privateNote: string }> = {};
+        const map: Record<string, { cardNumber: string; privateNote: string; pin: string }> = {};
         for (const row of data ?? []) {
           map[String(row.terminal_id)] = {
             cardNumber:  row.card_number   ?? "",
             privateNote: row.private_note  ?? "",
+            pin:         row.pin           ?? "",
           };
         }
         return NextResponse.json({ cardDataByTerminalId: map });
       }
 
       case "set_card_data": {
-        const { terminalId, cardNumber, privateNote } = body;
+        const { terminalId, cardNumber, privateNote, pin } = body;
         const { error } = await serviceSupabase
           .from("user_terminal_cards")
           .upsert(
@@ -229,6 +230,7 @@ export async function POST(req: NextRequest) {
               terminal_id:  terminalId,
               card_number:  cardNumber,
               private_note: privateNote,
+              pin:          pin ?? null,
               updated_at:   new Date().toISOString(),
             },
             { onConflict: "user_id,terminal_id" }
