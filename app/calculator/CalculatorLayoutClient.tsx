@@ -150,7 +150,7 @@ function GearIcon({ onClick }: { onClick: () => void }) {
 function Header() {
   const shell = useCalculatorShell();
   return (
-    <div style={{ paddingTop: 60, background: "linear-gradient(180deg, #ffffff 0%, #f2f2f2 100%)", flexShrink: 0, position: "relative", overflow: "visible" }}>
+    <div style={{ paddingTop: 12, background: "linear-gradient(180deg, #ffffff 0%, #f2f2f2 100%)", flexShrink: 0, position: "relative", overflow: "visible" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 16px" }}>
         <NavMenu />
         <div style={{ display: "flex", gap: 26, flexShrink: 0, alignItems: "center" }}>
