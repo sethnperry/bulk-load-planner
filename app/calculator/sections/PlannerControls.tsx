@@ -157,13 +157,13 @@ export default function PlannerControls(props: any) {
                         Product" in the action row above). */}
                     <div style={{
                       width: "100%", height: barH,
-                      borderRadius: "10px 10px 6px 6px",
+                      borderRadius: 0,
                       background: "rgba(255,255,255,0.06)",
                       position: "relative", overflow: "visible",
                       boxShadow: isSelected ? "0 0 0 2px rgba(255,255,255,0.55)" : "none",
                       transition: "box-shadow 150ms ease",
                     }}>
-                      <div style={{ position: "absolute", inset: 0, overflow: "hidden", borderRadius: "10px 10px 6px 6px" }}>
+                      <div style={{ position: "absolute", inset: 0, overflow: "hidden", borderRadius: 0 }}>
                         {/* Dimmer above the cap line -- unusable for this load */}
                         {capPct < 0.999 && (
                           <div style={{

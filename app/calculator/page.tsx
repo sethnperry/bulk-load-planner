@@ -949,7 +949,7 @@ const lastProductInfoById = useMemo(() => {
         const hasEquipment = Boolean(equipment.selectedCombo);
 
         return (
-          <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 4 }}>
+          <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 10 }}>
 
             {/* Equipment card — two-up Truck / Trailer */}
             {(() => {
