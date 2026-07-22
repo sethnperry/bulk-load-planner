@@ -157,37 +157,48 @@ export default function MyTerminalsModal(props: {
                         active ? "border-white/30 bg-white/5" : "border-white/10",
                       ].join(" ")}
                     >
-                      {/* Header */}
-                      <div
-                        role="button" tabIndex={0}
-                        onClick={() => isExpanded ? handleCollapse(tid) : handleExpand(tid)}
-                        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); isExpanded ? handleCollapse(tid) : handleExpand(tid); } }}
-                        className="flex items-center cursor-pointer select-none hover:bg-white/5"
-                      >
-                        <div style={{
-                          flexShrink: 0, width: 26, height: 26, marginLeft: 12,
-                          borderRadius: "50%", border: "1px solid rgba(255,255,255,0.35)",
-                          display: "flex", alignItems: "center", justifyContent: "center",
-                          fontSize: 10, fontWeight: 800,
-                          color: t.terminal_name ? "rgba(255,255,255,0.75)" : "rgba(255,255,255,0.20)",
-                        }}>
-                          {t.terminal_name ? avatarInitials(String(t.terminal_name)) : "—"}
-                        </div>
-                        <div className="min-w-0 flex-1 px-3 py-2">
-                          <div className="text-sm font-semibold text-white truncate">
-                            {t.terminal_name ?? "(unnamed terminal)"}
+                      {/* Header -- main body selects this terminal directly;
+                          only the chevron zone on the right expands/collapses
+                          the details panel below. */}
+                      <div className="flex items-center hover:bg-white/5">
+                        <div
+                          role="button" tabIndex={0}
+                          onClick={() => handleSelect(tid)}
+                          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleSelect(tid); } }}
+                          className="flex items-center flex-1 min-w-0 cursor-pointer select-none"
+                        >
+                          <div style={{
+                            flexShrink: 0, width: 26, height: 26, marginLeft: 12,
+                            borderRadius: "50%", border: "1px solid rgba(255,255,255,0.35)",
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                            fontSize: 10, fontWeight: 800,
+                            color: t.terminal_name ? "rgba(255,255,255,0.75)" : "rgba(255,255,255,0.20)",
+                          }}>
+                            {t.terminal_name ? avatarInitials(String(t.terminal_name)) : "—"}
                           </div>
-                          {expiresISO ? (
-                            <div className={["mt-1 text-xs tabular-nums", expired ? "text-red-400" : "text-white/50"].join(" ")}>
-                              {expired ? "Expired · " : ""}{formatMDYWithCountdown_(expiresISO)}
+                          <div className="min-w-0 flex-1 px-3 py-2">
+                            <div className="text-sm font-semibold text-white truncate">
+                              {t.terminal_name ?? "(unnamed terminal)"}
                             </div>
-                          ) : (
-                            <div className="mt-1 text-xs text-white/25">No visit recorded</div>
-                          )}
+                            {expiresISO ? (
+                              <div className={["mt-1 text-xs tabular-nums", expired ? "text-red-400" : "text-white/50"].join(" ")}>
+                                {expired ? "Expired · " : ""}{formatMDYWithCountdown_(expiresISO)}
+                              </div>
+                            ) : (
+                              <div className="mt-1 text-xs text-white/25">No visit recorded</div>
+                            )}
+                          </div>
                         </div>
-                        <div className="pr-3 text-white/35 text-xs select-none">
+                        <button
+                          type="button"
+                          onClick={() => isExpanded ? handleCollapse(tid) : handleExpand(tid)}
+                          aria-label={isExpanded ? "Collapse terminal details" : "Expand terminal details"}
+                          aria-expanded={isExpanded}
+                          className="flex-shrink-0 self-stretch px-3 flex items-center text-white/35 text-xs select-none hover:text-white/70 hover:bg-white/5"
+                          style={{ background: "none", border: "none", cursor: "pointer" }}
+                        >
                           {isExpanded ? "▲" : "▼"}
-                        </div>
+                        </button>
                       </div>
 
                       {/* Expanded panel */}
