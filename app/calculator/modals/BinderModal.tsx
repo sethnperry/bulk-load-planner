@@ -297,11 +297,16 @@ function AddPermitTypeModal({
 // button that swaps the summary for editable fields (Save/Cancel) --
 // mirroring the same expand-then-edit convention as the permit rows below.
 
-function InfoField({ label, value, full }: { label: string; value: string; full?: boolean }) {
+function InfoField({ label, value, full, truncate }: { label: string; value: string; full?: boolean; truncate?: boolean }) {
   return (
-    <div style={{ gridColumn: full ? "1 / -1" : undefined }}>
+    <div style={{ gridColumn: full ? "1 / -1" : undefined, minWidth: 0 }}>
       <div style={{ fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.35)", marginBottom: 2, textTransform: "uppercase" as const, letterSpacing: 0.4 }}>{label}</div>
-      <div style={{ fontSize: 13, color: "rgba(255,255,255,0.85)" }}>{value}</div>
+      <div style={{
+        fontSize: 13, color: "rgba(255,255,255,0.85)",
+        ...(truncate ? { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const } : {}),
+      }}>
+        {value}
+      </div>
     </div>
   );
 }
@@ -386,7 +391,7 @@ function UnitInfoRow({
                 <InfoField label="Model" value={detail?.model || "—"} />
                 <InfoField label="Plate" value={detail?.plate_number || "—"} />
                 <InfoField label="VIN" value={detail?.vin_number || "—"} full />
-                {detail?.notes && <InfoField label="Notes" value={detail.notes} full />}
+                {detail?.notes && <InfoField label="Notes" value={detail.notes} full truncate />}
               </div>
               <button type="button" onClick={() => setEditing(true)} style={saveBtnStyle}>Edit</button>
             </>
@@ -561,8 +566,6 @@ function UnitSection({
   onSaved: () => void;
 }) {
   const { pagesFor, hasDoc, reload: reloadDocs } = usePermitAttachments(unitKind, unitId, companyId);
-  const [confirmRemoveAll, setConfirmRemoveAll] = useState(false);
-  const [removingAll, setRemovingAll] = useState(false);
 
   const rows: Row[] = useMemo(() => {
     const applicable = types.filter((t) => {
@@ -595,27 +598,6 @@ function UnitSection({
       return (a.daysLeft as number) - (b.daysLeft as number);
     });
   }, [types, records, unitKind, unitId]);
-
-  const hasAnyRecords = rows.some((r) => r.record);
-
-  async function removeAllPermits() {
-    setRemovingAll(true);
-    try {
-      for (const row of rows) {
-        if (!row.record) continue;
-        for (const p of pagesFor(row.type.permit_type_id)) {
-          await supabase.storage.from("equipment-docs").remove([p.file_path]);
-          await supabase.from("equipment_attachments").delete().eq("id", p.id);
-        }
-        await supabase.from("equipment_permits").delete().eq("equipment_permit_id", row.record.equipment_permit_id);
-      }
-      reloadDocs();
-      onSaved();
-    } finally {
-      setRemovingAll(false);
-      setConfirmRemoveAll(false);
-    }
-  }
 
   return (
     <div style={{ marginBottom: 18 }}>
@@ -654,30 +636,6 @@ function UnitSection({
       >
         + Add permit type
       </div>
-
-      {hasAnyRecords && (
-        confirmRemoveAll ? (
-          <div style={{ borderRadius: 6, border: "1px solid rgba(220,60,60,0.30)", background: "rgba(180,40,40,0.10)", padding: "12px 14px", marginTop: 8 }}>
-            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.65)", lineHeight: 1.5, marginBottom: 10 }}>
-              This clears every recorded date and document for all permits on this {unitKind}. Permit types themselves aren&apos;t deleted -- you can re-enter dates any time. This can&apos;t be undone.
-            </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button type="button" onClick={() => setConfirmRemoveAll(false)} disabled={removingAll} style={cancelBtnStyle}>Cancel</button>
-              <button type="button" onClick={removeAllPermits} disabled={removingAll} style={{ ...dangerBtnStyle, flex: 1 }}>
-                {removingAll ? "Removing…" : "Remove all"}
-              </button>
-            </div>
-          </div>
-        ) : (
-          <button
-            type="button"
-            onClick={() => setConfirmRemoveAll(true)}
-            style={{ marginTop: 8, background: "none", border: "none", padding: 0, color: "rgba(239,68,68,0.55)", fontSize: 12, fontWeight: 700, cursor: "pointer" }}
-          >
-            Remove all permits
-          </button>
-        )
-      )}
     </div>
   );
 }

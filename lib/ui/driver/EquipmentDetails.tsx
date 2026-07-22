@@ -696,10 +696,6 @@ function TruckModal({ truck, companyId, onClose, onDone }: {
   const [make,      setMake]      = useState(truck?.make ?? "");
   const [model,     setModel]     = useState(truck?.model ?? "");
   const [year,      setYear]      = useState(String(truck?.year ?? ""));
-  const [region,    setRegion]    = useState(truck?.region ?? "");
-  const [local,     setLocal]     = useState(truck?.local_area ?? "");
-  const [status,    setStatus]    = useState(truck?.status_code ?? "");
-  const [statusLoc, setStatusLoc] = useState(truck?.status_location ?? "");
   const [active,    setActive]    = useState(truck?.active ?? true);
   // Permit dates
   const [regExp,    setRegExp]    = useState(truck?.reg_expiration_date ?? "");
@@ -754,8 +750,7 @@ function TruckModal({ truck, companyId, onClose, onDone }: {
     setSaving(true); setErr(null);
     const payload: any = {
       truck_name: name.trim(), vin_number: vin || null, plate_number: plate || null, make: make || null, model: model || null,
-      year: year ? parseInt(year) : null, region: region || null, local_area: local || null,
-      status_code: status || null, status_location: statusLoc || null, active, company_id: companyId,
+      year: year ? parseInt(year) : null, active, company_id: companyId,
       reg_expiration_date: regExp || null, reg_enforcement_date: regEnf || null,
       inspection_shop: insShop || null, inspection_issue_date: insIssue || null, inspection_expiration_date: insExp || null,
       inspection_enforcement_date: insEnf || null, inspection_notes: insNotes || null,
@@ -831,39 +826,8 @@ function TruckModal({ truck, companyId, onClose, onDone }: {
         <div><label style={{ ...css.label, fontSize: 10 }}>Model</label>{ti(model, setModel, "e.g. T680")}</div>
         <div><label style={{ ...css.label, fontSize: 10 }}>Year</label>{ti(year, setYear, "2022", "number")}</div>
       </div>
-      {/* Row 3: Region · Local Area · Status */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "6px 10px", marginBottom: 6 }}>
-        <div><label style={{ ...css.label, fontSize: 10 }}>Region</label>{ti(region, setRegion, "Southeast")}</div>
-        <div><label style={{ ...css.label, fontSize: 10 }}>Local Area</label>{ti(local, setLocal, "Tampa Bay")}</div>
-        <div>
-          <label style={{ ...css.label, fontSize: 10 }}>Status</label>
-          {status === "COUPLED"
-            ? <div style={{ ...css.input, ...sm, color: T.info, fontWeight: 700, cursor: "not-allowed", opacity: 0.85 }}>COUPLED</div>
-            : <select value={status} onChange={e => setStatus(e.target.value)} style={{ ...css.select, ...sm, width: "100%" }}>
-                <option value="">— Select —</option>
-                <option value="AVAIL">AVAIL — Available</option>
-                <option value="BOBTAIL">BOBTAIL — Bobtailing</option>
-                <option value="PARK">PARK — Parked</option>
-                <option value="MAINT">MAINT — Maintenance ⚠</option>
-                <option value="INSP">INSP — Inspection</option>
-                <option value="OOS">OOS — Out of Service ⚠</option>
-              </select>
-          }
-        </div>
-      </div>
-      {/* Row 4: Status Location — read-only when COUPLED, editable otherwise */}
-      <div style={{ marginBottom: 10 }}>
-        <label style={{ ...css.label, fontSize: 10 }}>Status Location</label>
-        {status === "COUPLED"
-          ? <div style={{ ...css.input, ...sm, color: T.muted, cursor: "not-allowed", opacity: 0.6 }}>
-              {statusLoc || "—"} <span style={{ fontSize: 10, marginLeft: 6 }}>(set via combo)</span>
-            </div>
-          : ti(statusLoc, setStatusLoc, "e.g. Yard 1")
-        }
-      </div>
       <div style={{ fontSize: 11, color: T.muted, marginBottom: 10, lineHeight: 1.5 }}>
-        <strong style={{ color: T.text }}>Active</strong> = unit appears in fleet lists and can be coupled.{" "}
-        <strong style={{ color: T.text }}>Status</strong> = physical/operational state. A unit can be Active but Parked.
+        <strong style={{ color: T.text }}>Active</strong> = unit appears in fleet lists and can be coupled.
         The <em>Deactivate</em> button below hides this unit from the fleet without deleting it.
       </div>
 
@@ -986,10 +950,6 @@ function TrailerModal({ trailer, companyId, onClose, onDone }: {
   const [make,      setMake]      = useState(trailer?.make ?? "");
   const [model,     setModel]     = useState(trailer?.model ?? "");
   const [year,      setYear]      = useState(String(trailer?.year ?? ""));
-  const [region,    setRegion]    = useState(trailer?.region ?? "");
-  const [local,     setLocal]     = useState(trailer?.local_area ?? "");
-  const [status,    setStatus]    = useState(trailer?.status_code ?? "");
-  const [statusLoc, setStatusLoc] = useState(trailer?.status_location ?? "");
   const [active,    setActive]    = useState(trailer?.active ?? true);
   const [comps,     setComps]     = useState<Compartment[]>(trailer?.compartments ?? []);
   // Permit dates
@@ -1031,9 +991,9 @@ function TrailerModal({ trailer, companyId, onClose, onDone }: {
     setSaving(true); setErr(null);
     const payload: any = {
       trailer_name: name.trim(), vin_number: vin || null, plate_number: plate || null, make: make || null, model: model || null,
-      year: year ? parseInt(year) : null, region: region || null, local_area: local || null,
+      year: year ? parseInt(year) : null,
       cg_max: 1.0, // always 1 per spec
-      status_code: status || null, status_location: statusLoc || null, active, company_id: companyId,
+      active, company_id: companyId,
       trailer_reg_expiration_date: trRegExp || null, trailer_reg_enforcement_date: trRegEnf || null,
       trailer_inspection_shop: trInsShop || null, trailer_inspection_issue_date: trInsIssue || null,
       trailer_inspection_expiration_date: trInsExp || null,
@@ -1112,40 +1072,8 @@ function TrailerModal({ trailer, companyId, onClose, onDone }: {
         <div><label style={{ ...css.label, fontSize: 10 }}>Model</label>{ti(model, setModel, "e.g. Tank")}</div>
         <div><label style={{ ...css.label, fontSize: 10 }}>Year</label>{ti(year, setYear, "2020", "number")}</div>
       </div>
-      {/* Row 3: Region · Local Area · Status */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "6px 10px", marginBottom: 6 }}>
-        <div><label style={{ ...css.label, fontSize: 10 }}>Region</label>{ti(region, setRegion, "Southeast")}</div>
-        <div><label style={{ ...css.label, fontSize: 10 }}>Local Area</label>{ti(local, setLocal, "Tampa Bay")}</div>
-        <div>
-          <label style={{ ...css.label, fontSize: 10 }}>Status</label>
-          {status === "COUPLED"
-            ? <div style={{ ...css.input, ...sm, color: T.info, fontWeight: 700, cursor: "not-allowed", opacity: 0.85 }}>COUPLED</div>
-            : <select value={status} onChange={e => setStatus(e.target.value)} style={{ ...css.select, ...sm, width: "100%" }}>
-                <option value="">— Select —</option>
-                <option value="AVAIL">AVAIL — Available</option>
-                <option value="LOAD">LOAD — Loaded / Staged</option>
-                <option value="PARK">PARK — Parked / Stored</option>
-                <option value="CLEAN">CLEAN — Cleaning / Purge</option>
-                <option value="MAINT">MAINT — Maintenance ⚠</option>
-                <option value="INSP">INSP — Inspection</option>
-                <option value="OOS">OOS — Out of Service ⚠</option>
-              </select>
-          }
-        </div>
-      </div>
-      {/* Row 4: Status Location — read-only when COUPLED */}
-      <div style={{ marginBottom: 10 }}>
-        <label style={{ ...css.label, fontSize: 10 }}>Status Location</label>
-        {status === "COUPLED"
-          ? <div style={{ ...css.input, ...sm, color: T.muted, cursor: "not-allowed", opacity: 0.6 }}>
-              {statusLoc || "—"} <span style={{ fontSize: 10, marginLeft: 6 }}>(set via combo)</span>
-            </div>
-          : ti(statusLoc, setStatusLoc, "e.g. Yard 1")
-        }
-      </div>
       <div style={{ fontSize: 11, color: T.muted, marginBottom: 10, lineHeight: 1.5 }}>
-        <strong style={{ color: T.text }}>Active</strong> = unit appears in fleet lists and can be coupled.{" "}
-        <strong style={{ color: T.text }}>Status</strong> = physical/operational state. A unit can be Active but Parked.
+        <strong style={{ color: T.text }}>Active</strong> = unit appears in fleet lists and can be coupled.
         The <em>Deactivate</em> button below hides this unit from the fleet without deleting it.
       </div>
 
