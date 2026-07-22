@@ -98,7 +98,7 @@ function buildReport(
 
 // ── Shared styles ─────────────────────────────────────────────────────────────
 const BTN: React.CSSProperties = {
-  flex: 1, padding: "11px 0", borderRadius: 10,
+  flex: 1, padding: "11px 0", borderRadius: 6,
   border: "1px solid rgba(255,255,255,0.12)",
   background: "rgba(255,255,255,0.05)",
   color: "rgba(255,255,255,0.80)",
@@ -152,7 +152,7 @@ function ExpirationCard({ label, statusText, expired, urgent, deferred, onTap, o
   const nameColor = deferred ? "rgba(255,255,255,0.30)" : "rgba(255,255,255,0.88)";
 
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderRadius: 8, border, background: bg }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderRadius: 6, border, background: bg }}>
       {/* Label — tappable */}
       <div
         role="button" tabIndex={0}
@@ -381,7 +381,7 @@ export default function ExpirationModal({
 
                 {/* Not carded — ghost, no date, no toggle */}
                 {cardNotCarded.map(name => (
-                  <div key={`nc-${name}`} style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.05)", background: "rgba(255,255,255,0.02)" }}>
+                  <div key={`nc-${name}`} style={{ padding: "8px 10px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.05)", background: "rgba(255,255,255,0.02)" }}>
                     <div style={{ fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,0.25)" }}>{name}</div>
                   </div>
                 ))}

@@ -23,6 +23,7 @@ import { usePathname, useRouter } from "next/navigation";
 import NavMenu from "@/lib/ui/NavMenu";
 import EquipmentModal from "./modals/EquipmentModal";
 import ExpirationModal from "./modals/ExpirationModal";
+import SettingsModal from "./modals/SettingsModal";
 import { CalculatorShellProvider, useCalculatorShell } from "./CalculatorShellContext";
 import { addDaysISO_, isPastISO_, formatMDYWithCountdown_ } from "./utils/dates";
 
@@ -138,7 +139,7 @@ function BellIcon({ count, onClick }: { count: number; onClick: () => void }) {
 
 function GearIcon({ onClick }: { onClick: () => void }) {
   return (
-    <button type="button" onClick={onClick} aria-label="Equipment" style={{ border: "none", background: "none", cursor: "pointer", padding: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+    <button type="button" onClick={onClick} aria-label="Settings" style={{ border: "none", background: "none", cursor: "pointer", padding: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(0,0,0,0.85)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <circle cx="12" cy="12" r="3"></circle>
         <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
@@ -147,7 +148,7 @@ function GearIcon({ onClick }: { onClick: () => void }) {
   );
 }
 
-function Header() {
+function Header({ onOpenSettings }: { onOpenSettings: () => void }) {
   const shell = useCalculatorShell();
   return (
     <div style={{ paddingTop: 12, background: "linear-gradient(180deg, #ffffff 0%, #f2f2f2 100%)", flexShrink: 0, position: "relative", overflow: "visible" }}>
@@ -155,7 +156,7 @@ function Header() {
         <NavMenu />
         <div style={{ display: "flex", gap: 26, flexShrink: 0, alignItems: "center" }}>
           <BellIcon count={shell.expirations.expiredCount + shell.expirations.warningCount} onClick={() => shell.setExpModalOpen(true)} />
-          <GearIcon onClick={() => shell.setEquipOpen(true)} />
+          <GearIcon onClick={onOpenSettings} />
         </div>
       </div>
       <TabBar />
@@ -165,9 +166,10 @@ function Header() {
 
 function ShellChrome({ children }: { children: React.ReactNode }) {
   const shell = useCalculatorShell();
+  const [settingsOpen, setSettingsOpen] = useState(false);
   return (
     <div style={{ height: "100dvh", background: "#0b0b0b", color: "#fff", display: "flex", flexDirection: "column", overflow: "hidden" }}>
-      <Header />
+      <Header onOpenSettings={() => setSettingsOpen(true)} />
       <div className="pt-tabscroll" style={{ flex: 1, overflowY: "auto", padding: "0px 12px 12px", background: "#0b0b0b" }}>
         {children}
       </div>
@@ -202,6 +204,11 @@ function ShellChrome({ children }: { children: React.ReactNode }) {
         addDaysISO_={addDaysISO_}
         isPastISO_={isPastISO_}
         formatMDYWithCountdown_={formatMDYWithCountdown_}
+      />
+
+      <SettingsModal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
       />
 
       <style jsx global>{`

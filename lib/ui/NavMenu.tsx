@@ -101,7 +101,7 @@ export default function NavMenu() {
         aria-label="Open navigation menu"
         style={{
           display: "flex", flexDirection: "column", justifyContent: "center",
-          alignItems: "center", gap: 5, width: 36, height: 36, borderRadius: 10,
+          alignItems: "center", gap: 5, width: 36, height: 36, borderRadius: 6,
           border: isPlanner ? "none" : open ? "1px solid rgba(255,255,255,0.2)" : "1px solid rgba(255,255,255,0.08)",
           background: isPlanner ? "none" : open ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.04)",
           cursor: "pointer", padding: 0, transition: "background 150ms, border 150ms", flexShrink: 0,
@@ -124,9 +124,15 @@ export default function NavMenu() {
 
       {open && (
         <div ref={panelRef} style={{
-          position: "absolute", top: "calc(100% + 8px)", right: 0,
+          position: "absolute", top: "calc(100% + 8px)",
+          // The button sits at the left edge of the header on the Planner
+          // (isPlanner) but at the right edge everywhere else (Profile,
+          // Admin, etc.) -- anchoring the panel to the opposite side of
+          // wherever the button actually is keeps it on-screen in both
+          // contexts instead of hanging off the edge of the viewport.
+          ...(isPlanner ? { left: 0 } : { right: 0 }),
           width: 240, background: "#111",
-          border: "1px solid rgba(255,255,255,0.1)", borderRadius: 14,
+          border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8,
           boxShadow: "0 16px 48px rgba(0,0,0,0.7)", overflow: "hidden", zIndex: 500,
         }}>
           {/* User */}
@@ -147,7 +153,7 @@ export default function NavMenu() {
               </div>
               {memberships.length === 1 ? (
                 <div style={{ fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,0.9)", display: "flex", alignItems: "center", gap: 6 }}>
-                  <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#f5a623", flexShrink: 0 }} />
+                  <span style={{ width: 6, height: 6, borderRadius: "50%", background: "rgba(255,255,255,0.55)", flexShrink: 0 }} />
                   {activeName}
                   {(myRole === "admin" || myRole === "lead") && <AdminBadge role={myRole} />}
                 </div>
@@ -161,14 +167,14 @@ export default function NavMenu() {
                         disabled={switching}
                         style={{
                           display: "flex", alignItems: "center", gap: 8, padding: "7px 10px",
-                          borderRadius: 8,
-                          border: active ? "1px solid rgba(245,166,35,0.3)" : "1px solid transparent",
-                          background: active ? "rgba(245,166,35,0.08)" : "rgba(255,255,255,0.03)",
+                          borderRadius: 6,
+                          border: active ? "1px solid rgba(255,255,255,0.20)" : "1px solid transparent",
+                          background: active ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.03)",
                           cursor: switching ? "wait" : "pointer", textAlign: "left" as const,
                           transition: "background 120ms", width: "100%",
                         }}
                       >
-                        <span style={{ width: 6, height: 6, borderRadius: "50%", flexShrink: 0, background: active ? "#f5a623" : "rgba(255,255,255,0.2)" }} />
+                        <span style={{ width: 6, height: 6, borderRadius: "50%", flexShrink: 0, background: active ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.2)" }} />
                         <span style={{ fontSize: 13, fontWeight: active ? 600 : 400, color: active ? "rgba(255,255,255,0.92)" : "rgba(255,255,255,0.55)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
                           {m.company?.company_name ?? "Company"}
                         </span>
@@ -207,7 +213,7 @@ export default function NavMenu() {
 
 function AdminBadge({ role }: { role: string }) {
   return (
-    <span style={{ marginLeft: "auto", fontSize: 10, fontWeight: 700, padding: "1px 6px", borderRadius: 10, background: "rgba(245,166,35,0.15)", color: "#f5a623", border: "1px solid rgba(245,166,35,0.3)", flexShrink: 0 }}>
+    <span style={{ marginLeft: "auto", fontSize: 10, fontWeight: 700, padding: "1px 6px", borderRadius: 10, background: "rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.70)", border: "1px solid rgba(255,255,255,0.20)", flexShrink: 0 }}>
       {role === "lead" ? "LEAD" : "ADMIN"}
     </span>
   );
@@ -220,7 +226,7 @@ function NavLink({ href, icon, label, onClick, danger }: {
 }) {
   return (
     <a href={href} onClick={onClick}
-      style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 10px", borderRadius: 8, fontSize: 13, fontWeight: 500, color: danger ? "#e05555" : "rgba(255,255,255,0.75)", textDecoration: "none", cursor: "pointer", transition: "background 100ms" }}
+      style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 10px", borderRadius: 6, fontSize: 13, fontWeight: 500, color: danger ? "#e05555" : "rgba(255,255,255,0.75)", textDecoration: "none", cursor: "pointer", transition: "background 100ms" }}
       onMouseEnter={e => (e.currentTarget.style.background = "rgba(255,255,255,0.05)")}
       onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
     >
