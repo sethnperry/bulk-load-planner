@@ -857,6 +857,12 @@ const lastProductInfoById = useMemo(() => {
     return `${code} — ${stateNameByCode.get(code) || code}`;
   }, [location.selectedState, stateNameByCode]);
 
+  const selectedStateName = useMemo(() => {
+    if (!location.selectedState) return "";
+    const code = normState(location.selectedState);
+    return stateNameByCode.get(code) || code;
+  }, [location.selectedState, stateNameByCode]);
+
   const cities = useMemo(() => {
     const st = normState(location.selectedState);
     return Array.from(new Set(
@@ -1333,6 +1339,7 @@ const lastProductInfoById = useMemo(() => {
         open={locOpen} onClose={() => setLocOpen(false)}
         selectedState={location.selectedState}
         selectedStateLabel={selectedStateLabel}
+        selectedStateName={selectedStateName}
         statesError={location.statesError}
         statesLoading={location.statesLoading}
         statePickerOpen={statePickerOpen}
@@ -1349,7 +1356,6 @@ const lastProductInfoById = useMemo(() => {
         normState={normState}
         toggleCityStar={toggleCityStar}
         isCityStarred={isCityStarred}
-        starBtnClass={starBtnClass}
         setLocOpen={setLocOpen}
       />
 

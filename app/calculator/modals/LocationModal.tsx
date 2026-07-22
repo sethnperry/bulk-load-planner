@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import { FullscreenModal } from "@/lib/ui/FullscreenModal";
 
 type StateOption = { code: string; name?: string | null };
@@ -12,6 +12,7 @@ export default function LocationModal(props: {
   // State picker
   selectedState: string;
   selectedStateLabel: string;
+  selectedStateName: string;
 
   statesError: string | null;
   statesLoading: boolean;
@@ -36,7 +37,6 @@ export default function LocationModal(props: {
   normState: (s: string) => string;
   toggleCityStar: (state: string, city: string) => void;
   isCityStarred: (state: string, city: string) => boolean;
-  starBtnClass: (starred: boolean) => string;
 
   // to preserve existing behavior (modal closes on city select)
   setLocOpen: (open: boolean) => void;
@@ -46,7 +46,7 @@ export default function LocationModal(props: {
     onClose,
 
     selectedState,
-    selectedStateLabel,
+    selectedStateName,
 
     statesError,
     statesLoading,
@@ -66,71 +66,124 @@ export default function LocationModal(props: {
 
     setSelectedCity,
 
-    normState,
     toggleCityStar,
     isCityStarred,
-    starBtnClass,
 
     setLocOpen,
   } = props;
 
+  // Non-favorited cities start collapsed -- unless the currently selected
+  // city isn't itself a favorite, in which case it'd otherwise be hidden
+  // from view with no indication of where it went.
+  const [citiesExpanded, setCitiesExpanded] = useState(
+    () => !!selectedCity && !topCities.includes(selectedCity)
+  );
+
+  const cityRow = (c: string, starred: boolean) => {
+    const active = c === selectedCity;
+    return (
+      <div
+        key={c}
+        role="button"
+        tabIndex={0}
+        onClick={() => { setSelectedCity(c); setLocOpen(false); }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setSelectedCity(c);
+            setLocOpen(false);
+          }
+        }}
+        className={[
+          "flex items-center rounded-md border cursor-pointer select-none hover:bg-white/5",
+          active ? "border-white/30 bg-white/5" : "border-white/10",
+        ].join(" ")}
+      >
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); toggleCityStar(selectedState, c); }}
+          aria-label={starred ? "Unstar city" : "Star city"}
+          style={{
+            flexShrink: 0, width: 26, height: 26, marginLeft: 12,
+            borderRadius: "50%",
+            border: `1px solid ${starred ? "rgba(234,179,8,0.55)" : "rgba(255,255,255,0.30)"}`,
+            background: "transparent",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: 14, lineHeight: 1, cursor: "pointer",
+            color: starred ? "rgba(234,179,8,0.95)" : "rgba(255,255,255,0.30)",
+          }}
+        >
+          {starred ? "★" : "☆"}
+        </button>
+        <div className="min-w-0 flex-1 px-3 py-3">
+          <div className="text-sm font-semibold text-white truncate">{c}</div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <FullscreenModal open={open} title="Select Location" onClose={onClose} footer={null}>
       <div className="space-y-4">
-        <div className="text-sm text-white/70">Choose your loading city.</div>
 
-        {/* STATE (compact / set-and-forget) */}
-        <div className="rounded-md border border-white/10 bg-white/[0.03] p-3">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <div className="text-xs uppercase tracking-wide text-white/50">State</div>
-              <div className="mt-1 text-sm font-semibold">{selectedState ? selectedStateLabel : "Select a state"}</div>
-              {statesError ? <div className="mt-1 text-xs text-red-400">{statesError}</div> : null}
+        {/* STATE -- collapsed to a one-line "Showing cities in {state}" once
+            set, matching My Terminals' header; only expands to the full
+            state list when there's no state yet or "Change" is tapped. */}
+        {!selectedState || statePickerOpen ? (
+          <div>
+            <div className="text-sm text-white/70 mb-2">
+              {selectedState ? "Choose a different state." : "Choose the state you're loading in."}
             </div>
-
-            <button
-              onClick={() => setStatePickerOpen((v) => !v)}
-              className="rounded-md border border-white/10 px-3 py-2 text-sm hover:bg-white/5"
-            >
-              {statePickerOpen ? "Close" : "Change"}
-            </button>
-          </div>
-
-          {statePickerOpen ? (
-            <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
-              {statesLoading ? (
-                <div className="col-span-2 sm:col-span-3 text-sm text-white/60">Loading states…</div>
-              ) : (
-                stateOptions.map((s) => {
-                  const active = normState(s.code) === normState(selectedState);
+            {statesError ? <div className="mb-2 text-xs text-red-400">{statesError}</div> : null}
+            {statesLoading ? (
+              <div className="text-sm text-white/60">Loading states…</div>
+            ) : (
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                {stateOptions.map((s) => {
+                  const active = s.code === selectedState;
                   return (
                     <button
                       key={s.code}
-                      onClick={() => {
-                        setSelectedState(s.code);
-                        setStatePickerOpen(false);
-                      }}
+                      onClick={() => { setSelectedState(s.code); setStatePickerOpen(false); }}
                       className={[
                         "rounded-md border px-3 py-3 text-left",
                         active ? "border-white/30 bg-white/5" : "border-white/10 hover:bg-white/5",
                       ].join(" ")}
                     >
-                      <div className="text-sm font-semibold">
-                        {s.code} — {s.name || s.code}
-                      </div>
+                      <div className="text-sm font-semibold">{s.code} — {s.name || s.code}</div>
                     </button>
                   );
-                })
-              )}
-            </div>
-          ) : null}
-        </div>
+                })}
+              </div>
+            )}
+            {selectedState && (
+              <button
+                type="button"
+                onClick={() => setStatePickerOpen(false)}
+                className="mt-3 text-xs font-semibold text-white/45 hover:text-white/70"
+              >
+                Cancel
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="text-sm text-white/70 flex items-center justify-between gap-2">
+            <span>
+              Showing cities in <span className="text-white">{selectedStateName}</span>
+            </span>
+            <button
+              type="button"
+              onClick={() => setStatePickerOpen(true)}
+              className="shrink-0 text-xs font-semibold text-white/45 hover:text-white/70"
+            >
+              Change
+            </button>
+          </div>
+        )}
 
-        {/* CITY (cards) */}
-        <div>
-          {!selectedState ? (
-            <div className="text-sm text-white/50">Select a state first.</div>
-          ) : citiesLoading ? (
+        {/* CITY */}
+        {selectedState && !statePickerOpen && (
+          citiesLoading ? (
             <div className="rounded-md border border-white/10 bg-white/[0.03] p-4 text-sm text-white/60">
               Loading cities…
             </div>
@@ -144,111 +197,40 @@ export default function LocationModal(props: {
             </div>
           ) : (
             <div className="space-y-3">
-              {/* Top Cities (manual starred) */}
-              {topCities.length ? (
-                <div>
-                  <div className="mb-2 text-xs uppercase tracking-wide text-white/50">Top Cities</div>
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                    {topCities.map((c) => {
-                      const active = c === selectedCity;
-                      return (
-                        <div
-                          key={`top-${c}`}
-                          role="button"
-                          tabIndex={0}
-                          onClick={() => {
-                            setSelectedCity(c);
-                            setLocOpen(false);
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" || e.key === " ") {
-                              e.preventDefault();
-                              setSelectedCity(c);
-                              setLocOpen(false);
-                            }
-                          }}
-                          className={[
-                            "rounded-md border px-4 py-3 text-left cursor-pointer select-none",
-                            active ? "border-white/30 bg-white/5" : "border-white/10 hover:bg-white/5",
-                          ].join(" ")}
-                        >
-                          <div className="flex items-center justify-between gap-3">
-                            <div className="text-sm font-semibold">{c}</div>
-
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                toggleCityStar(selectedState, c);
-                              }}
-                              aria-label="Unstar city"
-                              className={starBtnClass(true)}
-                            >
-                              ★
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ) : null}
-
-              {/* Ghost divider */}
-              {topCities.length ? <div className="h-px w-full bg-white/10" /> : null}
-
-              {/* All Cities (non-starred only) */}
+              {/* Favorites -- what's normally visible */}
               <div>
-                <div className="mb-2 text-xs uppercase tracking-wide text-white/50">All Cities</div>
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  {allCities.map((c) => {
-                    const active = c === selectedCity;
-                    const starred = isCityStarred(selectedState, c);
-
-                    return (
-                      <div
-                        key={c}
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => {
-                          setSelectedCity(c);
-                          setLocOpen(false);
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" || e.key === " ") {
-                            e.preventDefault();
-                            setSelectedCity(c);
-                            setLocOpen(false);
-                          }
-                        }}
-                        className={[
-                          "rounded-md border px-4 py-3 text-left cursor-pointer select-none",
-                          active ? "border-white/30 bg-white/5" : "border-white/10 hover:bg-white/5",
-                        ].join(" ")}
-                      >
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="text-sm font-semibold">{c}</div>
-
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              toggleCityStar(selectedState, c);
-                            }}
-                            aria-label={starred ? "Unstar city" : "Star city"}
-                            className={starBtnClass(starred)}
-                          >
-                            {starred ? "★" : "☆"}
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
+                <div className="mb-2 text-xs uppercase tracking-wide text-white/50">Favorites</div>
+                {topCities.length ? (
+                  <div className="grid grid-cols-1 gap-2">
+                    {topCities.map((c) => cityRow(c, true))}
+                  </div>
+                ) : (
+                  <div className="text-sm text-white/40">
+                    No favorite cities yet — tap the star on any city below to pin it here.
+                  </div>
+                )}
               </div>
+
+              {/* Tap zone to expand the full (non-favorite) list */}
+              {allCities.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setCitiesExpanded((v) => !v)}
+                  className="w-full flex items-center justify-between rounded-md border border-white/10 px-3 py-2.5 text-xs font-semibold text-white/50 hover:bg-white/5"
+                >
+                  <span>{citiesExpanded ? "Hide all cities" : `Show all cities (${allCities.length})`}</span>
+                  <span className="text-white/30">{citiesExpanded ? "▲" : "▼"}</span>
+                </button>
+              )}
+
+              {citiesExpanded && allCities.length > 0 && (
+                <div className="grid grid-cols-1 gap-2">
+                  {allCities.map((c) => cityRow(c, false))}
+                </div>
+              )}
             </div>
-          )}
-        </div>
+          )
+        )}
       </div>
     </FullscreenModal>
   );
