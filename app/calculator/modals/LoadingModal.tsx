@@ -22,20 +22,6 @@ type LastProductInfo = {
   last_api_updated_at?: string | null; // timestamptz string from Supabase
 };
 
-function badgeFromName_(name: string): string {
-  const s = String(name ?? "").trim();
-  if (!s) return "—";
-
-  // If the name ends with a 2–3 digit number (e.g. octane 87/93), use that.
-  const m = s.match(/(\d{2,3})\s*$/);
-  if (m?.[1]) return m[1];
-
-  const parts = s.split(/\s+/g).filter(Boolean);
-  const first = parts[0] ?? "";
-  if (parts.length >= 2) return (first[0] + (parts[1]?.[0] ?? "")).toUpperCase();
-  const alnum = first.replace(/[^a-zA-Z0-9]/g, "");
-  return (alnum.slice(0, 2) || first.slice(0, 2)).toUpperCase();
-}
 function fmtUpdatedOnLine(args: { updatedAt?: string | null; timeZone?: string | null }): string | null {
   const ts = args.updatedAt;
   if (!ts) return null;
@@ -120,7 +106,6 @@ export default function LoadingModal(props: {
   productNameById: Map<string, string>;
 
   // Optional: product styling overrides from catalog
-  productButtonCodeById?: Record<string, string>;
   productHexCodeById?: Record<string, string>;
 
   productInputs: ProductInputs;
@@ -146,7 +131,6 @@ export default function LoadingModal(props: {
     styles,
     planRows,
     productNameById,
-    productButtonCodeById,
     productHexCodeById,
     productInputs,
     setProductApi,
@@ -213,28 +197,34 @@ useEffect(() => {
             <div style={styles.help}>No filled compartments in the plan.</div>
           ) : (
             <div style={{ display: "grid", gap: 8 }}>
-              {plannedLines.map((x) => (
-                <div
-                  key={`${x.comp}-${x.productId}`}
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    gap: 8,
-                    alignItems: "baseline",
-                    padding: "7px 10px",
-                    borderRadius: 8,
-                    border: "1px solid rgba(255,255,255,0.10)",
-                    background: "rgba(255,255,255,0.04)",
-                  }}
-                >
-                  <div style={{ fontWeight: 800 }}>
-  C{x.comp} — {productNameById.get(x.productId) ?? x.productId}
-</div>
-                  <div style={{ color: "rgba(255,255,255,0.70)", fontWeight: 800 }}>
-  {Math.round(x.gallons)}
-</div>
-                </div>
-              ))}
+              {plannedLines.map((x) => {
+                const dotColor = (productHexCodeById?.[x.productId] && String(productHexCodeById[x.productId]).trim()) || "rgba(255,255,255,0.5)";
+                return (
+                  <div
+                    key={`${x.comp}-${x.productId}`}
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      gap: 8,
+                      padding: "9px 12px",
+                      borderRadius: 6,
+                      border: "1px solid rgba(255,255,255,0.10)",
+                      background: "rgba(255,255,255,0.04)",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                      <span style={{ width: 8, height: 8, borderRadius: "50%", background: dotColor, flexShrink: 0 }} />
+                      <span style={{ fontSize: 14, fontWeight: 600, color: "rgba(255,255,255,0.60)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
+                        C{x.comp} — {productNameById.get(x.productId) ?? x.productId}
+                      </span>
+                    </div>
+                    <div style={{ color: "#fff", fontWeight: 800, fontSize: 16, flexShrink: 0 }}>
+                      {Math.round(x.gallons)}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
@@ -249,7 +239,7 @@ useEffect(() => {
           {errorMessage ? (
             <div
               style={{
-                borderRadius: 14,
+                borderRadius: 6,
                 border: "1px solid rgba(255,80,80,0.35)",
                 background: "rgba(255,80,80,0.10)",
                 padding: "10px 12px",
@@ -268,31 +258,26 @@ useEffect(() => {
             <div style={{ display: "grid", gap: 10 }}>
               {productGroups.map((g) => {
                 const name = productNameById.get(g.productId) ?? g.productId;
-                const fromCatalog =
-                  (productButtonCodeById?.[g.productId] && String(productButtonCodeById[g.productId]).trim()) || "";
-                const fromName = badgeFromName_(name);
-
-                // If catalog code is 2 letters (e.g. PU/RU) but name ends with a number (e.g. 87/93),
-                // prefer the number so the badge matches what drivers expect on the button.
-                const badgeText =
-                  (fromCatalog &&
-                    /^[A-Za-z]{2}$/.test(fromCatalog) &&
-                    /^\d{2,3}$/.test(fromName)
-                    ? fromName
-                    : (fromCatalog || fromName));
-                const badgeHex =
-                  (productHexCodeById?.[g.productId] && String(productHexCodeById[g.productId]).trim()) || null;
+                const dotColor = (productHexCodeById?.[g.productId] && String(productHexCodeById[g.productId]).trim()) || "rgba(255,255,255,0.5)";
                 const apiVal = productInputs[g.productId]?.api ?? "";
                 const tempVal = productInputs[g.productId]?.tempF;
 
                 const lastInfo: LastProductInfo | undefined = lastProductInfoById?.[g.productId];
+                const apiLine = fmtLastApiLine_({
+                  lastApi: lastInfo?.last_api,
+                  lastApiUpdatedAt: lastInfo?.last_api_updated_at,
+                  timeZone: terminalTimeZone ?? null,
+                });
+                const stale = isApiStale(lastInfo?.last_api_updated_at, 7);
+                const missing = lastInfo?.last_api == null || !Number.isFinite(Number(lastInfo?.last_api));
+                const warn = stale || missing;
 
                 return (
                   <div
                     key={g.productId}
                     style={{
                       padding: "10px 12px",
-                      borderRadius: 10,
+                      borderRadius: 6,
                       border: "1px solid rgba(255,255,255,0.10)",
                       background: "rgba(255,255,255,0.04)",
                       display: "flex",
@@ -300,47 +285,33 @@ useEffect(() => {
                       gap: 8,
                     }}
                   >
-                    {/* Top row: badge + name/info + gallons */}
+                    {/* Top row: dot + name + gallons */}
                     <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-                      <div
-                        style={{
-                          width: 40, height: 40, borderRadius: 10, flexShrink: 0,
-                          display: "grid", placeItems: "center",
-                          fontWeight: 900, fontSize: 14, letterSpacing: 0.5,
-                          color: badgeHex ? badgeHex : "rgba(255,220,92,0.95)",
-                          border: badgeHex ? `2px solid ${badgeHex}` : "2px solid rgba(255,220,92,0.75)",
-                          background: "rgba(0,0,0,0.22)",
-                        }}
-                        aria-hidden
-                      >
-                        {badgeText}
-                      </div>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 800, fontSize: 14, lineHeight: 1.1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {name}
-                        </div>
-                        {(() => {
-                          const apiLine = fmtLastApiLine_({
-                            lastApi: lastInfo?.last_api,
-                            lastApiUpdatedAt: lastInfo?.last_api_updated_at,
-                            timeZone: terminalTimeZone ?? null,
-                          });
-                          const stale = isApiStale(lastInfo?.last_api_updated_at, 7);
-                          const missing = lastInfo?.last_api == null || !Number.isFinite(Number(lastInfo?.last_api));
-                          const color = missing ? "#f87171"
-                            : stale ? "#fb923c"
-                            : "rgba(255,255,255,0.50)";
-                          return (
-                            <div style={{ marginTop: 2, fontSize: 11, color, fontWeight: (stale || missing) ? 700 : 400 }}>
-                              {missing ? "⚠ No API recorded — enter manually"
-                                : stale ? `⚠ ${apiLine} — may be stale`
-                                : apiLine}
-                            </div>
-                          );
-                        })()}
-                      </div>
-                      <div style={{ color: "rgba(255,255,255,0.60)", fontWeight: 700, fontSize: 12, flexShrink: 0 }}>{Math.round(g.gallons)}</div>
+                      <span style={{ width: 8, height: 8, borderRadius: "50%", background: dotColor, flexShrink: 0 }} />
+                      <span style={{ flex: 1, fontSize: 14, fontWeight: 600, color: "rgba(255,255,255,0.60)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
+                        {name}
+                      </span>
+                      <div style={{ color: "#fff", fontWeight: 800, fontSize: 16, flexShrink: 0 }}>{Math.round(g.gallons)}</div>
                     </div>
+
+                    {/* API status -- a quiet line when fresh, a bold highlighted
+                        chip when stale/missing so a driver glancing quickly
+                        can't miss it. */}
+                    {warn ? (
+                      <div style={{
+                        display: "flex", alignItems: "center", gap: 6,
+                        padding: "7px 10px", borderRadius: 6,
+                        background: missing ? "rgba(248,113,113,0.14)" : "rgba(251,146,60,0.16)",
+                        border: `1px solid ${missing ? "rgba(248,113,113,0.40)" : "rgba(251,146,60,0.45)"}`,
+                      }}>
+                        <span style={{ fontSize: 13, fontWeight: 800, color: missing ? "#f87171" : "#fb923c", lineHeight: 1.3 }}>
+                          ⚠ {missing ? "No API recorded — enter manually" : `${apiLine} — may be stale`}
+                        </span>
+                      </div>
+                    ) : apiLine ? (
+                      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.45)" }}>{apiLine}</div>
+                    ) : null}
+
                     {/* Stacked inputs — uncontrolled while typing, normalized on blur */}
                     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                       {/* API */}
@@ -362,7 +333,7 @@ useEffect(() => {
                           }}
                           inputMode="decimal"
                           placeholder="37.9"
-                          style={{ ...styles.input, width: "100%", height: 48, borderRadius: 8, fontWeight: 800, fontSize: 18, textAlign: "center", boxSizing: "border-box" as const }}
+                          style={{ ...styles.input, width: "100%", height: 48, borderRadius: 6, fontWeight: 800, fontSize: 18, textAlign: "center", boxSizing: "border-box" as const }}
                         />
                         <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.25)", pointerEvents: "none" }}>API</span>
                       </div>
@@ -384,7 +355,7 @@ useEffect(() => {
                           }}
                           inputMode="decimal"
                           placeholder="79.0"
-                          style={{ ...styles.input, width: "100%", height: 48, borderRadius: 8, fontWeight: 800, fontSize: 18, textAlign: "center", boxSizing: "border-box" as const }}
+                          style={{ ...styles.input, width: "100%", height: 48, borderRadius: 6, fontWeight: 800, fontSize: 18, textAlign: "center", boxSizing: "border-box" as const }}
                         />
                         <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.25)", pointerEvents: "none" }}>TEMP</span>
                         <span style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", fontSize: 13, fontWeight: 700, color: "rgba(255,255,255,0.30)", pointerEvents: "none" }}>°F</span>

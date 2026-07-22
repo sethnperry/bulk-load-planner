@@ -800,12 +800,6 @@ const lastProductInfoById = useMemo(() => {
   // ── Placard data ──────────────────────────────────────────────────────────
 
 
-  const productButtonCodeById = useMemo(() => {
-    const rec: Record<string, string> = {};
-    for (const p of terminalProducts) { if (p.product_id && p.button_code) rec[p.product_id] = String(p.button_code); }
-    return rec;
-  }, [terminalProducts]);
-
   const productHexCodeById = useMemo(() => {
     const rec: Record<string, string> = {};
     for (const p of terminalProducts) { if (p.product_id && p.hex_code) rec[p.product_id] = String(p.hex_code); }
@@ -1304,7 +1298,6 @@ const lastProductInfoById = useMemo(() => {
         styles={styles}
         planRows={planRows as any[]}
         productNameById={productNameById}
-        productButtonCodeById={productButtonCodeById}
         productHexCodeById={productHexCodeById}
         productInputs={productInputs}
         terminalTimeZone={selectedTerminalTimeZoneResolved}
