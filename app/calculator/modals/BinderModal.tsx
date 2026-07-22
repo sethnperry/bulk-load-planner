@@ -900,7 +900,7 @@ export default function BinderModal({
 
   return (
     <>
-      <FullscreenModal open={open} onClose={onClose} title="Binder" footer={null}>
+      <FullscreenModal open={open} onClose={onClose} title="Equipment File" footer={null}>
         {loading && <div style={{ textAlign: "center" as const, color: "rgba(255,255,255,0.3)", fontSize: 13, padding: "24px 0" }}>Loading…</div>}
         {!loading && !truckId && !trailerId && (
           <div style={{ textAlign: "center" as const, color: "rgba(255,255,255,0.3)", fontSize: 13, padding: "24px 0" }}>Select equipment first.</div>

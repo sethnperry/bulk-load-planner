@@ -935,7 +935,7 @@ export default function SoloEquipmentModal({
               <div style={S.actionBtn()} onClick={() => setScaleOpen(true)}>Scale</div>
               <div style={S.actionBtn()} onClick={() => setServiceOpen(true)}>Service</div>
               <div style={S.actionBtn()} onClick={() => setWashOpen(true)}>Wash</div>
-              <div style={S.actionBtn()} onClick={() => setBinderOpen(true)}>Binder</div>
+              <div style={S.actionBtn()} onClick={() => setBinderOpen(true)}>Equip</div>
             </div>
           </div>
         </div>
