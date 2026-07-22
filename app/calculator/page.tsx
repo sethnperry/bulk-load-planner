@@ -437,10 +437,22 @@ export default function CalculatorPage() {
   // Fires once compPlan has actually re-rendered post-load (loadFromSlot
   // applies asynchronously via the hook's own setCompPlan), so the baseline
   // reflects what was really loaded, not what was on screen before it.
+  //
+  // Re-captures on every compPlan/cgSlider change while the flag is set,
+  // and only clears it after a short quiet period (debounced, same idea as
+  // usePlanSlots' own 350ms autosave debounce) rather than immediately on
+  // the first change. usePlanSlots' automatic restores (slot-0-on-terminal-
+  // change, last-load-from-log-on-combo-claim) hit the DB first and call
+  // setCompPlan/setCgSlider only once that resolves -- consuming the flag
+  // on the very next render (the pre-restore value) meant the baseline got
+  // locked in *before* the real restore landed, so the button showed
+  // "dirty" the instant equipment/terminal was picked, before the user had
+  // touched anything.
   useEffect(() => {
     if (!captureBaselineNext) return;
     setBaselineOverrides(overridesSnapshot(compPlan, cgSlider));
-    setCaptureBaselineNext(false);
+    const t = setTimeout(() => setCaptureBaselineNext(false), 600);
+    return () => clearTimeout(t);
   }, [compPlan, cgSlider, captureBaselineNext, overridesSnapshot]);
 
   // Terminal/combo switches trigger usePlanSlots' own automatic restores
