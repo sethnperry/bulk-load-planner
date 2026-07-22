@@ -42,17 +42,17 @@ type LoadSummary = {
 const S = {
   label: { fontSize: 13, fontWeight: 700 as const, color: "rgba(255,255,255,0.55)", marginBottom: 6, display: "block" },
   input: {
-    width: "100%", borderRadius: 14, padding: "12px 14px",
+    width: "100%", borderRadius: 6, padding: "12px 14px",
     border: "1px solid rgba(255,255,255,0.14)", background: "rgba(0,0,0,0.28)",
     color: "rgba(255,255,255,0.92)", fontSize: 18, fontWeight: 700 as const,
     outline: "none", boxSizing: "border-box" as const,
   } as React.CSSProperties,
   err: {
-    borderRadius: 16, padding: 14, background: "rgba(180,40,40,0.18)", border: "1px solid rgba(180,40,40,0.32)",
+    borderRadius: 6, padding: 14, background: "rgba(180,40,40,0.18)", border: "1px solid rgba(180,40,40,0.32)",
     color: "rgba(255,255,255,0.92)", fontWeight: 700, marginBottom: 16, fontSize: 13, lineHeight: 1.5,
   } as React.CSSProperties,
   notice: {
-    borderRadius: 14, padding: "12px 14px", marginBottom: 16,
+    borderRadius: 6, padding: "12px 14px", marginBottom: 16,
     background: "rgba(180,50,20,0.12)", border: "1px solid rgba(220,80,40,0.30)",
   } as React.CSSProperties,
   noticeLabel: { fontSize: 11, fontWeight: 900, color: "#fb923c", letterSpacing: 0.8, marginBottom: 4 },
@@ -186,7 +186,7 @@ export default function WeightRecordModal({
         <div style={{ flex: 1, overflowY: "auto", padding: "0 16px 8px" }}>
 
           <div style={{
-            borderRadius: 14, border: "1px dashed rgba(255,255,255,0.18)",
+            borderRadius: 6, border: "1px dashed rgba(255,255,255,0.18)",
             background: "rgba(255,255,255,0.03)", padding: "12px 14px",
             marginTop: 6, marginBottom: 18, fontSize: 12, color: "rgba(255,255,255,0.4)", lineHeight: 1.7,
           }}>
@@ -276,7 +276,7 @@ export default function WeightRecordModal({
             onClick={save}
             disabled={busy}
             style={{
-              width: "100%", borderRadius: 18, padding: "15px 18px", fontWeight: 900, fontSize: 17,
+              width: "100%", borderRadius: 6, padding: "15px 18px", fontWeight: 900, fontSize: 17,
               border: "1px solid rgba(255,255,255,0.18)", background: "rgba(255,255,255,0.12)",
               color: "rgba(255,255,255,0.95)", cursor: "pointer",
             }}

@@ -447,7 +447,7 @@ function ServiceTypeSelect({
             onClick={() => { onChange(""); setOpen(false); }}
             onMouseEnter={() => setHoverValue("")}
             onMouseLeave={() => setHoverValue((v) => (v === "" ? null : v))}
-            style={{ padding: "10px 12px", fontSize: 15, color: "#fff", cursor: "pointer", borderRadius: 8, background: hoverValue === "" ? "rgba(255,255,255,0.10)" : "transparent" }}
+            style={{ padding: "10px 12px", fontSize: 15, color: "#fff", cursor: "pointer", borderRadius: 6, background: hoverValue === "" ? "rgba(255,255,255,0.10)" : "transparent" }}
           >
             Select…
           </div>
@@ -455,7 +455,7 @@ function ServiceTypeSelect({
             <div
               key={t.service_type_id}
               style={{
-                display: "flex", alignItems: "center", gap: 6, borderRadius: 8,
+                display: "flex", alignItems: "center", gap: 6, borderRadius: 6,
                 background: hoverValue === t.service_type_id ? "rgba(255,255,255,0.10)" : t.service_type_id === value ? "rgba(255,255,255,0.05)" : "transparent",
               }}
               onMouseEnter={() => setHoverValue(t.service_type_id)}
@@ -486,7 +486,7 @@ function ServiceTypeSelect({
             onClick={() => { setOpen(false); onNewType(); }}
             onMouseEnter={() => setHoverValue("__new__")}
             onMouseLeave={() => setHoverValue((v) => (v === "__new__" ? null : v))}
-            style={{ padding: "10px 12px", fontSize: 15, color: "rgba(255,255,255,0.65)", cursor: "pointer", borderRadius: 8, background: hoverValue === "__new__" ? "rgba(255,255,255,0.10)" : "transparent" }}
+            style={{ padding: "10px 12px", fontSize: 15, color: "rgba(255,255,255,0.65)", cursor: "pointer", borderRadius: 6, background: hoverValue === "__new__" ? "rgba(255,255,255,0.10)" : "transparent" }}
           >
             + New type
           </div>
