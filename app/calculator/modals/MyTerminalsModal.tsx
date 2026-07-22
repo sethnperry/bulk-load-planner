@@ -4,17 +4,9 @@ import React, { useState } from "react";
 import SourcingModal from "./SourcingModal";
 
 // ── Terminal avatar helpers ───────────────────────────────────────────────────
-const AVATAR_COLORS: [string, string][] = [
-  ["#1a3a5c", "#4a9eda"], ["#1a3a2a", "#4aad6a"], ["#3a1a2a", "#da4a7a"],
-  ["#2a2a1a", "#c4a030"], ["#2a1a3a", "#7a4ada"], ["#1a3a3a", "#4acadc"],
-  ["#3a2a1a", "#da7a30"], ["#2a1a1a", "#da5050"],
-];
-
-function avatarColor(name: string): string {
-  let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) & 0xffffffff;
-  return AVATAR_COLORS[Math.abs(h) % AVATAR_COLORS.length][1];
-}
+// No fill, thin white stroke -- placeholder until real per-operator logos
+// (tracked as a someday idea, not this pass). Was a per-terminal color-hash
+// fill; that didn't fit the monochrome theme.
 
 function avatarInitials(name: string): string {
   const words = name.trim().split(/\s+/);
@@ -161,7 +153,7 @@ export default function MyTerminalsModal(props: {
                     <div
                       key={tid ?? `term-${idx}`}
                       className={[
-                        "rounded-xl border transition-all overflow-hidden",
+                        "rounded-md border transition-all overflow-hidden",
                         active ? "border-white/30 bg-white/5" : "border-white/10",
                       ].join(" ")}
                     >
@@ -173,11 +165,11 @@ export default function MyTerminalsModal(props: {
                         className="flex items-center cursor-pointer select-none hover:bg-white/5"
                       >
                         <div style={{
-                          flexShrink: 0, width: 28, textAlign: "center" as const,
-                          paddingLeft: 12, fontSize: 11, fontWeight: 800,
-                          color: t.terminal_name
-                            ? avatarColor(String(t.terminal_name))
-                            : "rgba(255,255,255,0.20)",
+                          flexShrink: 0, width: 26, height: 26, marginLeft: 12,
+                          borderRadius: "50%", border: "1px solid rgba(255,255,255,0.35)",
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          fontSize: 10, fontWeight: 800,
+                          color: t.terminal_name ? "rgba(255,255,255,0.75)" : "rgba(255,255,255,0.20)",
                         }}>
                           {t.terminal_name ? avatarInitials(String(t.terminal_name)) : "—"}
                         </div>
@@ -210,11 +202,11 @@ export default function MyTerminalsModal(props: {
                                 type="date"
                                 value={lastVisitISO}
                                 onChange={(e) => setAccessDateForTerminal_(tid, e.target.value)}
-                                className="flex-1 min-w-0 rounded-lg border border-white/10 bg-black/40 px-2 py-1.5 text-xs text-white"
+                                className="flex-1 min-w-0 rounded-md border border-white/10 bg-black/40 px-2 py-1.5 text-xs text-white"
                               />
                               <button type="button"
                                 onClick={() => setAccessDateForTerminal_(tid, isoToday())}
-                                className="rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-xs text-white/70 hover:bg-white/10 whitespace-nowrap">
+                                className="rounded-md border border-white/10 bg-white/5 px-2 py-1.5 text-xs text-white/70 hover:bg-white/10 whitespace-nowrap">
                                 Today
                               </button>
                             </div>
@@ -234,7 +226,7 @@ export default function MyTerminalsModal(props: {
                                 value={draft.cardNumber}
                                 onChange={(e) => updateDraft(tid, { cardNumber: e.target.value })}
                                 placeholder="Enter card #"
-                                className="w-full rounded-lg border border-white/10 bg-black/40 px-2 py-1.5 text-xs text-white placeholder:text-white/20"
+                                className="w-full rounded-md border border-white/10 bg-black/40 px-2 py-1.5 text-xs text-white placeholder:text-white/20"
                               />
                             </div>
                             <div className="flex-1 min-w-0">
@@ -244,7 +236,7 @@ export default function MyTerminalsModal(props: {
                                 value={draft.pin}
                                 onChange={(e) => updateDraft(tid, { pin: e.target.value })}
                                 placeholder="Enter PIN"
-                                className="w-full rounded-lg border border-white/10 bg-black/40 px-2 py-1.5 text-xs text-white placeholder:text-white/20"
+                                className="w-full rounded-md border border-white/10 bg-black/40 px-2 py-1.5 text-xs text-white placeholder:text-white/20"
                               />
                             </div>
                           </div>
@@ -256,10 +248,10 @@ export default function MyTerminalsModal(props: {
                             style={{
                               width: "100%",
                               padding: "10px 0",
-                              borderRadius: 10,
-                              border: "1px solid rgba(74,222,128,0.25)",
-                              background: "rgba(74,222,128,0.07)",
-                              color: "rgba(74,222,128,0.85)",
+                              borderRadius: 6,
+                              border: "1px solid rgba(255,255,255,0.16)",
+                              background: "rgba(255,255,255,0.06)",
+                              color: "rgba(255,255,255,0.85)",
                               fontSize: 13,
                               fontWeight: 700,
                               cursor: "pointer",
@@ -277,7 +269,7 @@ export default function MyTerminalsModal(props: {
                               onChange={(e) => updateDraft(tid, { privateNote: e.target.value })}
                               placeholder="Gate codes, contacts, reminders…"
                               rows={2}
-                              className="w-full rounded-lg border border-white/10 bg-black/40 px-2 py-1.5 text-xs text-white placeholder:text-white/20 resize-none"
+                              className="w-full rounded-md border border-white/10 bg-black/40 px-2 py-1.5 text-xs text-white placeholder:text-white/20 resize-none"
                             />
                           </div>
 
@@ -285,31 +277,31 @@ export default function MyTerminalsModal(props: {
                           {!isConfirming ? (
                             <div className="flex gap-2">
                               <button type="button" onClick={() => handleSelect(tid)}
-                                style={{ flex: 1, padding: "13px 0", borderRadius: 14, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.08)", color: "#ffffff", fontSize: 15, fontWeight: 700, cursor: "pointer", letterSpacing: 0.2 }}>
+                                style={{ flex: 1, padding: "13px 0", borderRadius: 6, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.08)", color: "#ffffff", fontSize: 15, fontWeight: 700, cursor: "pointer", letterSpacing: 0.2 }}>
                                 Select
                               </button>
                               {lastVisitISO && (
                                 <button type="button"
                                   onClick={() => setConfirmDeactivate(tid)}
-                                  style={{ padding: "13px 16px", borderRadius: 14, border: "1px solid rgba(239,68,68,0.20)", background: "rgba(239,68,68,0.06)", color: "rgba(239,68,68,0.70)", fontSize: 13, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" as const }}>
+                                  style={{ padding: "13px 16px", borderRadius: 6, border: "1px solid rgba(239,68,68,0.20)", background: "rgba(239,68,68,0.06)", color: "rgba(239,68,68,0.70)", fontSize: 13, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" as const }}>
                                   Deactivate
                                 </button>
                               )}
                             </div>
                           ) : (
-                            <div style={{ padding: "12px 14px", borderRadius: 12, border: "1px solid rgba(239,68,68,0.25)", background: "rgba(239,68,68,0.08)" }}>
+                            <div style={{ padding: "12px 14px", borderRadius: 6, border: "1px solid rgba(239,68,68,0.25)", background: "rgba(239,68,68,0.08)" }}>
                               <div style={{ fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,0.80)", marginBottom: 10 }}>
                                 Remove last visit date and mark as not carded?
                               </div>
                               <div className="flex gap-2">
                                 <button type="button"
                                   onClick={() => handleDeactivateConfirmed(tid)}
-                                  style={{ flex: 1, padding: "10px 0", borderRadius: 10, border: "1px solid rgba(239,68,68,0.30)", background: "rgba(239,68,68,0.15)", color: "rgba(239,68,68,0.90)", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+                                  style={{ flex: 1, padding: "10px 0", borderRadius: 6, border: "1px solid rgba(239,68,68,0.30)", background: "rgba(239,68,68,0.15)", color: "rgba(239,68,68,0.90)", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
                                   Yes, deactivate
                                 </button>
                                 <button type="button"
                                   onClick={() => setConfirmDeactivate(null)}
-                                  style={{ flex: 1, padding: "10px 0", borderRadius: 10, border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.60)", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+                                  style={{ flex: 1, padding: "10px 0", borderRadius: 6, border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.60)", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
                                   Cancel
                                 </button>
                               </div>

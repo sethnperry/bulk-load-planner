@@ -80,7 +80,7 @@ export default function LocationModal(props: {
         <div className="text-sm text-white/70">Choose your loading city.</div>
 
         {/* STATE (compact / set-and-forget) */}
-        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
+        <div className="rounded-md border border-white/10 bg-white/[0.03] p-3">
           <div className="flex items-center justify-between gap-3">
             <div>
               <div className="text-xs uppercase tracking-wide text-white/50">State</div>
@@ -90,7 +90,7 @@ export default function LocationModal(props: {
 
             <button
               onClick={() => setStatePickerOpen((v) => !v)}
-              className="rounded-xl border border-white/10 px-3 py-2 text-sm hover:bg-white/5"
+              className="rounded-md border border-white/10 px-3 py-2 text-sm hover:bg-white/5"
             >
               {statePickerOpen ? "Close" : "Change"}
             </button>
@@ -111,7 +111,7 @@ export default function LocationModal(props: {
                         setStatePickerOpen(false);
                       }}
                       className={[
-                        "rounded-2xl border px-3 py-3 text-left",
+                        "rounded-md border px-3 py-3 text-left",
                         active ? "border-white/30 bg-white/5" : "border-white/10 hover:bg-white/5",
                       ].join(" ")}
                     >
@@ -131,15 +131,15 @@ export default function LocationModal(props: {
           {!selectedState ? (
             <div className="text-sm text-white/50">Select a state first.</div>
           ) : citiesLoading ? (
-            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm text-white/60">
+            <div className="rounded-md border border-white/10 bg-white/[0.03] p-4 text-sm text-white/60">
               Loading cities…
             </div>
           ) : citiesError ? (
-            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm text-red-400">
+            <div className="rounded-md border border-white/10 bg-white/[0.03] p-4 text-sm text-red-400">
               {citiesError}
             </div>
           ) : cities.length === 0 ? (
-            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm text-white/60">
+            <div className="rounded-md border border-white/10 bg-white/[0.03] p-4 text-sm text-white/60">
               No cities available yet.
             </div>
           ) : (
@@ -168,7 +168,7 @@ export default function LocationModal(props: {
                             }
                           }}
                           className={[
-                            "rounded-2xl border px-4 py-3 text-left cursor-pointer select-none",
+                            "rounded-md border px-4 py-3 text-left cursor-pointer select-none",
                             active ? "border-white/30 bg-white/5" : "border-white/10 hover:bg-white/5",
                           ].join(" ")}
                         >
@@ -222,7 +222,7 @@ export default function LocationModal(props: {
                           }
                         }}
                         className={[
-                          "rounded-2xl border px-4 py-3 text-left cursor-pointer select-none",
+                          "rounded-md border px-4 py-3 text-left cursor-pointer select-none",
                           active ? "border-white/30 bg-white/5" : "border-white/10 hover:bg-white/5",
                         ].join(" ")}
                       >
