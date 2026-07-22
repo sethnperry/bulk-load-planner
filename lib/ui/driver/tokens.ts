@@ -9,13 +9,18 @@ export const T = {
   border:   "#2a2a2a",
   text:     "rgba(255,255,255,0.92)",
   muted:    "rgba(255,255,255,0.45)",
-  accent:   "#f5a623",
+  // Was orange (#f5a623) -- pure chrome/highlight color (primary buttons,
+  // pagination dots, "has data" badges), not a status signal, so it's
+  // monochrome now to match the rest of the app's theme pass. danger/
+  // success/warning/info are left alone -- those carry real status meaning
+  // (expiry urgency, coupled state) and were explicitly kept in color.
+  accent:   "#ffffff",
   danger:   "#e05555",
   success:  "#4caf82",
   warning:  "#f5c623",
   info:     "#5ba8f5",
-  radius:   12,
-  radiusSm: 8,
+  radius:   8,
+  radiusSm: 6,
 } as const;
 
 export const css = {
