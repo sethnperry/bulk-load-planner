@@ -72,6 +72,24 @@ function statusColor(row: Row): string {
   if (row.daysLeft != null && row.daysLeft <= 30) return "#fbbf24";
   return "rgba(255,255,255,0.6)";
 }
+// Canonical starter names -- mirrors the categories the old hardcoded
+// truck/trailer columns used to track (see CLAUDE.md), offered as a
+// quick-pick so a fresh company isn't stuck typing every standard permit
+// name from scratch. Purely a suggestion list for the "Add permit type"
+// flow -- doesn't touch the schema, and "+ Add custom" always falls
+// through to the same free-text editor.
+const PERMIT_SUGGESTIONS: Record<UnitKind, string[]> = {
+  truck: [
+    "Registration", "Annual Inspection", "IFTA Permits + Decals",
+    "PHMSA HazMat Permit", "Alliance HazMat Permit", "Fleet Insurance Cab Card",
+    "HazMat Transportation Lic", "Inner Bridge Permit",
+  ],
+  trailer: [
+    "Trailer Registration", "Annual Inspection",
+    "Tank V", "Tank K", "Tank L", "Tank T", "Tank I", "Tank P", "Tank UC",
+  ],
+};
+
 function statusText(row: Row): string {
   if (!row.record?.expiration_date) return "Not set";
   if (row.expired) return `Expired ${fmtDate(row.record.expiration_date)}`;
@@ -80,27 +98,27 @@ function statusText(row: Row): string {
 }
 
 const inputStyle: React.CSSProperties = {
-  width: "100%", borderRadius: 10, padding: "9px 11px", border: "1px solid rgba(255,255,255,0.16)",
+  width: "100%", borderRadius: 6, padding: "9px 11px", border: "1px solid rgba(255,255,255,0.16)",
   background: "rgba(0,0,0,0.3)", color: "#fff", fontSize: 14, boxSizing: "border-box",
 };
 const labelStyle: React.CSSProperties = { fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.4)", marginBottom: 4, display: "block" };
 const saveBtnStyle: React.CSSProperties = {
-  flex: 1, padding: "12px 14px", borderRadius: 12, border: "1px solid rgba(255,255,255,0.20)",
+  flex: 1, padding: "12px 14px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.20)",
   background: "rgba(255,255,255,0.12)", color: "#fff", fontWeight: 800, fontSize: 14, cursor: "pointer",
 };
 const cancelBtnStyle: React.CSSProperties = {
-  flex: 1, padding: "12px 14px", borderRadius: 12, border: "1px solid rgba(255,255,255,0.14)",
+  flex: 1, padding: "12px 14px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.14)",
   background: "rgba(255,255,255,0.06)", color: "#fff", fontWeight: 700, fontSize: 14, cursor: "pointer",
 };
 const dangerBtnStyle: React.CSSProperties = {
-  padding: "12px 14px", borderRadius: 12, border: "1px solid rgba(220,60,60,0.4)",
+  padding: "12px 14px", borderRadius: 6, border: "1px solid rgba(220,60,60,0.4)",
   background: "rgba(180,40,40,0.12)", color: "#fca5a5", fontWeight: 800, fontSize: 14, cursor: "pointer",
 };
 
 // ─── Permit type editor (rename / change applies_to / soft-delete) ──────────
 
 function PermitTypeEditorModal({
-  open, onClose, companyId, mode, type, unit, onSaved, onDeleted,
+  open, onClose, companyId, mode, type, unit, initialName, onSaved, onDeleted,
 }: {
   open: boolean;
   onClose: () => void;
@@ -108,6 +126,7 @@ function PermitTypeEditorModal({
   mode: "new" | "edit";
   type: PermitType | null;
   unit: UnitKind;
+  initialName?: string;
   onSaved: () => void;
   onDeleted: () => void;
 }) {
@@ -125,10 +144,10 @@ function PermitTypeEditorModal({
       setName(type.name);
       setAppliesTo(type.applies_to);
     } else {
-      setName("");
+      setName(initialName ?? "");
       setAppliesTo(unit);
     }
-  }, [open, mode, type, unit]);
+  }, [open, mode, type, unit, initialName]);
 
   async function save() {
     if (!name.trim()) { setErr("Enter a permit name."); return; }
@@ -210,6 +229,63 @@ function PermitTypeEditorModal({
             </div>
           </>
         )}
+      </div>
+    </FullscreenModal>
+  );
+}
+
+// ─── Add-permit picker (pick a common name, or add a custom one) ───────────
+// Sits in front of PermitTypeEditorModal -- picking a suggestion just
+// pre-fills that modal's name field (still goes through the same save/
+// applies_to/validation path); "+ Add custom" opens it blank, same as
+// "+ Add permit type" always did before this existed.
+
+function AddPermitTypeModal({
+  open, onClose, unit, existingTypes, onPick,
+}: {
+  open: boolean;
+  onClose: () => void;
+  unit: UnitKind;
+  existingTypes: PermitType[];
+  onPick: (name: string) => void;
+}) {
+  const suggestions = useMemo(() => {
+    const existingNames = new Set(
+      existingTypes
+        .filter((t) => t.applies_to === unit || t.applies_to === "both")
+        .map((t) => t.name.trim().toLowerCase())
+    );
+    return PERMIT_SUGGESTIONS[unit].filter((n) => !existingNames.has(n.toLowerCase()));
+  }, [existingTypes, unit]);
+
+  const rowStyle: React.CSSProperties = {
+    textAlign: "left" as const, padding: "12px 14px", borderRadius: 6,
+    border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)",
+    color: "white", fontSize: 14, fontWeight: 600, cursor: "pointer", width: "100%",
+  };
+
+  return (
+    <FullscreenModal open={open} onClose={onClose} title="Add Permit Type" footer={null}>
+      <div style={{ display: "grid", gap: 8 }}>
+        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginBottom: 4 }}>
+          Pick a common permit, or add a custom one.
+        </div>
+        {suggestions.map((name) => (
+          <button key={name} type="button" onClick={() => onPick(name)} style={rowStyle}>
+            {name}
+          </button>
+        ))}
+        <button
+          type="button"
+          onClick={() => onPick("")}
+          style={{
+            textAlign: "left" as const, padding: "12px 14px", borderRadius: 6,
+            border: "1px dashed rgba(255,255,255,0.18)", background: "transparent",
+            color: "rgba(255,255,255,0.55)", fontSize: 14, fontWeight: 700, cursor: "pointer", width: "100%",
+          }}
+        >
+          + Add custom
+        </button>
       </div>
     </FullscreenModal>
   );
@@ -485,6 +561,8 @@ function UnitSection({
   onSaved: () => void;
 }) {
   const { pagesFor, hasDoc, reload: reloadDocs } = usePermitAttachments(unitKind, unitId, companyId);
+  const [confirmRemoveAll, setConfirmRemoveAll] = useState(false);
+  const [removingAll, setRemovingAll] = useState(false);
 
   const rows: Row[] = useMemo(() => {
     const applicable = types.filter((t) => {
@@ -518,6 +596,27 @@ function UnitSection({
     });
   }, [types, records, unitKind, unitId]);
 
+  const hasAnyRecords = rows.some((r) => r.record);
+
+  async function removeAllPermits() {
+    setRemovingAll(true);
+    try {
+      for (const row of rows) {
+        if (!row.record) continue;
+        for (const p of pagesFor(row.type.permit_type_id)) {
+          await supabase.storage.from("equipment-docs").remove([p.file_path]);
+          await supabase.from("equipment_attachments").delete().eq("id", p.id);
+        }
+        await supabase.from("equipment_permits").delete().eq("equipment_permit_id", row.record.equipment_permit_id);
+      }
+      reloadDocs();
+      onSaved();
+    } finally {
+      setRemovingAll(false);
+      setConfirmRemoveAll(false);
+    }
+  }
+
   return (
     <div style={{ marginBottom: 18 }}>
       <UnitInfoRow
@@ -548,13 +647,37 @@ function UnitSection({
       <div
         onClick={onAddType}
         style={{
-          borderRadius: 10, border: "1px dashed rgba(255,255,255,0.18)", padding: "10px 12px",
+          borderRadius: 6, border: "1px dashed rgba(255,255,255,0.18)", padding: "10px 12px",
           textAlign: "center" as const, cursor: "pointer", fontSize: 13, fontWeight: 700,
           color: "rgba(255,255,255,0.35)", marginTop: 4,
         }}
       >
         + Add permit type
       </div>
+
+      {hasAnyRecords && (
+        confirmRemoveAll ? (
+          <div style={{ borderRadius: 6, border: "1px solid rgba(220,60,60,0.30)", background: "rgba(180,40,40,0.10)", padding: "12px 14px", marginTop: 8 }}>
+            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.65)", lineHeight: 1.5, marginBottom: 10 }}>
+              This clears every recorded date and document for all permits on this {unitKind}. Permit types themselves aren&apos;t deleted -- you can re-enter dates any time. This can&apos;t be undone.
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button type="button" onClick={() => setConfirmRemoveAll(false)} disabled={removingAll} style={cancelBtnStyle}>Cancel</button>
+              <button type="button" onClick={removeAllPermits} disabled={removingAll} style={{ ...dangerBtnStyle, flex: 1 }}>
+                {removingAll ? "Removing…" : "Remove all"}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setConfirmRemoveAll(true)}
+            style={{ marginTop: 8, background: "none", border: "none", padding: 0, color: "rgba(239,68,68,0.55)", fontSize: 12, fontWeight: 700, cursor: "pointer" }}
+          >
+            Remove all permits
+          </button>
+        )
+      )}
     </div>
   );
 }
@@ -718,14 +841,14 @@ function PermitRow({
           <div style={{ marginBottom: 10 }}>
             <label style={labelStyle}>Document{pages.length > 1 ? "s" : ""}</label>
             {pages.map((p) => (
-              <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "6px 10px", marginBottom: 4 }}>
+              <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, padding: "6px 10px", marginBottom: 4 }}>
                 <span style={{ fontSize: 14 }}>{p.mime_type?.startsWith("image/") ? "🖼" : "📄"}</span>
                 <span style={{ flex: 1, fontSize: 12, color: "rgba(255,255,255,0.8)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>{p.original_name}</span>
-                <button type="button" onClick={() => setPreviewGroup({ category: row.type.permit_type_id, label: row.type.name, pages })} style={{ background: "none", border: "none", color: "#67e8f9", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>View</button>
+                <button type="button" onClick={() => setPreviewGroup({ category: row.type.permit_type_id, label: row.type.name, pages })} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.75)", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>View</button>
                 <button type="button" onClick={() => deletePage(p)} disabled={busy} style={{ background: "none", border: "none", color: "#fca5a5", fontSize: 13, cursor: "pointer" }}>✕</button>
               </div>
             ))}
-            <label style={{ display: "block", textAlign: "center" as const, padding: "8px", borderRadius: 8, border: "1px dashed rgba(255,255,255,0.18)", fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.4)", cursor: "pointer" }}>
+            <label style={{ display: "block", textAlign: "center" as const, padding: "8px", borderRadius: 6, border: "1px dashed rgba(255,255,255,0.18)", fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.4)", cursor: "pointer" }}>
               {uploading ? "Uploading…" : pages.length ? "+ Add another page" : "+ Add document"}
               <input
                 type="file" accept="image/*,application/pdf,.pdf" style={{ display: "none" }}
@@ -780,7 +903,8 @@ export default function BinderModal({
   const [trailerDetail, setTrailerDetail] = useState<UnitDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [typeEditor, setTypeEditor] = useState<{ mode: "new" | "edit"; type: PermitType | null; unit: UnitKind } | null>(null);
+  const [typeEditor, setTypeEditor] = useState<{ mode: "new" | "edit"; type: PermitType | null; unit: UnitKind; initialName?: string } | null>(null);
+  const [addPicker, setAddPicker] = useState<UnitKind | null>(null);
 
   const detailCols = "year, make, model, vin_number, plate_number, notes";
 
@@ -828,7 +952,7 @@ export default function BinderModal({
             unitKind="truck" unitId={truckId} unitName={truckName ?? "Truck"} companyId={companyId}
             types={types} records={records} detail={truckDetail} expandedId={expandedId} onToggleExpand={toggleExpand}
             onEditType={(t) => setTypeEditor({ mode: "edit", type: t, unit: "truck" })}
-            onAddType={() => setTypeEditor({ mode: "new", type: null, unit: "truck" })}
+            onAddType={() => setAddPicker("truck")}
             onSaved={load}
           />
         )}
@@ -837,11 +961,22 @@ export default function BinderModal({
             unitKind="trailer" unitId={trailerId} unitName={trailerName ?? "Trailer"} companyId={companyId}
             types={types} records={records} detail={trailerDetail} expandedId={expandedId} onToggleExpand={toggleExpand}
             onEditType={(t) => setTypeEditor({ mode: "edit", type: t, unit: "trailer" })}
-            onAddType={() => setTypeEditor({ mode: "new", type: null, unit: "trailer" })}
+            onAddType={() => setAddPicker("trailer")}
             onSaved={load}
           />
         )}
       </FullscreenModal>
+
+      <AddPermitTypeModal
+        open={!!addPicker}
+        onClose={() => setAddPicker(null)}
+        unit={addPicker ?? "truck"}
+        existingTypes={types}
+        onPick={(name) => {
+          setTypeEditor({ mode: "new", type: null, unit: addPicker ?? "truck", initialName: name });
+          setAddPicker(null);
+        }}
+      />
 
       <PermitTypeEditorModal
         open={!!typeEditor}
@@ -850,6 +985,7 @@ export default function BinderModal({
         mode={typeEditor?.mode ?? "new"}
         type={typeEditor?.type ?? null}
         unit={typeEditor?.unit ?? "truck"}
+        initialName={typeEditor?.initialName}
         onSaved={() => { setTypeEditor(null); void load(); }}
         onDeleted={() => { setTypeEditor(null); void load(); }}
       />
