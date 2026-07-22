@@ -196,6 +196,26 @@ but don't assume that stays true if someone wires it in later.)
   member can already INSERT/UPDATE/DELETE trucks/trailers directly) — this is
   a real gap to close when this ships, not just a UI nicety.
 
+## Pre-launch cleanup (before app store submission)
+Running list of known rough edges that aren't urgent but shouldn't ship as-is.
+Add to this as more turn up.
+
+- **Orphaned "planned" `load_log` rows never get cleaned up.** Tapping LOAD on
+  the planner immediately inserts a `load_log` row with `status='planned'` --
+  before the driver ever reaches the Loading modal's LOADED button. If the
+  load is abandoned (backgrounds the app, changes their mind, was just poking
+  at the UI), that row lingers forever with no expiry/cleanup path. Confirmed
+  live 2026-07-22: dozens of these already exist for a single combo going back
+  to June, interspersed with real `status='loaded'` completions -- this has
+  been silently accumulating for a while, not a one-off. They're low-harm
+  (no `actual_total_gal`, don't feed `terminal_temp_bias` or
+  `terminal_products`, and "My Loads" shows them with a bare `—` instead of a
+  diff) but it's unbounded table growth and clutters load history. Needs
+  either: (a) a scheduled cleanup (delete/archive `planned` rows past some
+  age with no completion), or (b) app-side logic to reuse/replace a combo's
+  existing `planned` row instead of inserting a new one each time LOAD is
+  tapped.
+
 ## Files safe to delete
 - `supabase/migrations_old/` — superseded, confirmed not referenced.
 - `node_modules/` should never be zipped/committed — regenerate via `npm install`.
