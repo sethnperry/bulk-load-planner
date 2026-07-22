@@ -32,38 +32,37 @@ export default function CompartmentModal({
   const sel = compPlan?.[compNumber];
   const isEmpty = !!sel?.empty || !sel?.productId;
 
+  const rowStyle = (active: boolean): React.CSSProperties => ({
+    textAlign: "left", padding: "12px 14px", borderRadius: 6,
+    border: "1px solid rgba(255,255,255,0.10)",
+    background: active ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.03)",
+    color: "white", cursor: "pointer",
+    width: "100%", boxSizing: "border-box" as const, overflow: "hidden",
+    display: "flex", alignItems: "center", gap: 12,
+  });
+
   return (
     <FullscreenModal open={open} title={`Compartment ${compNumber}`} onClose={onClose}>
-      <div style={{ display: "grid", gap: 10 }}>
-        <strong style={{ fontSize: 14 }}>Product for Comp {compNumber}</strong>
-        <div style={{ display: "grid", gap: 8 }}>
+      <div style={{ display: "grid", gap: 8 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.45)", textTransform: "uppercase" as const, letterSpacing: 0.5 }}>
+          Product for Comp {compNumber}
+        </div>
+        <div style={{ display: "grid", gap: 6 }}>
 
           {/* MT / Empty */}
           <button
-            style={{
-              textAlign: "left", padding: "12px 14px", borderRadius: 16,
-              border: "1px solid rgba(255,255,255,0.14)",
-              background: isEmpty ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.05)",
-              color: "white", cursor: "pointer",
-              width: "100%", boxSizing: "border-box" as const, overflow: "hidden",
-            }}
+            style={rowStyle(isEmpty)}
             onClick={() => {
               setCompPlan((prev: any) => ({ ...prev, [compNumber]: { ...(prev[compNumber] ?? {}), empty: true, productId: "" } }));
               onClose();
             }}
           >
-            <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
-              <div style={{
-                width: 52, height: 42, borderRadius: 11, flexShrink: 0,
-                border: "1px solid rgba(180,220,255,0.9)", background: "rgba(0,0,0,0.35)",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                fontWeight: 900, fontSize: 14, letterSpacing: 0.5, color: "rgba(180,220,255,0.9)",
-              }}>MT</div>
-              <div style={{ minWidth: 0, overflow: "hidden" }}>
-                <div style={{ fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>MT (Empty)</div>
-                <div style={{ opacity: 0.6, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Leave this compartment empty</div>
-              </div>
+            <span style={{ width: 8, height: 8, borderRadius: "50%", background: "rgba(255,255,255,0.25)", flexShrink: 0 }} />
+            <div style={{ minWidth: 0, flex: 1, overflow: "hidden" }}>
+              <div style={{ fontWeight: 700, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>MT (Empty)</div>
+              <div style={{ opacity: 0.5, fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>Leave this compartment empty</div>
             </div>
+            {isEmpty && <span style={{ fontSize: 15, color: "#fff", flexShrink: 0 }}>✓</span>}
           </button>
 
           {terminalProducts.map((p: any) => {
@@ -75,33 +74,22 @@ export default function CompartmentModal({
             return (
               <button
                 key={p.product_id}
-                style={{
-                  textAlign: "left", padding: "12px 14px", borderRadius: 16,
-                  border: "1px solid rgba(255,255,255,0.14)",
-                  background: selected ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.05)",
-                  color: "white", cursor: "pointer",
-                  width: "100%", boxSizing: "border-box" as const, overflow: "hidden",
-                }}
+                style={rowStyle(selected)}
                 onClick={() => {
                   setCompPlan((prev: any) => ({ ...prev, [compNumber]: { ...(prev[compNumber] ?? {}), empty: false, productId: p.product_id } }));
                   onClose();
                 }}
                 title={name}
               >
-                <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
-                  <div style={{
-                    width: 52, height: 42, borderRadius: 11, flexShrink: 0,
-                    backgroundColor: "transparent", border: `2px solid ${btnColor}`,
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    fontWeight: 900, fontSize: 13, letterSpacing: 0.5, color: btnColor,
-                  }}>
-                    {btnCode}
+                <span style={{ width: 8, height: 8, borderRadius: "50%", background: btnColor, flexShrink: 0 }} />
+                <div style={{ minWidth: 0, flex: 1, overflow: "hidden" }}>
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 6, overflow: "hidden" }}>
+                    <span style={{ fontWeight: 700, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>{name}</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: btnColor, opacity: 0.85, flexShrink: 0, letterSpacing: 0.3 }}>{btnCode}</span>
                   </div>
-                  <div style={{ minWidth: 0, flex: 1, overflow: "hidden" }}>
-                    <div style={{ fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</div>
-                    <div style={{ opacity: 0.6, fontSize: 13, lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sub || " "}</div>
-                  </div>
+                  <div style={{ opacity: 0.5, fontSize: 12, lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>{sub || " "}</div>
                 </div>
+                {selected && <span style={{ fontSize: 15, color: "#fff", flexShrink: 0 }}>✓</span>}
               </button>
             );
           })}

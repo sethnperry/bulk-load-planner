@@ -24,6 +24,17 @@ export default function PlannerControls(props: any) {
 
   const [draggingComp, setDraggingComp] = useState<number | null>(null);
   const [dragGallonsText, setDragGallonsText] = useState<number | null>(null);
+  const [capInput, setCapInput] = useState<{ comp: number; value: string; max: number } | null>(null);
+
+  function commitCapInput() {
+    if (!capInput) return;
+    const parsed = Math.max(0, Math.min(capInput.max, Math.round(Number(capInput.value) || 0)));
+    setCompPlan((prev: any) => ({
+      ...prev,
+      [capInput.comp]: { ...(prev[capInput.comp] ?? { empty: false, productId: "" }), capOverride: parsed },
+    }));
+    setCapInput(null);
+  }
 
   return (
     <section style={{ border: "none", background: "transparent", padding: 0 }}>
@@ -105,8 +116,6 @@ export default function PlannerControls(props: any) {
                   }));
                 }
 
-                const isSelected = selectedComp === compNumber;
-
                 return (
                   <div
                     key={String(c.comp_number)}
@@ -152,16 +161,14 @@ export default function PlannerControls(props: any) {
                       )}
                     </div>
 
-                    {/* Bar — no border, rounded top, flat bottom. A ring
-                        highlights the selected comp (surfaces "Edit Comp N
-                        Product" in the action row above). */}
+                    {/* Bar — no border, square corners, flat bottom. Selection
+                        state (surfaces "Edit Comp N Product" in the action row
+                        above) is tracked but no longer drawn as a ring here. */}
                     <div style={{
                       width: "100%", height: barH,
                       borderRadius: 0,
                       background: "rgba(255,255,255,0.06)",
                       position: "relative", overflow: "visible",
-                      boxShadow: isSelected ? "0 0 0 2px rgba(255,255,255,0.55)" : "none",
-                      transition: "box-shadow 150ms ease",
                     }}>
                       <div style={{ position: "absolute", inset: 0, overflow: "hidden", borderRadius: 0 }}>
                         {/* Dimmer above the cap line -- unusable for this load */}
@@ -237,13 +244,22 @@ export default function PlannerControls(props: any) {
                       {code}
                     </div>
 
-                    {/* Gallons — darker grey */}
-                    <div style={{
-                      marginTop: 2,
-                      fontSize: "clamp(10px, 2.4vw, 13px)", fontWeight: 600,
-                      color: planned > 0 ? "rgba(140,140,140,0.9)" : "rgba(255,255,255,0.12)",
-                      letterSpacing: -0.2,
-                    }}>
+                    {/* Gallons — darker grey. Tap to dial in the cap precisely
+                        (same value the drag handle sets) via a numeric keypad,
+                        instead of only being able to drag it. */}
+                    <div
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (!selectedTerminalId) return;
+                        setCapInput({ comp: compNumber, value: String(effMax), max: persistedCap });
+                      }}
+                      style={{
+                        marginTop: 2,
+                        fontSize: "clamp(10px, 2.4vw, 13px)", fontWeight: 600,
+                        color: planned > 0 ? "rgba(140,140,140,0.9)" : "rgba(255,255,255,0.12)",
+                        letterSpacing: -0.2,
+                      }}
+                    >
                       {planned > 0 ? Math.round(planned).toLocaleString() : "—"}
                     </div>
                   </div>
@@ -256,6 +272,78 @@ export default function PlannerControls(props: any) {
 
       {selectedTrailerId && !compLoading && !compError && compartments.length === 0 && (
         <div style={styles.help}>No compartments found for this trailer.</div>
+      )}
+
+      {/* Precise cap entry -- centered overlay, device numeric keypad
+          (inputMode="numeric"), same value/bounds the drag handle sets. */}
+      {capInput && (
+        <div
+          onClick={() => setCapInput(null)}
+          style={{
+            position: "fixed", inset: 0, zIndex: 500,
+            background: "rgba(0,0,0,0.6)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            padding: 24,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "100%", maxWidth: 280,
+              background: "#161616", border: "1px solid rgba(255,255,255,0.12)",
+              borderRadius: 4, padding: 20,
+              display: "flex", flexDirection: "column", alignItems: "center", gap: 14,
+            }}
+          >
+            <div style={{ fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.45)", letterSpacing: 0.4, textTransform: "uppercase" as const }}>
+              Comp {capInput.comp} cap
+            </div>
+            <input
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              autoFocus
+              value={capInput.value}
+              onChange={(e) => {
+                const digits = e.target.value.replace(/[^0-9]/g, "");
+                setCapInput((prev) => (prev ? { ...prev, value: digits } : prev));
+              }}
+              onKeyDown={(e) => { if (e.key === "Enter") commitCapInput(); }}
+              style={{
+                width: "100%", textAlign: "center" as const,
+                background: "transparent", border: "none", borderBottom: "1px solid rgba(255,255,255,0.20)",
+                color: "#fff", fontSize: 40, fontWeight: 700, padding: "4px 0",
+              }}
+            />
+            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)" }}>
+              max {capInput.max.toLocaleString()} gal
+            </div>
+            <div style={{ display: "flex", gap: 10, width: "100%", marginTop: 4 }}>
+              <button
+                type="button"
+                onClick={() => setCapInput(null)}
+                style={{
+                  flex: 1, padding: "12px 0", borderRadius: 4,
+                  border: "1px solid rgba(255,255,255,0.15)", background: "transparent",
+                  color: "rgba(255,255,255,0.65)", fontSize: 14, fontWeight: 600, cursor: "pointer",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={commitCapInput}
+                style={{
+                  flex: 1, padding: "12px 0", borderRadius: 4,
+                  border: "none", background: "#fff",
+                  color: "#000", fontSize: 14, fontWeight: 700, cursor: "pointer",
+                }}
+              >
+                Set
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </section>
   );
