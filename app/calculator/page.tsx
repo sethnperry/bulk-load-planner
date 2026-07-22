@@ -406,20 +406,32 @@ export default function CalculatorPage() {
     });
   }, [compPlanKey]);
 
-  // "Save plan {letter}" is dirty-tracked against a baseline snapshot of
-  // cap overrides taken right after the last load/save -- it only shows when
-  // the current overrides actually diverge from what's saved, and hides
-  // itself immediately after a successful save (per explicit feedback: no
-  // button when there's nothing new to save).
-  const overridesSnapshot = useCallback((plan: Record<number, CompPlanInput>) => {
-    const out: Record<number, number> = {};
+  // "Save plan {letter}" is dirty-tracked against a baseline snapshot taken
+  // right after the last load/save -- it only shows when the current plan
+  // actually diverges from what's saved, and hides itself immediately after
+  // a successful save (per explicit feedback: no button when there's nothing
+  // new to save). Covers everything buildSnapshot()/saveToSlot() actually
+  // persist -- product selection + empty flag + cap override per comp, and
+  // the CG slider -- not just cap overrides, so picking a different product
+  // or sliding CG also surfaces the button.
+  const overridesSnapshot = useCallback((plan: Record<number, CompPlanInput>, cg: number) => {
+    const comps: Record<number, { productId: string; empty: boolean; capOverride: number | null }> = {};
     for (const k of Object.keys(plan || {})) {
-      const v = (plan as any)[k]?.capOverride;
-      if (v != null) out[Number(k)] = v;
+      const v = (plan as any)[k] ?? {};
+      comps[Number(k)] = {
+        productId: v.productId ?? "",
+        empty: !!v.empty,
+        capOverride: v.capOverride ?? null,
+      };
     }
-    return JSON.stringify(out);
+    return JSON.stringify({ comps, cg: Math.round((Number(cg) || 0) * 1000) / 1000 });
   }, []);
-  const [baselineOverrides, setBaselineOverrides] = useState("{}");
+  // Lazy initializer (not a literal "{}") so the baseline matches whatever
+  // compPlan/cgSlider actually start as -- broadening the snapshot to include
+  // productId/empty/cg means a hardcoded "{}" no longer matches an empty
+  // plan's real serialized shape, which made "Save plan" appear spuriously
+  // on a completely fresh mount.
+  const [baselineOverrides, setBaselineOverrides] = useState(() => overridesSnapshot(compPlan, cgSlider));
   const [captureBaselineNext, setCaptureBaselineNext] = useState(false);
 
   // Fires once compPlan has actually re-rendered post-load (loadFromSlot
@@ -427,9 +439,19 @@ export default function CalculatorPage() {
   // reflects what was really loaded, not what was on screen before it.
   useEffect(() => {
     if (!captureBaselineNext) return;
-    setBaselineOverrides(overridesSnapshot(compPlan));
+    setBaselineOverrides(overridesSnapshot(compPlan, cgSlider));
     setCaptureBaselineNext(false);
-  }, [compPlan, captureBaselineNext, overridesSnapshot]);
+  }, [compPlan, cgSlider, captureBaselineNext, overridesSnapshot]);
+
+  // Terminal/combo switches trigger usePlanSlots' own automatic restores
+  // (slot-0-on-terminal-change, last-load-from-log-on-combo-claim) -- those
+  // land asynchronously via that hook's own setCompPlan/setCgSlider calls,
+  // not through the explicit "Load {letter}" path. Reuse the same
+  // captureBaselineNext mechanism so the baseline is recaptured once that
+  // restore actually lands, instead of comparing against pre-restore state.
+  useEffect(() => {
+    setCaptureBaselineNext(true);
+  }, [location.selectedTerminalId, equipment.selectedComboId]);
 
   // Hydrate tempF and cgSlider once on mount
   useEffect(() => {
@@ -897,7 +919,7 @@ const lastProductInfoById = useMemo(() => {
           slotHas={planSlots.slotHas}
           disabled={!location.selectedTerminalId}
           onLoad={(n) => { planSlots.loadFromSlot(n); setCaptureBaselineNext(true); }}
-          onSave={(n) => { planSlots.saveToSlot(n); setBaselineOverrides(overridesSnapshot(compPlan)); }}
+          onSave={(n) => { planSlots.saveToSlot(n); setBaselineOverrides(overridesSnapshot(compPlan, cgSlider)); }}
           onClear={planSlots.clearSlot}
           onTourAdvance={tourAdvanceIfTarget}
           onActiveChange={setActiveSlotLetter}
@@ -909,7 +931,7 @@ const lastProductInfoById = useMemo(() => {
           right: "Edit Comp N Product" once a compartment bar has been
           tapped/selected. Both above the compartment strip. */}
       {(() => {
-        const currentOverrides = overridesSnapshot(compPlan);
+        const currentOverrides = overridesSnapshot(compPlan, cgSlider);
         const isDirty = currentOverrides !== baselineOverrides;
         const activeLetter = String.fromCharCode(64 + activeSlotLetter);
         if (!isDirty && selectedComp == null) return null;
@@ -968,6 +990,9 @@ const lastProductInfoById = useMemo(() => {
         styles={styles}
         setCompPlan={setCompPlan}
         onClose={() => { setCompModalOpen(false); setCompModalComp(null); setSelectedComp(null); }}
+        selectedTerminalId={location.selectedTerminalId ?? ""}
+        terminalName={terminalLabel}
+        onTerminalProductsChanged={fetchTerminalProducts}
       />
 
       {/* CG Slider — always visible */}

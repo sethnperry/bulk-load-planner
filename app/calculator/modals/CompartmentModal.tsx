@@ -5,8 +5,9 @@
 // planner's drag handle on each bar now handles temporary per-load
 // adjustments directly, so there's no longer a "settings" concern here.
 
-import React from "react";
+import React, { useState } from "react";
 import { FullscreenModal } from "@/lib/ui/FullscreenModal";
+import ManageTerminalProductsModal from "./ManageTerminalProductsModal";
 
 export default function CompartmentModal({
   open,
@@ -17,6 +18,9 @@ export default function CompartmentModal({
   styles,
   setCompPlan,
   onClose,
+  selectedTerminalId,
+  terminalName,
+  onTerminalProductsChanged,
 }: {
   open: boolean;
   compNumber: number | null;
@@ -26,7 +30,11 @@ export default function CompartmentModal({
   styles: any;
   setCompPlan: (fn: any) => void;
   onClose: () => void;
+  selectedTerminalId?: string;
+  terminalName?: string;
+  onTerminalProductsChanged?: () => void;
 }) {
+  const [manageOpen, setManageOpen] = useState(false);
   if (compNumber == null) return null;
 
   const sel = compPlan?.[compNumber];
@@ -105,7 +113,31 @@ export default function CompartmentModal({
             );
           })}
         </div>
+
+        {selectedTerminalId && (
+          <button
+            type="button"
+            onClick={() => setManageOpen(true)}
+            style={{
+              marginTop: 4, padding: "10px 0", borderRadius: 6, border: "1px solid rgba(255,255,255,0.10)",
+              background: "rgba(255,255,255,0.03)", color: "rgba(255,255,255,0.55)",
+              fontSize: 12, fontWeight: 700, cursor: "pointer", letterSpacing: 0.3,
+            }}
+          >
+            Manage products at this terminal
+          </button>
+        )}
       </div>
+
+      {selectedTerminalId && (
+        <ManageTerminalProductsModal
+          open={manageOpen}
+          onClose={() => setManageOpen(false)}
+          terminalId={selectedTerminalId}
+          terminalName={terminalName}
+          onChanged={() => onTerminalProductsChanged?.()}
+        />
+      )}
     </FullscreenModal>
   );
 }
