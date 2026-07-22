@@ -72,10 +72,12 @@ type Props = {
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
+// Report-line readouts (due dates, wash dates) keep meaningful color -- an
+// at-a-glance status signal. The action buttons and selection chrome below
+// are just navigation/category chrome, not status -- monochrome, per theme.
 const COLOR_TARE = "rgba(255,255,255,0.86)";
 const COLOR_SERVICE = "#fbbf24";
 const COLOR_WASH = "#67e8f9";
-const COLOR_BINDER = "rgba(64,140,255,0.90)";
 
 const S = {
   sectionHeader: {
@@ -84,17 +86,17 @@ const S = {
     textAlign: "center" as const,
   },
   card: {
-    borderRadius: 14, border: "1px solid rgba(255,255,255,0.12)",
+    borderRadius: 6, border: "1px solid rgba(255,255,255,0.12)",
     background: "rgba(255,255,255,0.05)", padding: "14px 10px",
     textAlign: "center" as const, cursor: "pointer", userSelect: "none" as const,
     fontWeight: 900, fontSize: 17, color: "rgba(255,255,255,0.85)",
   } as React.CSSProperties,
   cardSelected: {
-    background: "rgba(32,88,170,0.28)", border: "1px solid rgba(64,140,255,0.55)",
+    background: "rgba(255,255,255,0.12)", border: "1px solid rgba(255,255,255,0.45)",
     color: "#fff",
   } as React.CSSProperties,
   plusCard: {
-    borderRadius: 14, border: "1px dashed rgba(255,255,255,0.18)",
+    borderRadius: 6, border: "1px dashed rgba(255,255,255,0.18)",
     background: "transparent", padding: "14px 10px", textAlign: "center" as const,
     cursor: "pointer", fontWeight: 900, fontSize: 20, color: "rgba(255,255,255,0.35)",
   } as React.CSSProperties,
@@ -105,9 +107,10 @@ const S = {
     cursor: "pointer",
   } as React.CSSProperties,
   reportLabel: { fontSize: 13, fontWeight: 700 as const, color: "rgba(255,255,255,0.45)" },
-  actionBtn: (color: string): React.CSSProperties => ({
-    flex: 1, borderRadius: 12, padding: "12px 8px", textAlign: "center" as const,
-    background: `${color}1f`, border: `1px solid ${color}`, color,
+  actionBtn: (): React.CSSProperties => ({
+    flex: 1, borderRadius: 6, padding: "12px 8px", textAlign: "center" as const,
+    background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.16)",
+    color: "rgba(255,255,255,0.85)",
     fontWeight: 900, fontSize: 13, letterSpacing: 0.3, cursor: "pointer",
   }),
 };
@@ -180,7 +183,7 @@ function ComboConnector({
     >
       <line
         x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2}
-        stroke="rgba(64,140,255,0.85)" strokeWidth={2}
+        stroke="rgba(255,255,255,0.55)" strokeWidth={2}
       />
     </svg>
   );
@@ -367,7 +370,7 @@ function ServiceTypeEditorModal({
                 type="button"
                 onClick={() => setConfirmingDelete(true)}
                 disabled={busy}
-                style={{ width: "100%", padding: "12px 18px", borderRadius: 14, border: "1px solid rgba(220,60,60,0.4)", background: "rgba(180,40,40,0.12)", color: "#fca5a5", fontWeight: 800, fontSize: 14, cursor: "pointer" }}
+                style={{ width: "100%", padding: "12px 18px", borderRadius: 6, border: "1px solid rgba(220,60,60,0.4)", background: "rgba(180,40,40,0.12)", color: "#fca5a5", fontWeight: 800, fontSize: 14, cursor: "pointer" }}
               >
                 Delete type
               </button>
@@ -381,11 +384,11 @@ function ServiceTypeEditorModal({
             </div>
             <div style={{ display: "flex", gap: 10 }}>
               <button type="button" onClick={() => setConfirmingDelete(false)} disabled={busy}
-                style={{ flex: 1, padding: "12px 14px", borderRadius: 12, border: "1px solid rgba(255,255,255,0.14)", background: "rgba(255,255,255,0.06)", color: "#fff", cursor: "pointer" }}>
+                style={{ flex: 1, padding: "12px 14px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.14)", background: "rgba(255,255,255,0.06)", color: "#fff", cursor: "pointer" }}>
                 Cancel
               </button>
               <button type="button" onClick={confirmDelete} disabled={busy}
-                style={{ flex: 1, padding: "12px 14px", borderRadius: 12, border: "1px solid rgba(220,60,60,0.5)", background: "rgba(180,40,40,0.25)", color: "#fff", fontWeight: 800, cursor: "pointer" }}>
+                style={{ flex: 1, padding: "12px 14px", borderRadius: 6, border: "1px solid rgba(220,60,60,0.5)", background: "rgba(180,40,40,0.25)", color: "#fff", fontWeight: 800, cursor: "pointer" }}>
                 {busy ? "Deleting…" : "Delete"}
               </button>
             </div>
@@ -437,7 +440,7 @@ function ServiceTypeSelect({
       {open && (
         <div style={{
           position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 50,
-          background: "#0a0a0a", border: "1px solid rgba(255,255,255,0.16)", borderRadius: 12,
+          background: "#0a0a0a", border: "1px solid rgba(255,255,255,0.16)", borderRadius: 6,
           maxHeight: 280, overflowY: "auto", boxShadow: "0 8px 24px rgba(0,0,0,0.55)", padding: 4,
         }}>
           <div
@@ -816,7 +819,7 @@ export default function SoloEquipmentModal({
         <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
 
           {error && (
-            <div style={{ borderRadius: 12, padding: 12, marginBottom: 10, background: "rgba(180,40,40,0.18)", border: "1px solid rgba(180,40,40,0.32)", color: "rgba(255,255,255,0.92)", fontSize: 13, fontWeight: 700 }}>
+            <div style={{ borderRadius: 6, padding: 12, marginBottom: 10, background: "rgba(180,40,40,0.18)", border: "1px solid rgba(180,40,40,0.32)", color: "rgba(255,255,255,0.92)", fontSize: 13, fontWeight: 700 }}>
               {error}
             </div>
           )}
@@ -929,10 +932,10 @@ export default function SoloEquipmentModal({
             )}
 
             <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
-              <div style={S.actionBtn(COLOR_TARE)} onClick={() => setScaleOpen(true)}>Scale</div>
-              <div style={S.actionBtn(COLOR_SERVICE)} onClick={() => setServiceOpen(true)}>Service</div>
-              <div style={S.actionBtn(COLOR_WASH)} onClick={() => setWashOpen(true)}>Wash</div>
-              <div style={S.actionBtn(COLOR_BINDER)} onClick={() => setBinderOpen(true)}>Binder</div>
+              <div style={S.actionBtn()} onClick={() => setScaleOpen(true)}>Scale</div>
+              <div style={S.actionBtn()} onClick={() => setServiceOpen(true)}>Service</div>
+              <div style={S.actionBtn()} onClick={() => setWashOpen(true)}>Wash</div>
+              <div style={S.actionBtn()} onClick={() => setBinderOpen(true)}>Binder</div>
             </div>
           </div>
         </div>
@@ -1035,18 +1038,18 @@ export default function SoloEquipmentModal({
       {/* ── Remove confirmation ── */}
       {removeTarget && (
         <div style={{ position: "fixed", inset: 0, zIndex: 60, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
-          <div style={{ background: "#151515", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 16, padding: 20, maxWidth: 360 }}>
+          <div style={{ background: "#151515", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8, padding: 20, maxWidth: 360 }}>
             <div style={{ fontWeight: 900, fontSize: 16, marginBottom: 8 }}>Delete this unit?</div>
             <div style={{ fontSize: 13, color: "rgba(255,255,255,0.55)", lineHeight: 1.6, marginBottom: 18 }}>
               This permanently removes {removeTarget.name} and its full service and wash history. This can't be undone.
             </div>
             <div style={{ display: "flex", gap: 10 }}>
               <button type="button" onClick={() => setRemoveTarget(null)} disabled={busy}
-                style={{ flex: 1, padding: "10px 14px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.14)", background: "rgba(255,255,255,0.06)", color: "#fff", cursor: "pointer" }}>
+                style={{ flex: 1, padding: "10px 14px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.14)", background: "rgba(255,255,255,0.06)", color: "#fff", cursor: "pointer" }}>
                 Cancel
               </button>
               <button type="button" onClick={confirmRemove} disabled={busy}
-                style={{ flex: 1, padding: "10px 14px", borderRadius: 10, border: "1px solid rgba(220,60,60,0.5)", background: "rgba(180,40,40,0.25)", color: "#fca5a5", fontWeight: 800, cursor: "pointer" }}>
+                style={{ flex: 1, padding: "10px 14px", borderRadius: 6, border: "1px solid rgba(220,60,60,0.5)", background: "rgba(180,40,40,0.25)", color: "#fca5a5", fontWeight: 800, cursor: "pointer" }}>
                 {busy ? "Deleting…" : "Delete"}
               </button>
             </div>
@@ -1057,7 +1060,7 @@ export default function SoloEquipmentModal({
       {/* ── New pairing needs a one-time tare weight (no history for this exact truck+trailer pair) ── */}
       {newTareTarget && (
         <div style={{ position: "fixed", inset: 0, zIndex: 60, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
-          <div style={{ background: "#151515", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 16, padding: 20, maxWidth: 360, width: "100%" }}>
+          <div style={{ background: "#151515", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8, padding: 20, maxWidth: 360, width: "100%" }}>
             <div style={{ fontWeight: 900, fontSize: 16, marginBottom: 8 }}>New Pairing</div>
             <div style={{ fontSize: 13, color: "rgba(255,255,255,0.55)", lineHeight: 1.6, marginBottom: 14 }}>
               This truck and trailer haven't been paired before. Enter the tare weight from a certified scale ticket.
@@ -1065,7 +1068,7 @@ export default function SoloEquipmentModal({
             <input
               type="number" inputMode="numeric" placeholder="e.g. 34800" autoFocus
               value={newTareInput} onChange={(e) => setNewTareInput(e.target.value)}
-              style={{ width: "100%", borderRadius: 12, padding: "12px 14px", border: "1px solid rgba(255,255,255,0.14)", background: "rgba(0,0,0,0.28)", color: "#fff", fontSize: 18, fontWeight: 700, boxSizing: "border-box", marginBottom: 16 }}
+              style={{ width: "100%", borderRadius: 6, padding: "12px 14px", border: "1px solid rgba(255,255,255,0.14)", background: "rgba(0,0,0,0.28)", color: "#fff", fontSize: 18, fontWeight: 700, boxSizing: "border-box", marginBottom: 16 }}
             />
             <div style={{ display: "flex", gap: 10 }}>
               <button
@@ -1081,12 +1084,12 @@ export default function SoloEquipmentModal({
                   setSelectedTruckId(current?.truck_id ?? null);
                   setSelectedTrailerId(current?.trailer_id ?? null);
                 }}
-                style={{ flex: 1, padding: "10px 14px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.14)", background: "rgba(255,255,255,0.06)", color: "#fff", cursor: "pointer" }}
+                style={{ flex: 1, padding: "10px 14px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.14)", background: "rgba(255,255,255,0.06)", color: "#fff", cursor: "pointer" }}
               >
                 Cancel
               </button>
               <button type="button" onClick={submitNewTare} disabled={busy}
-                style={{ flex: 1, padding: "10px 14px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.18)", background: "rgba(255,255,255,0.1)", color: "#fff", fontWeight: 800, cursor: "pointer" }}>
+                style={{ flex: 1, padding: "10px 14px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.18)", background: "rgba(255,255,255,0.1)", color: "#fff", fontWeight: 800, cursor: "pointer" }}>
                 {busy ? "Pairing…" : "Couple & Select"}
               </button>
             </div>
@@ -1340,7 +1343,7 @@ function SimpleWashModal({
 }
 
 const inputStyle: React.CSSProperties = {
-  width: "100%", borderRadius: 12, padding: "10px 12px", border: "1px solid rgba(255,255,255,0.14)",
+  width: "100%", borderRadius: 6, padding: "10px 12px", border: "1px solid rgba(255,255,255,0.14)",
   background: "rgba(0,0,0,0.28)", color: "#fff", fontSize: 15, boxSizing: "border-box",
 };
 const selectStyle: React.CSSProperties = {
@@ -1352,6 +1355,6 @@ const selectStyle: React.CSSProperties = {
   paddingRight: 36,
 };
 const saveBtnStyle: React.CSSProperties = {
-  width: "100%", padding: "14px 18px", borderRadius: 14, border: "1px solid rgba(255,255,255,0.18)",
+  width: "100%", padding: "14px 18px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.18)",
   background: "rgba(255,255,255,0.1)", color: "#fff", fontWeight: 900, fontSize: 15, cursor: "pointer",
 };
