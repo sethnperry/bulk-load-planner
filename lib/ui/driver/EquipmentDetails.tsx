@@ -826,10 +826,6 @@ function TruckModal({ truck, companyId, onClose, onDone }: {
         <div><label style={{ ...css.label, fontSize: 10 }}>Model</label>{ti(model, setModel, "e.g. T680")}</div>
         <div><label style={{ ...css.label, fontSize: 10 }}>Year</label>{ti(year, setYear, "2022", "number")}</div>
       </div>
-      <div style={{ fontSize: 11, color: T.muted, marginBottom: 10, lineHeight: 1.5 }}>
-        <strong style={{ color: T.text }}>Active</strong> = unit appears in fleet lists and can be coupled.
-        The <em>Deactivate</em> button below hides this unit from the fleet without deleting it.
-      </div>
 
       <hr style={css.divider} />
 
@@ -1071,10 +1067,6 @@ function TrailerModal({ trailer, companyId, onClose, onDone }: {
         <div><label style={{ ...css.label, fontSize: 10 }}>Make</label>{ti(make, setMake, "e.g. Polar")}</div>
         <div><label style={{ ...css.label, fontSize: 10 }}>Model</label>{ti(model, setModel, "e.g. Tank")}</div>
         <div><label style={{ ...css.label, fontSize: 10 }}>Year</label>{ti(year, setYear, "2020", "number")}</div>
-      </div>
-      <div style={{ fontSize: 11, color: T.muted, marginBottom: 10, lineHeight: 1.5 }}>
-        <strong style={{ color: T.text }}>Active</strong> = unit appears in fleet lists and can be coupled.
-        The <em>Deactivate</em> button below hides this unit from the fleet without deleting it.
       </div>
 
       <hr style={css.divider} />
