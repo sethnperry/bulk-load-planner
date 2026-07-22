@@ -130,7 +130,7 @@ export default function SetupGate(props: SetupGateProps) {
             key={s}
             style={{
               width: s === step ? 18 : 6, height: 6, borderRadius: 3,
-              background: s === step ? "#67e8f9" : "rgba(255,255,255,0.15)",
+              background: s === step ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.15)",
               transition: "all 0.25s ease",
             }}
           />
@@ -146,15 +146,15 @@ export default function SetupGate(props: SetupGateProps) {
           transition={{ type: "spring", stiffness: 300, damping: 28 }}
           style={{
             background: "rgba(255,255,255,0.06)",
-            border: "1px solid rgba(103,232,249,0.35)",
-            borderRadius: 20,
+            border: "1px solid rgba(255,255,255,0.18)",
+            borderRadius: 6,
             padding: "22px 36px",
             cursor: "pointer",
             color: "rgba(255,255,255,0.95)",
             fontWeight: 900,
             fontSize: "clamp(20px, 5vw, 30px)",
             letterSpacing: 0.2,
-            boxShadow: "0 0 0 4px rgba(103,232,249,0.10)",
+            boxShadow: "0 0 0 4px rgba(255,255,255,0.04)",
           }}
         >
           {step === "equipment" && (equipmentLabel || copy.title)}
