@@ -94,6 +94,12 @@ export type ProductRow = {
   last_temp_f?: number | null;   // observed temp when last_api was recorded
   last_loaded_at?: string | null;
   un_number?: string | null;     // DOT UN number e.g. "UN1203" for placard logic
+  is_dyed?: boolean | null;
+  // When set, this product's API/temp tracking pools onto the canonical
+  // product's terminal_products row instead of its own (rack-injected
+  // variance like dye -- same tank, same feed). Driver-facing selection/
+  // labeling is unaffected; only the underlying tracking is redirected.
+  canonical_product_id?: string | null;
 };
 
 export type TerminalProductMetaRow = {

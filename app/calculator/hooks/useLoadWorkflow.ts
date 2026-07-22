@@ -308,9 +308,18 @@ try {
   if (selectedTerminalId && product_updates.length > 0) {
     const now = new Date().toISOString();
 
+    // Pool onto the canonical product's row for rack-injected-variance
+    // products (e.g. dyed diesel) -- same resolution complete_load's RPC
+    // does server-side; this client-side fallback upsert has its own
+    // separate write path and needs the same redirect, or a dyed-diesel
+    // delivery would still build up its own separate row here.
+    const canonicalByProductId = new Map(
+      terminalProducts.map((p) => [p.product_id, p.canonical_product_id ?? null])
+    );
+
     const rows = product_updates.map((u) => ({
       terminal_id: selectedTerminalId,
-      product_id: u.product_id,
+      product_id: canonicalByProductId.get(u.product_id) || u.product_id,
 
       // values
       last_api: u.api,
@@ -328,11 +337,40 @@ try {
       updated_at: now,
     }));
 
-    const { error } = await supabase
-      .from("terminal_products")
-      .upsert(rows, { onConflict: "terminal_id,product_id" });
+    // Update-then-insert-if-missing instead of a plain upsert: `active`
+    // defaults to true on this table, and a canonical-grouped product (e.g.
+    // dyed diesel) can pool onto a "main" product row that doesn't exist yet
+    // at a terminal that only ever curated the variant (confirmed live --
+    // Kinder Morgan offers dyed diesel but has no plain D2 row at all). A
+    // blind upsert would either silently no-op (update) or, if it did
+    // insert, wrongly surface that main product as a new driver-selectable
+    // option nobody curated. Only a genuine insert sets active explicitly
+    // (to false, pooling-only); an existing row's active flag is never
+    // touched.
+    for (const row of rows) {
+      const { data: updated, error: updateErr } = await supabase
+        .from("terminal_products")
+        .update({
+          last_api: row.last_api,
+          last_temp_f: row.last_temp_f,
+          last_api_updated_at: row.last_api_updated_at,
+          last_loaded_at: row.last_loaded_at,
+          last_updated_by_load_id: row.last_updated_by_load_id,
+          updated_at: row.updated_at,
+        })
+        .eq("terminal_id", row.terminal_id)
+        .eq("product_id", row.product_id)
+        .select("terminal_id");
 
-    if (error) console.warn("terminal_products upsert failed (non-fatal):", error);
+      if (updateErr) { console.warn("terminal_products update failed (non-fatal):", updateErr); continue; }
+
+      if (!updated || updated.length === 0) {
+        const { error: insertErr } = await supabase
+          .from("terminal_products")
+          .insert({ ...row, active: false });
+        if (insertErr) console.warn("terminal_products insert failed (non-fatal):", insertErr);
+      }
+    }
   }
 } catch (e) {
   console.warn("terminal_products upsert threw (non-fatal):", e);

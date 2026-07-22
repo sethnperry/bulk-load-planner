@@ -257,11 +257,33 @@ export default function CalculatorPage() {
     const { data, error } = await supabase
       .from("terminal_products")
       .select(`active, last_api, last_api_updated_at, last_temp_f, last_loaded_at,
-        products (product_id, product_name, display_name, description, product_code, button_code, hex_code, api_60, alpha_per_f, un_number)`)
+        products (product_id, product_name, display_name, description, product_code, button_code, hex_code, api_60, alpha_per_f, un_number, is_dyed, canonical_product_id)`)
       .eq("terminal_id", location.selectedTerminalId);
     if (error) { setTerminalProducts([]); return; }
+    // Stats lookup by product_id across ALL rows at this terminal (not just
+    // active ones) -- a rack-injected-variance product (e.g. dyed diesel)
+    // pools its tracking onto the canonical product's row, which needs to
+    // be found here even if the canonical product itself isn't separately
+    // offered/active at this terminal's driver-facing list.
+    const statsByProductId: Record<string, { last_api: number | null; last_api_updated_at: string | null; last_temp_f: number | null; last_loaded_at: string | null }> = {};
+    for (const row of (data ?? []) as any[]) {
+      const pid = row.products?.product_id;
+      if (!pid) continue;
+      statsByProductId[pid] = {
+        last_api: row.last_api ?? null,
+        last_api_updated_at: row.last_api_updated_at ?? null,
+        last_temp_f: row.last_temp_f ?? null,
+        last_loaded_at: row.last_loaded_at ?? null,
+      };
+    }
     const products = (data ?? []).filter((row: any) => row.active !== false)
-      .map((row: any) => row.products ? { ...row.products, last_api: row.last_api ?? null, last_api_updated_at: row.last_api_updated_at ?? null, last_temp_f: row.last_temp_f ?? null, last_loaded_at: row.last_loaded_at ?? null } : null)
+      .map((row: any) => {
+        if (!row.products) return null;
+        const own = statsByProductId[row.products.product_id];
+        const canonicalId = row.products.canonical_product_id as string | null | undefined;
+        const stats = (canonicalId && statsByProductId[canonicalId]) ? statsByProductId[canonicalId] : own;
+        return { ...row.products, ...stats };
+      })
       .filter(Boolean);
     setTerminalProducts(products as ProductRow[]);
   }, [location.selectedTerminalId]);

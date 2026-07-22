@@ -86,6 +86,17 @@ export default function CompartmentModal({
                   <div style={{ display: "flex", alignItems: "baseline", gap: 6, overflow: "hidden" }}>
                     <span style={{ fontWeight: 700, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>{name}</span>
                     <span style={{ fontSize: 11, fontWeight: 700, color: btnColor, opacity: 0.85, flexShrink: 0, letterSpacing: 0.3 }}>{btnCode}</span>
+                    {/* Fill color stays the real product color (dye color) --
+                        only this badge is red, for visibility that it's a
+                        dyed/off-road-only variant. */}
+                    {p.is_dyed && (
+                      <span style={{
+                        fontSize: 9, fontWeight: 800, color: "#ef4444", background: "rgba(239,68,68,0.12)",
+                        borderRadius: 3, padding: "1px 4px", letterSpacing: 0.4, flexShrink: 0,
+                      }}>
+                        DYED
+                      </span>
+                    )}
                   </div>
                   <div style={{ opacity: 0.5, fontSize: 12, lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>{sub || " "}</div>
                 </div>
