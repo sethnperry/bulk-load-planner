@@ -58,13 +58,13 @@ function PredictionBanner({
   if (loading) {
     return (
       <div style={{
-        borderRadius: 12, border: "1px solid rgba(103,232,249,0.15)",
-        background: "rgba(103,232,249,0.04)", padding: "12px 14px",
+        borderRadius: 6, border: "1px solid rgba(255,255,255,0.10)",
+        background: "rgba(255,255,255,0.03)", padding: "12px 14px",
         display: "flex", alignItems: "center", gap: 12,
       }}>
         <div style={{
           width: 26, height: 26, borderRadius: "50%", flexShrink: 0,
-          border: "2px solid rgba(103,232,249,0.15)", borderTopColor: "#67e8f9",
+          border: "2px solid rgba(255,255,255,0.12)", borderTopColor: "rgba(255,255,255,0.55)",
           animation: "ptSpin 0.8s linear infinite",
         }} />
         <div>
@@ -84,9 +84,9 @@ function PredictionBanner({
 
   return (
     <div style={{
-      borderRadius: 12,
-      border: isAccepted ? "1px solid rgba(74,222,128,0.25)" : "1px solid rgba(103,232,249,0.22)",
-      background: isAccepted ? "rgba(74,222,128,0.06)" : "rgba(103,232,249,0.06)",
+      borderRadius: 6,
+      border: isAccepted ? "1px solid rgba(74,222,128,0.25)" : "1px solid rgba(255,255,255,0.10)",
+      background: isAccepted ? "rgba(74,222,128,0.06)" : "rgba(255,255,255,0.03)",
       padding: "12px 16px",
       display: "flex", alignItems: "center", gap: 12,
     }}>
@@ -98,7 +98,7 @@ function PredictionBanner({
           <ConfidenceDot confidence={confidence} />
         </div>
         <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-          <span style={{ fontSize: 32, fontWeight: 900, color: confidence ? CONFIDENCE_COLOR[confidence] : "#67e8f9", lineHeight: 1 }}>
+          <span style={{ fontSize: 32, fontWeight: 900, color: confidence ? CONFIDENCE_COLOR[confidence] : "rgba(255,255,255,0.85)", lineHeight: 1 }}>
             {predictedTempF.toFixed(1)}°F
           </span>
           <span style={{ fontSize: 11, color: "rgba(255,255,255,0.35)" }}>
@@ -112,8 +112,8 @@ function PredictionBanner({
         </div>
       ) : (
         <button type="button" onClick={() => onAccept(predictedTempF)} style={{
-          background: "rgba(103,232,249,0.12)", border: "1px solid rgba(103,232,249,0.28)",
-          borderRadius: 8, padding: "8px 16px", color: "#67e8f9",
+          background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.18)",
+          borderRadius: 6, padding: "8px 16px", color: "rgba(255,255,255,0.85)",
           fontSize: 12, fontWeight: 800, letterSpacing: 0.4,
           cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0,
         }}>
@@ -170,7 +170,7 @@ export default function ProductTempModal(props: {
             {selectedCity && selectedState ? `${selectedCity}, ${selectedState}` : "City, ST"}
           </span>
           <span style={{ color: "rgba(255,255,255,0.50)" }}>{" "} - {" "}</span>
-          <span style={{ color: "rgb(0,194,216)" }}>
+          <span style={{ color: "rgba(255,255,255,0.65)" }}>
             {ambientTempLoading ? "Loading…" : ambientTempF == null ? "—" : `${Math.round(ambientTempF)}°F ambient`}
           </span>
         </div>
@@ -195,7 +195,7 @@ export default function ProductTempModal(props: {
             onClick={() => setTempF(60)} title="Snap to 60°F">60°</button>
           {predictedFuelTempF != null && Math.abs(tempF - predictedFuelTempF) > 0.15 && (
             <button type="button"
-              style={{ ...styles.smallBtn, color: "#67e8f9", borderColor: "rgba(103,232,249,0.3)" }}
+              style={{ ...styles.smallBtn, color: "rgba(255,255,255,0.92)", borderColor: "rgba(255,255,255,0.35)" }}
               onClick={() => setTempF(predictedFuelTempF)}
               title="Snap to predicted temp">
               {predictedFuelTempF.toFixed(1)}°
@@ -211,7 +211,7 @@ export default function ProductTempModal(props: {
         <button
           type="button"
           onClick={() => { onClose(); router.push("/learn"); }}
-          style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", padding: "11px 14px", borderRadius: 12, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", cursor: "pointer" }}
+          style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", padding: "11px 14px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", cursor: "pointer" }}
         >
           <span style={{ fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,0.55)" }}>How this prediction works</span>
           <span style={{ fontSize: 13, color: "rgba(255,255,255,0.25)" }}>›</span>
