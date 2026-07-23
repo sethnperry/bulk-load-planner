@@ -962,6 +962,8 @@ export default function SoloEquipmentModal({
         companyId={companyId}
         comboId={selectedCombo?.combo_id ?? null}
         onChanged={() => { loadEquipment(); onRefreshCombos(); }}
+        truckName={trucks.find((t) => t.truck_id === selectedCombo?.truck_id)?.truck_name}
+        trailerName={trailers.find((t) => t.trailer_id === selectedCombo?.trailer_id)?.trailer_name}
       />
 
       {/* ── Service / Wash (minimal for this pass -- full spec is §2/§3) ── */}

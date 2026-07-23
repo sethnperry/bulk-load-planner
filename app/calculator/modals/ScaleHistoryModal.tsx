@@ -13,6 +13,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { supabase } from "@/lib/supabase/client";
+import { generateWeightTicketPng, shareOrDownloadTicket } from "@/lib/ui/generateWeightTicket";
 
 type WeightRecordRaw = {
   weight_record_id: string;
@@ -79,9 +80,11 @@ type Props = {
   companyId: string;
   comboId: string | null;
   onChanged?: () => void;
+  truckName?: string | null;
+  trailerName?: string | null;
 };
 
-export default function ScaleHistoryModal({ open, onClose, companyId, comboId, onChanged }: Props) {
+export default function ScaleHistoryModal({ open, onClose, companyId, comboId, onChanged, truckName, trailerName }: Props) {
   const [search, setSearch] = useState("");
   const [activeDays, setActiveDays] = useState<number | null>(90);
   const [copied, setCopied] = useState(false);
@@ -101,6 +104,9 @@ export default function ScaleHistoryModal({ open, onClose, companyId, comboId, o
   const [editHeavy, setEditHeavy] = useState("");
   const [editLight, setEditLight] = useState("");
   const [editNotes, setEditNotes] = useState("");
+  const [printBusy, setPrintBusy] = useState(false);
+
+  const equipmentLabel = [truckName, trailerName].filter(Boolean).join(" / ");
 
   const allEquipment = activeDays === null;
 
@@ -218,6 +224,29 @@ export default function ScaleHistoryModal({ open, onClose, companyId, comboId, o
       setError(e?.message ?? "Failed to save changes.");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function printRecord(row: WeightRecordRaw) {
+    setPrintBusy(true);
+    setError(null);
+    try {
+      const blob = await generateWeightTicketPng({
+        recordedAt: row.recorded_at,
+        equipmentLabel,
+        heavyLbs: row.heavy_weight_lbs,
+        lightLbs: row.light_weight_lbs,
+        netLbs: row.net_weight_lbs,
+        plannerLbs: row.planner_weight_lbs,
+        tareUpdated: row.tare_updated,
+        priorTareLbs: row.prior_tare_lbs,
+        notes: row.notes,
+      });
+      await shareOrDownloadTicket(blob, `weight-ticket-${fmtDate(row.recorded_at).replace(/\//g, "-")}.png`);
+    } catch (e: any) {
+      setError(e?.message ?? "Failed to generate ticket image.");
+    } finally {
+      setPrintBusy(false);
     }
   }
 
@@ -446,6 +475,10 @@ export default function ScaleHistoryModal({ open, onClose, companyId, comboId, o
               </div>
             ) : (
               <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={() => printRecord(expandedRow)} disabled={printBusy}
+                  style={{ flex: 1, padding: "12px 14px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.14)", background: "rgba(255,255,255,0.06)", color: "#fff", fontWeight: 700, cursor: printBusy ? "wait" : "pointer" }}>
+                  {printBusy ? "Generating…" : "Print"}
+                </button>
                 <button onClick={() => startEdit(expandedRow)}
                   style={{ flex: 1, padding: "12px 14px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.14)", background: "rgba(255,255,255,0.06)", color: "#fff", fontWeight: 700, cursor: "pointer" }}>
                   Edit

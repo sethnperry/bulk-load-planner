@@ -442,7 +442,7 @@ try {
     completeBusy,
     completeError,
     actualByComp,
-    loadReport,
+    loadReport, setLoadReport,
     beginLoadToSupabase,
     onLoadedFromLoadingModal,
     cancelActiveLoad,
