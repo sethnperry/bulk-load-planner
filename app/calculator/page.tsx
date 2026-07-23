@@ -174,7 +174,7 @@ function TempDial({ value, min, max, step, onChange }: TempDialProps) {
             style={{ width: "100%", maxWidth: 280, background: "#161616", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 6, padding: 20, display: "flex", flexDirection: "column", alignItems: "center", gap: 14 }}
           >
             <div style={{ fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.45)", letterSpacing: 0.4, textTransform: "uppercase" as const }}>
-              Set Temp (°F)
+              Set Temp (°F) for All Products
             </div>
             <input
               type="text" inputMode="decimal" autoFocus
@@ -370,12 +370,55 @@ export default function CalculatorPage() {
   // All initialized to defaults; hydrated from localStorage in useEffect after mount
   // (avoids SSR hydration mismatch — localStorage is client-only)
   const [tempF, setTempFRaw] = useState<number>(60);
+
+  // Per-product planned temp -- split load (e.g. diesel + regular in the same
+  // trailer) genuinely have different temps (different tanks), so a single
+  // shared tempF was wrong the moment more than one product was in the plan.
+  // tempF is kept as the dial's own "reference" value; every existing way of
+  // moving it (drag, type-in, quick +/-, snap buttons) now also shifts every
+  // product's own temp by the same delta, applied once here so none of those
+  // call sites needed to change. Setting one product directly (tapping its
+  // row in the modal) bypasses this and only touches that product -- see
+  // setSingleProductTempF below. Deliberately NOT persisted to localStorage
+  // like tempF is -- same "always re-seeded from the live prediction, never
+  // restored from a snapshot" rule tempF itself already follows.
+  const [productTempF, setProductTempF] = useState<Record<string, number>>({});
+
+  // Kept in sync synchronously (not via a useEffect) so setTempF can always
+  // read "prev" without nesting a second setState call inside setTempFRaw's
+  // own updater. That nested-call version worked in production but silently
+  // double-applied the delta in dev: React 18 StrictMode double-invokes
+  // updater functions to catch impure ones, and an updater that calls
+  // setProductTempF as a side effect isn't pure -- both invocations actually
+  // fired the nested update, doubling the shift. Caught this live testing
+  // the split-load dial (a single +5.8° drag was landing as +11.6°).
+  const tempFRef = useRef(60);
+
   const setTempF = useCallback((v: number | ((prev: number) => number)) => {
-    setTempFRaw(prev => {
-      const next = typeof v === "function" ? v(prev) : v;
-      try { localStorage.setItem("protankr_tempF_v1", String(next)); } catch {}
-      return next;
-    });
+    const prev = tempFRef.current;
+    const next = typeof v === "function" ? v(prev) : v;
+    const delta = Math.round((next - prev) * 10) / 10;
+    tempFRef.current = next;
+    if (delta !== 0) {
+      setProductTempF((prevProd) => {
+        if (Object.keys(prevProd).length === 0) return prevProd;
+        const out: Record<string, number> = {};
+        for (const [pid, val] of Object.entries(prevProd)) out[pid] = Math.round((val + delta) * 10) / 10;
+        return out;
+      });
+    }
+    try { localStorage.setItem("protankr_tempF_v1", String(next)); } catch {}
+    setTempFRaw(next);
+  }, []);
+
+  // Safety net for the one path that sets tempF directly (localStorage
+  // hydration on mount, below) instead of through setTempF -- keeps the ref
+  // truthful even then, so a delta computed right after mount is never based
+  // on the stale initial 60 default.
+  useEffect(() => { tempFRef.current = tempF; }, [tempF]);
+
+  const setSingleProductTempF = useCallback((productId: string, value: number) => {
+    setProductTempF((prev) => ({ ...prev, [productId]: Math.round(value * 10) / 10 }));
   }, []);
 
   const [cgSlider, setCgSliderRaw] = useState<number>(0.5);
@@ -634,16 +677,24 @@ export default function CalculatorPage() {
   const lbsPerGalForProductId = useCallback((productId: string): number | null => {
     const p = terminalProducts.find((x) => x.product_id === productId);
     if (!p || p.api_60 == null || p.alpha_per_f == null) return null;
+    // Each product uses its OWN planned temp now, not the shared dial value --
+    // a split load (e.g. diesel + regular in the same trailer) really can sit
+    // at two different temps at once, and the weight math needs to reflect
+    // that, not just the display. Falls back to the shared tempF for a
+    // product that hasn't been seeded into productTempF yet (shouldn't
+    // normally happen -- the seeding effect below keeps every planned
+    // product's entry current -- but keeps this callable safely regardless).
+    const t = productTempF[productId] ?? tempF;
     // Use driver-observed API (last_api @ last_temp_f) when available — more accurate
     // than the static api_60 reference. bestLbsPerGallon back-corrects to 60°F first.
     return bestLbsPerGallon(
       Number(p.api_60),
       Number(p.alpha_per_f),
-      tempF,
+      t,
       p.last_api     != null ? Number(p.last_api)     : null,
       p.last_temp_f  != null ? Number(p.last_temp_f)  : null,
     );
-  }, [terminalProducts, tempF]);
+  }, [terminalProducts, tempF, productTempF]);
 
   // ── Active compartments ────────────────────────────────────────────────────
   const activeComps = useMemo<ActiveComp[]>(() => {
@@ -664,6 +715,32 @@ export default function CalculatorPage() {
     out.sort((a, b) => a.position - b.position);
     return out;
   }, [selectedTrailerId, compartments, terminalProducts, compPlan, tempF]);
+
+  // Seed productTempF for any planned product that doesn't have an entry yet
+  // (new product just added to the plan), and drop entries for products no
+  // longer in the plan. New products seed to the CURRENT dial value (tempF)
+  // -- not the raw prediction -- so a product added after the driver has
+  // already nudged the dial away from the prediction picks up that nudge
+  // too, instead of jumping back to the un-adjusted number.
+  const plannedProductIds = useMemo(() => {
+    const s = new Set<string>();
+    for (const c of activeComps) if (c.productId) s.add(c.productId);
+    return s;
+  }, [activeComps]);
+
+  useEffect(() => {
+    setProductTempF((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const pid of plannedProductIds) {
+        if (!(pid in next)) { next[pid] = tempF; changed = true; }
+      }
+      for (const pid of Object.keys(next)) {
+        if (!plannedProductIds.has(pid)) { delete next[pid]; changed = true; }
+      }
+      return changed ? next : prev;
+    });
+  }, [plannedProductIds, tempF]);
 
   // ── Weight limits ──────────────────────────────────────────────────────────
   // target_weight = the gross weight the driver is trying to hit (renamed from gross_limit_lbs)
@@ -805,6 +882,20 @@ const lastProductInfoById = useMemo(() => {
     for (const p of terminalProducts) { if (p.product_id && p.hex_code) rec[p.product_id] = String(p.hex_code); }
     return rec;
   }, [terminalProducts]);
+
+  // Per-product rows for the Temp modal's product list (dot + name + own
+  // temp, tap to adjust just that one) -- same shape as LoadingModal's own
+  // planned-compartments/product-groups rows, for visual continuity.
+  const tempModalProductGroups = useMemo(() => {
+    return Array.from(plannedProductIds)
+      .map((pid) => ({
+        productId: pid,
+        name: productNameById.get(pid) ?? pid,
+        hex: (productHexCodeById[pid] && productHexCodeById[pid].trim()) || "rgba(255,255,255,0.5)",
+        tempF: productTempF[pid] ?? tempF,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [plannedProductIds, productNameById, productHexCodeById, productTempF, tempF]);
 
   // ── City starring ──────────────────────────────────────────────────────────
   const CITY_STARS_KEY_PREFIX = "protankr_city_stars_v1::";
@@ -1322,6 +1413,8 @@ const lastProductInfoById = useMemo(() => {
         ambientTempF={location.ambientTempF}
         tempF={tempF}
         setTempF={setTempF}
+        productGroups={tempModalProductGroups}
+        onSetProductTemp={setSingleProductTempF}
         predictedFuelTempF={predictedFuelTempF}
         fuelTempConfidence={fuelTempConfidence}
         fuelTempLoading={fuelTempLoading}
