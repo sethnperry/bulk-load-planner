@@ -5,6 +5,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
+import { deleteLoad as deleteLoadRpc } from "@/lib/supabase/load";
 
 export type LoadHistoryRow = {
   load_id: string;
@@ -14,7 +15,9 @@ export type LoadHistoryRow = {
   combo_id: string;
   terminal_id: string;
   state_code: string | null;
+  city_id?: string | null;
   city_name?: string | null;
+  cg_bias?: number | null;
   planned_total_gal: number | null;
   planned_gross_lbs: number | null;
   actual_total_lbs: number | null;
@@ -62,6 +65,7 @@ export function useLoadHistory(authUserId: string) {
         .select(`
           load_id, status, started_at, completed_at,
           combo_id, terminal_id, state_code, city_id,
+          cg_bias,
           planned_total_gal, planned_gross_lbs,
           actual_total_lbs, diff_lbs,
           product_temp_f, planned_snapshot,
@@ -182,6 +186,20 @@ export function useLoadHistory(authUserId: string) {
     }
   }, [linesCache, linesLoading]);
 
+  // Deletes a load and removes it from the local rows list immediately —
+  // covers both a manual delete from My Loads and the abandoned "planned"
+  // rows this same RPC cleans up when the Loading modal is closed early.
+  const deleteLoad = useCallback(async (loadId: string) => {
+    await deleteLoadRpc(loadId);
+    setRows((prev) => prev.filter((r) => r.load_id !== loadId));
+    setLinesCache((prev) => {
+      if (!(loadId in prev)) return prev;
+      const next = { ...prev };
+      delete next[loadId];
+      return next;
+    });
+  }, []);
+
   return {
     rows,
     loading,
@@ -191,5 +209,6 @@ export function useLoadHistory(authUserId: string) {
     fetch,
     fetchLines,
     resolveLabels,
+    deleteLoad,
   };
 }

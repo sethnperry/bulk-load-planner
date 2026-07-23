@@ -71,4 +71,12 @@ export async function completeLoad(payload: CompleteLoadPayload) {
   return data as CompleteLoadResult;
 }
 
+// Deletes a load_log row (and its load_lines) the caller owns -- used both
+// to auto-clean an abandoned "planned" row when the Loading modal is closed
+// without completing, and for the manual Delete action in My Loads.
+export async function deleteLoad(loadId: string) {
+  const { error } = await supabase.rpc("delete_load", { p_load_id: loadId });
+  if (error) throw error;
+}
+
 

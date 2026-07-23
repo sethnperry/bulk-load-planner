@@ -4,7 +4,7 @@
 
 import { useCallback, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
-import { beginLoad, completeLoad } from "@/lib/supabase/load";
+import { beginLoad, completeLoad, deleteLoad } from "@/lib/supabase/load";
 import { lbsPerGallonAtTemp } from "../utils/planMath";
 import type { LoadReport, PlanRow, ProductRow } from "../types";
 
@@ -189,6 +189,29 @@ export function useLoadWorkflow({
     selectedCityId, planRows, plannedGallonsTotal, plannedWeightLbs,
     tare, cgBias, ambientTempF, tempF, setProductInputs, onRefreshTerminalAccess, authUserId,
   ]);
+
+  // ── Cancel (Loading modal closed before LOADED is tapped) ─────────────────
+  // begin_load inserts the load_log row immediately (needed so terminal_access
+  // gets re-carded and the modal has a load_id to write into), so closing out
+  // without completing must delete that row again -- otherwise every LOAD tap
+  // that doesn't end in LOADED leaves a permanent blank "planned" row in My
+  // Loads (the bug this fixes).
+  const [cancelBusy, setCancelBusy] = useState(false);
+
+  const cancelActiveLoad = useCallback(async () => {
+    const loadId = activeLoadId;
+    setLoadingOpen(false);
+    if (!loadId) return;
+    setActiveLoadId(null);
+    setCancelBusy(true);
+    try {
+      await deleteLoad(loadId);
+    } catch (err) {
+      console.warn("cancelActiveLoad: delete_load failed (non-fatal):", err);
+    } finally {
+      setCancelBusy(false);
+    }
+  }, [activeLoadId]);
 
   // ── On loaded (from loading modal) ────────────────────────────────────────
 
@@ -422,5 +445,7 @@ try {
     loadReport,
     beginLoadToSupabase,
     onLoadedFromLoadingModal,
+    cancelActiveLoad,
+    cancelBusy,
   };
 }

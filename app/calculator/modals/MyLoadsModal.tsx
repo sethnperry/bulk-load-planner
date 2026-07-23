@@ -426,6 +426,12 @@ type Props = {
   terminalCatalog: any[];
   headerOverride?: string;
   combos: any[];
+  // Omitted entirely from the admin view (AdminLoadsModal.tsx) -- delete_load
+  // is owner-checked server-side (auth.uid() must match), and restoring
+  // another driver's load into the viewing admin's own planner never makes
+  // sense, so those actions just don't render there.
+  onDeleteLoad?: (loadId: string) => Promise<void>;
+  onRestoreLoad?: (row: LoadHistoryRow) => void;
 };
 
 export default function MyLoadsModal({
@@ -435,12 +441,15 @@ export default function MyLoadsModal({
   onFetchLines, onFetchRange,
   terminalCatalog, combos,
   headerOverride,
+  onDeleteLoad, onRestoreLoad,
 }: Props) {
   const [search, setSearch] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [activeDays, setActiveDays] = useState<number | null>(7);
   const [copied, setCopied] = useState(false);
+  const [confirmMode, setConfirmMode] = useState<"delete" | "restore" | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -448,6 +457,7 @@ export default function MyLoadsModal({
       setSearch("");
       setExpandedId(null);
       setSelectedId(null);
+      setConfirmMode(null);
       onFetchRange(activeDays);
       setTimeout(() => searchRef.current?.focus(), 180);
     }
@@ -482,6 +492,28 @@ export default function MyLoadsModal({
   function handleEmail() {
     if (!selectedRow) return;
     shareViaEmail(selectedRow, selectedLines);
+  }
+
+  async function confirmDelete() {
+    if (!selectedRow || !onDeleteLoad) return;
+    setDeleteBusy(true);
+    try {
+      await onDeleteLoad(selectedRow.load_id);
+      setConfirmMode(null);
+      setExpandedId(null);
+      setSelectedId(null);
+    } catch (e: any) {
+      alert(e?.message ?? "Failed to delete load.");
+    } finally {
+      setDeleteBusy(false);
+    }
+  }
+
+  function confirmRestore() {
+    if (!selectedRow || !onRestoreLoad) return;
+    onRestoreLoad(selectedRow);
+    setConfirmMode(null);
+    onClose();
   }
 
   const filtered = useMemo(() => {
@@ -554,7 +586,7 @@ export default function MyLoadsModal({
             );
           })}
 
-          {/* Share controls — enabled only when a load is selected */}
+          {/* Share + row-management controls — enabled only when a load is selected */}
           <div style={{ marginLeft: "auto", display: "flex", gap: 5, alignItems: "center" }}>
             {(["copy", "text", "email"] as const).map((type) => {
               const enabled = !!selectedId;
@@ -576,6 +608,36 @@ export default function MyLoadsModal({
                 </button>
               );
             })}
+            {onRestoreLoad && (
+              <button
+                disabled={!selectedId}
+                onClick={() => setConfirmMode("restore")}
+                style={{
+                  padding: "5px 9px", borderRadius: 7, fontSize: 11, fontWeight: 800, letterSpacing: 0.3, flexShrink: 0,
+                  cursor: selectedId ? "pointer" : "default", transition: "all 150ms ease",
+                  border: selectedId ? "1px solid rgba(255,255,255,0.30)" : "1px solid rgba(255,255,255,0.08)",
+                  background: selectedId ? "rgba(255,255,255,0.07)" : "transparent",
+                  color: selectedId ? "rgba(255,255,255,0.80)" : "rgba(255,255,255,0.18)",
+                }}
+              >
+                RESTORE
+              </button>
+            )}
+            {onDeleteLoad && (
+              <button
+                disabled={!selectedId}
+                onClick={() => setConfirmMode("delete")}
+                style={{
+                  padding: "5px 9px", borderRadius: 7, fontSize: 11, fontWeight: 800, letterSpacing: 0.3, flexShrink: 0,
+                  cursor: selectedId ? "pointer" : "default", transition: "all 150ms ease",
+                  border: selectedId ? "1px solid rgba(239,68,68,0.45)" : "1px solid rgba(255,255,255,0.08)",
+                  background: selectedId ? "rgba(239,68,68,0.10)" : "transparent",
+                  color: selectedId ? "#ef4444" : "rgba(255,255,255,0.18)",
+                }}
+              >
+                DELETE
+              </button>
+            )}
           </div>
         </div>
 
@@ -621,6 +683,43 @@ export default function MyLoadsModal({
           <div style={{ height: 28 }} />
         </div>
       </div>
+
+      {/* Restore/Delete confirm overlay */}
+      {confirmMode && selectedRow && (
+        <div
+          onClick={(e) => { e.stopPropagation(); setConfirmMode(null); }}
+          style={{ position: "fixed", inset: 0, zIndex: 10200, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ width: "100%", maxWidth: 320, background: "#161616", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 6, padding: 20, display: "flex", flexDirection: "column", gap: 12 }}
+          >
+            <div style={{ fontSize: 15, fontWeight: 800, color: "#fff" }}>
+              {confirmMode === "delete" ? "Delete this load?" : "Restore this load?"}
+            </div>
+            <div style={{ fontSize: 13, color: "rgba(255,255,255,0.55)", lineHeight: 1.5 }}>
+              {confirmMode === "delete"
+                ? "This permanently removes it from My Loads. This can't be undone."
+                : "This replaces your current plan in the Planner with this load's equipment, terminal, and compartment selections."}
+            </div>
+            <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+              <button type="button" onClick={() => setConfirmMode(null)} disabled={deleteBusy}
+                style={{ flex: 1, padding: "12px 0", borderRadius: 6, border: "1px solid rgba(255,255,255,0.15)", background: "transparent", color: "rgba(255,255,255,0.65)", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>
+                Cancel
+              </button>
+              <button type="button" onClick={confirmMode === "delete" ? confirmDelete : confirmRestore} disabled={deleteBusy}
+                style={{
+                  flex: 1, padding: "12px 0", borderRadius: 6, border: "none",
+                  background: confirmMode === "delete" ? "#ef4444" : "#fff",
+                  color: confirmMode === "delete" ? "#fff" : "#000",
+                  fontSize: 14, fontWeight: 700, cursor: "pointer",
+                }}>
+                {confirmMode === "delete" ? (deleteBusy ? "Deleting…" : "Delete") : "Restore"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>,
     document.body
   );

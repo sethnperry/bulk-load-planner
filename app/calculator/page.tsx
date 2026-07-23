@@ -641,6 +641,66 @@ export default function CalculatorPage() {
     });
   }, [compartments]);
 
+  // ── Restore a My Loads row back into the live planner ─────────────────────
+  // "Restore" switches location + equipment to match the load, then waits for
+  // compartments to actually load for the (possibly new) trailer before
+  // applying compPlan -- doing it eagerly would race the "Hydrate compPlan
+  // when combo+terminal key changes" / "Initialize compPlan entries" effects
+  // above, which reset compPlan as soon as compPlanKey or compartments change.
+  // restoreTick forces the apply-effect below to re-check on every restore
+  // call even when combo/terminal/compartments haven't actually changed (the
+  // common case -- restoring the load you just abandoned at the same spot).
+  type PendingRestore = { comboId: string; terminalId: string; lines: Array<{ comp_number: number; product_id: string | null }> };
+  const pendingRestoreRef = useRef<PendingRestore | null>(null);
+  const [restoreTick, setRestoreTick] = useState(0);
+
+  const restoreLoadToPlanner = useCallback((row: { combo_id: string; terminal_id: string; state_code?: string | null; city_name?: string | null; planned_snapshot?: any }) => {
+    const snapshotLines: any[] = row.planned_snapshot?.lines ?? [];
+    const lines = snapshotLines
+      .map((l) => ({ comp_number: Number(l.comp_number), product_id: l.product_id ? String(l.product_id) : null }))
+      .filter((l) => Number.isFinite(l.comp_number));
+
+    pendingRestoreRef.current = {
+      comboId: String(row.combo_id ?? ""),
+      terminalId: String(row.terminal_id ?? ""),
+      lines,
+    };
+
+    // Mirrors useLocation's own hydration pattern: set state/city/terminal
+    // together with the reset-on-change effects suppressed, so picking a
+    // different state doesn't wipe the city/terminal we're about to set.
+    location.skipResetRef.current = true;
+    if (row.state_code) location.setSelectedState(row.state_code);
+    if (row.city_name) location.setSelectedCity(row.city_name);
+    if (row.terminal_id) location.setSelectedTerminalId(String(row.terminal_id));
+    setTimeout(() => { location.skipResetRef.current = false; }, 100);
+
+    if (row.combo_id && String(row.combo_id) !== String(equipment.selectedComboId)) {
+      equipment.setSelectedComboId(String(row.combo_id));
+    }
+
+    setRestoreTick((v) => v + 1);
+  }, [location, equipment]);
+
+  useEffect(() => {
+    const pending = pendingRestoreRef.current;
+    if (!pending) return;
+    if (String(equipment.selectedComboId) !== pending.comboId) return;
+    if (String(location.selectedTerminalId) !== pending.terminalId) return;
+    if (compartments.length === 0) return;
+
+    const byComp = new Map(pending.lines.map((l) => [l.comp_number, l.product_id]));
+    const next: Record<number, CompPlanInput> = {};
+    for (const c of compartments) {
+      const n = Number(c.comp_number);
+      if (!Number.isFinite(n)) continue;
+      next[n] = { empty: false, productId: byComp.get(n) ?? "" };
+    }
+    setCompPlan(next);
+    pendingRestoreRef.current = null;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [equipment.selectedComboId, location.selectedTerminalId, compartments, restoreTick]);
+
   // ── CG bias ────────────────────────────────────────────────────────────────
   const cgBias = useMemo(() => cgSliderToBias(cgSlider), [cgSlider]);
   const unstableLoad = cgSlider < CG_NEUTRAL;
@@ -1382,10 +1442,12 @@ const lastProductInfoById = useMemo(() => {
         onFetchRange={loadHistory.fetch}
         terminalCatalog={terminals.terminalCatalog ?? []}
         combos={equipment.combos ?? []}
+        onDeleteLoad={loadHistory.deleteLoad}
+        onRestoreLoad={restoreLoadToPlanner}
       />
 
       <LoadingModal
-        open={loadWorkflow.loadingOpen} onClose={() => loadWorkflow.setLoadingOpen(false)}
+        open={loadWorkflow.loadingOpen} onClose={loadWorkflow.cancelActiveLoad}
         styles={styles}
         planRows={planRows as any[]}
         productNameById={productNameById}
