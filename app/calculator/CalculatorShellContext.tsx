@@ -28,6 +28,7 @@ import { useLocation } from "./hooks/useLocation";
 import { useTerminals } from "./hooks/useTerminals";
 import { useExpirations } from "./hooks/useExpirations";
 import { useTerminalFilters } from "./hooks/useTerminalFilters";
+import { useDemoWatchdog } from "./hooks/useDemoWatchdog";
 import { addDaysISO_ } from "./utils/dates";
 import type { TerminalRow, TerminalCatalogRow } from "./types";
 
@@ -77,6 +78,8 @@ export function CalculatorShellProvider({ children }: { children: React.ReactNod
     const session = getSetupSession();
     if (session) setSetupSession(session);
   }, []);
+
+  useDemoWatchdog(authUserId);
 
   const equipment = useEquipment(authUserId, setupSession);
   const location = useLocation(effectiveUserId);
