@@ -72,13 +72,13 @@ const PERSONAS = [
     key: "alpha",
     email: process.env.DEMO_ACCOUNT_EMAIL_ALPHA,
     companyId: process.env.DEMO_COMPANY_ID_ALPHA,
-    dummyName: "Jordan Casey",
+    dummyName: "Test Testerson",
   },
   {
     key: "beta",
     email: process.env.DEMO_ACCOUNT_EMAIL_BETA,
     companyId: process.env.DEMO_COMPANY_ID_BETA,
-    dummyName: "Alex Rivera",
+    dummyName: "Demo Demopoulos",
   },
 ].filter((p) => p.email && p.companyId);
 
