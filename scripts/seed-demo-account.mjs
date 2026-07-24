@@ -153,6 +153,21 @@ async function ensureScopedMembership(demoUserId, companyId) {
     .from("user_settings")
     .upsert({ user_id: demoUserId, active_company_id: companyId }, { onConflict: "user_id" });
   if (usErr) throw usErr;
+
+  // is_solo drives which Equipment modal the app shows -- EquipmentModal.tsx
+  // renders the old fleet browse/claim-couple UI unless the active
+  // company's is_solo is true, in which case it shows the modern
+  // SoloEquipmentModal (Binder/Scale/Service/Wash) that the real source
+  // account actually uses. Found live (as "the old equipment modal" in the
+  // demo) because these target companies were previously plain test
+  // companies with is_solo=false -- force it true so the demo always
+  // reflects the same experience as the real account, not a stale fleet-tier
+  // one.
+  const { error: coErr } = await admin
+    .from("companies")
+    .update({ is_solo: true, owner_user_id: demoUserId })
+    .eq("company_id", companyId);
+  if (coErr) throw coErr;
 }
 
 async function wipeDemoData(demoUserId, demoCompanyId) {
