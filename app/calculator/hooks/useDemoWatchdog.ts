@@ -30,7 +30,7 @@ import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
 
-const TOKEN_KEY = "protankr_demo_token_v1";
+const TOKEN_KEY_PREFIX = "protankr_demo_token_v1";
 const POLL_MS = 15_000;
 const IDLE_MS = 20 * 60 * 1000; // 20 minutes
 const IDLE_CHECK_MS = 30_000;
@@ -60,22 +60,29 @@ export function useDemoWatchdog(authUserId: string) {
     if (!isDemo) return;
     endedRef.current = false;
 
+    // Scoped per persona -- otherwise switching between two demo links in
+    // the same browser tab (e.g. the account owner testing both) leaves a
+    // stale token from the first persona that immediately looks like a
+    // "commandeered" mismatch for the second, since sessionStorage is one
+    // shared store per origin, not per persona.
+    const tokenKey = `${TOKEN_KEY_PREFIX}:${personaKey}`;
+
     async function endSession(reason: string) {
       if (endedRef.current) return;
       endedRef.current = true;
-      try { sessionStorage.removeItem(TOKEN_KEY); } catch {}
+      try { sessionStorage.removeItem(tokenKey); } catch {}
       try { await supabase.auth.signOut(); } catch {}
       router.replace(`/demo/ended?reason=${reason}&persona=${personaKey}`);
     }
 
     async function ensureCommandeered() {
       let token: string | null = null;
-      try { token = sessionStorage.getItem(TOKEN_KEY); } catch {}
+      try { token = sessionStorage.getItem(tokenKey); } catch {}
       if (token) return;
       try {
         const { data, error } = await supabase.rpc("demo_commandeer");
         if (error) throw error;
-        try { sessionStorage.setItem(TOKEN_KEY, String(data)); } catch {}
+        try { sessionStorage.setItem(tokenKey, String(data)); } catch {}
       } catch (e) {
         console.warn("demo_commandeer failed (non-fatal):", e);
       }
@@ -83,7 +90,7 @@ export function useDemoWatchdog(authUserId: string) {
 
     async function checkSuperseded() {
       let myToken: string | null = null;
-      try { myToken = sessionStorage.getItem(TOKEN_KEY); } catch {}
+      try { myToken = sessionStorage.getItem(tokenKey); } catch {}
       if (!myToken) return;
       const { data, error } = await supabase
         .from("demo_sessions")
