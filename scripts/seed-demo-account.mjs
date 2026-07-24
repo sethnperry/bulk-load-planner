@@ -170,29 +170,56 @@ async function ensureScopedMembership(demoUserId, companyId) {
   if (coErr) throw coErr;
 }
 
+// Every delete here is error-checked and throws immediately on failure --
+// an earlier silent version of this function let a stray FK violation
+// (weight_records still referencing a combo) pass unnoticed, leaving old
+// trucks/trailers/combos behind on the next reseed and producing visible
+// duplicates ("DEMO 25184" next to "DEMO ALPHA 25184"). Also deletes
+// weight_records by combo_id (not just company_id) as a safety net, since
+// that's exactly the row shape that broke it last time.
+async function del(table, column, value, mode = "eq") {
+  const { error } = await admin.from(table).delete()[mode](column, value);
+  if (error) throw new Error(`Delete from ${table} where ${column} ${mode} ${JSON.stringify(value)} failed: ${error.message}`);
+}
+
 async function wipeDemoData(demoUserId, demoCompanyId) {
   console.log("  Wiping previously-cloned demo data (if any)...");
+
+  // weight_records references BOTH load_log.load_id and
+  // equipment_combos.combo_id -- it has to go first, using every id it
+  // could possibly reference (by company_id, by this user's load ids, and
+  // by this company's combo ids), or whichever FK isn't covered blocks the
+  // later deletes.
   const priorLoads = await fetchAll("load_log", "user_id", demoUserId);
   const priorLoadIds = priorLoads.map((r) => r.load_id);
-  if (priorLoadIds.length) await admin.from("load_lines").delete().in("load_id", priorLoadIds);
-  await admin.from("load_log").delete().eq("user_id", demoUserId);
-  await admin.from("weight_records").delete().eq("company_id", demoCompanyId);
-  await admin.from("wash_records").delete().eq("company_id", demoCompanyId);
-  await admin.from("service_records").delete().eq("company_id", demoCompanyId);
-  await admin.from("service_types").delete().eq("company_id", demoCompanyId);
-  await admin.from("equipment_permits").delete().eq("company_id", demoCompanyId);
-  await admin.from("permit_types").delete().eq("company_id", demoCompanyId);
-  await admin.from("equipment_combos").delete().eq("company_id", demoCompanyId);
+  const priorCombos = await fetchAll("equipment_combos", "company_id", demoCompanyId);
+  const priorComboIds = priorCombos.map((c) => c.combo_id);
+
+  if (priorLoadIds.length) await del("weight_records", "load_id", priorLoadIds, "in");
+  if (priorComboIds.length) await del("weight_records", "combo_id", priorComboIds, "in");
+  await del("weight_records", "company_id", demoCompanyId);
+
+  if (priorLoadIds.length) await del("load_lines", "load_id", priorLoadIds, "in");
+  await del("load_log", "user_id", demoUserId);
+
+  await del("wash_records", "company_id", demoCompanyId);
+  await del("service_records", "company_id", demoCompanyId);
+  await del("service_types", "company_id", demoCompanyId);
+  await del("equipment_permits", "company_id", demoCompanyId);
+  await del("permit_types", "company_id", demoCompanyId);
+  await del("equipment_combos", "company_id", demoCompanyId);
+
   const priorTrailers = await fetchAll("trailers", "company_id", demoCompanyId);
   const priorTrailerIds = priorTrailers.map((r) => r.trailer_id);
-  if (priorTrailerIds.length) await admin.from("trailer_compartments").delete().in("trailer_id", priorTrailerIds);
-  await admin.from("trailers").delete().eq("company_id", demoCompanyId);
-  await admin.from("trucks").delete().eq("company_id", demoCompanyId);
-  await admin.from("my_terminals").delete().eq("user_id", demoUserId);
-  await admin.from("terminal_access").delete().eq("user_id", demoUserId);
-  await admin.from("user_terminal_cards").delete().eq("user_id", demoUserId);
-  await admin.from("user_primary_trucks").delete().eq("user_id", demoUserId);
-  await admin.from("user_primary_trailers").delete().eq("user_id", demoUserId);
+  if (priorTrailerIds.length) await del("trailer_compartments", "trailer_id", priorTrailerIds, "in");
+  await del("trailers", "company_id", demoCompanyId);
+  await del("trucks", "company_id", demoCompanyId);
+
+  await del("my_terminals", "user_id", demoUserId);
+  await del("terminal_access", "user_id", demoUserId);
+  await del("user_terminal_cards", "user_id", demoUserId);
+  await del("user_primary_trucks", "user_id", demoUserId);
+  await del("user_primary_trailers", "user_id", demoUserId);
 }
 
 async function cloneProfile(demoUserId, dummyName) {
@@ -218,17 +245,19 @@ async function seedPersona(persona) {
 
   // ── Equipment ──────────────────────────────────────────────────────────
   // truck_name/trailer_name/combo_name are all globally unique (not scoped
-  // per company) -- prefix with the persona key so cloning never collides
-  // with the real source company's own unit numbers OR with another
-  // persona's own clone of the same equipment.
-  const namePrefix = `DEMO ${persona.key.toUpperCase()}`;
+  // per company) -- suffix with a single persona letter so cloning never
+  // collides with the real source company's own unit numbers OR with
+  // another persona's own clone of the same equipment. Deliberately NOT
+  // prefixed with "DEMO" (per the user -- keep it looking like real fleet
+  // numbers, not obviously demo-branded).
+  const suffix = persona.key.charAt(0).toUpperCase();
 
   const trucks = await fetchAll("trucks", "company_id", SOURCE_COMPANY_ID);
   const truckIdMap = new Map();
   const newTrucks = trucks.map((t) => {
     const id = newId();
     truckIdMap.set(t.truck_id, id);
-    return { ...t, truck_id: id, truck_name: `${namePrefix} ${t.truck_name}`, company_id: demoCompanyId, in_use_by: null, status_updated_at: null };
+    return { ...t, truck_id: id, truck_name: `${t.truck_name}-${suffix}`, company_id: demoCompanyId, in_use_by: null, status_updated_at: null };
   });
   await insertBatched("trucks", newTrucks);
   console.log(`  Cloned ${newTrucks.length} trucks`);
@@ -238,7 +267,7 @@ async function seedPersona(persona) {
   const newTrailers = trailers.map((t) => {
     const id = newId();
     trailerIdMap.set(t.trailer_id, id);
-    return { ...t, trailer_id: id, trailer_name: `${namePrefix} ${t.trailer_name}`, company_id: demoCompanyId, in_use_by: null, status_updated_at: null };
+    return { ...t, trailer_id: id, trailer_name: `${t.trailer_name}-${suffix}`, company_id: demoCompanyId, in_use_by: null, status_updated_at: null };
   });
   await insertBatched("trailers", newTrailers);
   console.log(`  Cloned ${newTrailers.length} trailers`);
@@ -259,7 +288,7 @@ async function seedPersona(persona) {
     return {
       ...c,
       combo_id: id,
-      combo_name: `DEMO ${persona.key.toUpperCase()} ${c.combo_name}`,
+      combo_name: `${c.combo_name}-${suffix}`,
       company_id: demoCompanyId,
       truck_id: truckIdMap.get(c.truck_id) ?? c.truck_id,
       trailer_id: trailerIdMap.get(c.trailer_id) ?? c.trailer_id,
