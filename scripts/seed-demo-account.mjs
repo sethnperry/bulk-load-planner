@@ -1,23 +1,37 @@
 // scripts/seed-demo-account.mjs
 //
-// One-time (and re-runnable) provisioning for the shareable demo account.
+// One-time (and re-runnable) provisioning for the shareable demo accounts.
 // Run manually via `node scripts/seed-demo-account.mjs` -- never wired into
 // the app itself. Uses the service-role key (bypasses RLS), so it must only
 // ever be run from a trusted machine, never exposed as an API route.
 //
-// What it does:
-//   1. Finds or creates the demo auth user (magic-link login only, no
-//      password needed).
-//   2. Finds or creates an isolated demo company (not a real solo-tier
-//      account -- is_solo=false, owner_user_id=null).
-//   3. Wipes any previously-cloned demo data (safe -- everything it deletes
-//      is scoped to the demo company/user; it never touches the source
-//      company, which it only ever reads from).
-//   4. Clones the source company's equipment/terminals/permits/service/wash/
-//      load/weight-record history into the demo company/user, generating
-//      fresh UUIDs and remapping every foreign key.
+// Seeds TWO independent demo personas ("alpha" / "beta"), each pointed at
+// its own pre-existing company (so two different people can each have their
+// own live demo session without kicking each other -- demo_sessions/
+// demo_commandeer is already per-user, not a singleton). Each persona's
+// demo user is scoped to EXACTLY that one company -- any other company
+// membership it might have (e.g. left over from an earlier seeding run
+// under a different company) is removed.
 //
-// Explicitly NOT cloned (privacy + complexity):
+// What it does per persona:
+//   1. Finds or creates the persona's demo auth user (magic-link login
+//      only, no password needed).
+//   2. Ensures that user's ONLY company membership is the persona's target
+//      company (which must already exist -- this script never creates a
+//      company from scratch).
+//   3. Wipes any previously-cloned demo data for that persona (safe --
+//      everything it deletes is scoped to the persona's own company/user;
+//      it only ever reads from the source company/user, never writes there).
+//   4. Clones the source company's equipment/terminals/permits/service/
+//      wash/load/weight-record history into the persona's company/user,
+//      generating fresh UUIDs and remapping every foreign key.
+//   5. Clones the source profile with the real display_name swapped for a
+//      made-up one.
+//
+// Explicitly redacted / not cloned:
+//   - user_terminal_cards.card_number / .pin -- real fuel-card numbers and
+//     PINs. Blanked out, not carried over, regardless of source values.
+//   - profiles.display_name -- replaced with a made-up name per persona.
 //   - driver_licenses, driver_medical_cards, driver_port_ids,
 //     driver_twic_cards, truck_other_permits (personal document data)
 //   - attachments, equipment_attachments (file-storage pointers -- the
@@ -29,11 +43,11 @@
 // Required env vars (.env.local):
 //   NEXT_PUBLIC_SUPABASE_URL
 //   SUPABASE_SERVICE_ROLE_KEY
-//   DEMO_ACCOUNT_EMAIL       -- the demo account's email (magic-link only)
-//   DEMO_SOURCE_COMPANY_ID   -- the real company_id to clone equipment/
-//                               permits/service/wash/weight-record data from
-//   DEMO_SOURCE_USER_ID      -- the real user_id to clone load history/
-//                               terminal cards/starred terminals from
+//   DEMO_SOURCE_COMPANY_ID    -- the real company_id to clone data from
+//   DEMO_SOURCE_USER_ID       -- the real user_id to clone load history/
+//                                terminal cards/starred terminals/profile from
+//   DEMO_ACCOUNT_EMAIL_ALPHA, DEMO_COMPANY_ID_ALPHA
+//   DEMO_ACCOUNT_EMAIL_BETA,  DEMO_COMPANY_ID_BETA
 
 import crypto from "node:crypto";
 import path from "node:path";
@@ -46,14 +60,31 @@ dotenv.config({ path: path.join(__dirname, "..", ".env.local") });
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const DEMO_EMAIL = process.env.DEMO_ACCOUNT_EMAIL;
 const SOURCE_COMPANY_ID = process.env.DEMO_SOURCE_COMPANY_ID;
 const SOURCE_USER_ID = process.env.DEMO_SOURCE_USER_ID;
 
 if (!SUPABASE_URL || !SERVICE_KEY) throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY.");
-if (!DEMO_EMAIL) throw new Error("Set DEMO_ACCOUNT_EMAIL in .env.local.");
 if (!SOURCE_COMPANY_ID) throw new Error("Set DEMO_SOURCE_COMPANY_ID in .env.local.");
 if (!SOURCE_USER_ID) throw new Error("Set DEMO_SOURCE_USER_ID in .env.local.");
+
+const PERSONAS = [
+  {
+    key: "alpha",
+    email: process.env.DEMO_ACCOUNT_EMAIL_ALPHA,
+    companyId: process.env.DEMO_COMPANY_ID_ALPHA,
+    dummyName: "Jordan Casey",
+  },
+  {
+    key: "beta",
+    email: process.env.DEMO_ACCOUNT_EMAIL_BETA,
+    companyId: process.env.DEMO_COMPANY_ID_BETA,
+    dummyName: "Alex Rivera",
+  },
+].filter((p) => p.email && p.companyId);
+
+if (PERSONAS.length === 0) {
+  throw new Error("Set at least one persona's DEMO_ACCOUNT_EMAIL_* / DEMO_COMPANY_ID_* pair in .env.local.");
+}
 
 const admin = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } });
 
@@ -88,52 +119,44 @@ async function insertBatched(table, rows) {
   }
 }
 
-async function findOrCreateDemoUser() {
+async function ensureDemoUser(email) {
   const { data, error } = await admin.auth.admin.listUsers({ perPage: 1000 });
   if (error) throw error;
-  const existing = data.users.find((u) => u.email?.toLowerCase() === DEMO_EMAIL.toLowerCase());
+  const existing = data.users.find((u) => u.email?.toLowerCase() === email.toLowerCase());
   if (existing) {
-    console.log("Demo user already exists:", existing.id);
+    console.log(`  Demo user already exists: ${existing.id}`);
     return existing;
   }
-  const { data: created, error: createErr } = await admin.auth.admin.createUser({
-    email: DEMO_EMAIL,
-    email_confirm: true,
-  });
+  const { data: created, error: createErr } = await admin.auth.admin.createUser({ email, email_confirm: true });
   if (createErr) throw createErr;
-  console.log("Created demo user:", created.user.id);
+  console.log(`  Created demo user: ${created.user.id}`);
   return created.user;
 }
 
-async function ensureDemoCompany(demoUserId) {
+// Scopes the demo user to EXACTLY this one company -- removes any other
+// membership it might have (e.g. left over from a prior run under a
+// different target company), matching the "one persona, one company"
+// invariant this script relies on.
+async function ensureScopedMembership(demoUserId, companyId) {
+  await admin.from("user_companies").delete().eq("user_id", demoUserId).neq("company_id", companyId);
   const { data: existing } = await admin
     .from("user_companies")
     .select("company_id")
     .eq("user_id", demoUserId)
+    .eq("company_id", companyId)
     .maybeSingle();
-  if (existing) {
-    console.log("Demo company already exists:", existing.company_id);
-    return existing.company_id;
+  if (!existing) {
+    const { error } = await admin.from("user_companies").insert({ user_id: demoUserId, company_id: companyId, role: "admin" });
+    if (error) throw error;
   }
-  const companyId = newId();
-  const { error: coErr } = await admin
-    .from("companies")
-    .insert({ company_id: companyId, company_name: "ProTankr Demo", is_solo: false, owner_user_id: null });
-  if (coErr) throw coErr;
-  const { error: ucErr } = await admin
-    .from("user_companies")
-    .insert({ user_id: demoUserId, company_id: companyId, role: "admin" });
-  if (ucErr) throw ucErr;
   const { error: usErr } = await admin
     .from("user_settings")
     .upsert({ user_id: demoUserId, active_company_id: companyId }, { onConflict: "user_id" });
   if (usErr) throw usErr;
-  console.log("Created demo company:", companyId);
-  return companyId;
 }
 
 async function wipeDemoData(demoUserId, demoCompanyId) {
-  console.log("Wiping previously-cloned demo data (if any)...");
+  console.log("  Wiping previously-cloned demo data (if any)...");
   const priorLoads = await fetchAll("load_log", "user_id", demoUserId);
   const priorLoadIds = priorLoads.map((r) => r.load_id);
   if (priorLoadIds.length) await admin.from("load_lines").delete().in("load_id", priorLoadIds);
@@ -157,36 +180,53 @@ async function wipeDemoData(demoUserId, demoCompanyId) {
   await admin.from("user_primary_trailers").delete().eq("user_id", demoUserId);
 }
 
-async function main() {
-  const demoUser = await findOrCreateDemoUser();
-  const demoUserId = demoUser.id;
-  const demoCompanyId = await ensureDemoCompany(demoUserId);
+async function cloneProfile(demoUserId, dummyName) {
+  const { data: src } = await admin.from("profiles").select("*").eq("user_id", SOURCE_USER_ID).maybeSingle();
+  if (!src) return;
+  const { user_id, display_name, ...rest } = src;
+  const { error } = await admin
+    .from("profiles")
+    .upsert({ ...rest, user_id: demoUserId, display_name: dummyName }, { onConflict: "user_id" });
+  if (error) throw error;
+  console.log(`  Cloned profile (display_name -> "${dummyName}")`);
+}
 
+async function seedPersona(persona) {
+  console.log(`\n=== Persona: ${persona.key} (${persona.email}) -> company ${persona.companyId} ===`);
+  const demoUser = await ensureDemoUser(persona.email);
+  const demoUserId = demoUser.id;
+  const demoCompanyId = persona.companyId;
+
+  await ensureScopedMembership(demoUserId, demoCompanyId);
   await wipeDemoData(demoUserId, demoCompanyId);
+  await cloneProfile(demoUserId, persona.dummyName);
 
   // ── Equipment ──────────────────────────────────────────────────────────
+  // truck_name/trailer_name/combo_name are all globally unique (not scoped
+  // per company) -- prefix with the persona key so cloning never collides
+  // with the real source company's own unit numbers OR with another
+  // persona's own clone of the same equipment.
+  const namePrefix = `DEMO ${persona.key.toUpperCase()}`;
+
   const trucks = await fetchAll("trucks", "company_id", SOURCE_COMPANY_ID);
   const truckIdMap = new Map();
   const newTrucks = trucks.map((t) => {
     const id = newId();
     truckIdMap.set(t.truck_id, id);
-    // truck_name is globally unique (not scoped per company) -- prefix so
-    // cloning never collides with the real source company's own unit numbers.
-    return { ...t, truck_id: id, truck_name: `DEMO ${t.truck_name}`, company_id: demoCompanyId, in_use_by: null, status_updated_at: null };
+    return { ...t, truck_id: id, truck_name: `${namePrefix} ${t.truck_name}`, company_id: demoCompanyId, in_use_by: null, status_updated_at: null };
   });
   await insertBatched("trucks", newTrucks);
-  console.log(`Cloned ${newTrucks.length} trucks`);
+  console.log(`  Cloned ${newTrucks.length} trucks`);
 
   const trailers = await fetchAll("trailers", "company_id", SOURCE_COMPANY_ID);
   const trailerIdMap = new Map();
   const newTrailers = trailers.map((t) => {
     const id = newId();
     trailerIdMap.set(t.trailer_id, id);
-    // trailer_name is globally unique too -- same prefix treatment as trucks.
-    return { ...t, trailer_id: id, trailer_name: `DEMO ${t.trailer_name}`, company_id: demoCompanyId, in_use_by: null, status_updated_at: null };
+    return { ...t, trailer_id: id, trailer_name: `${namePrefix} ${t.trailer_name}`, company_id: demoCompanyId, in_use_by: null, status_updated_at: null };
   });
   await insertBatched("trailers", newTrailers);
-  console.log(`Cloned ${newTrailers.length} trailers`);
+  console.log(`  Cloned ${newTrailers.length} trailers`);
 
   const allCompartments = [];
   for (const [oldTrailerId, newTrailerId] of trailerIdMap) {
@@ -194,7 +234,7 @@ async function main() {
     for (const c of comps) allCompartments.push({ ...c, trailer_id: newTrailerId });
   }
   await insertBatched("trailer_compartments", allCompartments);
-  console.log(`Cloned ${allCompartments.length} trailer_compartments`);
+  console.log(`  Cloned ${allCompartments.length} trailer_compartments`);
 
   const combos = await fetchAll("equipment_combos", "company_id", SOURCE_COMPANY_ID);
   const comboIdMap = new Map();
@@ -204,8 +244,7 @@ async function main() {
     return {
       ...c,
       combo_id: id,
-      // combo_name is globally unique too.
-      combo_name: `DEMO ${c.combo_name}`,
+      combo_name: `DEMO ${persona.key.toUpperCase()} ${c.combo_name}`,
       company_id: demoCompanyId,
       truck_id: truckIdMap.get(c.truck_id) ?? c.truck_id,
       trailer_id: trailerIdMap.get(c.trailer_id) ?? c.trailer_id,
@@ -214,7 +253,7 @@ async function main() {
     };
   });
   await insertBatched("equipment_combos", newCombos);
-  console.log(`Cloned ${newCombos.length} equipment_combos`);
+  console.log(`  Cloned ${newCombos.length} equipment_combos`);
 
   // ── Permits ────────────────────────────────────────────────────────────
   const permitTypes = await fetchAll("permit_types", "company_id", SOURCE_COMPANY_ID);
@@ -225,7 +264,7 @@ async function main() {
     return { ...p, permit_type_id: id, company_id: demoCompanyId };
   });
   await insertBatched("permit_types", newPermitTypes);
-  console.log(`Cloned ${newPermitTypes.length} permit_types`);
+  console.log(`  Cloned ${newPermitTypes.length} permit_types`);
 
   const equipmentPermits = await fetchAll("equipment_permits", "company_id", SOURCE_COMPANY_ID);
   const newEquipmentPermits = equipmentPermits.map((p) => ({
@@ -237,7 +276,7 @@ async function main() {
     permit_type_id: permitTypeIdMap.get(p.permit_type_id) ?? p.permit_type_id,
   }));
   await insertBatched("equipment_permits", newEquipmentPermits);
-  console.log(`Cloned ${newEquipmentPermits.length} equipment_permits`);
+  console.log(`  Cloned ${newEquipmentPermits.length} equipment_permits`);
 
   // ── Service / wash ─────────────────────────────────────────────────────
   const serviceTypes = await fetchAll("service_types", "company_id", SOURCE_COMPANY_ID);
@@ -248,7 +287,7 @@ async function main() {
     return { ...s, service_type_id: id, company_id: demoCompanyId };
   });
   await insertBatched("service_types", newServiceTypes);
-  console.log(`Cloned ${newServiceTypes.length} service_types`);
+  console.log(`  Cloned ${newServiceTypes.length} service_types`);
 
   const serviceRecords = await fetchAll("service_records", "company_id", SOURCE_COMPANY_ID);
   const newServiceRecords = serviceRecords.map((s) => ({
@@ -261,7 +300,7 @@ async function main() {
     created_by: demoUserId,
   }));
   await insertBatched("service_records", newServiceRecords);
-  console.log(`Cloned ${newServiceRecords.length} service_records`);
+  console.log(`  Cloned ${newServiceRecords.length} service_records`);
 
   const washRecords = await fetchAll("wash_records", "company_id", SOURCE_COMPANY_ID);
   const newWashRecords = washRecords.map((w) => ({
@@ -273,34 +312,38 @@ async function main() {
     created_by: demoUserId,
   }));
   await insertBatched("wash_records", newWashRecords);
-  console.log(`Cloned ${newWashRecords.length} wash_records`);
+  console.log(`  Cloned ${newWashRecords.length} wash_records`);
 
   // ── Terminal associations (user-scoped, not company-scoped) ──────────────
   const myTerminals = await fetchAll("my_terminals", "user_id", SOURCE_USER_ID);
   await insertBatched("my_terminals", myTerminals.map((m) => ({ ...m, user_id: demoUserId })));
-  console.log(`Cloned ${myTerminals.length} my_terminals`);
+  console.log(`  Cloned ${myTerminals.length} my_terminals`);
 
   const terminalAccess = await fetchAll("terminal_access", "user_id", SOURCE_USER_ID);
   await insertBatched("terminal_access", terminalAccess.map((t) => ({ ...t, id: newId(), user_id: demoUserId })));
-  console.log(`Cloned ${terminalAccess.length} terminal_access`);
+  console.log(`  Cloned ${terminalAccess.length} terminal_access`);
 
+  // card_number/pin are real fuel-card credentials -- redact, never clone.
   const terminalCards = await fetchAll("user_terminal_cards", "user_id", SOURCE_USER_ID);
-  await insertBatched("user_terminal_cards", terminalCards.map((c) => ({ ...c, id: newId(), user_id: demoUserId })));
-  console.log(`Cloned ${terminalCards.length} user_terminal_cards`);
+  await insertBatched(
+    "user_terminal_cards",
+    terminalCards.map((c) => ({ ...c, id: newId(), user_id: demoUserId, card_number: "", pin: null }))
+  );
+  console.log(`  Cloned ${terminalCards.length} user_terminal_cards (card_number/pin redacted)`);
 
   const primaryTrucks = await fetchAll("user_primary_trucks", "user_id", SOURCE_USER_ID);
   await insertBatched(
     "user_primary_trucks",
     primaryTrucks.filter((p) => truckIdMap.has(p.truck_id)).map((p) => ({ ...p, user_id: demoUserId, truck_id: truckIdMap.get(p.truck_id) }))
   );
-  console.log(`Cloned ${primaryTrucks.length} user_primary_trucks`);
+  console.log(`  Cloned ${primaryTrucks.length} user_primary_trucks`);
 
   const primaryTrailers = await fetchAll("user_primary_trailers", "user_id", SOURCE_USER_ID);
   await insertBatched(
     "user_primary_trailers",
     primaryTrailers.filter((p) => trailerIdMap.has(p.trailer_id)).map((p) => ({ ...p, user_id: demoUserId, trailer_id: trailerIdMap.get(p.trailer_id) }))
   );
-  console.log(`Cloned ${primaryTrailers.length} user_primary_trailers`);
+  console.log(`  Cloned ${primaryTrailers.length} user_primary_trailers`);
 
   // ── Load history ───────────────────────────────────────────────────────
   const loads = await fetchAll("load_log", "user_id", SOURCE_USER_ID);
@@ -311,7 +354,7 @@ async function main() {
     return { ...l, load_id: id, user_id: demoUserId, combo_id: l.combo_id ? comboIdMap.get(l.combo_id) ?? l.combo_id : null };
   });
   await insertBatched("load_log", newLoads);
-  console.log(`Cloned ${newLoads.length} load_log rows`);
+  console.log(`  Cloned ${newLoads.length} load_log rows`);
 
   const allLines = [];
   for (const l of loads) {
@@ -319,7 +362,7 @@ async function main() {
     for (const ln of lines) allLines.push({ ...ln, load_id: loadIdMap.get(l.load_id) });
   }
   await insertBatched("load_lines", allLines);
-  console.log(`Cloned ${allLines.length} load_lines rows`);
+  console.log(`  Cloned ${allLines.length} load_lines rows`);
 
   // ── Weight records ─────────────────────────────────────────────────────
   const weightRecords = await fetchAll("weight_records", "company_id", SOURCE_COMPANY_ID);
@@ -336,12 +379,25 @@ async function main() {
     };
   });
   await insertBatched("weight_records", newWeightRecords);
-  console.log(`Cloned ${newWeightRecords.length} weight_records`);
+  console.log(`  Cloned ${newWeightRecords.length} weight_records`);
 
-  console.log("\nDone.");
-  console.log("Set these in .env.local and Vercel:");
-  console.log(`  DEMO_ACCOUNT_EMAIL=${DEMO_EMAIL}`);
-  console.log(`  NEXT_PUBLIC_DEMO_USER_ID=${demoUserId}`);
+  return demoUserId;
+}
+
+async function main() {
+  const results = [];
+  for (const persona of PERSONAS) {
+    const demoUserId = await seedPersona(persona);
+    results.push({ ...persona, demoUserId });
+  }
+
+  console.log("\nDone. Set these in .env.local and Vercel:");
+  console.log(
+    `  NEXT_PUBLIC_DEMO_USER_IDS=${results.map((r) => `${r.key}:${r.demoUserId}`).join(",")}`
+  );
+  for (const r of results) {
+    console.log(`  Persona "${r.key}": /api/demo/start?persona=${r.key}  (${r.email}, user_id ${r.demoUserId})`);
+  }
 }
 
 main().catch((e) => {

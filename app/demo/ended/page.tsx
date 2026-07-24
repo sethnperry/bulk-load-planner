@@ -4,9 +4,16 @@
 // Landed on when useDemoWatchdog signs the demo account out (someone else
 // opened the demo link, or it timed out from inactivity), or when
 // /api/demo/start itself fails. Visual language matches app/auth/confirm/page.tsx.
+//
+// Reads the query string directly (not next/navigation's useSearchParams)
+// -- that hook's Suspense-based resolution produced a real client/server
+// hydration mismatch here (the href briefly computed with the "alpha"
+// default instead of the actual ?persona= in the URL). This page is only
+// ever reached via a client-side redirect or a direct link click, so there's
+// no SSR value worth reconciling -- reading window.location.search directly
+// sidesteps the whole hydration question.
 
-import { Suspense } from "react";
-import { useSearchParams } from "next/navigation";
+import { useEffect, useState } from "react";
 
 const LOGO_PATH =
   "M 41.28,85.61 L40.14,85.38 L39.51,84.29 L39.51,29.70 L39.97,28.44 L41.86,27.35 L75.00,27.35 L76.43,26.38 L76.66,24.20 L74.77,22.76 L21.90,22.65 L19.15,21.62 L16.57,19.50 L9.12,11.24 L8.66,10.21 L8.89,8.72 L10.32,7.51 L75.11,7.40 L79.36,8.08 L82.91,9.58 L87.90,13.65 L91.34,19.72 L92.14,26.38 L91.46,30.05 L90.08,33.37 L85.67,38.70 L82.57,40.77 L79.13,42.14 L75.92,42.72 L55.85,42.72 L54.99,43.35 L54.42,72.36 L52.92,74.89 L41.28,85.61 Z";
@@ -61,13 +68,19 @@ const COPY: Record<string, { title: string; body: string }> = {
   },
 };
 
-function EndedInner() {
-  const params = useSearchParams();
-  const reason = params.get("reason") ?? "";
-  const copy = COPY[reason] ?? {
-    title: "Demo session ended",
-    body: "This demo session is no longer active.",
-  };
+export default function DemoEndedPage() {
+  // null until mounted client-side -- avoids ever rendering a guessed
+  // default that could mismatch the real URL.
+  const [query, setQuery] = useState<{ reason: string; persona: string } | null>(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    setQuery({ reason: params.get("reason") ?? "", persona: params.get("persona") ?? "alpha" });
+  }, []);
+
+  if (!query) return <Screen><Logo size={48} /></Screen>;
+
+  const copy = COPY[query.reason] ?? { title: "Demo session ended", body: "This demo session is no longer active." };
 
   return (
     <Screen>
@@ -83,7 +96,7 @@ function EndedInner() {
           {copy.body}
         </div>
         <a
-          href="/api/demo/start"
+          href={`/api/demo/start?persona=${query.persona}`}
           style={{
             display: "block", padding: "13px 18px", borderRadius: 8, textDecoration: "none",
             background: "#fff", color: "#000", fontSize: 14, fontWeight: 700,
@@ -93,13 +106,5 @@ function EndedInner() {
         </a>
       </div>
     </Screen>
-  );
-}
-
-export default function DemoEndedPage() {
-  return (
-    <Suspense fallback={<Screen><Logo size={48} /></Screen>}>
-      <EndedInner />
-    </Suspense>
   );
 }

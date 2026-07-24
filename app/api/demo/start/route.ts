@@ -1,17 +1,29 @@
 // app/api/demo/start/route.ts
 //
-// The shareable "demo login" link. Mints a fresh Supabase magic-link for
-// the one fixed demo account (never accepted as a request parameter --
-// hardcoded to DEMO_ACCOUNT_EMAIL, server-side env only) and redirects the
-// browser straight to it, skipping the email step entirely. Reuses the
-// exact same generateLink -> action_link -> /auth/confirm flow already
-// proven by app/api/admin/invite/route.ts; app/auth/confirm/page.tsx needs
-// zero changes to handle this.
+// The shareable "demo login" link. Mints a fresh Supabase magic-link for one
+// of a small fixed set of demo accounts -- selected only by the ?persona=
+// query param matching a known key ("alpha" | "beta"), which maps to a
+// server-side-only email env var. The email itself is never accepted as a
+// request parameter, so this can only ever log someone into one of the
+// designated demo accounts. Redirects straight through the generated link,
+// skipping the email step entirely -- reuses the exact same generateLink ->
+// action_link -> /auth/confirm flow already proven by
+// app/api/admin/invite/route.ts; app/auth/confirm/page.tsx needs zero
+// changes to handle this.
+//
+// Two independent personas exist so two different people can each have
+// their own live demo session without kicking each other's (demo_sessions/
+// demo_commandeer tracks activity per-user, not as a single global lock).
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
+
+const PERSONA_EMAIL_ENV: Record<string, string | undefined> = {
+  alpha: process.env.DEMO_ACCOUNT_EMAIL_ALPHA,
+  beta: process.env.DEMO_ACCOUNT_EMAIL_BETA,
+};
 
 function getAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -24,8 +36,9 @@ export async function GET(req: NextRequest) {
   const origin = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ?? new URL(req.url).origin;
 
   try {
-    const email = process.env.DEMO_ACCOUNT_EMAIL;
-    if (!email) throw new Error("DEMO_ACCOUNT_EMAIL not set.");
+    const persona = (new URL(req.url).searchParams.get("persona") ?? "alpha").toLowerCase();
+    const email = PERSONA_EMAIL_ENV[persona];
+    if (!email) throw new Error(`Unknown or unconfigured demo persona: ${persona}`);
 
     const admin = getAdmin();
     const { data, error } = await admin.auth.admin.generateLink({
