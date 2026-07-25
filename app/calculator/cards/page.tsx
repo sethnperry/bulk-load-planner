@@ -12,25 +12,33 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useCalculatorShell } from "../CalculatorShellContext";
 import { formatMDYWithCountdown_, isPastISO_ } from "../utils/dates";
 
-// ── Gradient + masking helpers ─────────────────────────────────────────────
+// ── Monochrome card tones + formatting helpers ──────────────────────────────
+// Nothing on a fuel card is protected info -- if someone's past the device
+// lock they already have the run of the app -- so cards read as plain,
+// physical-looking stock (pearl/ivory/silver/champagne) instead of the old
+// arbitrary color-per-terminal gradients, and numbers/PINs show in full,
+// no mask/reveal toggle.
 
-const GRADIENTS: [string, string][] = [
-  ["#1a3a5c", "#2f6aa8"], ["#1a3a2a", "#2f8a54"], ["#3a1a2a", "#a03a5a"],
-  ["#2a2a1a", "#a58a2a"], ["#2a1a3a", "#5a3aa0"], ["#1a3a3a", "#2f9aa8"],
-  ["#3a2a1a", "#a86a2a"], ["#2a1a1a", "#a03a3a"],
+const TONES: [string, string][] = [
+  ["#f7f5f0", "#e8e4da"], // pearl
+  ["#f2ecdd", "#e3dcc8"], // ivory
+  ["#ece8e2", "#d9d4cb"], // warm grey
+  ["#eef0f1", "#dadde0"], // cool silver
+  ["#f0e6d2", "#ddd0b3"], // champagne
+  ["#e9e5df", "#d6d0c6"], // greige
+  ["#f5f3ee", "#e6e1d8"], // alabaster
 ];
 
-function gradientFor(name: string): [string, string] {
+function toneFor(name: string): [string, string] {
   let h = 0;
   for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) & 0xffffffff;
-  return GRADIENTS[Math.abs(h) % GRADIENTS.length];
+  return TONES[Math.abs(h) % TONES.length];
 }
 
-function maskCardNumber(num: string): string {
+function formatCardNumber(num: string): string {
   const digits = num.replace(/\s+/g, "");
   if (!digits) return "";
-  if (digits.length <= 4) return `•••• ${digits}`;
-  return `•••• ${digits.slice(-4)}`;
+  return digits.replace(/(.{4})/g, "$1 ").trim();
 }
 
 // ── City selector — same centered-dial carousel pattern as the tab bar ────
@@ -147,9 +155,9 @@ export default function CardsPage() {
         {terminalsInCity.map((t: any) => {
           const tid = String(t.terminal_id);
           const card = cardDataByTerminalId[tid];
-          const [g1, g2] = gradientFor(String(t.terminal_name ?? tid));
+          const [base, shade] = toneFor(String(t.terminal_name ?? tid));
 
-          const statusColor = t.status === "valid" ? "#4ade80" : t.status === "expired" ? "#ef4444" : "rgba(255,255,255,0.55)";
+          const statusColor = t.status === "valid" ? "#16a34a" : t.status === "expired" ? "#dc2626" : "rgba(0,0,0,0.45)";
           const statusLabel = t.status === "valid" ? "Active" : t.status === "expired" ? "Expired" : "Not carded";
 
           const expiresISO = terminals.terminalDisplayInfo(t, tid);
@@ -160,37 +168,42 @@ export default function CardsPage() {
           return (
             <div key={tid} style={{
               borderRadius: 18, padding: 16,
-              background: `linear-gradient(135deg, ${g1} 0%, ${g2} 100%)`,
-              boxShadow: "0 10px 24px rgba(0,0,0,0.35)",
+              // Sheen highlight (upper-left) over the base->shade tone gives
+              // the flat color some depth without introducing real hue --
+              // stays in the pearl/ivory/grey family, just reads as a
+              // physical card instead of a flat swatch.
+              background: `radial-gradient(circle at 25% 15%, rgba(255,255,255,0.7), transparent 55%), linear-gradient(135deg, ${base} 0%, ${shade} 100%)`,
+              border: "1px solid rgba(0,0,0,0.08)",
+              boxShadow: "0 10px 24px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.6)",
             }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-                <div style={{ fontSize: 16, fontWeight: 700, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
+                <div style={{ fontSize: 16, fontWeight: 700, color: "#1a1a1a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
                   {t.terminal_name ?? "Terminal"}
                 </div>
                 <div style={{
                   fontSize: 10, fontWeight: 700, color: statusColor,
-                  background: "rgba(0,0,0,0.28)", borderRadius: 999, padding: "3px 9px",
+                  background: "rgba(0,0,0,0.07)", borderRadius: 999, padding: "3px 9px",
                   textTransform: "uppercase" as const, letterSpacing: 0.4, flexShrink: 0,
                 }}>
                   {statusLabel}
                 </div>
               </div>
-              <div style={{ fontSize: 12, color: "rgba(255,255,255,0.65)", marginTop: 2 }}>
+              <div style={{ fontSize: 12, color: "rgba(0,0,0,0.5)", marginTop: 2 }}>
                 {t.city}{t.state ? `, ${t.state}` : ""}
               </div>
 
-              <div style={{ marginTop: 20, fontSize: 18, fontWeight: 700, color: "#fff", letterSpacing: 1.5, fontFamily: "monospace" }}>
-                {card?.cardNumber ? maskCardNumber(card.cardNumber) : "No card on file"}
+              <div style={{ marginTop: 20, fontSize: 18, fontWeight: 700, color: "#111", letterSpacing: 1.5, fontFamily: "monospace" }}>
+                {card?.cardNumber ? formatCardNumber(card.cardNumber) : "No card on file"}
               </div>
 
               <div style={{ marginTop: 14, display: "flex", justifyContent: "space-between" }}>
                 <div>
-                  <div style={{ fontSize: 9, fontWeight: 700, color: "rgba(255,255,255,0.55)", textTransform: "uppercase" as const, letterSpacing: 0.5 }}>PIN</div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: "#fff", marginTop: 2 }}>{card?.pin || "—"}</div>
+                  <div style={{ fontSize: 9, fontWeight: 700, color: "rgba(0,0,0,0.45)", textTransform: "uppercase" as const, letterSpacing: 0.5 }}>PIN</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#111", marginTop: 2 }}>{card?.pin || "—"}</div>
                 </div>
                 <div style={{ textAlign: "right" as const }}>
-                  <div style={{ fontSize: 9, fontWeight: 700, color: "rgba(255,255,255,0.55)", textTransform: "uppercase" as const, letterSpacing: 0.5 }}>Expires</div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: "#fff", marginTop: 2 }}>{expiryText}</div>
+                  <div style={{ fontSize: 9, fontWeight: 700, color: "rgba(0,0,0,0.45)", textTransform: "uppercase" as const, letterSpacing: 0.5 }}>Expires</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#111", marginTop: 2 }}>{expiryText}</div>
                 </div>
               </div>
             </div>
