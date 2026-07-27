@@ -8,13 +8,20 @@ import { DataRow } from "./primitives";
 import { AttachmentManager, PaperclipBadge, useAttachmentCounts } from "./AttachmentManager";
 import type { Member, DriverProfile } from "./types";
 
-export function MemberCard({ member, companyId, onRefresh, onEditProfile, hideRoleDropdown, hideRemove, currentUserId }: {
+export function MemberCard({ member, companyId, onRefresh, onEditProfile, hideRoleDropdown, hideRemove, hideComplianceCards, currentUserId }: {
   member: Member;
   companyId: string;
   onRefresh: () => void;
   onEditProfile: (m: Member, onSaved: () => void) => void;
   hideRoleDropdown?: boolean;
   hideRemove?: boolean;
+  // The self-view (Settings → Profile) no longer shows Driver's License/
+  // Medical Card/TWIC/Port IDs/Terminals here -- the Cards tab
+  // (Terminals/Badges/Credentials) is now the source of truth for that
+  // data for an individual driver. Admin's team-member view is unaffected
+  // (omits this prop) -- a fleet admin still needs to see/manage a
+  // driver's compliance data for onboarding/oversight.
+  hideComplianceCards?: boolean;
   currentUserId: string;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -99,15 +106,16 @@ export function MemberCard({ member, companyId, onRefresh, onEditProfile, hideRo
   const licDays   = daysUntil(lic?.expiration_date);
   const medDays   = daysUntil(med?.expiration_date);
   const twicDays  = daysUntil(twic?.expiration_date);
-  const expiringSoon = [licDays, medDays, twicDays, ...terminals.map((t: any) => t.days_until_expiry)]
+  const expiringSoon = !hideComplianceCards && [licDays, medDays, twicDays, ...terminals.map((t: any) => t.days_until_expiry)]
     .some(d => d != null && d < 30);
+  const canExpand = !hideComplianceCards || !hideRoleDropdown || !hideRemove;
 
   return (
     <div style={{ ...css.card, padding: 0, overflow: "hidden" }}>
 
       {/* ── Collapsed header ── */}
-      <div style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "12px 14px", cursor: "pointer" }} onClick={toggle}>
-        <span style={{ color: T.muted, fontSize: 14, transition: "transform 150ms", transform: expanded ? "rotate(90deg)" : "none", flexShrink: 0, userSelect: "none" as const, marginTop: 2 }}>›</span>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "12px 14px", cursor: canExpand ? "pointer" : "default" }} onClick={canExpand ? toggle : undefined}>
+        {canExpand && <span style={{ color: T.muted, fontSize: 14, transition: "transform 150ms", transform: expanded ? "rotate(90deg)" : "none", flexShrink: 0, userSelect: "none" as const, marginTop: 2 }}>›</span>}
 
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -119,7 +127,7 @@ export function MemberCard({ member, companyId, onRefresh, onEditProfile, hideRo
               overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const,
             }}>{name}</span>
             {expiringSoon && <span style={css.tag(T.warning)}>⚠</span>}
-            <PaperclipBadge count={totalAttachments} />
+            {!hideComplianceCards && <PaperclipBadge count={totalAttachments} />}
             <button
               onClick={e => { e.stopPropagation(); onEditProfile(local, () => reload(true)); }}
               style={{ ...css.btn("subtle"), fontSize: 11, flexShrink: 0, padding: "3px 8px" }}
@@ -136,7 +144,7 @@ export function MemberCard({ member, companyId, onRefresh, onEditProfile, hideRo
       </div>
 
       {/* ── Expanded section ── */}
-      {expanded && (
+      {canExpand && expanded && (
         <div style={{ borderTop: `1px solid ${T.border}`, background: T.surface2 }}>
 
           {(!hideRoleDropdown || !hideRemove) && (
@@ -159,7 +167,7 @@ export function MemberCard({ member, companyId, onRefresh, onEditProfile, hideRo
             </div>
           )}
 
-          {loading ? (
+          {hideComplianceCards ? null : loading ? (
             <div style={{ fontSize: 12, color: T.muted, padding: "12px 14px" }}>Loading…</div>
           ) : (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(190px, 1fr))", gap: 8, padding: "12px 14px" }}>

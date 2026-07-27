@@ -53,7 +53,7 @@ import CompartmentModal from "./modals/CompartmentModal";
 import { styles } from "./ui/styles";
 
 // ── Utils ──────────────────────────────────────────────────────────────────────
-import { addDaysISO_, formatMDYWithCountdown_, isPastISO_ } from "./utils/dates";
+import { addDaysISO_, daysUntilISO_, formatMDYWithCountdown_, isPastISO_ } from "./utils/dates";
 import { normCity, normState } from "./utils/normalize";
 import { cgSliderToBias, bestLbsPerGallon, planForGallons, CG_NEUTRAL } from "./utils/planMath";
 
@@ -1254,10 +1254,8 @@ const lastProductInfoById = useMemo(() => {
         const terminalSelected = Boolean(location.selectedTerminalId);
         const tid = location.selectedTerminalId ? String(location.selectedTerminalId) : null;
         const cardNum = tid ? (cardDataByTerminalId[tid]?.cardNumber ?? "") : "";
-        const cardPin = tid ? (cardDataByTerminalId[tid]?.pin ?? "") : "";
-        const terminalSub = terminalSelected
-          ? [locationLabel, cardNum ? `Card # ${cardNum}` : null, cardPin ? `PIN ${cardPin}` : null].filter(Boolean).join(" · ")
-          : null;
+        const expiryDays = terminalDisplayISO ? daysUntilISO_(terminalDisplayISO) : null;
+        const expirationSub = expiryDays != null ? `Exp. ${expiryDays} days` : null;
 
         const infoCard: React.CSSProperties = {
           borderRadius: 16, border: "1px solid rgba(255,255,255,0.10)",
@@ -1342,15 +1340,23 @@ const lastProductInfoById = useMemo(() => {
                 </>
               ) : (
                 <>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: 14, fontWeight: 600, color: terminalSelected ? "#fff" : "rgba(255,255,255,0.35)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
-                      {terminalSelected ? (terminalLabel ?? "Terminal") : "Select terminal"}
-                    </div>
-                    {terminalSub && (
-                      <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
-                        {terminalSub}
+                  <div style={{ display: "flex", flex: 1, gap: 20, minWidth: 0 }}>
+                    <div style={{ minWidth: 0, overflow: "hidden" }}>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
+                        {locationLabel ?? "—"}
                       </div>
-                    )}
+                      <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
+                        {cardNum ? `Card # ${cardNum}` : " "}
+                      </div>
+                    </div>
+                    <div style={{ minWidth: 0, overflow: "hidden" }}>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: terminalSelected ? "#fff" : "rgba(255,255,255,0.35)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
+                        {terminalSelected ? (terminalLabel ?? "Terminal") : "Select terminal"}
+                      </div>
+                      <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
+                        {expirationSub ?? " "}
+                      </div>
+                    </div>
                   </div>
                   <span style={chevron}>›</span>
                 </>
@@ -1547,13 +1553,10 @@ const lastProductInfoById = useMemo(() => {
         accessDateByTerminalId={terminals.accessDateByTerminalId}
         setAccessDateForTerminal_={terminals.setAccessDateForTerminal}
         cardDataByTerminalId={cardDataByTerminalId}
-        setCardDataForTerminal_={setCardDataForTerminal_}
         myTerminalIds={myTerminalIdSet}
         setMyTerminalIds={() => {}}
-        setTerminals={terminals.setTerminals}
         setSelectedTerminalId={location.setSelectedTerminalId}
         setTermOpen={setTermOpen}
-        authUserId={authUserId}
         onChangeLocation={() => { setTermOpen(false); setLocOpen(true); }}
       />
 

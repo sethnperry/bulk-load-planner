@@ -34,8 +34,8 @@ const TABS = [
 ] as const;
 
 function activeTabFor(pathname: string | null): typeof TABS[number]["id"] {
-  if (pathname === "/calculator/cards") return "cards";
-  if (pathname === "/calculator/vault") return "vault";
+  if (pathname?.startsWith("/calculator/cards")) return "cards";
+  if (pathname?.startsWith("/calculator/vault")) return "vault";
   return "planner";
 }
 

@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useState } from "react";
-import SourcingModal from "./SourcingModal";
 
 // ── Terminal avatar helpers ───────────────────────────────────────────────────
 // No fill, thin white stroke -- placeholder until real per-operator logos
@@ -17,6 +16,12 @@ import { FullscreenModal } from "@/lib/ui/FullscreenModal";
 
 type TerminalRow = any;
 type CardData = { cardNumber: string; privateNote: string; pin: string; };
+
+// This modal is the Planner's terminal picker -- tap a row to select it for
+// the current plan. Card editing (number/PIN/private note/last visit/
+// sourcing/deactivate/remove) now lives on the back of each card in the
+// Cards tab (app/calculator/cards/page.tsx), which is the source of truth
+// for that data; this expanded panel is read-only.
 
 export default function MyTerminalsModal(props: {
   open: boolean;
@@ -34,13 +39,10 @@ export default function MyTerminalsModal(props: {
   accessDateByTerminalId: Record<string, string | undefined>;
   setAccessDateForTerminal_: (terminalId: string, isoDate: string) => void;
   cardDataByTerminalId: Record<string, CardData | undefined>;
-  setCardDataForTerminal_: (terminalId: string, data: CardData) => void;
   myTerminalIds: Set<string>;
   setMyTerminalIds: React.Dispatch<React.SetStateAction<Set<string>>>;
-  setTerminals: React.Dispatch<React.SetStateAction<any[]>>;
   setSelectedTerminalId: (id: string) => void;
   setTermOpen: (open: boolean) => void;
-  authUserId: string;
   onChangeLocation?: () => void;
 }) {
   const {
@@ -50,54 +52,19 @@ export default function MyTerminalsModal(props: {
     expandedTerminalId, setExpandedTerminalId,
     addDaysISO_, isPastISO_, formatMDYWithCountdown_,
     accessDateByTerminalId, setAccessDateForTerminal_,
-    cardDataByTerminalId, setCardDataForTerminal_,
-    myTerminalIds, setMyTerminalIds, setTerminals,
+    cardDataByTerminalId,
+    myTerminalIds, setMyTerminalIds,
     setSelectedTerminalId, setTermOpen,
-    authUserId, onChangeLocation,
+    onChangeLocation,
   } = props;
-
-  const [draftCards, setDraftCards] = useState<Record<string, CardData>>({});
-  const [confirmDeactivate, setConfirmDeactivate] = useState<string | null>(null);
-  const [sourcingTerminal, setSourcingTerminal] = useState<{ id: string; name: string } | null>(null);
 
   const isoToday = () => new Date().toISOString().slice(0, 10);
 
-  const getDraft = (tid: string): CardData => {
-    if (draftCards[tid]) return draftCards[tid];
-    const saved = cardDataByTerminalId[tid];
-    return { cardNumber: saved?.cardNumber ?? "", privateNote: saved?.privateNote ?? "", pin: saved?.pin ?? "" };
-  };
-  const updateDraft = (tid: string, patch: Partial<CardData>) =>
-    setDraftCards(prev => ({ ...prev, [tid]: { ...getDraft(tid), ...patch } }));
-  const flushDraft = (tid: string) => {
-    if (draftCards[tid]) {
-      setCardDataForTerminal_(tid, draftCards[tid]);
-      setDraftCards(prev => { const n = { ...prev }; delete n[tid]; return n; });
-    }
-  };
-
-  const handleExpand = (tid: string) => {
-    if (expandedTerminalId && expandedTerminalId !== tid) flushDraft(expandedTerminalId);
-    setExpandedTerminalId(tid);
-    setConfirmDeactivate(null);
-  };
-  const handleCollapse = (tid: string) => {
-    flushDraft(tid);
-    setExpandedTerminalId(null);
-    setConfirmDeactivate(null);
-  };
   const handleSelect = (tid: string) => {
-    flushDraft(tid);
     if (!myTerminalIds.has(tid)) setMyTerminalIds(prev => new Set([...prev, tid]));
     if (!accessDateByTerminalId[tid]) setAccessDateForTerminal_(tid, isoToday());
     setSelectedTerminalId(tid);
     setTermOpen(false);
-  };
-
-  const handleDeactivateConfirmed = (tid: string) => {
-    setAccessDateForTerminal_(tid, "");
-    setConfirmDeactivate(null);
-    setExpandedTerminalId(null);
   };
 
   const sorted = [...terminalsFiltered].sort((a, b) => {
@@ -110,235 +77,124 @@ export default function MyTerminalsModal(props: {
   });
 
   return (
-    <>
-      <FullscreenModal open={open} title="My Terminals" onClose={onClose}>
-        {!selectedState || !selectedCity ? (
-          <div className="text-sm text-white/60">Select a city first.</div>
-        ) : (
-          <div className="space-y-3">
-            <div className="text-sm text-white/70 flex items-center justify-between gap-2">
-              <span>
-                Showing terminals in{" "}
-                <span className="text-white">{selectedCity}, {selectedState}</span>
-              </span>
-              {onChangeLocation && (
-                <button
-                  type="button"
-                  onClick={onChangeLocation}
-                  className="shrink-0 text-xs font-semibold text-white/45 hover:text-white/70"
-                >
-                  Change
-                </button>
-              )}
-            </div>
-
-            {termError && <div className="text-sm text-red-400">{termError}</div>}
-
-            {sorted.length === 0 ? (
-              <div className="text-sm text-white/60">No terminals found for this city.</div>
-            ) : (
-              <div className="grid grid-cols-1 gap-2">
-                {sorted.map((t, idx) => {
-                  const tid = String(t.terminal_id);
-                  const active = tid === String(selectedTerminalId);
-                  const isExpanded = expandedTerminalId === tid;
-                  const lastVisitISO = accessDateByTerminalId[tid] ?? "";
-                  const renewalDays = Number(t.renewal_days ?? t.renewalDays ?? t.renewal ?? 90) || 90;
-                  const expiresISO = lastVisitISO ? addDaysISO_(lastVisitISO, renewalDays) : "";
-                  const expired = expiresISO ? isPastISO_(expiresISO) : false;
-                  const draft = getDraft(tid);
-                  const isConfirming = confirmDeactivate === tid;
-
-                  return (
-                    <div
-                      key={tid ?? `term-${idx}`}
-                      className={[
-                        "rounded-md border transition-all overflow-hidden",
-                        active ? "border-white/30 bg-white/5" : "border-white/10",
-                      ].join(" ")}
-                    >
-                      {/* Header -- main body selects this terminal directly;
-                          only the chevron zone on the right expands/collapses
-                          the details panel below. */}
-                      <div className="flex items-center hover:bg-white/5">
-                        <div
-                          role="button" tabIndex={0}
-                          onClick={() => handleSelect(tid)}
-                          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleSelect(tid); } }}
-                          className="flex items-center flex-1 min-w-0 cursor-pointer select-none"
-                        >
-                          <div style={{
-                            flexShrink: 0, width: 26, height: 26, marginLeft: 12,
-                            borderRadius: "50%", border: "1px solid rgba(255,255,255,0.35)",
-                            display: "flex", alignItems: "center", justifyContent: "center",
-                            fontSize: 10, fontWeight: 800,
-                            color: t.terminal_name ? "rgba(255,255,255,0.75)" : "rgba(255,255,255,0.20)",
-                          }}>
-                            {t.terminal_name ? avatarInitials(String(t.terminal_name)) : "—"}
-                          </div>
-                          <div className="min-w-0 flex-1 px-3 py-2">
-                            <div className="text-sm font-semibold text-white truncate">
-                              {t.terminal_name ?? "(unnamed terminal)"}
-                            </div>
-                            {expiresISO ? (
-                              <div className={["mt-1 text-xs tabular-nums", expired ? "text-red-400" : "text-white/50"].join(" ")}>
-                                {expired ? "Expired · " : ""}{formatMDYWithCountdown_(expiresISO)}
-                              </div>
-                            ) : (
-                              <div className="mt-1 text-xs text-white/25">No visit recorded</div>
-                            )}
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => isExpanded ? handleCollapse(tid) : handleExpand(tid)}
-                          aria-label={isExpanded ? "Collapse terminal details" : "Expand terminal details"}
-                          aria-expanded={isExpanded}
-                          className="flex-shrink-0 self-stretch px-3 flex items-center text-white/35 text-xs select-none hover:text-white/70 hover:bg-white/5"
-                          style={{ background: "none", border: "none", cursor: "pointer" }}
-                        >
-                          {isExpanded ? "▲" : "▼"}
-                        </button>
-                      </div>
-
-                      {/* Expanded panel */}
-                      {isExpanded && (
-                        <div className="border-t border-white/10 px-3 pt-3 pb-3 space-y-3" onClick={(e) => e.stopPropagation()}>
-
-                          {/* Last Visit */}
-                          <div>
-                            <div className="text-xs text-white/40 mb-1 font-medium">Last Visit</div>
-                            <div className="flex gap-1">
-                              <input
-                                type="date"
-                                value={lastVisitISO}
-                                onChange={(e) => setAccessDateForTerminal_(tid, e.target.value)}
-                                className="flex-1 min-w-0 rounded-md border border-white/10 bg-black/40 px-2 py-1.5 text-xs text-white"
-                              />
-                              <button type="button"
-                                onClick={() => setAccessDateForTerminal_(tid, isoToday())}
-                                className="rounded-md border border-white/10 bg-white/5 px-2 py-1.5 text-xs text-white/70 hover:bg-white/10 whitespace-nowrap">
-                                Today
-                              </button>
-                            </div>
-                            {expiresISO && (
-                              <div className={["mt-1 text-xs tabular-nums", expired ? "text-red-400" : "text-white/35"].join(" ")}>
-                                Expires {formatMDYWithCountdown_(expiresISO)}
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Card Number + PIN */}
-                          <div className="flex gap-2">
-                            <div className="flex-1 min-w-0">
-                              <div className="text-xs text-white/40 mb-1 font-medium">Card Number</div>
-                              <input
-                                type="text"
-                                value={draft.cardNumber}
-                                onChange={(e) => updateDraft(tid, { cardNumber: e.target.value })}
-                                placeholder="Enter card #"
-                                className="w-full rounded-md border border-white/10 bg-black/40 px-2 py-1.5 text-xs text-white placeholder:text-white/20"
-                              />
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="text-xs text-white/40 mb-1 font-medium">PIN</div>
-                              <input
-                                type="text"
-                                value={draft.pin}
-                                onChange={(e) => updateDraft(tid, { pin: e.target.value })}
-                                placeholder="Enter PIN"
-                                className="w-full rounded-md border border-white/10 bg-black/40 px-2 py-1.5 text-xs text-white placeholder:text-white/20"
-                              />
-                            </div>
-                          </div>
-
-                          {/* Sourcing button — above Private Note */}
-                          <button
-                            type="button"
-                            onClick={() => setSourcingTerminal({ id: tid, name: String(t.terminal_name ?? tid) })}
-                            style={{
-                              width: "100%",
-                              padding: "10px 0",
-                              borderRadius: 6,
-                              border: "1px solid rgba(255,255,255,0.16)",
-                              background: "rgba(255,255,255,0.06)",
-                              color: "rgba(255,255,255,0.85)",
-                              fontSize: 13,
-                              fontWeight: 700,
-                              cursor: "pointer",
-                              letterSpacing: 0.3,
-                            }}
-                          >
-                            Sourcing
-                          </button>
-
-                          {/* Private Note */}
-                          <div>
-                            <div className="text-xs text-white/40 mb-1 font-medium">Private Note</div>
-                            <textarea
-                              value={draft.privateNote}
-                              onChange={(e) => updateDraft(tid, { privateNote: e.target.value })}
-                              placeholder="Gate codes, contacts, reminders…"
-                              rows={2}
-                              className="w-full rounded-md border border-white/10 bg-black/40 px-2 py-1.5 text-xs text-white placeholder:text-white/20 resize-none"
-                            />
-                          </div>
-
-                          {/* Select / Deactivate */}
-                          {!isConfirming ? (
-                            <div className="flex gap-2">
-                              <button type="button" onClick={() => handleSelect(tid)}
-                                style={{ flex: 1, padding: "13px 0", borderRadius: 6, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.08)", color: "#ffffff", fontSize: 15, fontWeight: 700, cursor: "pointer", letterSpacing: 0.2 }}>
-                                Select
-                              </button>
-                              {lastVisitISO && (
-                                <button type="button"
-                                  onClick={() => setConfirmDeactivate(tid)}
-                                  style={{ padding: "13px 16px", borderRadius: 6, border: "1px solid rgba(239,68,68,0.20)", background: "rgba(239,68,68,0.06)", color: "rgba(239,68,68,0.70)", fontSize: 13, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" as const }}>
-                                  Deactivate
-                                </button>
-                              )}
-                            </div>
-                          ) : (
-                            <div style={{ padding: "12px 14px", borderRadius: 6, border: "1px solid rgba(239,68,68,0.25)", background: "rgba(239,68,68,0.08)" }}>
-                              <div style={{ fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,0.80)", marginBottom: 10 }}>
-                                Remove last visit date and mark as not carded?
-                              </div>
-                              <div className="flex gap-2">
-                                <button type="button"
-                                  onClick={() => handleDeactivateConfirmed(tid)}
-                                  style={{ flex: 1, padding: "10px 0", borderRadius: 6, border: "1px solid rgba(239,68,68,0.30)", background: "rgba(239,68,68,0.15)", color: "rgba(239,68,68,0.90)", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
-                                  Yes, deactivate
-                                </button>
-                                <button type="button"
-                                  onClick={() => setConfirmDeactivate(null)}
-                                  style={{ flex: 1, padding: "10px 0", borderRadius: 6, border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.60)", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
-                                  Cancel
-                                </button>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
+    <FullscreenModal open={open} title="My Terminals" onClose={onClose}>
+      {!selectedState || !selectedCity ? (
+        <div className="text-sm text-white/60">Select a city first.</div>
+      ) : (
+        <div className="space-y-3">
+          <div className="text-sm text-white/70 flex items-center justify-between gap-2">
+            <span>
+              Showing terminals in{" "}
+              <span className="text-white">{selectedCity}, {selectedState}</span>
+            </span>
+            {onChangeLocation && (
+              <button
+                type="button"
+                onClick={onChangeLocation}
+                className="shrink-0 text-xs font-semibold text-white/45 hover:text-white/70"
+              >
+                Change
+              </button>
             )}
           </div>
-        )}
-      </FullscreenModal>
 
-      {/* Sourcing modal — layered on top */}
-      {sourcingTerminal && (
-        <SourcingModal
-          open={!!sourcingTerminal}
-          onClose={() => setSourcingTerminal(null)}
-          terminalId={sourcingTerminal.id}
-          terminalName={sourcingTerminal.name}
-          authUserId={authUserId}
-        />
+          {termError && <div className="text-sm text-red-400">{termError}</div>}
+
+          {sorted.length === 0 ? (
+            <div className="text-sm text-white/60">No terminals found for this city.</div>
+          ) : (
+            <div className="grid grid-cols-1 gap-2">
+              {sorted.map((t, idx) => {
+                const tid = String(t.terminal_id);
+                const active = tid === String(selectedTerminalId);
+                const isExpanded = expandedTerminalId === tid;
+                const lastVisitISO = accessDateByTerminalId[tid] ?? "";
+                const renewalDays = Number(t.renewal_days ?? t.renewalDays ?? t.renewal ?? 90) || 90;
+                const expiresISO = lastVisitISO ? addDaysISO_(lastVisitISO, renewalDays) : "";
+                const expired = expiresISO ? isPastISO_(expiresISO) : false;
+                const card = cardDataByTerminalId[tid];
+
+                return (
+                  <div
+                    key={tid ?? `term-${idx}`}
+                    className={[
+                      "rounded-md border transition-all overflow-hidden",
+                      active ? "border-white/30 bg-white/5" : "border-white/10",
+                    ].join(" ")}
+                  >
+                    {/* Header -- main body selects this terminal directly;
+                        only the chevron zone on the right expands/collapses
+                        the read-only details panel below. */}
+                    <div className="flex items-center hover:bg-white/5">
+                      <div
+                        role="button" tabIndex={0}
+                        onClick={() => handleSelect(tid)}
+                        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleSelect(tid); } }}
+                        className="flex items-center flex-1 min-w-0 cursor-pointer select-none"
+                      >
+                        <div style={{
+                          flexShrink: 0, width: 26, height: 26, marginLeft: 12,
+                          borderRadius: "50%", border: "1px solid rgba(255,255,255,0.35)",
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          fontSize: 10, fontWeight: 800,
+                          color: t.terminal_name ? "rgba(255,255,255,0.75)" : "rgba(255,255,255,0.20)",
+                        }}>
+                          {t.terminal_name ? avatarInitials(String(t.terminal_name)) : "—"}
+                        </div>
+                        <div className="min-w-0 flex-1 px-3 py-2">
+                          <div className="text-sm font-semibold text-white truncate">
+                            {t.terminal_name ?? "(unnamed terminal)"}
+                          </div>
+                          {expiresISO ? (
+                            <div className={["mt-1 text-xs tabular-nums", expired ? "text-red-400" : "text-white/50"].join(" ")}>
+                              {expired ? "Expired · " : ""}{formatMDYWithCountdown_(expiresISO)}
+                            </div>
+                          ) : (
+                            <div className="mt-1 text-xs text-white/25">No visit recorded</div>
+                          )}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setExpandedTerminalId(isExpanded ? null : tid)}
+                        aria-label={isExpanded ? "Collapse terminal details" : "Expand terminal details"}
+                        aria-expanded={isExpanded}
+                        className="flex-shrink-0 self-stretch px-3 flex items-center text-white/35 text-xs select-none hover:text-white/70 hover:bg-white/5"
+                        style={{ background: "none", border: "none", cursor: "pointer" }}
+                      >
+                        {isExpanded ? "▲" : "▼"}
+                      </button>
+                    </div>
+
+                    {/* Expanded panel -- read-only copy; edit on the Cards tab */}
+                    {isExpanded && (
+                      <div className="border-t border-white/10 px-3 pt-3 pb-3 space-y-2" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex justify-between text-xs">
+                          <span className="text-white/40 font-medium">Expiration</span>
+                          <span className={["tabular-nums font-semibold", expired ? "text-red-400" : "text-white/70"].join(" ")}>
+                            {expiresISO ? formatMDYWithCountdown_(expiresISO) : "Not carded"}
+                          </span>
+                        </div>
+                        <div className="flex justify-between text-xs">
+                          <span className="text-white/40 font-medium">Card Number</span>
+                          <span className="text-white/70 font-semibold tabular-nums">{card?.cardNumber || "—"}</span>
+                        </div>
+                        <div className="flex justify-between text-xs">
+                          <span className="text-white/40 font-medium">PIN</span>
+                          <span className="text-white/70 font-semibold tabular-nums">{card?.pin || "—"}</span>
+                        </div>
+                        <div className="pt-1 text-[11px] text-white/25">
+                          Edit card details from the Cards tab.
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
       )}
-    </>
+    </FullscreenModal>
   );
 }

@@ -8,12 +8,17 @@ import { Modal, Field, FieldRow, Banner, SubSectionTitle } from "./primitives";
 import { PortIdEditor, TerminalAccessEditor } from "./editors";
 import type { Member, DriverProfile } from "./types";
 
-export function DriverProfileModal({ member, companyId, onClose, onDone, onRemove }: {
+export function DriverProfileModal({ member, companyId, onClose, onDone, onRemove, hideComplianceFields }: {
   member: Member;
   companyId: string;
   onClose: () => void;
   onDone: (updated: Partial<Member>) => void;
   onRemove?: () => void; // optional — omit on ProfilePage to hide Remove User button
+  // Self-edit (Settings → Profile) drops License/Medical/HazMat/TWIC/Port
+  // IDs/Terminal Access entirely -- the Cards tab (Terminals/Badges/
+  // Credentials) is the sole writer for that data now. Admin's edit of a
+  // team member (app/admin/page.tsx) omits this prop and keeps full access.
+  hideComplianceFields?: boolean;
 }) {
   const [profile,  setProfile]  = useState<DriverProfile | null>(null);
   const [loading,  setLoading]  = useState(true);
@@ -123,37 +128,39 @@ export function DriverProfileModal({ member, companyId, onClose, onDone, onRemov
       employee_number: employeeNumber || null,
     };
 
-    if (licClass || licNumber || licExpiry) {
-      payload.license = {
-        license_class:   licClass || null,
-        endorsements:    licEndorse ? licEndorse.split(/[,\s]+/).map(s => s.trim()).filter(Boolean) : [],
-        restrictions:    licRestrict ? licRestrict.split(/[,\s]+/).map(s => s.trim()).filter(Boolean) : [],
-        license_number:  licNumber || null,
-        issue_date:      licIssue || null,
-        expiration_date: licExpiry || null,
-        state_code:      licState || null,
-        hazmat_linked_to_license: hazmatLinked,
-        hazmat_issue_date:        hazmatLinked ? null : (hazmatIssue || null),
-        hazmat_expiration_date:   hazmatLinked ? null : (hazmatExpiry || null),
-      };
+    if (!hideComplianceFields) {
+      if (licClass || licNumber || licExpiry) {
+        payload.license = {
+          license_class:   licClass || null,
+          endorsements:    licEndorse ? licEndorse.split(/[,\s]+/).map(s => s.trim()).filter(Boolean) : [],
+          restrictions:    licRestrict ? licRestrict.split(/[,\s]+/).map(s => s.trim()).filter(Boolean) : [],
+          license_number:  licNumber || null,
+          issue_date:      licIssue || null,
+          expiration_date: licExpiry || null,
+          state_code:      licState || null,
+          hazmat_linked_to_license: hazmatLinked,
+          hazmat_issue_date:        hazmatLinked ? null : (hazmatIssue || null),
+          hazmat_expiration_date:   hazmatLinked ? null : (hazmatExpiry || null),
+        };
+      }
+      if (medExpiry || medIssue) {
+        payload.medical = {
+          issue_date:          medIssue || null,
+          expiration_date:     medExpiry || null,
+          examiner_name:       medExaminer || null,
+          attached_to_license: medAttachedToLic,
+        };
+      }
+      // hazmat flags are now nested inside payload.license
+      if (twicNumber || twicExpiry) {
+        payload.twic = {
+          card_number:     twicNumber || null,
+          issue_date:      twicIssue || null,
+          expiration_date: twicExpiry || null,
+        };
+      }
+      payload.port_ids = portIds.filter(p => p.port_name.trim());
     }
-    if (medExpiry || medIssue) {
-      payload.medical = {
-        issue_date:          medIssue || null,
-        expiration_date:     medExpiry || null,
-        examiner_name:       medExaminer || null,
-        attached_to_license: medAttachedToLic,
-      };
-    }
-    // hazmat flags are now nested inside payload.license
-    if (twicNumber || twicExpiry) {
-      payload.twic = {
-        card_number:     twicNumber || null,
-        issue_date:      twicIssue || null,
-        expiration_date: twicExpiry || null,
-      };
-    }
-    payload.port_ids = portIds.filter(p => p.port_name.trim());
 
     try {
       const { error } = await supabase.rpc("upsert_driver_profile", {
@@ -205,100 +212,104 @@ export function DriverProfileModal({ member, companyId, onClose, onDone, onRemov
             <Field label="Local Area" half><input value={localArea} onChange={e => setLocalArea(e.target.value)} style={css.input} placeholder="e.g. Tampa Bay" /></Field>
           </FieldRow>
 
-          <hr style={css.divider} />
+          {!hideComplianceFields && (
+            <>
+              <hr style={css.divider} />
 
-          {/* Driver's License */}
-          <SubSectionTitle>Driver's License</SubSectionTitle>
-          <FieldRow>
-            <Field label="State" half>
-              <input value={licState} onChange={e => setLicState(e.target.value)} style={css.input} placeholder="FL" maxLength={2} />
-            </Field>
-            <Field label="Class" half>
-              <select value={licClass} onChange={e => setLicClass(e.target.value)} style={{ ...css.select, width: "100%" }}>
-                <option value="">—</option>
-                <option value="A">Class A</option>
-                <option value="B">Class B</option>
-                <option value="C">Class C</option>
-                <option value="D">Class D</option>
-              </select>
-            </Field>
-            <Field label="License Number" half><input value={licNumber} onChange={e => setLicNumber(e.target.value)} style={css.input} placeholder="License #" /></Field>
-            <Field label="Endorsements" half><input value={licEndorse} onChange={e => setLicEndorse(e.target.value)} style={css.input} placeholder="H, N, X (comma separated)" /></Field>
-            <Field label="Restrictions" half><input value={licRestrict} onChange={e => setLicRestrict(e.target.value)} style={css.input} placeholder="B, E (comma separated)" /></Field>
-            <div style={{ width: "100%" }} />
-            <Field label="Issue Date" half><input type="date" value={licIssue} onChange={e => setLicIssue(e.target.value)} style={css.input} /></Field>
-            <Field label="Expiration Date" half><input type="date" value={licExpiry} onChange={e => setLicExpiry(e.target.value)} style={css.input} /></Field>
-          </FieldRow>
-
-          <hr style={css.divider} />
-
-          {/* Medical Card */}
-          <SubSectionTitle>Medical Card</SubSectionTitle>
-          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: T.muted, marginBottom: 10, cursor: "pointer" }}>
-            <input type="checkbox" checked={medAttachedToLic} onChange={e => {
-              setMedAttachedToLic(e.target.checked);
-              if (e.target.checked && licIssue) setMedIssue(licIssue);
-              if (e.target.checked && licExpiry) setMedExpiry(licExpiry);
-            }} style={{ width: 14, height: 14, accentColor: T.accent }} />
-            <span>Attached to driver's license <span style={{ color: T.muted, fontSize: 11 }}>(copies license dates)</span></span>
-          </label>
-          <FieldRow>
-            <Field label="Issue Date" half>
-              <input type="date" value={medIssue}
-                onChange={e => { if (!medAttachedToLic) setMedIssue(e.target.value); }}
-                style={{ ...css.input, opacity: medAttachedToLic ? 0.5 : 1 }} readOnly={medAttachedToLic} />
-            </Field>
-            <Field label="Expiration Date" half>
-              <input type="date" value={medAttachedToLic ? licExpiry : medExpiry}
-                onChange={e => { if (!medAttachedToLic) setMedExpiry(e.target.value); }}
-                style={{ ...css.input, opacity: medAttachedToLic ? 0.5 : 1 }} readOnly={medAttachedToLic} />
-            </Field>
-            <Field label="Examiner Name"><input value={medExaminer} onChange={e => setMedExaminer(e.target.value)} style={css.input} placeholder="Dr. Name" /></Field>
-          </FieldRow>
-
-          <hr style={css.divider} />
-
-          {/* HazMat */}
-          <SubSectionTitle>HazMat Endorsement</SubSectionTitle>
-          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: T.muted, marginBottom: 10, cursor: "pointer" }}>
-            <input type="checkbox" checked={hazmatLinked} onChange={e => setHazmatLinked(e.target.checked)}
-              style={{ width: 14, height: 14, accentColor: T.accent }} />
-            <span>HazMat renewal tied to driver's license <span style={{ color: T.muted, fontSize: 11 }}>(renews with CDL)</span></span>
-          </label>
-          {hazmatLinked
-            ? <div style={{ fontSize: 12, color: T.muted, marginBottom: 12 }}>HazMat will renew on <strong style={{ color: T.text }}>{fmtDate(licExpiry) || "—"}</strong> with the CDL.</div>
-            : <FieldRow>
-                <Field label="Issue Date" half><input type="date" value={hazmatIssue} onChange={e => setHazmatIssue(e.target.value)} style={css.input} /></Field>
-                <Field label="Expiration Date" half><input type="date" value={hazmatExpiry} onChange={e => setHazmatExpiry(e.target.value)} style={css.input} /></Field>
+              {/* Driver's License */}
+              <SubSectionTitle>Driver's License</SubSectionTitle>
+              <FieldRow>
+                <Field label="State" half>
+                  <input value={licState} onChange={e => setLicState(e.target.value)} style={css.input} placeholder="FL" maxLength={2} />
+                </Field>
+                <Field label="Class" half>
+                  <select value={licClass} onChange={e => setLicClass(e.target.value)} style={{ ...css.select, width: "100%" }}>
+                    <option value="">—</option>
+                    <option value="A">Class A</option>
+                    <option value="B">Class B</option>
+                    <option value="C">Class C</option>
+                    <option value="D">Class D</option>
+                  </select>
+                </Field>
+                <Field label="License Number" half><input value={licNumber} onChange={e => setLicNumber(e.target.value)} style={css.input} placeholder="License #" /></Field>
+                <Field label="Endorsements" half><input value={licEndorse} onChange={e => setLicEndorse(e.target.value)} style={css.input} placeholder="H, N, X (comma separated)" /></Field>
+                <Field label="Restrictions" half><input value={licRestrict} onChange={e => setLicRestrict(e.target.value)} style={css.input} placeholder="B, E (comma separated)" /></Field>
+                <div style={{ width: "100%" }} />
+                <Field label="Issue Date" half><input type="date" value={licIssue} onChange={e => setLicIssue(e.target.value)} style={css.input} /></Field>
+                <Field label="Expiration Date" half><input type="date" value={licExpiry} onChange={e => setLicExpiry(e.target.value)} style={css.input} /></Field>
               </FieldRow>
-          }
 
-          <hr style={css.divider} />
+              <hr style={css.divider} />
 
-          {/* TWIC */}
-          <SubSectionTitle>TWIC Card</SubSectionTitle>
-          <FieldRow>
-            <Field label="Card Number" half><input value={twicNumber} onChange={e => setTwicNumber(e.target.value)} style={css.input} placeholder="TWIC #" /></Field>
-            <div style={{ width: "calc(50% - 5px)" }} />
-            <Field label="Issue Date" half><input type="date" value={twicIssue} onChange={e => setTwicIssue(e.target.value)} style={css.input} /></Field>
-            <Field label="Expiration Date" half><input type="date" value={twicExpiry} onChange={e => setTwicExpiry(e.target.value)} style={css.input} /></Field>
-          </FieldRow>
+              {/* Medical Card */}
+              <SubSectionTitle>Medical Card</SubSectionTitle>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: T.muted, marginBottom: 10, cursor: "pointer" }}>
+                <input type="checkbox" checked={medAttachedToLic} onChange={e => {
+                  setMedAttachedToLic(e.target.checked);
+                  if (e.target.checked && licIssue) setMedIssue(licIssue);
+                  if (e.target.checked && licExpiry) setMedExpiry(licExpiry);
+                }} style={{ width: 14, height: 14, accentColor: T.accent }} />
+                <span>Attached to driver's license <span style={{ color: T.muted, fontSize: 11 }}>(copies license dates)</span></span>
+              </label>
+              <FieldRow>
+                <Field label="Issue Date" half>
+                  <input type="date" value={medIssue}
+                    onChange={e => { if (!medAttachedToLic) setMedIssue(e.target.value); }}
+                    style={{ ...css.input, opacity: medAttachedToLic ? 0.5 : 1 }} readOnly={medAttachedToLic} />
+                </Field>
+                <Field label="Expiration Date" half>
+                  <input type="date" value={medAttachedToLic ? licExpiry : medExpiry}
+                    onChange={e => { if (!medAttachedToLic) setMedExpiry(e.target.value); }}
+                    style={{ ...css.input, opacity: medAttachedToLic ? 0.5 : 1 }} readOnly={medAttachedToLic} />
+                </Field>
+                <Field label="Examiner Name"><input value={medExaminer} onChange={e => setMedExaminer(e.target.value)} style={css.input} placeholder="Dr. Name" /></Field>
+              </FieldRow>
 
-          <hr style={css.divider} />
+              <hr style={css.divider} />
 
-          {/* Port IDs */}
-          <SubSectionTitle>Port IDs</SubSectionTitle>
-          <PortIdEditor portIds={portIds} onChange={setPortIds} />
+              {/* HazMat */}
+              <SubSectionTitle>HazMat Endorsement</SubSectionTitle>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: T.muted, marginBottom: 10, cursor: "pointer" }}>
+                <input type="checkbox" checked={hazmatLinked} onChange={e => setHazmatLinked(e.target.checked)}
+                  style={{ width: 14, height: 14, accentColor: T.accent }} />
+                <span>HazMat renewal tied to driver's license <span style={{ color: T.muted, fontSize: 11 }}>(renews with CDL)</span></span>
+              </label>
+              {hazmatLinked
+                ? <div style={{ fontSize: 12, color: T.muted, marginBottom: 12 }}>HazMat will renew on <strong style={{ color: T.text }}>{fmtDate(licExpiry) || "—"}</strong> with the CDL.</div>
+                : <FieldRow>
+                    <Field label="Issue Date" half><input type="date" value={hazmatIssue} onChange={e => setHazmatIssue(e.target.value)} style={css.input} /></Field>
+                    <Field label="Expiration Date" half><input type="date" value={hazmatExpiry} onChange={e => setHazmatExpiry(e.target.value)} style={css.input} /></Field>
+                  </FieldRow>
+              }
 
-          <hr style={css.divider} />
+              <hr style={css.divider} />
 
-          {/* Terminal Access */}
-          <TerminalAccessEditor
-            userId={member.user_id}
-            companyId={companyId}
-            existing={terminals}
-            onReload={reloadProfile}
-          />
+              {/* TWIC */}
+              <SubSectionTitle>TWIC Card</SubSectionTitle>
+              <FieldRow>
+                <Field label="Card Number" half><input value={twicNumber} onChange={e => setTwicNumber(e.target.value)} style={css.input} placeholder="TWIC #" /></Field>
+                <div style={{ width: "calc(50% - 5px)" }} />
+                <Field label="Issue Date" half><input type="date" value={twicIssue} onChange={e => setTwicIssue(e.target.value)} style={css.input} /></Field>
+                <Field label="Expiration Date" half><input type="date" value={twicExpiry} onChange={e => setTwicExpiry(e.target.value)} style={css.input} /></Field>
+              </FieldRow>
+
+              <hr style={css.divider} />
+
+              {/* Port IDs */}
+              <SubSectionTitle>Port IDs</SubSectionTitle>
+              <PortIdEditor portIds={portIds} onChange={setPortIds} />
+
+              <hr style={css.divider} />
+
+              {/* Terminal Access */}
+              <TerminalAccessEditor
+                userId={member.user_id}
+                companyId={companyId}
+                existing={terminals}
+                onReload={reloadProfile}
+              />
+            </>
+          )}
 
           {/* Actions */}
           <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 8 }}>

@@ -25,12 +25,13 @@ export const selectStyle: React.CSSProperties = {
 };
 
 export function CustomSelect({
-  value, onChange, options, disabled,
+  value, onChange, options, disabled, buttonStyle,
 }: {
   value: string;
   onChange: (v: string) => void;
   options: { value: string; label: string }[];
   disabled?: boolean;
+  buttonStyle?: React.CSSProperties;
 }) {
   const [open, setOpen] = useState(false);
   const [hoverValue, setHoverValue] = useState<string | null>(null);
@@ -57,6 +58,7 @@ export function CustomSelect({
           ...selectStyle,
           display: "flex", alignItems: "center", justifyContent: "space-between",
           textAlign: "left" as const, cursor: disabled ? "not-allowed" : "pointer",
+          ...buttonStyle,
         }}
       >
         <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>{selected?.label ?? ""}</span>

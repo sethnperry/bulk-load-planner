@@ -26,7 +26,6 @@ export default function NavMenu() {
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
 
   const isPlanner = pathname === "/" || pathname === "/calculator" || Boolean(pathname?.startsWith("/calculator/"));
-  const isProfile = pathname === "/profile";
   const isAdmin_  = pathname === "/admin";
   const isSuperAdmin_ = pathname === "/superadmin";
   const isAdmin   = myRole === "admin" || myRole === "lead";
@@ -191,9 +190,6 @@ export default function NavMenu() {
           <div style={{ padding: "8px 6px" }}>
             {!isPlanner && (
               <NavLink href="/calculator" icon="⟵" label="Back to Planner" onClick={() => setOpen(false)} />
-            )}
-            {!isProfile && (
-              <NavLink href="/profile" icon="◉" label="Profile" onClick={() => setOpen(false)} />
             )}
             {isAdmin && !isAdmin_ && (
               <NavLink href="/admin" icon="⚙" label="Company Admin" onClick={() => setOpen(false)} />

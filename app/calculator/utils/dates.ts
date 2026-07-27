@@ -26,6 +26,12 @@ export function formatMDY(dateLike: string) {
   return `${m}-${d}-${y}`;
 }
 
+export function formatMDYSlash_(dateLike: string) {
+  const ymd = dateLike.slice(0, 10);
+  const [y, m, d] = ymd.split("-");
+  return `${m}/${d}/${y.slice(2)}`;
+}
+
 export function isoToday_() {
   return new Date().toISOString().slice(0, 10); // YYYY-MM-DD
 }

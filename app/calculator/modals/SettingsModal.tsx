@@ -4,12 +4,20 @@
 // App-level settings -- the gear icon used to (wrongly) open the Equipment
 // modal; this is its real destination. Only placeholders for now (dark
 // theme is the only theme that exists today, and subscription/IAP via
-// RevenueCat isn't wired up yet per CLAUDE.md's product direction) --
-// Profile is the one row that's a real, already-existing route.
+// RevenueCat isn't wired up yet per CLAUDE.md's product direction).
+//
+// Profile used to be its own hamburger-menu destination (/profile); it's
+// now merged in here instead -- tapping "Profile" swaps this same modal's
+// content to the embedded SelfProfileView rather than navigating away,
+// with its own "‹ Back" row (FullscreenModal's header "Close" always means
+// close, per the same convention as the Cards tab's AddCardSheet). The
+// /profile route itself still exists (it's the post-signup magic-link
+// landing page -- see app/login/page.tsx's emailRedirectTo), just no
+// longer linked from the hamburger.
 
-import React from "react";
-import { useRouter } from "next/navigation";
+import React, { useEffect, useState } from "react";
 import { FullscreenModal } from "@/lib/ui/FullscreenModal";
+import { SelfProfileView } from "@/lib/ui/driver/SelfProfileView";
 
 function ComingSoonTag() {
   return (
@@ -60,38 +68,57 @@ function SettingsRow({ label, sub, right, onClick }: {
 }
 
 export default function SettingsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const router = useRouter();
+  const [view, setView] = useState<"root" | "profile">("root");
+
+  useEffect(() => { if (open) setView("root"); }, [open]);
 
   return (
-    <FullscreenModal open={open} title="Settings" onClose={onClose}>
-      <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-
+    <FullscreenModal open={open} title={view === "profile" ? "Profile" : "Settings"} onClose={onClose}>
+      {view === "profile" ? (
         <div>
-          <SectionLabel>Appearance</SectionLabel>
-          <SettingsRow
-            label="Dark Mode"
-            sub="ProTankr is dark-themed only for now"
-            right={<ComingSoonTag />}
-          />
+          <button
+            type="button"
+            onClick={() => setView("root")}
+            style={{
+              display: "flex", alignItems: "center", gap: 4, marginBottom: 16,
+              border: "none", background: "none", padding: 0, cursor: "pointer",
+              fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,0.55)",
+            }}
+          >
+            ‹ Back to Settings
+          </button>
+          <SelfProfileView />
         </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
 
-        <div>
-          <SectionLabel>Account</SectionLabel>
-          <div style={{ display: "grid", gap: 8 }}>
+          <div>
+            <SectionLabel>Appearance</SectionLabel>
             <SettingsRow
-              label="Profile"
-              sub="Name, license info, contact details"
-              onClick={() => { onClose(); router.push("/profile"); }}
-            />
-            <SettingsRow
-              label="Subscription"
-              sub="Manage your plan and billing"
+              label="Dark Mode"
+              sub="ProTankr is dark-themed only for now"
               right={<ComingSoonTag />}
             />
           </div>
-        </div>
 
-      </div>
+          <div>
+            <SectionLabel>Account</SectionLabel>
+            <div style={{ display: "grid", gap: 8 }}>
+              <SettingsRow
+                label="Profile"
+                sub="Name, hire date, division/region"
+                onClick={() => setView("profile")}
+              />
+              <SettingsRow
+                label="Subscription"
+                sub="Manage your plan and billing"
+                right={<ComingSoonTag />}
+              />
+            </div>
+          </div>
+
+        </div>
+      )}
     </FullscreenModal>
   );
 }
