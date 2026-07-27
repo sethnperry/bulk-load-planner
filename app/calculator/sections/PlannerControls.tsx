@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useState } from "react";
+import { useCalculatorShell } from "../CalculatorShellContext";
+import { themeFill } from "../theme";
 
 /**
  * PlannerControls - compartment strip.
@@ -21,6 +23,9 @@ export default function PlannerControls(props: any) {
     compPlan, setCompPlan, terminalProducts, selectedComp, onSelectComp,
     onTourAdvance, selectedTerminalId,
   } = props;
+
+  const shell = useCalculatorShell();
+  const handleFill = themeFill(shell.theme.darkMode, shell.theme.accentColor);
 
   const [draggingComp, setDraggingComp] = useState<number | null>(null);
   const [dragGallonsText, setDragGallonsText] = useState<number | null>(null);
@@ -218,7 +223,7 @@ export default function PlannerControls(props: any) {
                           cursor: "ns-resize", touchAction: "none", zIndex: 3,
                         }}
                       >
-                        <div style={{ width: 30, height: 5, borderRadius: 3, background: "#fff", boxShadow: "0 1px 4px rgba(0,0,0,0.5)" }} />
+                        <div style={{ width: 30, height: 5, borderRadius: 3, background: handleFill, boxShadow: "0 1px 4px rgba(0,0,0,0.5)" }} />
                       </div>
 
                       {isDragging && dragGallonsText != null && (

@@ -18,6 +18,46 @@
 import React, { useEffect, useState } from "react";
 import { FullscreenModal } from "@/lib/ui/FullscreenModal";
 import { SelfProfileView } from "@/lib/ui/driver/SelfProfileView";
+import { useCalculatorShell } from "../CalculatorShellContext";
+
+function ToggleSwitch({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      onClick={() => onChange(!checked)}
+      style={{
+        width: 44, height: 26, borderRadius: 999, border: "none", padding: 3,
+        background: checked ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.14)",
+        display: "flex", justifyContent: checked ? "flex-end" : "flex-start",
+        cursor: "pointer", transition: "background 150ms", flexShrink: 0,
+      }}
+    >
+      <span style={{ width: 20, height: 20, borderRadius: "50%", background: checked ? "#111" : "#fff", transition: "transform 150ms", boxShadow: "0 1px 3px rgba(0,0,0,0.4)" }} />
+    </button>
+  );
+}
+
+function AccentColorPicker({ value, onChange, onReset }: { value: string | null; onChange: (v: string) => void; onReset: () => void }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+      {value && (
+        <button type="button" onClick={onReset} style={{ border: "none", background: "none", color: "rgba(255,255,255,0.4)", fontSize: 12, fontWeight: 700, cursor: "pointer", padding: 0 }}>
+          Reset
+        </button>
+      )}
+      <label style={{ position: "relative", width: 28, height: 28, borderRadius: "50%", overflow: "hidden", border: "1px solid rgba(255,255,255,0.25)", cursor: "pointer", background: value ?? "#3a3a3c", display: "block" }}>
+        <input
+          type="color"
+          value={value ?? "#3a3a3c"}
+          onChange={(e) => onChange(e.target.value)}
+          style={{ position: "absolute", inset: -4, width: "calc(100% + 8px)", height: "calc(100% + 8px)", opacity: 0, cursor: "pointer", border: "none", padding: 0 }}
+        />
+      </label>
+    </div>
+  );
+}
 
 function ComingSoonTag() {
   return (
@@ -68,6 +108,8 @@ function SettingsRow({ label, sub, right, onClick }: {
 }
 
 export default function SettingsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const shell = useCalculatorShell();
+  const { darkMode, accentColor, setDarkMode, setAccentColor } = shell.theme;
   const [view, setView] = useState<"root" | "profile">("root");
 
   useEffect(() => { if (open) setView("root"); }, [open]);
@@ -94,11 +136,18 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
 
           <div>
             <SectionLabel>Appearance</SectionLabel>
-            <SettingsRow
-              label="Dark Mode"
-              sub="ProTankr is dark-themed only for now"
-              right={<ComingSoonTag />}
-            />
+            <div style={{ display: "grid", gap: 8 }}>
+              <SettingsRow
+                label="Dark Mode"
+                sub="Graphite header, Load button, handles & CG dot"
+                right={<ToggleSwitch checked={darkMode} onChange={setDarkMode} />}
+              />
+              <SettingsRow
+                label="Accent Color"
+                sub={accentColor ? "Overrides Dark Mode's fill on those same elements" : "Optional -- pick a custom color for those same elements"}
+                right={<AccentColorPicker value={accentColor} onChange={setAccentColor} onReset={() => setAccentColor(null)} />}
+              />
+            </div>
           </div>
 
           <div>

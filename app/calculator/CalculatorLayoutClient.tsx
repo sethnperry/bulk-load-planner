@@ -26,6 +26,10 @@ import ExpirationModal from "./modals/ExpirationModal";
 import SettingsModal from "./modals/SettingsModal";
 import { CalculatorShellProvider, useCalculatorShell } from "./CalculatorShellContext";
 import { addDaysISO_, isPastISO_, formatMDYWithCountdown_ } from "./utils/dates";
+import {
+  themeHeaderGradient, themeIconStroke, themeTabActive, themeTabInactive,
+  themeUnderlineTrack, themeUnderlineActive,
+} from "./theme";
 
 const TABS = [
   { id: "planner", label: "Planner", href: "/calculator" },
@@ -42,6 +46,8 @@ function activeTabFor(pathname: string | null): typeof TABS[number]["id"] {
 function TabBar() {
   const pathname = usePathname();
   const router = useRouter();
+  const shell = useCalculatorShell();
+  const darkMode = shell.theme.darkMode;
   const active = activeTabFor(pathname);
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -103,7 +109,7 @@ function TabBar() {
               <div style={{
                 padding: "14px 2px",
                 font: isActive ? "500 16px Outfit" : "400 14px Outfit",
-                color: isActive ? "#111" : "rgba(0,0,0,0.35)",
+                color: isActive ? themeTabActive(darkMode) : themeTabInactive(darkMode),
                 transition: "all 150ms ease",
               }}>
                 {t.label}
@@ -113,18 +119,18 @@ function TabBar() {
         })}
       </div>
       <div style={{ display: "flex" }}>
-        <div style={{ flex: 1, height: 1, background: "rgba(0,0,0,0.15)" }} />
-        <div style={{ flex: 1, height: 2, background: "#111" }} />
-        <div style={{ flex: 1, height: 1, background: "rgba(0,0,0,0.15)" }} />
+        <div style={{ flex: 1, height: 1, background: themeUnderlineTrack(darkMode) }} />
+        <div style={{ flex: 1, height: 2, background: themeUnderlineActive(darkMode) }} />
+        <div style={{ flex: 1, height: 1, background: themeUnderlineTrack(darkMode) }} />
       </div>
     </div>
   );
 }
 
-function BellIcon({ count, onClick }: { count: number; onClick: () => void }) {
+function BellIcon({ count, onClick, stroke }: { count: number; onClick: () => void; stroke: string }) {
   return (
     <button type="button" onClick={onClick} aria-label="Alerts" style={{ position: "relative", border: "none", background: "none", cursor: "pointer", padding: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="rgba(0,0,0,0.85)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"></path>
         <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
       </svg>
@@ -137,10 +143,10 @@ function BellIcon({ count, onClick }: { count: number; onClick: () => void }) {
   );
 }
 
-function GearIcon({ onClick }: { onClick: () => void }) {
+function GearIcon({ onClick, stroke }: { onClick: () => void; stroke: string }) {
   return (
     <button type="button" onClick={onClick} aria-label="Settings" style={{ border: "none", background: "none", cursor: "pointer", padding: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(0,0,0,0.85)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <circle cx="12" cy="12" r="3"></circle>
         <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
       </svg>
@@ -150,13 +156,15 @@ function GearIcon({ onClick }: { onClick: () => void }) {
 
 function Header({ onOpenSettings }: { onOpenSettings: () => void }) {
   const shell = useCalculatorShell();
+  const { darkMode, accentColor } = shell.theme;
+  const iconStroke = themeIconStroke(darkMode);
   return (
-    <div style={{ paddingTop: 12, background: "linear-gradient(180deg, #ffffff 0%, #f2f2f2 100%)", flexShrink: 0, position: "relative", overflow: "visible" }}>
+    <div style={{ paddingTop: 12, background: themeHeaderGradient(darkMode, accentColor), flexShrink: 0, position: "relative", overflow: "visible" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 16px" }}>
-        <NavMenu />
+        <NavMenu darkMode={darkMode} />
         <div style={{ display: "flex", gap: 26, flexShrink: 0, alignItems: "center" }}>
-          <BellIcon count={shell.expirations.expiredCount + shell.expirations.warningCount} onClick={() => shell.setExpModalOpen(true)} />
-          <GearIcon onClick={onOpenSettings} />
+          <BellIcon count={shell.expirations.expiredCount + shell.expirations.warningCount} onClick={() => shell.setExpModalOpen(true)} stroke={iconStroke} />
+          <GearIcon onClick={onOpenSettings} stroke={iconStroke} />
         </div>
       </div>
       <TabBar />

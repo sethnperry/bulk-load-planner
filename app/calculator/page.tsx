@@ -54,6 +54,7 @@ import { styles } from "./ui/styles";
 
 // ── Utils ──────────────────────────────────────────────────────────────────────
 import { addDaysISO_, daysUntilISO_, formatMDYWithCountdown_, isPastISO_ } from "./utils/dates";
+import { themeFill, themeTextOnFill } from "./theme";
 import { normCity, normState } from "./utils/normalize";
 import { cgSliderToBias, bestLbsPerGallon, planForGallons, CG_NEUTRAL } from "./utils/planMath";
 
@@ -1203,7 +1204,7 @@ const lastProductInfoById = useMemo(() => {
             onChange={(e) => { setCgSlider(Number(e.target.value)); tourAdvanceIfTarget("tour-cg-slider"); }}
             style={{ width: "100%" }} disabled={!equipment.selectedCombo}
           />
-          {/* Puck — plain light-gray circle, no label, centered on the 4px track */}
+          {/* Puck — themed fill (light gray / dark graphite / custom accent), no label, centered on the 4px track */}
           <div aria-hidden style={{
             position: "absolute",
             left: `${Math.max(0, Math.min(1, cgSlider)) * 100}%`,
@@ -1211,7 +1212,7 @@ const lastProductInfoById = useMemo(() => {
             transform: "translate(-50%, -50%)",
             width: 22, height: 22,
             borderRadius: "50%",
-            background: "#d9d9d9",
+            background: themeFill(shell.theme.darkMode, shell.theme.accentColor, "#d9d9d9"),
             pointerEvents: "none",
             boxShadow: "0 1px 4px rgba(0,0,0,0.4)",
           }} />
@@ -1389,12 +1390,12 @@ const lastProductInfoById = useMemo(() => {
             {/* Load button */}
             <button type="button" onClick={loadWorkflow.beginLoadToSupabase} disabled={loadDisabled}
               style={{
-                borderRadius: 6, border: "none", background: "#fff", padding: "10px 14px", width: "100%",
+                borderRadius: 6, border: "none", background: themeFill(shell.theme.darkMode, shell.theme.accentColor), padding: "10px 14px", width: "100%",
                 cursor: loadDisabled ? "not-allowed" : "pointer", opacity: loadDisabled ? 0.5 : 1,
                 textAlign: "center" as const,
               }}
             >
-              <span style={{ fontSize: 16, fontWeight: 700, color: "#000", letterSpacing: 0.3 }}>{loadLabel}</span>
+              <span style={{ fontSize: 16, fontWeight: 700, color: themeTextOnFill(shell.theme.darkMode), letterSpacing: 0.3 }}>{loadLabel}</span>
             </button>
 
             {/* Load summary */}

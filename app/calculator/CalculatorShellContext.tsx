@@ -29,6 +29,7 @@ import { useTerminals } from "./hooks/useTerminals";
 import { useExpirations } from "./hooks/useExpirations";
 import { useTerminalFilters } from "./hooks/useTerminalFilters";
 import { useDemoWatchdog } from "./hooks/useDemoWatchdog";
+import { useTheme } from "./hooks/useTheme";
 import { addDaysISO_ } from "./utils/dates";
 import type { TerminalRow, TerminalCatalogRow } from "./types";
 
@@ -53,6 +54,7 @@ type ShellValue = {
   setTermOpen: (v: boolean) => void;
   cardDataByTerminalId: Record<string, CardData>;
   setCardDataForTerminal_: (terminalId: string, data: CardData) => Promise<void>;
+  theme: ReturnType<typeof useTheme>;
 };
 
 const ShellContext = createContext<ShellValue | null>(null);
@@ -80,6 +82,8 @@ export function CalculatorShellProvider({ children }: { children: React.ReactNod
   }, []);
 
   useDemoWatchdog(authUserId);
+
+  const theme = useTheme(authUserId);
 
   const equipment = useEquipment(authUserId, setupSession);
   const location = useLocation(effectiveUserId);
@@ -181,6 +185,7 @@ export function CalculatorShellProvider({ children }: { children: React.ReactNod
     equipOpen, setEquipOpen, expModalOpen, setExpModalOpen,
     termOpen, setTermOpen,
     cardDataByTerminalId, setCardDataForTerminal_,
+    theme,
   };
 
   return <ShellContext.Provider value={value}>{children}</ShellContext.Provider>;
