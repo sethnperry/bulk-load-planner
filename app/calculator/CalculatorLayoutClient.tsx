@@ -37,9 +37,13 @@ const TABS = [
   { id: "vault", label: "Vault", href: "/calculator/vault" },
 ] as const;
 
-function activeTabFor(pathname: string | null): typeof TABS[number]["id"] {
+function activeTabFor(pathname: string | null): typeof TABS[number]["id"] | "none" {
   if (pathname?.startsWith("/calculator/cards")) return "cards";
   if (pathname?.startsWith("/calculator/vault")) return "vault";
+  // Reports is a nav-menu destination, not a peer of Planner/Cards/Vault --
+  // "none" leaves every tab unhighlighted instead of falsely bolding
+  // Planner while Reports content is what's actually showing.
+  if (pathname?.startsWith("/calculator/reports")) return "none";
   return "planner";
 }
 
