@@ -27,7 +27,7 @@ import SettingsModal from "./modals/SettingsModal";
 import { CalculatorShellProvider, useCalculatorShell } from "./CalculatorShellContext";
 import { addDaysISO_, isPastISO_, formatMDYWithCountdown_ } from "./utils/dates";
 import {
-  themeHeaderGradient, themeIconStroke, themeTabActive, themeTabInactive,
+  themeFill, themeHeaderGradient, themeIconStroke, themeTabActive, themeTabInactive,
   themeUnderlineTrack, themeUnderlineActive,
 } from "./theme";
 
@@ -158,6 +158,17 @@ function Header({ onOpenSettings }: { onOpenSettings: () => void }) {
   const shell = useCalculatorShell();
   const { darkMode, accentColor } = shell.theme;
   const iconStroke = themeIconStroke(darkMode);
+
+  // The OS status bar / PWA chrome strip above this header is drawn by the
+  // browser from <meta name="theme-color">, not from any CSS on the page --
+  // layout.tsx's static `viewport.themeColor` only sets its initial value,
+  // so it has to be kept in sync here whenever Dark Mode/accent change.
+  useEffect(() => {
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute("content", themeFill(darkMode, accentColor, "#ffffff"));
+    return () => { if (meta) meta.setAttribute("content", "#ffffff"); };
+  }, [darkMode, accentColor]);
+
   return (
     <div style={{ paddingTop: 12, background: themeHeaderGradient(darkMode, accentColor), flexShrink: 0, position: "relative", overflow: "visible" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 16px" }}>
