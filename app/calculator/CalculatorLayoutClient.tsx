@@ -170,7 +170,16 @@ function Header({ onOpenSettings }: { onOpenSettings: () => void }) {
   }, [darkMode, accentColor]);
 
   return (
-    <div style={{ paddingTop: 12, background: themeHeaderGradient(darkMode, accentColor), flexShrink: 0, position: "relative", overflow: "visible" }}>
+    <div style={{
+      // iOS's translucent status bar (see layout.tsx) shows whatever this
+      // div paints underneath it -- extending the padding (and therefore
+      // this gradient background) up through the safe area is what actually
+      // makes the status bar match the current theme instead of leaving a
+      // seam; the icon row below is unaffected since it's a separate nested
+      // div with its own fixed padding.
+      paddingTop: "calc(env(safe-area-inset-top, 0px) + 12px)",
+      background: themeHeaderGradient(darkMode, accentColor), flexShrink: 0, position: "relative", overflow: "visible",
+    }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 16px" }}>
         <NavMenu darkMode={darkMode} />
         <div style={{ display: "flex", gap: 26, flexShrink: 0, alignItems: "center" }}>
