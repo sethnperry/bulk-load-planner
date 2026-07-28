@@ -106,8 +106,8 @@ export default function NavMenu({ darkMode }: { darkMode?: boolean } = {}) {
         style={{
           display: "flex", flexDirection: "column", justifyContent: "center",
           alignItems: "center", gap: 5, width: 36, height: 36, borderRadius: 6,
-          border: isPlannerLight ? "none" : open ? "1px solid rgba(255,255,255,0.2)" : "1px solid rgba(255,255,255,0.08)",
-          background: isPlannerLight ? "none" : open ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.04)",
+          border: isPlanner ? "none" : open ? "1px solid rgba(255,255,255,0.2)" : "1px solid rgba(255,255,255,0.08)",
+          background: isPlanner ? "none" : open ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.04)",
           cursor: "pointer", padding: 0, transition: "background 150ms, border 150ms", flexShrink: 0,
         }}
       >
