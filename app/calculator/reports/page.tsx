@@ -29,8 +29,9 @@ import RecordHistoryModal from "../modals/RecordHistoryModal";
 import TerminalCardsPickerModal from "../modals/TerminalCardsPickerModal";
 import TerminalCardsReportModal from "../modals/TerminalCardsReportModal";
 import CredentialsReportModal, { type LicenseData, type MedicalData, type TwicData } from "../modals/CredentialsReportModal";
-import { toneFor, cardStateFor, EXP_COLOR } from "../cards/cardTheme";
+import { cardStateFor, EXP_COLOR } from "../cards/cardTheme";
 import { daysUntilISO_ } from "../utils/dates";
+import { GRAPHITE, GRAPHITE_DARKER } from "../theme";
 import { buildTerminalCardsReportBody, type TerminalCardsScope, type TerminalStatusItem } from "./buildTerminalCardsReport";
 
 type EquipRow = { truck_id?: string; trailer_id?: string; truck_name?: string; trailer_name?: string; active: boolean | null };
@@ -48,7 +49,6 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 function ReportTile({ title, sub, stat, statColor, onClick, disabled }: {
   title: string; sub: string; stat?: string; statColor?: string; onClick: () => void; disabled?: boolean;
 }) {
-  const [base, shade] = toneFor(title);
   return (
     <div
       role="button" tabIndex={disabled ? -1 : 0}
@@ -56,22 +56,22 @@ function ReportTile({ title, sub, stat, statColor, onClick, disabled }: {
       onKeyDown={disabled ? undefined : (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); } }}
       style={{
         display: "flex", alignItems: "center", gap: 12, padding: "14px 16px", borderRadius: 8,
-        background: disabled ? "rgba(255,255,255,0.04)" : `radial-gradient(circle at 20% 15%, rgba(255,255,255,0.7), transparent 55%), linear-gradient(135deg, ${base} 0%, ${shade} 100%)`,
-        border: disabled ? "1px solid rgba(255,255,255,0.08)" : "1px solid rgba(0,0,0,0.08)",
-        boxShadow: disabled ? "none" : "0 6px 14px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.55)",
+        background: disabled ? "rgba(255,255,255,0.03)" : `linear-gradient(135deg, ${GRAPHITE} 0%, ${GRAPHITE_DARKER} 100%)`,
+        border: disabled ? "1px solid rgba(255,255,255,0.08)" : "1px solid rgba(255,255,255,0.10)",
+        boxShadow: disabled ? "none" : "0 6px 14px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.06)",
         cursor: disabled ? "default" : "pointer", userSelect: "none" as const,
       }}
     >
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 15, fontWeight: 800, color: disabled ? "rgba(255,255,255,0.4)" : "#161616" }}>{title}</div>
-        <div style={{ fontSize: 12, color: disabled ? "rgba(255,255,255,0.3)" : "rgba(0,0,0,0.5)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>{sub}</div>
+        <div style={{ fontSize: 15, fontWeight: 800, color: disabled ? "rgba(255,255,255,0.4)" : "rgba(255,255,255,0.92)" }}>{title}</div>
+        <div style={{ fontSize: 12, color: disabled ? "rgba(255,255,255,0.3)" : "rgba(255,255,255,0.45)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>{sub}</div>
       </div>
       {stat && (
-        <div style={{ fontSize: 13, fontWeight: 800, color: statColor ?? (disabled ? "rgba(255,255,255,0.3)" : "rgba(0,0,0,0.55)"), textAlign: "right" as const, flexShrink: 0, whiteSpace: "nowrap" as const }}>
+        <div style={{ fontSize: 13, fontWeight: 800, color: statColor ?? (disabled ? "rgba(255,255,255,0.3)" : "rgba(255,255,255,0.55)"), textAlign: "right" as const, flexShrink: 0, whiteSpace: "nowrap" as const }}>
           {stat}
         </div>
       )}
-      {!disabled && <span style={{ fontSize: 16, color: "rgba(0,0,0,0.25)", flexShrink: 0 }}>›</span>}
+      {!disabled && <span style={{ fontSize: 16, color: "rgba(255,255,255,0.25)", flexShrink: 0 }}>›</span>}
     </div>
   );
 }

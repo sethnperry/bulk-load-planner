@@ -32,8 +32,6 @@ import { usePlanSlots } from "./hooks/usePlanSlots";
 import { useLoadWorkflow } from "./hooks/useLoadWorkflow";
 import { usePlanRows } from "./hooks/usePlanRows";
 import { useFuelTempPrediction } from "./hooks/useFuelTempPrediction";
-import { useLoadHistory } from "./hooks/useLoadHistory";
-import type { LoadHistoryRow } from "./hooks/useLoadHistory";
 
 // ── Sections ───────────────────────────────────────────────────────────────────
 import PlannerControls from "./sections/PlannerControls";
@@ -44,8 +42,6 @@ import LocationModal from "./modals/LocationModal";
 import MyTerminalsModal from "./modals/MyTerminalsModal";
 import TerminalCatalogModal from "./modals/TerminalCatalogModal";
 import LoadingModal from "./modals/LoadingModal";
-import MyLoadsModal from "./modals/MyLoadsModal";
-import LoadReportModal from "./modals/LoadReportModal";
 import ProductTempModal from "./modals/ProductTempModal";
 import CompartmentModal from "./modals/CompartmentModal";
 
@@ -544,11 +540,6 @@ export default function CalculatorPage() {
     hydratedCompPlanRef.current = null;
     setCompPlanRaw({});
   }, [compPlanKey]);
-  const [myLoadsOpen, setMyLoadsOpen]   = useState(false);
-  const [loadReportOpen, setLoadReportOpen] = useState(false);
-
-  const loadHistory = useLoadHistory(effectiveUserId);
-
   // ── Guided tour ───────────────────────────────────────────────────────────
   const tour = useTour({
     stateConditions: {
@@ -809,89 +800,19 @@ export default function CalculatorPage() {
     predictedTempF: predictedFuelTempF,
   });
 
-  // ── Restore a My Loads row back into the live planner ─────────────────────
-  // "Restore" switches location + equipment to match the load, then waits for
-  // compartments to actually load for the (possibly new) trailer before
-  // applying compPlan -- doing it eagerly would race the "Hydrate compPlan
-  // when combo+terminal key changes" / "Initialize compPlan entries" effects
-  // above, which reset compPlan as soon as compPlanKey or compartments change.
-  // restoreTick forces the apply-effect below to re-check on every restore
-  // call even when combo/terminal/compartments haven't actually changed (the
-  // common case -- restoring the load you just abandoned at the same spot).
-  //
-  // The Target/Actual/Diff summary line, by contrast, has no such race --
-  // it's set directly from the row's own already-fetched columns, not
-  // derived from compPlan/compartments, so it applies immediately and isn't
-  // part of the pendingRestoreRef/effect machinery below. Restoring a
-  // completed ("loaded") row shows its real actual/diff; restoring a still-
-  // "planned" one clears loadReport back to null so a stale previous
-  // completion's numbers don't linger on screen.
-  type PendingRestore = { comboId: string; terminalId: string; lines: Array<{ comp_number: number; product_id: string | null }> };
-  const pendingRestoreRef = useRef<PendingRestore | null>(null);
-  const [restoreTick, setRestoreTick] = useState(0);
-
-  const restoreLoadToPlanner = useCallback((row: LoadHistoryRow) => {
-    const snapshotLines: any[] = row.planned_snapshot?.lines ?? [];
-    const lines = snapshotLines
-      .map((l) => ({ comp_number: Number(l.comp_number), product_id: l.product_id ? String(l.product_id) : null }))
-      .filter((l) => Number.isFinite(l.comp_number));
-
-    pendingRestoreRef.current = {
-      comboId: String(row.combo_id ?? ""),
-      terminalId: String(row.terminal_id ?? ""),
-      lines,
-    };
-
-    // Mirrors useLocation's own hydration pattern: set state/city/terminal
-    // together with the reset-on-change effects suppressed, so picking a
-    // different state doesn't wipe the city/terminal we're about to set.
-    location.skipResetRef.current = true;
-    if (row.state_code) location.setSelectedState(row.state_code);
-    if (row.city_name) location.setSelectedCity(row.city_name);
-    if (row.terminal_id) location.setSelectedTerminalId(String(row.terminal_id));
-    setTimeout(() => { location.skipResetRef.current = false; }, 100);
-
-    if (row.combo_id && String(row.combo_id) !== String(equipment.selectedComboId)) {
-      equipment.setSelectedComboId(String(row.combo_id));
-    }
-
-    // diff_lbs on load_log is actual_payload - planned_payload, but tare is
-    // identical between planned/actual so it equals actual_gross - planned_gross
-    // too -- lets us derive actual_gross_lbs without a dedicated column.
-    if (row.status === "loaded" && row.planned_gross_lbs != null && row.diff_lbs != null) {
-      const plannedGross = Number(row.planned_gross_lbs);
-      const diff = Number(row.diff_lbs);
-      loadWorkflow.setLoadReport({
-        planned_total_gal: Number(row.planned_total_gal ?? 0),
-        planned_gross_lbs: plannedGross,
-        actual_gross_lbs: plannedGross + diff,
-        diff_lbs: diff,
-      });
-    } else {
-      loadWorkflow.setLoadReport(null);
-    }
-
-    setRestoreTick((v) => v + 1);
-  }, [location, equipment, loadWorkflow]);
-
+  // Seed the Target/Actual/Diff summary from the last *completed* load for
+  // this combo as soon as it's available (mount, or switching equipment) --
+  // there's no "My Loads" button on this page anymore, so this is the only
+  // way that summary ever gets populated outside of a load just finished in
+  // this same session. Guarded so it never clobbers a fresher report (either
+  // one this session just produced, or one restored via My Loads).
   useEffect(() => {
-    const pending = pendingRestoreRef.current;
-    if (!pending) return;
-    if (String(equipment.selectedComboId) !== pending.comboId) return;
-    if (String(location.selectedTerminalId) !== pending.terminalId) return;
-    if (compartments.length === 0) return;
-
-    const byComp = new Map(pending.lines.map((l) => [l.comp_number, l.product_id]));
-    const next: Record<number, CompPlanInput> = {};
-    for (const c of compartments) {
-      const n = Number(c.comp_number);
-      if (!Number.isFinite(n)) continue;
-      next[n] = { empty: false, productId: byComp.get(n) ?? "" };
+    if (planSlots.lastLoadReport && !loadWorkflow.loadReport) {
+      loadWorkflow.setLoadReport(planSlots.lastLoadReport);
     }
-    setCompPlan(next);
-    pendingRestoreRef.current = null;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [equipment.selectedComboId, location.selectedTerminalId, compartments, restoreTick]);
+  }, [planSlots.lastLoadReport]);
+
 
   // ── Terminal filters / expirations ────────────────────────────────────────
   // Also shared via context (see above) -- myTerminalIdSet, terminalFilters,
@@ -1234,6 +1155,17 @@ const lastProductInfoById = useMemo(() => {
         const diffText = diff == null ? "—" : `${diff >= 0 ? "+" : ""}${Math.round(diff).toLocaleString()} lbs`;
         const diffColor = diff == null ? "rgba(255,255,255,0.85)" : diff > 0 ? "#ef4444" : "#4ade80";
 
+        // Actual weight, colored against this combo's own target and the
+        // fixed 80,000 lb federal legal limit (same threshold LoadReportModal
+        // already uses for its "drain to 80k" line).
+        const LEGAL_GROSS_LBS = 80000;
+        const actualGross = loadReport?.actual_gross_lbs ?? null;
+        const actualColor =
+          actualGross == null || !(targetWeight > 0) ? "#fff"
+          : actualGross >= LEGAL_GROSS_LBS ? "#ef4444"
+          : actualGross >= targetWeight ? "#4ade80"
+          : "#fff";
+
         // isOverride = user manually moved temp away from prediction after it auto-applied
         const isOverride = userAdjustedTempRef.current && predictedFuelTempF != null && Math.abs(tempF - predictedFuelTempF) > 0.5;
         const isHighConfidence = !isOverride && fuelTempConfidence === "high";
@@ -1402,23 +1334,12 @@ const lastProductInfoById = useMemo(() => {
             <div style={{ borderRadius: 16, background: "rgba(255,255,255,0.03)", padding: "10px 14px" }}>
               <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8 }}>
                 <div style={{ fontSize: 20, fontWeight: 700, color: "#fff" }}>{plannedGalText}</div>
-                <button type="button"
-                  onClick={() => {
-                    if (loadWorkflow.loadReport && loadHistory.rows[0]) {
-                      loadHistory.fetchLines(loadHistory.rows[0].load_id, loadHistory.rows[0].planned_snapshot, loadHistory.rows[0].product_temp_f);
-                      setLoadReportOpen(true);
-                    } else {
-                      setMyLoadsOpen(true);
-                      loadHistory.fetch();
-                    }
-                  }}
-                  style={{ fontSize: 12, fontWeight: 600, color: "rgba(255,255,255,0.45)", background: "none", border: "none", cursor: "pointer", padding: 0, whiteSpace: "nowrap" as const }}
-                >
-                  My Loads ›
-                </button>
+                <div style={{ fontSize: 20, fontWeight: 700, color: actualColor, textAlign: "right" as const }}>{actualText}</div>
               </div>
-              <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginTop: 4 }}>
-                Target {targetText} · Actual {actualText} · <span style={{ color: diffColor, fontWeight: 600 }}>Diff {diffText}</span>
+              <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 4 }}>
+                <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", textAlign: "right" as const }}>
+                  Target {targetText} · <span style={{ color: diffColor, fontWeight: 600 }}>Diff {diffText}</span>
+                </div>
               </div>
               {planUsesReferenceApi && planRows.length > 0 && (
                 <div style={{ fontSize: 10, fontWeight: 700, color: "#fb923c", marginTop: 4 }}>⚠ using ref API</div>
@@ -1455,29 +1376,6 @@ const lastProductInfoById = useMemo(() => {
       <div id="tour-fleet-instruction" style={{ display: "none" }} />
 
       {/* ── Modals ── */}
-      <LoadReportModal
-        open={loadReportOpen}
-        onClose={() => setLoadReportOpen(false)}
-        row={loadHistory.rows[0] ?? null}
-        lines={loadHistory.rows[0] ? loadHistory.linesCache[loadHistory.rows[0].load_id] : undefined}
-      />
-
-      <MyLoadsModal
-        open={myLoadsOpen} onClose={() => setMyLoadsOpen(false)}
-        authUserId={effectiveUserId}
-        rows={loadHistory.rows}
-        loading={loadHistory.loading}
-        error={loadHistory.error}
-        linesCache={loadHistory.linesCache}
-        linesLoading={loadHistory.linesLoading}
-        onFetchLines={loadHistory.fetchLines}
-        onFetchRange={loadHistory.fetch}
-        terminalCatalog={terminals.terminalCatalog ?? []}
-        combos={equipment.combos ?? []}
-        onDeleteLoad={loadHistory.deleteLoad}
-        onRestoreLoad={restoreLoadToPlanner}
-      />
-
       <LoadingModal
         open={loadWorkflow.loadingOpen} onClose={loadWorkflow.cancelActiveLoad}
         styles={styles}

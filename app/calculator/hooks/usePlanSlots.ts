@@ -63,6 +63,15 @@ export function usePlanSlots({
   const [slotBump, setSlotBump] = useState(0);
   const [slotHas, setSlotHas] = useState<Record<number, boolean>>({});
   const [lastLoadLines, setLastLoadLines] = useState<any[]>([]);
+  const [lastLoadReport, setLastLoadReport] = useState<{
+    planned_total_gal: number; planned_gross_lbs: number | null; actual_gross_lbs: number | null; diff_lbs: number | null;
+  } | null>(null);
+
+  // True only until the first real (signed-in) scope resolves after a fresh
+  // page mount -- lets the "restore slot 0" effect below tell a genuine
+  // refresh apart from a later same-session terminal switch, so an
+  // unfinalized in-progress plan never survives a reload (see that effect).
+  const isFreshMountRef = useRef(true);
 
   const planRestoreReadyRef = useRef<string | null>(null);
   const planDirtyRef = useRef(false);
@@ -208,41 +217,22 @@ export function usePlanSlots({
   }
 
   async function fetchLastLoadFromLog(): Promise<any | null> {
-    console.log("[planSlots] fetchLastLoadFromLog — comboId:", selectedComboId);
     if (!selectedComboId) return null;
 
-    // Step 1: get the most recent completed load_id for this combo
-    // Broad diagnostic: any rows visible at all?
-    const { data: anyRows, error: anyErr } = await supabase
-      .from("load_log")
-      .select("load_id, status, started_at, combo_id, user_id")
-      .order("started_at", { ascending: false })
-      .limit(3);
-    console.log("[planSlots] BROAD load_log (no filter):", anyRows?.map((r: any) => ({ status: r.status, combo_id: r.combo_id?.slice(0,8), user_id: r.user_id?.slice(0,8) })), "err:", anyErr?.message);
-
+    // Only a genuinely finalized ("loaded") row counts -- an abandoned
+    // "planned" row (LOAD tapped but never confirmed LOADED) must never be
+    // treated as "the last load" for slip-seat pre-fill or the Target/
+    // Actual/Diff summary. No fallback to "any status" on purpose.
     const { data: comboRows, error: comboErr } = await supabase
       .from("load_log")
-      .select("load_id, status, started_at, combo_id")
+      .select("load_id, status, started_at, terminal_id, planned_total_gal, planned_gross_lbs, diff_lbs")
       .eq("combo_id", selectedComboId)
+      .eq("status", "loaded")
       .order("started_at", { ascending: false })
-      .limit(5);
-    console.log("[planSlots] load_log for THIS combo (all statuses):", comboRows?.map((r: any) => ({ status: r.status, load_id: r.load_id?.slice(0,8) })), "err:", comboErr?.message, "comboId:", selectedComboId?.slice(0,8));
+      .limit(1);
 
-    const logRow = comboRows?.find((r: any) => r.status === "completed") ?? null;
-    const logErr = comboErr;
-    if (!logRow) {
-      console.log("[planSlots] no completed row found. All statuses seen:", comboRows?.map((r:any)=>r.status));
-      // Try with any status as fallback — use most recent regardless
-      const fallback = comboRows?.[0] ?? null;
-      if (!fallback) return null;
-      console.log("[planSlots] using fallback row with status:", fallback.status);
-      // Continue with fallback below — reassign
-      Object.assign(logRow ?? {}, fallback);
-    }
-    // Resolved row
-    const resolvedRow = comboRows?.find((r: any) => r.status === "completed") ?? comboRows?.[0] ?? null;
-    console.log("[planSlots] resolved row:", resolvedRow ? { load_id: resolvedRow.load_id?.slice(0,8), status: resolvedRow.status } : null);
-    if (!resolvedRow) return null;
+    if (comboErr || !comboRows?.length) return null;
+    const resolvedRow = comboRows[0];
 
     // Step 2: get load_lines for that load, joined with products for un_number
     const { data: lineRows, error: lineErr } = await supabase
@@ -250,9 +240,7 @@ export function usePlanSlots({
       .select("comp_number, product_id, planned_gallons, products(un_number, product_name, display_name)")
       .eq("load_id", resolvedRow.load_id);
 
-    console.log("[planSlots] load_lines:", lineRows?.map((l: any) => ({ comp: l.comp_number, pid: l.product_id, un: l.products?.un_number })), "err:", lineErr?.message);
     if (lineErr || !lineRows) return null;
-    if (lineRows.length === 0) { console.log("[planSlots] load_lines empty — RLS may be blocking or load has no lines"); }
 
     const lines = lineRows.map((l: any) => ({
       comp_number: Number(l.comp_number),
@@ -269,7 +257,15 @@ export function usePlanSlots({
       compPlan[n] = { empty: false, productId: line.product_id };
     }
 
-    console.log("[planSlots] final lines:", lines);
+    const plannedGross = resolvedRow.planned_gross_lbs != null ? Number(resolvedRow.planned_gross_lbs) : null;
+    const diff = resolvedRow.diff_lbs != null ? Number(resolvedRow.diff_lbs) : null;
+    const loadReport = plannedGross != null && diff != null ? {
+      planned_total_gal: Number(resolvedRow.planned_total_gal ?? 0),
+      planned_gross_lbs: plannedGross,
+      actual_gross_lbs: plannedGross + diff,
+      diff_lbs: diff,
+    } : null;
+
     return {
       v: 1,
       savedAt: resolvedRow.started_at ? new Date(resolvedRow.started_at).getTime() : Date.now(),
@@ -279,6 +275,7 @@ export function usePlanSlots({
       compPlan,
       lastLoadLines: lines,
       lastLoadId: resolvedRow.load_id,
+      loadReport,
     };
   }
 
@@ -391,6 +388,7 @@ export function usePlanSlots({
       const llKey = `proTankr:${authUserId ? "u:" + authUserId : "anon"}:combo:${selectedComboId}:lastLoadLines`;
       safeWrite(llKey, { lastLoadLines: dbPayload.lastLoadLines, lastLoadId: dbPayload.lastLoadId });
       setLastLoadLines(dbPayload.lastLoadLines ?? []);
+      setLastLoadReport(dbPayload.loadReport ?? null);
 
       // Only restore the plan (compPlan/temp/CG) if slot 0 is empty — i.e. fresh page load
       // with no autosaved state. If slot 0 has data the driver is mid-plan; don't clobber it.
@@ -405,14 +403,31 @@ export function usePlanSlots({
   }, [selectedComboId, authUserId]);
 
   // ── Restore slot 0 on terminal change ─────────────────────────────────────
+  // A genuine fresh mount/refresh never resumes an unfinalized in-progress
+  // plan -- any local WIP draft for this real (signed-in) scope gets cleared
+  // exactly once, the first time it's seen after mount, so the combo-claim
+  // effect above sees an empty slot 0 and only the last *completed* load's
+  // slip-seat data (if any) can pre-fill compPlan. Later terminal switches
+  // within the same session still restore each terminal's own local draft
+  // normally -- this only guards the very first resolution after a reload.
 
   useEffect(() => {
     if (!selectedTerminalId) return;
     const raw = safeRead(planStoreKey(0)) as PlanSnapshot | null;
     planRestoreReadyRef.current = planScopeKey;
-    if (raw && raw.v === 1 && String(raw.terminalId) === String(selectedTerminalId)) {
+
+    const consumesFreshFlag = !!authUserId;
+    const skipLocalRestore = isFreshMountRef.current && consumesFreshFlag;
+    if (consumesFreshFlag) isFreshMountRef.current = false;
+
+    if (skipLocalRestore) {
+      safeDelete(planStoreKey(0));
+      setCgSlider(0.25);
+      setCompPlan({});
+    } else if (raw && raw.v === 1 && String(raw.terminalId) === String(selectedTerminalId)) {
       applySnapshot(raw);
     }
+
     queueMicrotask(() => {
       if (planRestoreReadyRef.current === planScopeKey) planRestoreReadyRef.current = null;
     });
@@ -517,6 +532,7 @@ export function usePlanSlots({
     PLAN_SLOTS,
     slotHas,
     lastLoadLines,
+    lastLoadReport,
     fetchLastProductPerComp,
     saveToSlot,
     clearSlot,
