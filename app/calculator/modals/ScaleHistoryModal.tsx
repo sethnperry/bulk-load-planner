@@ -27,6 +27,7 @@ type WeightRecordRaw = {
   tare_updated: boolean;
   notes: string | null;
   recorded_at: string;
+  created_by: string | null;
 };
 
 const DATE_RANGES: { label: string; days: number | null }[] = [
@@ -92,6 +93,7 @@ export default function ScaleHistoryModal({ open, onClose, companyId, comboId, o
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [rows, setRows] = useState<WeightRecordRaw[]>([]);
+  const [namesByUserId, setNamesByUserId] = useState<Record<string, string>>({});
   const searchRef = useRef<HTMLInputElement>(null);
   const reportRef = useRef<HTMLDivElement>(null);
 
@@ -116,11 +118,25 @@ export default function ScaleHistoryModal({ open, onClose, companyId, comboId, o
     setConfirmingDelete(false);
   }
 
+  // Equipment logs are shared fleet-wide -- created_by is already captured
+  // on every insert, this just resolves it to a display name.
+  async function resolveCreatedByNames(userIds: (string | null)[]) {
+    const ids = Array.from(new Set(userIds.filter((x): x is string => !!x)));
+    const missing = ids.filter((id) => !(id in namesByUserId));
+    if (missing.length === 0) return;
+    const { data } = await supabase.rpc("get_display_names_full", { p_user_ids: missing });
+    const next: Record<string, string> = {};
+    for (const row of (data ?? []) as any[]) {
+      if (row?.user_id) next[row.user_id] = row.display_name ?? "Unknown";
+    }
+    setNamesByUserId((prev) => ({ ...prev, ...next }));
+  }
+
   async function load() {
     setLoading(true);
     setError(null);
     try {
-      const cols = "weight_record_id, combo_id, load_id, heavy_weight_lbs, light_weight_lbs, net_weight_lbs, planner_weight_lbs, prior_tare_lbs, tare_updated, notes, recorded_at";
+      const cols = "weight_record_id, combo_id, load_id, heavy_weight_lbs, light_weight_lbs, net_weight_lbs, planner_weight_lbs, prior_tare_lbs, tare_updated, notes, recorded_at, created_by";
       let data: WeightRecordRaw[];
       if (allEquipment) {
         const { data: d, error: e } = await supabase.from("weight_records").select(cols).eq("company_id", companyId);
@@ -134,6 +150,7 @@ export default function ScaleHistoryModal({ open, onClose, companyId, comboId, o
       }
       data.sort((a, b) => (a.recorded_at < b.recorded_at ? 1 : -1));
       setRows(data);
+      void resolveCreatedByNames(data.map((r) => r.created_by));
     } catch (e: any) {
       setError(e?.message ?? "Failed to load history.");
     } finally {
@@ -411,6 +428,11 @@ export default function ScaleHistoryModal({ open, onClose, companyId, comboId, o
                               style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", marginTop: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const, cursor: "pointer" }}
                             >
                               {row.notes}
+                            </div>
+                          )}
+                          {row.created_by && (
+                            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.30)", marginTop: 4 }}>
+                              Logged by {namesByUserId[row.created_by] ?? "…"}
                             </div>
                           )}
                         </div>

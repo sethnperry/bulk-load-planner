@@ -1,9 +1,11 @@
 // lib/ui/driver/types.ts
 // Shared types used by AdminPage, ProfilePage, MemberCard, DriverProfileModal
 
+import type { Role } from "./role";
+
 export type Member = {
   user_id: string;
-  role: string;
+  role: Role;
   email: string;
   display_name: string | null;
   hire_date: string | null;

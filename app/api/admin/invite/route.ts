@@ -13,6 +13,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient }              from "@supabase/supabase-js";
+import { isRole }                    from "@/lib/ui/driver/role";
 
 export const runtime = "nodejs";
 
@@ -72,6 +73,9 @@ export async function POST(req: NextRequest) {
     };
     if (!email || !companyId) {
       return NextResponse.json({ error: "email and companyId are required." }, { status: 400 });
+    }
+    if (!isRole(role)) {
+      return NextResponse.json({ error: `Invalid role "${role}".` }, { status: 400 });
     }
 
     const admin = getAdmin();

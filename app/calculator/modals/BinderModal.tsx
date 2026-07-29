@@ -672,6 +672,10 @@ function PermitRow({
     setErr(null);
     setConfirmingDelete(false);
   }, [isExpanded, row.record]);
+  // Attribution tooltip ("Uploaded by X") deferred -- equipment_attachments
+  // has no uploaded_by column live yet, see DocHub.tsx's AttachmentRecord
+  // comment. Re-add here once supabase/migrations/20260731000000_equipment_sharing_attribution.sql
+  // has actually been applied.
 
   async function save() {
     setBusy(true);

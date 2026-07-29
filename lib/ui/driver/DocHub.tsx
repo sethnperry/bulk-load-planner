@@ -19,6 +19,12 @@ export type AttachmentRecord = {
   mime_type: string;
   page_order: number;
   uploaded_at: string;
+  // uploaded_by intentionally not selected yet -- the column doesn't exist
+  // live until supabase/migrations/20260731000000_equipment_sharing_attribution.sql
+  // is applied (confirmed via a direct PostgREST query 2026-07-31: selecting
+  // it 400s with "column does not exist"). Re-add uploaded_by here (and to
+  // both hooks' .select() calls, both upload .insert() calls below, and the
+  // BinderModal.tsx tooltip) once that migration has actually run.
 };
 
 // Grouped by category slug

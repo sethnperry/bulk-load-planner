@@ -15,6 +15,7 @@ import { Modal, Field, FieldRow, Banner, SubSectionTitle } from "@/lib/ui/driver
 import { MemberCard } from "@/lib/ui/driver/MemberCard";
 import { DriverProfileModal } from "@/lib/ui/driver/DriverProfileModal";
 import type { Member } from "@/lib/ui/driver/types";
+import type { Role } from "@/lib/ui/driver/role";
 import AdminLoadsModal from "./AdminLoadsModal";
 
 // ─────────────────────────────────────────────────────────────
@@ -410,7 +411,7 @@ function InviteModal({ companyId, onClose, onDone }: { companyId: string; onClos
     <Modal title="Invite User" onClose={onClose}>
       {status && <Banner msg={status.msg} type={status.type} />}
       <Field label="Email"><input type="email" value={email} onChange={e => setEmail(e.target.value)} style={css.input} onKeyDown={e => e.key === "Enter" && send()} autoFocus /></Field>
-      <Field label="Role"><select value={role} onChange={e => setRole(e.target.value)} style={{ ...css.select, width: "100%" }}><option value="driver">Driver</option><option value="lead">Lead</option><option value="admin">Admin</option></select></Field>
+      <Field label="Role"><select value={role} onChange={e => setRole(e.target.value)} style={{ ...css.select, width: "100%" }}><option value="driver">Driver</option><option value="lead">Lead</option><option value="dispatch">Dispatch</option><option value="admin">Admin</option></select></Field>
       <div style={{ fontSize: 12, color: T.muted, marginBottom: 18, lineHeight: 1.5 }}>If the user already has an account they'll be added immediately. New users receive a magic link.</div>
       <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
         <button style={css.btn("ghost")} onClick={onClose}>Cancel</button>
@@ -1022,7 +1023,7 @@ export default function AdminPage() {
   const [search,     setSearch]     = useState("");
   const [sortField,  setSortField]  = useState<SortField>("name");
   const [sortDir,    setSortDir]    = useState<SortDir>("asc");
-  const [filterRole, setFilterRole] = useState<"" | "none" | "admin" | "lead" | "driver">("none");
+  const [filterRole, setFilterRole] = useState<"" | "none" | Role>("none");
 
   const [truckFilter,   setTruckFilter]   = useState<ActiveFilter>("");
   const [truckSearch,   setTruckSearch]   = useState("");
@@ -1062,7 +1063,7 @@ export default function AdminPage() {
       setCompanyName((memRow?.company as any)?.company_name ?? "");
       const role = memRow?.role ?? "";
       setMyRole(role);
-      if (role !== "admin" && role !== "lead") { setErr("Admin access required."); return; }
+      if (role !== "admin" && role !== "lead" && role !== "dispatch") { setErr("Admin access required."); return; }
 
       // Members
       const { data: memberRows } = await supabase.from("user_companies").select("user_id, role").eq("company_id", cid);
@@ -1274,8 +1275,8 @@ export default function AdminPage() {
         <NavMenu />
       </div>
 
-      {/* ── USERS (admin only) ── */}
-      {myRole === "admin" && (
+      {/* ── USERS (admin sees + manages; dispatch sees roster + Loads only, no invite/reassign/remove) ── */}
+      {(myRole === "admin" || myRole === "dispatch") && (
         <>
           <section style={{ marginBottom: 32 }}>
             <div style={css.sectionHead}>
@@ -1283,17 +1284,18 @@ export default function AdminPage() {
                 <span style={{ transition: "transform 150ms", transform: usersOpen ? "rotate(90deg)" : "none", display: "inline-block", fontSize: 14 }}>›</span>
                 Users ({members.length})
               </h2>
-              <button style={plusBtn} onClick={() => setInviteModal(true)}>+</button>
+              {myRole === "admin" && <button style={plusBtn} onClick={() => setInviteModal(true)}>+</button>}
             </div>
             {usersOpen && (
               <>
                 <div style={filterRow}>
                   <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name, email, employee #…" style={{ ...css.input, flex: 1, minWidth: 140, padding: "7px 10px" }} />
-                  <select value={filterRole} onChange={e => setFilterRole(e.target.value as any)} style={{ ...css.select, fontSize: 12, padding: "7px 8px" }}>
+                  <select value={filterRole} onChange={e => setFilterRole(e.target.value as "" | "none" | Role)} style={{ ...css.select, fontSize: 12, padding: "7px 8px" }}>
                     <option value="none">— Role —</option>
                     <option value="">All roles</option>
                     <option value="admin">Admin</option>
                     <option value="lead">Lead</option>
+                    <option value="dispatch">Dispatch</option>
                     <option value="driver">Driver</option>
                   </select>
                   <select value={`${sortField}:${sortDir}`} onChange={e => { const [f, d] = e.target.value.split(":"); setSortField(f as SortField); setSortDir(d as SortDir); }} style={{ ...css.select, fontSize: 12, padding: "7px 8px" }}>
@@ -1309,8 +1311,14 @@ export default function AdminPage() {
                 ) : (
                   filteredMembers.map(m => (
                     <div key={m.user_id} style={{ position: "relative" }}>
-                      <MemberCard member={m} companyId={companyId!} onRefresh={loadAll} onEditProfile={(member, onSaved) => setProfileModal({ member, onSaved })} currentUserId={currentUserId} />
-                      {myRole === "admin" && m.user_id !== currentUserId && (
+                      <MemberCard
+                        member={m} companyId={companyId!} onRefresh={loadAll}
+                        onEditProfile={(member, onSaved) => setProfileModal({ member, onSaved })}
+                        currentUserId={currentUserId}
+                        hideRoleDropdown={myRole !== "admin"}
+                        hideRemove={myRole !== "admin"}
+                      />
+                      {(myRole === "admin" || myRole === "dispatch") && m.user_id !== currentUserId && (
                         <div style={{ position: "absolute", bottom: 10, right: 12, display: "flex", gap: 6 }}>
                           <button
                             type="button"
@@ -1322,13 +1330,15 @@ export default function AdminPage() {
                               return "Loads";
                             })()}
                           </button>
-                          <button
-                            type="button"
-                            onClick={() => setupForUser(m)}
-                            style={{ fontSize: 11, fontWeight: 700, padding: "4px 10px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.60)", cursor: "pointer", whiteSpace: "nowrap" as const }}
-                          >
-                            Set up planner →
-                          </button>
+                          {myRole === "admin" && (
+                            <button
+                              type="button"
+                              onClick={() => setupForUser(m)}
+                              style={{ fontSize: 11, fontWeight: 700, padding: "4px 10px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.60)", cursor: "pointer", whiteSpace: "nowrap" as const }}
+                            >
+                              Set up planner →
+                            </button>
+                          )}
                         </div>
                       )}
                     </div>
@@ -1341,6 +1351,11 @@ export default function AdminPage() {
         </>
       )}
 
+      {/* ── EQUIPMENT + TERMINALS (admin/lead only -- dispatch gets Users/Loads
+           above but no equipment or terminal-catalog view/edit, per the
+           permission matrix) ── */}
+      {(myRole === "admin" || myRole === "lead") && (
+      <>
       {/* ── EQUIPMENT (Trucks, Trailers, Combos) ── */}
       <section style={{ marginBottom: 32, marginTop: 28 }}>
         <div style={{ ...css.sectionHead, cursor: "pointer", userSelect: "none" }} onClick={() => setEquipOpen(v => !v)}>
@@ -1476,12 +1491,14 @@ export default function AdminPage() {
           </>
         )}
       </section>
+      </>
+      )}
 
       {/* ── Modals ── */}
       {inviteModal && myRole === "admin" && <InviteModal companyId={companyId!} onClose={() => setInviteModal(false)} onDone={() => { setInviteModal(false); loadAll(); }} />}
       {profileModal && <DriverProfileModal member={profileModal.member} companyId={companyId!} onClose={() => setProfileModal(null)} onDone={(u) => { profileModal.onSaved(u); setProfileModal(null); }} onRemove={() => { setProfileModal(null); loadAll(); }} />}
-      {truckModal   && <TruckModal truck={truckModal === "new" ? null : truckModal} companyId={companyId!} onClose={() => setTruckModal(null)} onDone={() => { setTruckModal(null); loadAll(); }} />}
-      {trailerModal && <TrailerModal trailer={trailerModal === "new" ? null : trailerModal} companyId={companyId!} onClose={() => setTrailerModal(null)} onDone={() => { setTrailerModal(null); loadAll(); }} />}
+      {truckModal   && <TruckModal truck={truckModal === "new" ? null : truckModal} companyId={companyId!} onClose={() => setTruckModal(null)} onDone={() => { setTruckModal(null); loadAll(); }} myRole={myRole} />}
+      {trailerModal && <TrailerModal trailer={trailerModal === "new" ? null : trailerModal} companyId={companyId!} onClose={() => setTrailerModal(null)} onDone={() => { setTrailerModal(null); loadAll(); }} myRole={myRole} />}
       {terminalModal && (
         <TerminalModal
           terminal={terminalModal === "new" ? null : terminalModal}

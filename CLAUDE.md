@@ -14,7 +14,319 @@ Splitting into two tiers:
 - **Basic (solo, tier 1):** individual driver tracks their own equipment/spares,
   no sharing.
 - **Fleet (add-on, tier 2):** multi-driver sharing, status visibility across
-  drivers, admin-managed.
+  drivers, admin-managed. Full build spec below (§ Fleet Tier — Build Spec).
+
+## Fleet Tier — Build Spec (recorded 2026-07-29, not yet scoped into sprint work)
+
+Full spec pasted by user 2026-07-29. Nothing below is built yet — this is the
+reference doc for when Fleet tier work actually starts. Cross-check against
+"Architecture reality" above before touching schema, as always.
+
+### Equipment sharing
+- Service/wash/scale history, inspections, attachments travel with the
+  **equipment**, not the driver — visible to all drivers + lead drivers
+  (with attribution), so slip-seat drivers see prior condition notes. Leads
+  oversee.
+- Sensitive equipment data (purchase price, lease terms, insurance claims)
+  needs an **admin-only field**, separate from the shared log.
+
+#### Shipped 2026-07-31
+
+Turned out most of "visible to all drivers/leads" was **already true** before
+this pass — `service_records`/`wash_records`/`weight_records` RLS has always
+been plain company-wide (`company_id = get_active_company_id()`, no role
+check at all, matches how `trucks`/`trailers` themselves already work per
+"Key existing infrastructure" above), so any company member could already
+read any equipment's logs. The only actual gap was **attribution**: all
+three tables already had a `created_by` column populated on every insert
+(confirmed via `SoloEquipmentModal.tsx`/`WeightRecordModal.tsx`'s own insert
+calls), but `RecordHistoryModal.tsx`/`ScaleHistoryModal.tsx` never selected
+or displayed it. Fixed by adding `created_by` to each modal's select +
+resolving it via the existing `get_display_names_full` RPC (same one
+`app/admin/page.tsx` already uses) — shows as "Logged by {name}" under each
+expanded row.
+
+`equipment_attachments` (Binder/DocHub permit documents) uploader attribution
+was **attempted, then reverted** this same pass — its insert call sites in
+`DocHub.tsx`/`BinderModal.tsx` never captured an uploader at all, so I wrote
+`uploaded_by` into both selects/inserts plus a tooltip, but a direct
+PostgREST check (`select id,uploaded_by from equipment_attachments`) came
+back `42703 column does not exist` — this table has no migration file at all
+(confirmed via repo search, another migrations-lag instance) and its live
+shape doesn't have this column yet. Since that would have 400'd every doc
+list/upload silently (neither hook checks the Supabase response's `error`),
+**all of it was reverted back to the pre-pass state** rather than shipping
+broken reads/writes on a working feature overnight. `DocHub.tsx`'s
+`AttachmentRecord` type has a comment marking exactly what to re-add (both
+selects, both inserts, the `BinderModal.tsx` tooltip) once the migration
+below has actually run — don't rebuild from scratch, the code already
+existed and was verified compiling, just re-apply the same diff.
+
+Sensitive equipment data is new (not a revert): `equipment_sensitive_data`
+table (same migration file below), `truck_id`/`trailer_id` XOR pattern
+matching `service_records`, RLS **strictly `role = 'admin'`** (not
+admin+lead, unlike everything else equipment-related — this is the one
+piece of equipment data the spec calls out as not belonging in the shared
+log). UI is a collapsed "Sensitive Info (admin only)" section inside
+`TruckModal`/`TrailerModal` (`lib/ui/driver/EquipmentDetails.tsx`, new
+`SensitiveInfoSection` component), gated on a newly-threaded `myRole` prop,
+visible only for `myRole === "admin"` and only for existing (non-new)
+equipment. Also confirmed via direct PostgREST query not to exist live yet
+(`404 PGRST205`) — but unlike attachments, this is a **brand-new,
+collapsed-by-default section with no prior working behavior to regress**,
+and its save path does check/surface the Supabase error via `Banner`, so an
+admin who opens it before the migration runs gets an honest error message,
+not silent data loss. Left shipped as-is.
+
+**Migration queued, not yet applied**: `supabase/migrations/20260731000000_equipment_sharing_attribution.sql`
+(adds `equipment_attachments.uploaded_by` + creates `equipment_sensitive_data`).
+Run in the Supabase SQL editor, then re-apply the attachment-attribution diff
+described above.
+
+**Explicitly NOT done, flagged for later**:
+- **Inspections** — confirmed via repo-wide search that this doesn't exist
+  as a feature *at all* (no table, no UI, only an unrelated string match).
+  Unlike service/wash/scale, this needs to be designed from scratch, not
+  just shared — a real net-new feature, deliberately out of scope for this
+  "share what already exists" pass.
+- Edit/delete permission gating on equipment logs. `RecordHistoryModal.tsx`'s
+  own header comment already flags this as an unresolved fleet-tier
+  follow-up ("driver has full read/write/delete control here... gating this
+  to admin-only is a fleet-tier follow-up, not implemented yet") — the
+  matrix only specifies who can *view* logs, not the edit/delete
+  granularity, and that's a real product decision (can any driver edit/
+  delete *any other* driver's service record?), not something to guess.
+  Left exactly as-is.
+- `weight_records` also has no migration file (same lag pattern), but its
+  `created_by` column was confirmed live via a direct PostgREST query
+  (200, not 42703) before relying on it — unlike `equipment_attachments`,
+  this one checked out.
+
+### Fleet-wide underloading dashboard
+- Aggregate "gallons left on the table" across all trucks/drivers — the
+  number that justifies the subscription to a fleet owner.
+
+### Terminal card / credential management (fleet-wide)
+- Fleet-wide view of who's carded where, filterable by terminal (so dispatch
+  doesn't send an uncarded driver).
+- **Priority terminal flagging**: dispatch flags a specific terminal for a
+  *specific* driver (not all drivers) to prompt them to get carded there.
+  Surfaces in that driver's location button and/or Cards tab. Cards tab needs
+  a new "flagged" filter. Progress bar shows both driver and dispatcher how
+  many more training loads are needed until the flagged card goes active.
+
+### Onboarding
+- Replace/rework the existing guided tour with short video clips.
+- Fleet training mode: new drivers inherit the fleet's terminal
+  history/presets instead of starting cold.
+
+### Cross-company reading network
+- No new UI — temp/API readings already update silently across companies;
+  keep it invisible/passive, not a per-driver alert. (This is the existing
+  network-effect feature described at the top of this doc, not something new.)
+
+### Incentive system ("Recovered Gallons")
+
+**Concept**: drivers earn points for loading closer to true legal capacity
+instead of conservatively. Points cap at the legal weight limit — overloading
+has no upside, only risk. Normalizes fairness between long-haul (fewer
+loads/day) and short-haul (more loads/day) drivers.
+
+**Setup**: off by default, company admin toggles on in company profile.
+Company sets a benchmark **gallons** figure per product, company-wide (not
+per equipment class — assumes all equipment handles up to the legal limit).
+Manual entry only in v1, no benchmark versioning/history. Benchmark gallons
+convert to a reference weight via a **standard industry density table per
+product** (not company historical average — avoids chicken-and-egg data
+problem). Company-specific density override is a possible later addition,
+not v1.
+
+**Single-product calc**:
+1. Convert benchmark gallons → weight using *today's* actual API/temp-derived
+   lbs/gal (not the static reference density — this is the point of tying it
+   to the existing temp/API system).
+2. Actual weight = actual gallons × today's lbs/gal.
+3. Recovered weight = actual weight − benchmark weight (at today's density).
+4. Recovered gallons = recovered weight ÷ today's lbs/gal.
+5. Cap: stops accruing at 80,000 lbs GVW (configurable per company).
+6. Floor: negative recovered gallons → 0, never negative points.
+
+**Split-load calc (finalized)** — per compartment:
+1. Compartment's % share of total load gallons.
+2. That product's benchmark gallons → weight at today's density.
+3. Prorated benchmark weight = that % of the benchmark weight.
+4. Prorated actual weight = that % of total actual load weight (all comps
+   summed).
+5. Recovered weight = prorated actual − prorated benchmark.
+6. Convert to gallons via that product's today's lbs/gal.
+7. **Floor each compartment at 0 individually** — never net one compartment's
+   shortfall against another's surplus.
+8. Sum all compartments' recovered gallons = load total.
+
+Worked example is in the original spec message if the math needs re-deriving
+later (regular 8,500gal/diesel 7,600gal benchmarks → ~470 total points on a
+1,200gal regular / 7,000gal diesel load).
+
+**Data model** (not yet migrated):
+- `product_benchmarks`: `company_id, product_id, benchmark_gallons, reference_density, updated_at`
+- `incentive_settings`: `company_id, enabled bool, weight_cap_lbs default 80000 editable`
+- `load_points`: `load_id, driver_id, company_id, product_id, compartment_index, benchmark_gallons_used, actual_gallons, density_at_load (snapshot -- store, never recompute later), recovered_gallons, recovered_points, created_at`
+
+**UI behavior**: points calculate silently after submit (not live per-keystroke
+— avoids turning loading into a real-time optimization game, which cuts
+against the safety-first design intent). Simple "You earned X points on this
+load" confirmation after submit.
+
+**Payroll / payout**:
+- Points→dollars conversion is entirely company-side, at whatever rate they
+  pick. App has no payout calculator.
+- Payroll report: pay periods are **company-defined** (settings: period type
+  — weekly/biweekly/semi-monthly/monthly — + anchor day); admin picks from a
+  dropdown of generated periods, not manual date entry.
+- Table: driver, loads in period, total recovered gallons, total points, avg
+  per load — expandable to per-load detail. Employee/payroll ID pulls from
+  existing driver profile field.
+- CSV export: driver name/ID, period, total points, blank "$ amount" column
+  for admin's own rate.
+- **Edit & recalculate**: loads editable after the fact (typo fixes, wrong
+  compartment, etc). Recalc uses the *original* `density_at_load` snapshot
+  unless the edit specifically corrects a bad density reading. Track edit
+  history (who, old→new, timestamp) on the load. If points change after a
+  report was already exported, flag that report **"stale"** (not invalid) —
+  don't block or auto-regenerate.
+- Overload disputes not handled by the app — the weight cap is the entire
+  mitigation; company policy governs from there.
+
+### Roles & permissions
+
+**Pricing**: Base tier $100/mo = 1 admin seat + 4 seats of any non-admin
+role. Additional non-admin seats $25/mo each. Additional admin seats priced
+standalone, higher than $25/seat (e.g. $40-50 range) and **not** bundled with
+4 more generic seats — avoids penalizing large multi-region companies needing
+multiple admins but not more driver/dispatch seats. Role reassignment is a
+simple dropdown on the admin page (promote driver → lead driver → dispatch).
+
+**Permission matrix**:
+
+| Area | Driver | Lead Driver | Dispatch | Admin |
+|---|---|---|---|---|
+| Own loads/planner | ✓ | ✓ | — | ✓ |
+| Other drivers' loads | — | — | ✓ | ✓ |
+| Own cards | ✓ | ✓ | — | ✓ |
+| Other drivers' cards | — | — | ✓ | ✓ |
+| Flag priority terminal cards | — | — | ✓ | ✓ |
+| All company equipment (view/edit) | ✓ | ✓ | — | ✓ |
+| Equipment logs incl. attribution | ✓ | ✓ | — | ✓ |
+| Incentive benchmark settings | — | — | — | ✓ |
+| Payroll report | — | — | — | ✓ |
+| Own password vault | ✓ | ✓ | ✓ | ✓ |
+| Others' password vaults | — | — | — | — |
+| Role assignment | — | — | — | ✓ |
+
+Key principle: **equipment is shared fleet property** (all drivers/leads see
+it), **loads and cards are personal data** (only the individual + dispatch +
+admin see them), **password vault is personal to every role including
+admin** (nobody sees another user's vault, ever — no exceptions for role).
+
+Note this permission matrix does NOT match the "Key existing infrastructure"
+section's currently-hardcoded `role === "admin" || role === "lead"` checks
+scattered across the app (see call-site list above) — those only distinguish
+admin/lead from everyone else today; dispatch as a distinct role with its
+own cross-driver-but-not-equipment-edit visibility is new and will need
+those call sites (and RLS) actually reworked, not just a new role string
+added to the enum.
+
+#### Dispatch role — shipped 2026-07-30 (mechanics only, no billing)
+
+Scoped down from the full spec above to just the role mechanics, per an
+explicit decision to defer seat-based billing enforcement to a separate
+Stripe/RevenueCat pass. Live-DB verification (4 queries the user ran)
+confirmed `user_companies.role` is plain unconstrained `text` (default
+`'driver'`) — adding `'dispatch'` needed zero column migration, just app-code
++ two RLS policy updates.
+
+**New**: `lib/ui/driver/role.ts` — the first-ever shared `Role` type
+(`"driver" | "lead" | "admin" | "dispatch"`) + `ROLE_LABELS` + `isRole()`
+guard. Previously `role` was bare `string` (or `as any`-cast) everywhere,
+which is exactly how the two invite-role dropdowns had already drifted out
+of sync with each other (`app/admin/page.tsx`'s had driver/lead/admin;
+`lib/ui/driver/EquipmentDetails.tsx`'s separate, second `InviteModal` had
+only driver/admin, missing `lead`) — both now consistently offer all four.
+`/api/admin/invite/route.ts` also gained real validation via `isRole()`
+(previously accepted literally any string for `role`, no allow-list at all).
+
+**Who gets what, concretely**: dispatch can now enter `/admin` and see the
+Users/roster list (read-only — `MemberCard`'s existing `hideRoleDropdown`/
+`hideRemove` props suppress the role-reassignment dropdown and Remove button
+for non-admin viewers) and the per-member **"Loads"** button (opens the
+existing, already-built `AdminLoadsModal` — read-only, reuses
+`useLoadHistory(targetUserId)` unchanged). Dispatch does **not** get: the
+Equipment/Terminals sections (now explicitly gated to
+`admin || lead`, since they previously had NO section-level gate at all and
+would have silently opened to anyone who passed the page-level entry check
+once dispatch was added there), the "Set up planner →" full-impersonation
+button, the invite button, or role reassignment. All of those stay
+admin-only (or admin/lead-only for equipment), unchanged.
+
+**Migration queued, not yet applied**: `supabase/migrations/20260730000000_dispatch_role_load_visibility.sql`
+swaps the `load_log`/`load_lines` "admins can read company member loads"
+policies from `role IN ('admin','lead')` to `role IN ('admin','dispatch')` —
+this is what actually makes the new "Loads" button return data for a
+dispatch user; the app-code gate alone isn't sufficient. **Run this in the
+Supabase SQL editor before testing dispatch's Loads view.** Also worth
+noting: this is a real behavior change, not additive — leads lose the
+cross-driver load visibility they currently have, since the matrix scopes
+that to Dispatch + Admin only. Both policies existed live already but were
+never in a migration file until this one (confirmed via a live query
+2026-07-29 — see "Architecture reality" for why that's unsurprising here).
+
+**Explicitly NOT done, flagged for whenever each area is actually built**:
+- Fleet-wide terminal card / credential visibility for dispatch (the real
+  subject of the spec's Section 1.3) — the `driver_licenses`/
+  `driver_medical_cards`/`driver_port_ids`/`driver_twic_cards`/`attachments`
+  RLS policies (all currently `role = 'admin'` only, confirmed live) were
+  deliberately left untouched. Extending them to dispatch needs a real
+  product decision first: those policies are full `ALL` (CRUD), and giving
+  dispatch the same would let dispatch edit/delete another driver's license
+  record, which is more than "view who's carded where" implies — don't
+  extend blindly, ask.
+- The "priority terminal flagging" feature — brand new table/UI, not built.
+- **Security flag, not yet verified**: the actual role-reassignment code
+  path (`lib/ui/driver/MemberCard.tsx`'s `changeRole()`) is a bare client-side
+  `.update()` on `user_companies` with no in-component role check — its only
+  protection is whatever RLS exists on `user_companies` UPDATE, which is
+  **unconfirmed** (a keyword search for "role" in `pg_policies.qual` would
+  miss a function-based check like `is_company_admin()`). Also: the
+  `admin_set_user_company` RPC that exists live is dead code, never called
+  from anywhere in app-code — don't assume it's the enforcement path.
+  Worth a live-DB check before this ships further.
+- A likely pre-existing bug, found in passing, not fixed: `reports/page.tsx`'s
+  `useLoadHistory(authUserId)` call probably should be
+  `useLoadHistory(effectiveUserId)` — as written, an admin using "Set up
+  planner for [driver]" impersonation sees *their own* load history in
+  Reports → My Loads, not the impersonated driver's, while every other
+  fetch on that same page correctly uses `effectiveUserId`.
+
+### Website / landing page rework
+- `protankr.com` currently redirects straight into the calculator tool —
+  needs a real marketing site.
+- **Rename "calculator" → "Planner"** throughout (route + UI copy). Planner
+  redirects unauthenticated users to `/login`.
+- New site structure: `/` marketing landing, `/planner` (renamed calculator,
+  auth-gated), `/pricing` (solo + fleet pricing from above), `/about`,
+  `/login`, `/signup`.
+- Styling: keep the existing dark `#111111` app theme (continuity between
+  marketing site and product, not a separate palette). Industrial/utilitarian
+  visual language (sharp edges, gauge/data-driven visuals using real app
+  metrics) over generic SaaS-template look. Hero copy leads with the actual
+  problem (off-spec fuel → conservative loading → lost gallons), not vague
+  taglines.
+
+### Open questions (Fleet spec)
+- Tie-break rule if a split load has two compartments with exactly equal
+  gallons of different products.
+- Whether `product_benchmarks` needs a company-specific density override
+  path in addition to the standard reference table.
 
 ## Architecture reality (learned the hard way — READ THIS FIRST)
 

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
+import { ROLE_LABELS, type Role } from "./driver/role";
 
 type Membership = {
   company_id: string;
@@ -34,7 +35,7 @@ export default function NavMenu({ darkMode }: { darkMode?: boolean } = {}) {
   const isAdmin_  = pathname === "/admin";
   const isSuperAdmin_ = pathname === "/superadmin";
   const isReports_ = pathname === "/calculator/reports";
-  const isAdmin   = myRole === "admin" || myRole === "lead";
+  const isAdmin   = myRole === "admin" || myRole === "lead" || myRole === "dispatch";
 
   useEffect(() => {
     let cancelled = false;
@@ -160,7 +161,7 @@ export default function NavMenu({ darkMode }: { darkMode?: boolean } = {}) {
                 <div style={{ fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,0.9)", display: "flex", alignItems: "center", gap: 6 }}>
                   <span style={{ width: 6, height: 6, borderRadius: "50%", background: "rgba(255,255,255,0.55)", flexShrink: 0 }} />
                   {activeName}
-                  {(myRole === "admin" || myRole === "lead") && <AdminBadge role={myRole} />}
+                  {myRole !== "driver" && myRole !== "" && <AdminBadge role={myRole} />}
                 </div>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column" as const, gap: 4 }}>
@@ -183,7 +184,7 @@ export default function NavMenu({ darkMode }: { darkMode?: boolean } = {}) {
                         <span style={{ fontSize: 13, fontWeight: active ? 600 : 400, color: active ? "rgba(255,255,255,0.92)" : "rgba(255,255,255,0.55)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
                           {m.company?.company_name ?? "Company"}
                         </span>
-                        {(m.role === "admin" || m.role === "lead") && <AdminBadge role={m.role} />}
+                        {m.role !== "driver" && <AdminBadge role={m.role} />}
                       </button>
                     );
                   })}
@@ -217,9 +218,10 @@ export default function NavMenu({ darkMode }: { darkMode?: boolean } = {}) {
 }
 
 function AdminBadge({ role }: { role: string }) {
+  const label = ROLE_LABELS[role as Role] ?? role.toUpperCase();
   return (
     <span style={{ marginLeft: "auto", fontSize: 10, fontWeight: 700, padding: "1px 6px", borderRadius: 10, background: "rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.70)", border: "1px solid rgba(255,255,255,0.20)", flexShrink: 0 }}>
-      {role === "lead" ? "LEAD" : "ADMIN"}
+      {label.toUpperCase()}
     </span>
   );
 }

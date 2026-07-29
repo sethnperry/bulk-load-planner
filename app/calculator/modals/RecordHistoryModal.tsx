@@ -37,6 +37,7 @@ type ServiceRecordRaw = {
   location: string | null;
   reading_value: number | null;
   notes: string | null;
+  created_by: string | null;
 };
 type WashRecordRaw = {
   wash_record_id: string;
@@ -45,6 +46,7 @@ type WashRecordRaw = {
   location: string | null;
   washed_at: string;
   notes: string | null;
+  created_by: string | null;
 };
 type ServiceTypeRaw = {
   service_type_id: string;
@@ -68,6 +70,7 @@ type ServiceRow = {
   shopName: string | null;
   location: string | null;
   notes: string | null;
+  createdBy: string | null;
 };
 
 type WashRow = {
@@ -76,6 +79,7 @@ type WashRow = {
   unit: UnitRef;
   location: string | null;
   notes: string | null;
+  createdBy: string | null;
 };
 
 const DATE_RANGES: { label: string; days: number | null }[] = [
@@ -176,6 +180,7 @@ export default function RecordHistoryModal({ open, onClose, kind, title, company
   const [serviceRows, setServiceRows] = useState<ServiceRow[]>([]);
   const [washRows, setWashRows] = useState<WashRow[]>([]);
   const [types, setTypes] = useState<ServiceTypeRaw[]>([]);
+  const [namesByUserId, setNamesByUserId] = useState<Record<string, string>>({});
   const searchRef = useRef<HTMLInputElement>(null);
   const reportRef = useRef<HTMLDivElement>(null);
 
@@ -199,6 +204,21 @@ export default function RecordHistoryModal({ open, onClose, kind, title, company
 
   const truckName = (id: string) => trucks.find((t) => t.truck_id === id)?.truck_name ?? "Truck";
   const trailerName = (id: string) => trailers.find((t) => t.trailer_id === id)?.trailer_name ?? "Trailer";
+
+  // Equipment logs are shared fleet-wide (any company member can see who
+  // logged what, not just their own entries) -- created_by is already
+  // captured on every insert, this just resolves it to a display name.
+  async function resolveCreatedByNames(userIds: (string | null)[]) {
+    const ids = Array.from(new Set(userIds.filter((x): x is string => !!x)));
+    const missing = ids.filter((id) => !(id in namesByUserId));
+    if (missing.length === 0) return;
+    const { data } = await supabase.rpc("get_display_names_full", { p_user_ids: missing });
+    const next: Record<string, string> = {};
+    for (const row of (data ?? []) as any[]) {
+      if (row?.user_id) next[row.user_id] = row.display_name ?? "Unknown";
+    }
+    setNamesByUserId((prev) => ({ ...prev, ...next }));
+  }
 
   // Selecting "All" (date range) also broadens scope to every truck/trailer
   // in the company, not just the currently selected pair.
@@ -224,7 +244,7 @@ export default function RecordHistoryModal({ open, onClose, kind, title, company
 
       if (kind === "service") {
         let records: ServiceRecordRaw[];
-        const cols = "service_record_id, truck_id, trailer_id, service_type_id, date, shop_name, location, reading_value, notes";
+        const cols = "service_record_id, truck_id, trailer_id, service_type_id, date, shop_name, location, reading_value, notes, created_by";
         if (allEquipment) {
           const { data, error: e } = await supabase.from("service_records").select(cols).eq("company_id", companyId);
           if (e) throw e;
@@ -269,13 +289,15 @@ export default function RecordHistoryModal({ open, onClose, kind, title, company
             id: r.service_record_id, date: r.date, unit,
             serviceTypeId: r.service_type_id, typeName: type?.name ?? "Service", companion,
             readingValue: r.reading_value, shopName: r.shop_name, location: r.location, notes: r.notes,
+            createdBy: r.created_by,
           };
         }).sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : (a.unit.label === "Truck" ? -1 : 1)));
 
         setServiceRows(rows);
+        void resolveCreatedByNames(rows.map((r) => r.createdBy));
       } else {
         let records: WashRecordRaw[];
-        const cols = "wash_record_id, truck_id, trailer_id, location, washed_at, notes";
+        const cols = "wash_record_id, truck_id, trailer_id, location, washed_at, notes, created_by";
         if (allEquipment) {
           const { data, error: e } = await supabase.from("wash_records").select(cols).eq("company_id", companyId);
           if (e) throw e;
@@ -294,10 +316,11 @@ export default function RecordHistoryModal({ open, onClose, kind, title, company
           const unit: UnitRef = r.truck_id
             ? { id: r.truck_id, label: "Truck", name: truckName(r.truck_id) }
             : { id: r.trailer_id!, label: "Trailer", name: trailerName(r.trailer_id!) };
-          return { id: r.wash_record_id, date: r.washed_at, unit, location: r.location, notes: r.notes };
+          return { id: r.wash_record_id, date: r.washed_at, unit, location: r.location, notes: r.notes, createdBy: r.created_by };
         }).sort((a, b) => (a.date < b.date ? 1 : -1));
 
         setWashRows(rows);
+        void resolveCreatedByNames(rows.map((r) => r.createdBy));
       }
     } catch (e: any) {
       setError(e?.message ?? "Failed to load history.");
@@ -608,6 +631,11 @@ export default function RecordHistoryModal({ open, onClose, kind, title, company
                             </div>
                           )}
                           {detail && <div style={{ fontSize: 12, color: "rgba(255,255,255,0.55)", marginTop: 3 }}>{detail}</div>}
+                          {row.createdBy && (
+                            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.30)", marginTop: 4 }}>
+                              Logged by {namesByUserId[row.createdBy] ?? "…"}
+                            </div>
+                          )}
                         </div>
                       )}
 
@@ -678,12 +706,21 @@ export default function RecordHistoryModal({ open, onClose, kind, title, company
                         )}
                       </div>
 
-                      {isExpanded && !editing && row.notes && (
-                        <div
-                          onClick={(e) => { e.stopPropagation(); setNoteOverlay(row.notes); }}
-                          style={{ marginTop: 8, fontSize: 12, color: "rgba(255,255,255,0.4)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const, cursor: "pointer" }}
-                        >
-                          {row.notes}
+                      {isExpanded && !editing && (row.notes || row.createdBy) && (
+                        <div style={{ marginTop: 8 }} onClick={(e) => e.stopPropagation()}>
+                          {row.notes && (
+                            <div
+                              onClick={() => setNoteOverlay(row.notes)}
+                              style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const, cursor: "pointer" }}
+                            >
+                              {row.notes}
+                            </div>
+                          )}
+                          {row.createdBy && (
+                            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.30)", marginTop: 4 }}>
+                              Logged by {namesByUserId[row.createdBy] ?? "…"}
+                            </div>
+                          )}
                         </div>
                       )}
 

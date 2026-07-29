@@ -672,7 +672,7 @@ function InviteModal({ companyId, onClose, onDone }: { companyId: string; onClos
     <Modal title="Invite User" onClose={onClose}>
       {status && <Banner msg={status.msg} type={status.type} />}
       <Field label="Email"><input type="email" value={email} onChange={e => setEmail(e.target.value)} style={css.input} onKeyDown={e => e.key === "Enter" && send()} autoFocus /></Field>
-      <Field label="Role"><select value={role} onChange={e => setRole(e.target.value)} style={{ ...css.select, width: "100%" }}><option value="driver">Driver</option><option value="admin">Admin</option></select></Field>
+      <Field label="Role"><select value={role} onChange={e => setRole(e.target.value)} style={{ ...css.select, width: "100%" }}><option value="driver">Driver</option><option value="lead">Lead</option><option value="dispatch">Dispatch</option><option value="admin">Admin</option></select></Field>
       <div style={{ fontSize: 12, color: T.muted, marginBottom: 18, lineHeight: 1.5 }}>If the user already has an account they'll be added immediately. New users receive a magic link.</div>
       <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
         <button style={css.btn("ghost")} onClick={onClose}>Cancel</button>
@@ -683,11 +683,105 @@ function InviteModal({ companyId, onClose, onDone }: { companyId: string; onClos
 }
 
 // ─────────────────────────────────────────────────────────────
+// Sensitive Info (admin-only; purchase price, lease terms, insurance
+// claims -- deliberately its own table/RLS, separate from the shared
+// equipment log per the Fleet Tier spec's "admin-only field" requirement)
+// ─────────────────────────────────────────────────────────────
+
+type SensitiveData = {
+  id?: string;
+  purchase_price: string;
+  purchase_date: string;
+  lease_terms: string;
+  insurance_claims: string;
+};
+
+const emptySensitive: SensitiveData = { purchase_price: "", purchase_date: "", lease_terms: "", insurance_claims: "" };
+
+function SensitiveInfoSection({ unitKind, unitId, companyId }: { unitKind: "truck" | "trailer"; unitId: string; companyId: string }) {
+  const [open, setOpen] = useState(false);
+  const [data, setData] = useState<SensitiveData>(emptySensitive);
+  const [loaded, setLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open || loaded) return;
+    const col = unitKind === "truck" ? "truck_id" : "trailer_id";
+    supabase.from("equipment_sensitive_data").select("id, purchase_price, purchase_date, lease_terms, insurance_claims").eq(col, unitId).maybeSingle()
+      .then(({ data: row }) => {
+        if (row) {
+          setData({
+            id: row.id,
+            purchase_price: row.purchase_price != null ? String(row.purchase_price) : "",
+            purchase_date: row.purchase_date ?? "",
+            lease_terms: row.lease_terms ?? "",
+            insurance_claims: row.insurance_claims ?? "",
+          });
+        }
+        setLoaded(true);
+      });
+  }, [open, loaded, unitKind, unitId]);
+
+  async function save() {
+    setSaving(true);
+    setErr(null);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const payload: any = {
+        company_id: companyId,
+        truck_id: unitKind === "truck" ? unitId : null,
+        trailer_id: unitKind === "trailer" ? unitId : null,
+        purchase_price: data.purchase_price ? Number(data.purchase_price) : null,
+        purchase_date: data.purchase_date || null,
+        lease_terms: data.lease_terms || null,
+        insurance_claims: data.insurance_claims || null,
+        updated_by: user?.id ?? null,
+        updated_at: new Date().toISOString(),
+      };
+      if (data.id) {
+        const { error } = await supabase.from("equipment_sensitive_data").update(payload).eq("id", data.id);
+        if (error) throw error;
+      } else {
+        const { data: inserted, error } = await supabase.from("equipment_sensitive_data").insert(payload).select("id").single();
+        if (error) throw error;
+        setData((d) => ({ ...d, id: inserted.id }));
+      }
+    } catch (e: any) {
+      setErr(e?.message ?? "Failed to save.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div style={{ marginTop: 10, marginBottom: 10 }}>
+      <button type="button" onClick={() => setOpen((v) => !v)}
+        style={{ ...css.btn("subtle"), fontSize: 11, width: "100%", textAlign: "left" as const }}>
+        {open ? "▾" : "▸"} Sensitive Info (admin only)
+      </button>
+      {open && (
+        <div style={{ marginTop: 8, padding: 10, borderRadius: 6, border: `1px solid ${T.border}` }}>
+          {err && <Banner msg={err} type="error" />}
+          <FieldRow>
+            <Field label="Purchase Price"><input type="number" value={data.purchase_price} onChange={(e) => setData((d) => ({ ...d, purchase_price: e.target.value }))} style={css.input} /></Field>
+            <Field label="Purchase Date"><input type="date" value={data.purchase_date} onChange={(e) => setData((d) => ({ ...d, purchase_date: e.target.value }))} style={css.input} /></Field>
+          </FieldRow>
+          <Field label="Lease Terms"><textarea value={data.lease_terms} onChange={(e) => setData((d) => ({ ...d, lease_terms: e.target.value }))} rows={2} style={{ ...css.input, width: "100%", fontSize: 12, resize: "vertical" as const }} /></Field>
+          <Field label="Insurance Claims"><textarea value={data.insurance_claims} onChange={(e) => setData((d) => ({ ...d, insurance_claims: e.target.value }))} rows={2} style={{ ...css.input, width: "100%", fontSize: 12, resize: "vertical" as const }} /></Field>
+          <button type="button" onClick={save} disabled={saving} style={{ ...css.btn("primary"), fontSize: 11, width: "100%" }}>{saving ? "Saving…" : "Save Sensitive Info"}</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
 // Truck Modal
 // ─────────────────────────────────────────────────────────────
 
-function TruckModal({ truck, companyId, onClose, onDone }: {
-  truck: Truck | null; companyId: string; onClose: () => void; onDone: () => void;
+function TruckModal({ truck, companyId, onClose, onDone, myRole }: {
+  truck: Truck | null; companyId: string; onClose: () => void; onDone: () => void; myRole?: string;
 }) {
   const isNew = !truck;
   const [name,      setName]      = useState(truck?.truck_name ?? "");
@@ -876,6 +970,10 @@ function TruckModal({ truck, companyId, onClose, onDone }: {
           style={{ ...css.input, width: "100%", fontSize: 12, resize: "vertical" as const }} />
       </Field>
 
+      {!isNew && myRole === "admin" && (
+        <SensitiveInfoSection unitKind="truck" unitId={truck!.truck_id} companyId={companyId} />
+      )}
+
       <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" as const }}>
         {!isNew && (
           <button style={{ ...css.btn("danger"), flex: "1 1 0", minWidth: 80, textAlign: "center" as const }} onClick={deleteTruck} disabled={saving}>Delete</button>
@@ -936,8 +1034,8 @@ function TankEditRow({ label, dateVal, onDateChange, notesVal, onNotesChange, on
   );
 }
 
-function TrailerModal({ trailer, companyId, onClose, onDone }: {
-  trailer: Trailer | null; companyId: string; onClose: () => void; onDone: () => void;
+function TrailerModal({ trailer, companyId, onClose, onDone, myRole }: {
+  trailer: Trailer | null; companyId: string; onClose: () => void; onDone: () => void; myRole?: string;
 }) {
   const isNew = !trailer;
   const [name,      setName]      = useState(trailer?.trailer_name ?? "");
@@ -1143,6 +1241,10 @@ function TrailerModal({ trailer, companyId, onClose, onDone }: {
         <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3}
           style={{ ...css.input, width: "100%", fontSize: 12, resize: "vertical" as const }} />
       </Field>
+
+      {!isNew && myRole === "admin" && (
+        <SensitiveInfoSection unitKind="trailer" unitId={trailer!.trailer_id} companyId={companyId} />
+      )}
 
       <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" as const }}>
         {!isNew && (

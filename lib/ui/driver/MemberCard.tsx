@@ -155,6 +155,7 @@ export function MemberCard({ member, companyId, onRefresh, onEditProfile, hideRo
                   style={{ ...css.select, fontSize: 12, padding: "5px 8px" }}>
                   <option value="driver">Driver</option>
                   <option value="lead">Lead</option>
+                  <option value="dispatch">Dispatch</option>
                   <option value="admin">Admin</option>
                 </select>
               )}
