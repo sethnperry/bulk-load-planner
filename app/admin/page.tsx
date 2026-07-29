@@ -17,6 +17,8 @@ import { DriverProfileModal } from "@/lib/ui/driver/DriverProfileModal";
 import type { Member } from "@/lib/ui/driver/types";
 import type { Role } from "@/lib/ui/driver/role";
 import AdminLoadsModal from "./AdminLoadsModal";
+import FleetCardsModal from "./FleetCardsModal";
+import IncentiveSettingsModal from "./IncentiveSettingsModal";
 
 // ─────────────────────────────────────────────────────────────
 // Types
@@ -1036,6 +1038,8 @@ export default function AdminPage() {
   const [inviteModal,  setInviteModal]  = useState(false);
   const [profileModal, setProfileModal] = useState<{ member: Member; onSaved: (u: Partial<Member>) => void } | null>(null);
   const [loadsModal, setLoadsModal] = useState<{ userId: string; displayName: string } | null>(null);
+  const [fleetCardsOpen, setFleetCardsOpen] = useState(false);
+  const [incentiveSettingsOpen, setIncentiveSettingsOpen] = useState(false);
   const [truckModal,   setTruckModal]   = useState<Truck | null | "new">(null);
   const [trailerModal, setTrailerModal] = useState<Trailer | null | "new">(null);
   const [comboModal,   setComboModal]   = useState<Combo | null | "new">(null);
@@ -1272,7 +1276,21 @@ export default function AdminPage() {
     <div style={css.page}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 28, gap: 12 }}>
         <div><h1 style={css.heading}>{companyName}</h1><p style={css.subheading}>Company Admin</p></div>
-        <NavMenu />
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          {(myRole === "admin" || myRole === "dispatch") && (
+            <button type="button" onClick={() => setFleetCardsOpen(true)}
+              style={{ fontSize: 12, fontWeight: 800, padding: "7px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.75)", cursor: "pointer", whiteSpace: "nowrap" as const }}>
+              Fleet Cards
+            </button>
+          )}
+          {myRole === "admin" && (
+            <button type="button" onClick={() => setIncentiveSettingsOpen(true)}
+              style={{ fontSize: 12, fontWeight: 800, padding: "7px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.75)", cursor: "pointer", whiteSpace: "nowrap" as const }}>
+              Incentives
+            </button>
+          )}
+          <NavMenu />
+        </div>
       </div>
 
       {/* ── USERS (admin sees + manages; dispatch sees roster + Loads only, no invite/reassign/remove) ── */}
@@ -1574,6 +1592,8 @@ export default function AdminPage() {
           targetDisplayName={loadsModal.displayName}
         />
       )}
+      <FleetCardsModal open={fleetCardsOpen} onClose={() => setFleetCardsOpen(false)} companyId={companyId!} />
+      <IncentiveSettingsModal open={incentiveSettingsOpen} onClose={() => setIncentiveSettingsOpen(false)} companyId={companyId!} />
     </div>
   );
 }

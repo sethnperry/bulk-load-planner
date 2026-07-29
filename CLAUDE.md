@@ -115,6 +115,72 @@ described above.
   a new "flagged" filter. Progress bar shows both driver and dispatcher how
   many more training loads are needed until the flagged card goes active.
 
+#### Shipped 2026-08-01 (fleet card visibility only)
+
+`app/admin/FleetCardsModal.tsx` (new) — "Fleet Cards" button in the admin
+page header, visible to `admin`+`dispatch` (mirrors the Loads button's
+gating). Pick a terminal (search over `terminals`), see every company
+driver's card status there — name + computed expiry state (via the same
+`cardStateFor` used by the Cards tab), color-adjusted for a dark background
+(`cardTheme.ts`'s `EXP_COLOR` assumes the light pearl card-wallet
+background; reusing it here directly would have made "valid" render as
+near-black-on-near-black — caught before it shipped, see `DARK_EXP_COLOR`
+in that file). Deliberately status-only — doesn't read/show
+`card_number`/`pin` (those stay in `user_terminal_cards`, untouched).
+
+Migration (queued, not applied): `supabase/migrations/20260801000000_fleet_terminal_card_visibility.sql`
+adds one new, purely additive SELECT policy on `terminal_access` for
+admin+dispatch across the company — doesn't drop/replace whatever policy
+already exists there (unknown exact shape, no DB access to check). Only
+verified end-to-end for the *same-user* case (the one test company
+available has a single member, so cross-driver visibility itself is
+architecturally sound but not empirically confirmed the way the dispatch
+role's load-visibility swap was) — worth a real check with a second driver
+in the company after the migration runs.
+
+**Priority terminal flagging — design confirmed with user 2026-08-01, not
+yet built (queued behind the Incentive System).** Bigger than a simple
+"N training loads" counter — it's a **customizable per-terminal checklist**
+with progress tracking, not a fixed rule:
+
+- **Per-terminal, admin-configurable checklist** — each terminal has its own
+  list of carding requirements, set on the terminal setup/admin page
+  (existing "Terminals" section in `app/admin/page.tsx`, or the terminal
+  product setup screen — same company-scoped-list pattern already
+  established by `service_types`/`permit_types`, reuse that shape rather
+  than inventing a new one). At minimum one item is "N training loads"
+  (the number itself is per-terminal, since terminals vary — e.g. 3 vs 5),
+  but the list can also hold arbitrary other steps ("anything else that may
+  be on the list to get carded" — safety briefing, paperwork, etc, not
+  load-count-based).
+- **Driver-facing flow**: when a driver selects a terminal in the Planner
+  that isn't active yet (flagged/in-training for them), a window opens
+  showing that terminal's checklist before the Planner is revealed. The
+  driver checks off which step they're on. Some items likely auto-track
+  (the "training loads" counter increments from actual completed loads at
+  that terminal once flagged), others are probably manually checked
+  (non-load steps) — exact auto-vs-manual split per item type still needs
+  nailing down at build time, but the checklist-with-mixed-item-types shape
+  itself is confirmed.
+- **Load tagging**: when the driver actually loads at a flagged/in-training
+  terminal, that load gets a DB note identifying it as a training load (or
+  whichever checklist step it corresponds to) — likely a nullable column
+  on `load_log` linking back to the checklist item, so a training load is
+  still a completely normal load, just annotated.
+- **Manager/dispatch visibility**: progress against the checklist (not just
+  a boolean "flagged or not") should be visible to admin/dispatch — natural
+  extension of `FleetCardsModal.tsx` (already shows per-driver per-terminal
+  status; this would add a progress readout, e.g. "2 of 5 training loads,
+  1 of 2 other steps").
+
+Still open at build time: exact schema (a `terminal_checklist_items`
+company+terminal-scoped table + a per-driver progress table, mirroring the
+`service_types`/`service_records` split already used for service history);
+whether "goes active" needs an explicit admin/dispatch confirm step or
+auto-clears once every item is checked; whether it surfaces via the
+location button, Cards tab, or both (user said "and/or" originally, hasn't
+been pinned down further).
+
 ### Onboarding
 - Replace/rework the existing guided tour with short video clips.
 - Fleet training mode: new drivers inherit the fleet's terminal
@@ -196,6 +262,46 @@ load" confirmation after submit.
   don't block or auto-regenerate.
 - Overload disputes not handled by the app — the weight cap is the entire
   mitigation; company policy governs from there.
+
+**Status (2026-08-02): core calc engine done, payroll report deferred.**
+Built and queued (migration `20260802000000_incentive_system.sql`, not yet
+applied — no live DB write access this session):
+- `incentive_settings`, `product_benchmarks`, `load_points` tables + RLS
+  (company-read, admin-write on settings/benchmarks; load_points has no
+  direct client write at all — only `calculate_load_points` touches it).
+- `calculate_load_points(p_load_id)` RPC — implements the finalized
+  split-load formula verbatim (a single-compartment load is just the n=1
+  case, no separate code path). Called fire-and-forget/non-fatal from
+  `useLoadWorkflow.ts` right after `complete_load` succeeds, same pattern as
+  `update_terminal_temp_bias`. No-ops silently if the company hasn't
+  enabled incentives.
+- `products.api_60` + `alpha_per_f` (already existing columns) turned out to
+  **be** the "standard industry density table per product" the spec called
+  for — no new density table was needed. `product_benchmarks.reference_density`
+  is a snapshot of that computed at benchmark-set time, but is
+  **informational only** (shown to the admin for context); the live calc
+  always uses that load's actual observed density, never this snapshot.
+  This also resolves the open question below about a company-specific
+  density override — since the static reference isn't used in the math,
+  there's nothing to override.
+- `IncentiveSettingsModal.tsx` (admin-only, entry point next to Fleet Cards
+  in `app/admin/page.tsx`): enable toggle, weight cap input, search-and-add
+  per-product benchmark gallons (not a picker over the full granular
+  catalog — most companies only ever benchmark a handful of products).
+- Driver-facing confirmation: "You earned X points on this load" line in
+  the planner's Load Summary card (`app/calculator/page.tsx`), populated
+  from `LoadReport.recovered_points` — null/hidden whenever incentives
+  aren't enabled for the company.
+
+**Not started — deferred, genuinely separate deliverable:** the payroll
+report (pay-period generation from `incentive_settings.pay_period_type` +
+`pay_period_anchor_date`, driver/loads/gallons/points table view, CSV
+export with blank "$ amount" column, edit-and-recalculate preserving the
+original `density_at_load` snapshot unless the edit specifically corrects a
+bad density reading, edit history tracking, "stale" flagging of
+already-exported reports). The `pay_period_type`/`pay_period_anchor_date`
+columns already exist on `incentive_settings` (added now to avoid a second
+migration touching that table later) but nothing reads them yet.
 
 ### Roles & permissions
 
@@ -325,8 +431,6 @@ never in a migration file until this one (confirmed via a live query
 ### Open questions (Fleet spec)
 - Tie-break rule if a split load has two compartments with exactly equal
   gallons of different products.
-- Whether `product_benchmarks` needs a company-specific density override
-  path in addition to the standard reference table.
 
 ## Architecture reality (learned the hard way — READ THIS FIRST)
 

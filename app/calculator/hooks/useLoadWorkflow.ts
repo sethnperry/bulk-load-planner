@@ -325,6 +325,17 @@ try {
   console.warn("terminal_temp_bias update failed (non-fatal):", e);
 }
 
+// Incentive system ("Recovered Gallons") -- silent, non-fatal. No-ops
+// server-side if the company hasn't enabled it (calculate_load_points
+// returns { enabled: false }).
+let recoveredPoints: number | null = null;
+try {
+  const { data: pointsRes } = await supabase.rpc("calculate_load_points", { p_load_id: activeLoadId });
+  if (pointsRes?.enabled) recoveredPoints = Number(pointsRes.recovered_gallons ?? 0);
+} catch (e) {
+  console.warn("calculate_load_points failed (non-fatal):", e);
+}
+
 // Fallback: persist "last observed" API/temp so LoadingModal can show previous API on reload
 // (Non-fatal if RLS blocks it)
 try {
@@ -412,6 +423,7 @@ try {
         planned_gross_lbs: plannedGross,
         actual_gross_lbs: actualGross,
         diff_lbs: diff,
+        recovered_points: recoveredPoints,
       });
       setLoadingOpen(false);
 

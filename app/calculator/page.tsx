@@ -1344,6 +1344,11 @@ const lastProductInfoById = useMemo(() => {
               {planUsesReferenceApi && planRows.length > 0 && (
                 <div style={{ fontSize: 10, fontWeight: 700, color: "#fb923c", marginTop: 4 }}>⚠ using ref API</div>
               )}
+              {loadReport?.recovered_points != null && loadReport.recovered_points > 0 && (
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#4ade80", marginTop: 6 }}>
+                  🎉 You earned {loadReport.recovered_points.toFixed(1)} points on this load
+                </div>
+              )}
             </div>
 
             {/* Footnote */}

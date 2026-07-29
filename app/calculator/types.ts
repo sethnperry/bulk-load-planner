@@ -133,4 +133,7 @@ export type LoadReport = {
   planned_gross_lbs: number | null;
   actual_gross_lbs: number | null;
   diff_lbs: number | null;
+  // Incentive system ("Recovered Gallons") -- null when the company hasn't
+  // enabled it, or calculate_load_points hasn't returned yet.
+  recovered_points: number | null;
 };

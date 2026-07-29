@@ -64,7 +64,7 @@ export function usePlanSlots({
   const [slotHas, setSlotHas] = useState<Record<number, boolean>>({});
   const [lastLoadLines, setLastLoadLines] = useState<any[]>([]);
   const [lastLoadReport, setLastLoadReport] = useState<{
-    planned_total_gal: number; planned_gross_lbs: number | null; actual_gross_lbs: number | null; diff_lbs: number | null;
+    planned_total_gal: number; planned_gross_lbs: number | null; actual_gross_lbs: number | null; diff_lbs: number | null; recovered_points: number | null;
   } | null>(null);
 
   // True only until the first real (signed-in) scope resolves after a fresh
@@ -388,7 +388,7 @@ export function usePlanSlots({
       const llKey = `proTankr:${authUserId ? "u:" + authUserId : "anon"}:combo:${selectedComboId}:lastLoadLines`;
       safeWrite(llKey, { lastLoadLines: dbPayload.lastLoadLines, lastLoadId: dbPayload.lastLoadId });
       setLastLoadLines(dbPayload.lastLoadLines ?? []);
-      setLastLoadReport(dbPayload.loadReport ?? null);
+      setLastLoadReport(dbPayload.loadReport ? { ...dbPayload.loadReport, recovered_points: dbPayload.loadReport.recovered_points ?? null } : null);
 
       // Only restore the plan (compPlan/temp/CG) if slot 0 is empty — i.e. fresh page load
       // with no autosaved state. If slot 0 has data the driver is mid-plan; don't clobber it.
