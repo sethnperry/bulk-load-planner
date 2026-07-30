@@ -32,6 +32,7 @@ import { useDemoWatchdog } from "./hooks/useDemoWatchdog";
 import { useTheme } from "./hooks/useTheme";
 import { addDaysISO_ } from "./utils/dates";
 import type { TerminalRow, TerminalCatalogRow } from "./types";
+import { isRole, type Role } from "@/lib/ui/driver/role";
 
 export type CardData = { cardNumber: string; privateNote: string; pin: string };
 
@@ -55,6 +56,14 @@ type ShellValue = {
   cardDataByTerminalId: Record<string, CardData>;
   setCardDataForTerminal_: (terminalId: string, data: CardData) => Promise<void>;
   theme: ReturnType<typeof useTheme>;
+  // Role of effectiveUserId in their active company -- null until resolved.
+  // Drives the role-specific tab (Lead/Dispatch/Admin) shown left of Planner.
+  role: Role | null;
+  companyId: string | null;
+  // Super admins (is_super_admin() RPC, same one NavMenu.tsx already uses)
+  // see ALL role tabs regardless of their own company role -- lets one
+  // account verify Lead/Dispatch/Admin tabs without reassigning roles.
+  isSuperAdmin: boolean;
 };
 
 const ShellContext = createContext<ShellValue | null>(null);
@@ -123,6 +132,45 @@ export function CalculatorShellProvider({ children }: { children: React.ReactNod
   const [expModalOpen, setExpModalOpen] = useState(false);
   const [termOpen, setTermOpen] = useState(false);
 
+  // ── Role (drives the Lead/Dispatch/Admin tab shown left of Planner) ──────
+  // Same query shape as NavMenu.tsx's own role fetch, but scoped to
+  // effectiveUserId (not authUserId) so admin impersonation ("Set up
+  // planner for driver X") reflects the impersonated user's role, matching
+  // every other piece of shared shell state.
+  const [role, setRole] = useState<Role | null>(null);
+  const [companyId, setCompanyId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!effectiveUserId) return;
+    let cancelled = false;
+    (async () => {
+      const [{ data: mRows }, { data: sRow }] = await Promise.all([
+        supabase.from("user_companies").select("company_id, role").eq("user_id", effectiveUserId),
+        supabase.from("user_settings").select("active_company_id").eq("user_id", effectiveUserId).maybeSingle(),
+      ]);
+      if (cancelled) return;
+      const ms = (mRows ?? []) as { company_id: string; role: string }[];
+      const activeId = (sRow?.active_company_id as string | null) ?? ms[0]?.company_id ?? null;
+      const rawRole = ms.find((m) => m.company_id === activeId)?.role ?? null;
+      setCompanyId(activeId);
+      setRole(isRole(rawRole) ? rawRole : null);
+    })();
+    return () => { cancelled = true; };
+  }, [effectiveUserId]);
+
+  // Super-admin status is about the REAL signed-in account, not whoever
+  // they're impersonating -- keyed on authUserId, not effectiveUserId.
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  useEffect(() => {
+    if (!authUserId) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase.rpc("is_super_admin");
+      if (!cancelled) setIsSuperAdmin(Boolean(data));
+    })();
+    return () => { cancelled = true; };
+  }, [authUserId]);
+
   // ── Card data (card number + PIN + private note, per terminal, per user) ──
   // Shared here (not local to the Planner page) because the new Cards tab
   // route needs the same data -- two independent fetches would risk the same
@@ -186,6 +234,7 @@ export function CalculatorShellProvider({ children }: { children: React.ReactNod
     termOpen, setTermOpen,
     cardDataByTerminalId, setCardDataForTerminal_,
     theme,
+    role, companyId, isSuperAdmin,
   };
 
   return <ShellContext.Provider value={value}>{children}</ShellContext.Provider>;

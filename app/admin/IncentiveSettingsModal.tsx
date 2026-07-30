@@ -51,6 +51,8 @@ export default function IncentiveSettingsModal({ open, onClose, companyId }: Pro
 
   const [enabled, setEnabled] = useState(false);
   const [weightCapLbs, setWeightCapLbs] = useState("80000");
+  const [payPeriodType, setPayPeriodType] = useState("biweekly");
+  const [payPeriodAnchorDate, setPayPeriodAnchorDate] = useState("");
 
   const [products, setProducts] = useState<ProductRow[]>([]);
   const [benchmarks, setBenchmarks] = useState<Record<string, BenchmarkRow>>({});
@@ -66,13 +68,15 @@ export default function IncentiveSettingsModal({ open, onClose, companyId }: Pro
     (async () => {
       setLoading(true);
       const [{ data: settings }, { data: prods }, { data: existing }] = await Promise.all([
-        supabase.from("incentive_settings").select("enabled, weight_cap_lbs").eq("company_id", companyId).maybeSingle(),
+        supabase.from("incentive_settings").select("enabled, weight_cap_lbs, pay_period_type, pay_period_anchor_date").eq("company_id", companyId).maybeSingle(),
         supabase.from("products").select("product_id, product_name, display_name, button_code, api_60, alpha_per_f").order("product_name"),
         supabase.from("product_benchmarks").select("product_id, benchmark_gallons, reference_density").eq("company_id", companyId),
       ]);
       if (cancelled) return;
       setEnabled(Boolean(settings?.enabled));
       setWeightCapLbs(String(settings?.weight_cap_lbs ?? 80000));
+      setPayPeriodType(settings?.pay_period_type ?? "biweekly");
+      setPayPeriodAnchorDate(settings?.pay_period_anchor_date ?? new Date().toISOString().slice(0, 10));
       setProducts((prods ?? []) as ProductRow[]);
       const map: Record<string, BenchmarkRow> = {};
       for (const row of (existing ?? []) as BenchmarkRow[]) map[row.product_id] = row;
@@ -123,6 +127,8 @@ export default function IncentiveSettingsModal({ open, onClose, companyId }: Pro
         company_id: companyId,
         enabled,
         weight_cap_lbs: Number.isFinite(cap) && cap > 0 ? cap : 80000,
+        pay_period_type: payPeriodType,
+        pay_period_anchor_date: payPeriodAnchorDate || null,
         updated_at: new Date().toISOString(),
       });
       if (settingsErr) throw settingsErr;
@@ -183,6 +189,25 @@ export default function IncentiveSettingsModal({ open, onClose, companyId }: Pro
               <div style={{ marginTop: 12 }}>
                 <div style={{ fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.5)", marginBottom: 6 }}>WEIGHT CAP (GVW, lbs)</div>
                 <input type="number" value={weightCapLbs} onChange={(e) => setWeightCapLbs(e.target.value)} style={{ ...INPUT, width: "100%" }} />
+              </div>
+
+              <div style={{ marginTop: 16, display: "flex", gap: 10 }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.5)", marginBottom: 6 }}>PAY PERIOD</div>
+                  <select value={payPeriodType} onChange={(e) => setPayPeriodType(e.target.value)} style={{ ...INPUT, width: "100%" }}>
+                    <option value="weekly">Weekly</option>
+                    <option value="biweekly">Biweekly</option>
+                    <option value="semi_monthly">Semi-monthly</option>
+                    <option value="monthly">Monthly</option>
+                  </select>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.5)", marginBottom: 6 }}>ANCHOR DATE</div>
+                  <input type="date" value={payPeriodAnchorDate} onChange={(e) => setPayPeriodAnchorDate(e.target.value)} style={{ ...INPUT, width: "100%" }} />
+                </div>
+              </div>
+              <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginTop: 6, lineHeight: 1.5 }}>
+                Anchor date fixes the start of a period (day-of-week for weekly/biweekly, day-of-month for semi-monthly/monthly). Drives the period dropdown in the Payroll Report.
               </div>
 
               <div style={{ marginTop: 16, fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.5)", marginBottom: 6 }}>PRODUCT BENCHMARKS (gallons)</div>

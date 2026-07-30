@@ -30,20 +30,43 @@ import {
   themeFill, themeHeaderGradient, themeIconStroke, themeTabActive, themeTabInactive,
   themeUnderlineTrack, themeUnderlineActive,
 } from "./theme";
+import type { Role } from "@/lib/ui/driver/role";
 
-const TABS = [
+const BASE_TABS = [
   { id: "planner", label: "Planner", href: "/calculator" },
   { id: "cards", label: "Cards", href: "/calculator/cards" },
   { id: "vault", label: "Vault", href: "/calculator/vault" },
 ] as const;
 
-function activeTabFor(pathname: string | null): typeof TABS[number]["id"] | "none" {
+// Everyone gets Planner/Cards/Vault; exactly one extra role-specific tab is
+// prepended to the left, per role. Order here (Lead, Dispatch, Admin) is
+// also the left-to-right order super admins see when all three show at
+// once. A driver (or unresolved role) gets no extra tab.
+const ROLE_TAB_ORDER: Role[] = ["lead", "dispatch", "admin"];
+const ROLE_TABS: Partial<Record<Role, { id: string; label: string; href: string }>> = {
+  lead: { id: "lead", label: "Lead", href: "/calculator/lead" },
+  dispatch: { id: "dispatch", label: "Dispatch", href: "/calculator/dispatch" },
+  admin: { id: "admin", label: "Admin", href: "/calculator/admin" },
+};
+
+function tabsFor(role: Role | null, isSuperAdmin: boolean) {
+  // Super admins see every role tab regardless of their own company role --
+  // lets one account verify Lead/Dispatch/Admin without reassigning roles.
+  const extras = isSuperAdmin
+    ? ROLE_TAB_ORDER.map((r) => ROLE_TABS[r]!)
+    : role && ROLE_TABS[role] ? [ROLE_TABS[role]!] : [];
+  return [...extras, ...BASE_TABS];
+}
+
+function activeTabFor(pathname: string | null, tabs: ReturnType<typeof tabsFor>): string | "none" {
   if (pathname?.startsWith("/calculator/cards")) return "cards";
   if (pathname?.startsWith("/calculator/vault")) return "vault";
   // Reports is a nav-menu destination, not a peer of Planner/Cards/Vault --
   // "none" leaves every tab unhighlighted instead of falsely bolding
   // Planner while Reports content is what's actually showing.
   if (pathname?.startsWith("/calculator/reports")) return "none";
+  const roleTab = tabs.find((t) => t.id !== "planner" && t.id !== "cards" && t.id !== "vault" && pathname?.startsWith(t.href));
+  if (roleTab) return roleTab.id;
   return "planner";
 }
 
@@ -52,7 +75,8 @@ function TabBar() {
   const router = useRouter();
   const shell = useCalculatorShell();
   const darkMode = shell.theme.darkMode;
-  const active = activeTabFor(pathname);
+  const tabs = useMemo(() => tabsFor(shell.role, shell.isSuperAdmin), [shell.role, shell.isSuperAdmin]);
+  const active = activeTabFor(pathname, tabs);
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const suppressScrollNavRef = useRef(false);
@@ -60,7 +84,7 @@ function TabBar() {
   const centerTab = (id: string, smooth: boolean) => {
     const container = scrollRef.current;
     if (!container) return;
-    const idx = TABS.findIndex((t) => t.id === id);
+    const idx = tabs.findIndex((t) => t.id === id);
     const el = container.children[idx] as HTMLElement | undefined;
     if (!el) return;
     const target = el.offsetLeft + el.offsetWidth / 2 - container.clientWidth / 2;
@@ -70,7 +94,7 @@ function TabBar() {
   };
 
   useEffect(() => { centerTab(active, false); }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { centerTab(active, true); }, [active]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { centerTab(active, true); }, [active, tabs.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function onScroll() {
     if (suppressScrollNavRef.current) return;
@@ -86,8 +110,8 @@ function TabBar() {
         const d = Math.abs(r.left + r.width / 2 - centerX);
         if (d < bestDist) { bestDist = d; best = i; }
       });
-      const id = TABS[best]?.id;
-      if (id && id !== active) router.push(TABS[best].href);
+      const id = tabs[best]?.id;
+      if (id && id !== active) router.push(tabs[best].href);
     }, 80);
   }
 
@@ -102,7 +126,7 @@ function TabBar() {
           padding: "0 calc(50% - 60px)", WebkitOverflowScrolling: "touch",
         }}
       >
-        {TABS.map((t) => {
+        {tabs.map((t) => {
           const isActive = t.id === active;
           return (
             <div

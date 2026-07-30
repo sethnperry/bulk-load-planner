@@ -20,6 +20,7 @@ import AdminLoadsModal from "./AdminLoadsModal";
 import FleetCardsModal from "./FleetCardsModal";
 import IncentiveSettingsModal from "./IncentiveSettingsModal";
 import TerminalChecklistEditorModal from "./TerminalChecklistEditorModal";
+import PayrollReportModal from "./PayrollReportModal";
 
 // ─────────────────────────────────────────────────────────────
 // Types
@@ -1058,6 +1059,7 @@ export default function AdminPage() {
   const [loadsModal, setLoadsModal] = useState<{ userId: string; displayName: string } | null>(null);
   const [fleetCardsOpen, setFleetCardsOpen] = useState(false);
   const [incentiveSettingsOpen, setIncentiveSettingsOpen] = useState(false);
+  const [payrollReportOpen, setPayrollReportOpen] = useState(false);
   const [truckModal,   setTruckModal]   = useState<Truck | null | "new">(null);
   const [trailerModal, setTrailerModal] = useState<Trailer | null | "new">(null);
   const [comboModal,   setComboModal]   = useState<Combo | null | "new">(null);
@@ -1305,6 +1307,12 @@ export default function AdminPage() {
             <button type="button" onClick={() => setIncentiveSettingsOpen(true)}
               style={{ fontSize: 12, fontWeight: 800, padding: "7px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.75)", cursor: "pointer", whiteSpace: "nowrap" as const }}>
               Incentives
+            </button>
+          )}
+          {myRole === "admin" && (
+            <button type="button" onClick={() => setPayrollReportOpen(true)}
+              style={{ fontSize: 12, fontWeight: 800, padding: "7px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.75)", cursor: "pointer", whiteSpace: "nowrap" as const }}>
+              Payroll
             </button>
           )}
           <NavMenu />
@@ -1612,6 +1620,7 @@ export default function AdminPage() {
       )}
       <FleetCardsModal open={fleetCardsOpen} onClose={() => setFleetCardsOpen(false)} companyId={companyId!} />
       <IncentiveSettingsModal open={incentiveSettingsOpen} onClose={() => setIncentiveSettingsOpen(false)} companyId={companyId!} />
+      <PayrollReportModal open={payrollReportOpen} onClose={() => setPayrollReportOpen(false)} companyId={companyId!} />
     </div>
   );
 }

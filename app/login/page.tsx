@@ -28,7 +28,7 @@ export default function LoginPage() {
     ? "http://localhost:3000"
     : "https://www.protankr.com";
 
-const emailRedirectTo = `${siteUrl}/auth/callback?next=${encodeURIComponent("/profile")}`;
+const emailRedirectTo = `${siteUrl}/auth/callback?next=${encodeURIComponent("/calculator")}`;
       const { error: otpError } = await supabase.auth.signInWithOtp({
         email: trimmed,
         options: { emailRedirectTo },

@@ -348,15 +348,60 @@ applied — no live DB write access this session):
   from `LoadReport.recovered_points` — null/hidden whenever incentives
   aren't enabled for the company.
 
-**Not started — deferred, genuinely separate deliverable:** the payroll
-report (pay-period generation from `incentive_settings.pay_period_type` +
-`pay_period_anchor_date`, driver/loads/gallons/points table view, CSV
-export with blank "$ amount" column, edit-and-recalculate preserving the
-original `density_at_load` snapshot unless the edit specifically corrects a
-bad density reading, edit history tracking, "stale" flagging of
-already-exported reports). The `pay_period_type`/`pay_period_anchor_date`
-columns already exist on `incentive_settings` (added now to avoid a second
-migration touching that table later) but nothing reads them yet.
+**Status (2026-08-04): payroll report shipped — Incentive System now
+fully complete.** Built and queued (migration
+`20260804000000_payroll_report.sql`, not yet applied — requires
+`20260802000000_incentive_system.sql` to be applied first since it adds a
+trigger on `load_points` and reuses `calculate_load_points`):
+- `payroll_reports` table — purely a "this period was exported" marker, not
+  a stored report. The report itself (table + CSV) is always computed live
+  from `load_points` for whatever period is selected. Admin-only RLS.
+- `load_edit_history` table — one row per `edit_load_line()` call, logging
+  who/when/old→new for whatever fields changed. Admin-read only (via the
+  load's company), no direct client write.
+- `flag_stale_payroll_reports` trigger (AFTER UPDATE on `load_points`) —
+  whenever points get recalculated, any already-exported
+  `payroll_reports` row whose period covers that load's date flips
+  `is_stale = true`. Generic and automatic — doesn't care what caused the
+  recalc.
+- `recalculate_load_points(p_load_id, p_preserve_density)` — admin-gated
+  (checked inside the function, not left to RLS, since this affects pay).
+  `p_preserve_density = true` (default): re-prorates using each
+  compartment's *existing* `density_at_load` snapshot and the edited
+  `actual_gallons` — density itself never moves, per spec ("uses the
+  original density_at_load snapshot unless the edit specifically corrects
+  a bad density reading"). `p_preserve_density = false`: the edit did
+  correct a bad density reading, so this just calls the existing
+  `calculate_load_points` again for a full from-scratch recompute (it
+  already derives density fresh from current `load_lines`).
+- `edit_load_line(p_load_id, p_comp_number, p_actual_gallons, p_actual_lbs,
+  p_density_correction)` — admin-only, updates `load_lines`, logs to
+  `load_edit_history`, then calls `recalculate_load_points` with the
+  correct preserve/correct flag.
+- `app/admin/payPeriods.ts` (new, pure date math, no DB calls) —
+  `generatePayPeriods()` generates weekly/biweekly/semi-monthly/monthly
+  period boundaries from `pay_period_type` + `pay_period_anchor_date`, so
+  the admin picks from a dropdown rather than typing dates manually, per
+  spec. Semi-monthly's split day is clamped to 1–15 (the "A" half is
+  always exactly 15 days; the "B" half absorbs whatever's left in the
+  actual calendar month) — matches the standard 1–15/16-EOM convention
+  when anchor day = 1, generalizes reasonably for other split days.
+  Manually verified against several anchor/period-type combinations
+  (including a semi-monthly year-boundary rollover) before wiring into the
+  UI.
+- `IncentiveSettingsModal.tsx` extended with pay period type + anchor date
+  fields (the columns already existed on `incentive_settings` from the
+  original migration; this is the first UI that actually writes them).
+- `PayrollReportModal.tsx` (new, admin-only, entry point next to
+  Incentives in `app/admin/page.tsx`): period dropdown, driver table
+  (name, employee ID from the existing `profiles.employee_number` field,
+  loads count, total recovered gallons, total points, avg per load),
+  expandable to per-load and then per-compartment detail, inline
+  edit-and-recalculate (gallons/lbs inputs + a "this corrects a bad
+  density/API reading" checkbox controlling the preserve-vs-recompute
+  path), CSV export (driver name/ID, period, total points, blank "$
+  amount" column) which also inserts the `payroll_reports` marker row and
+  clears any stale flag shown for that period.
 
 ### Roles & permissions
 
@@ -467,6 +512,92 @@ never in a migration file until this one (confirmed via a live query
   planner for [driver]" impersonation sees *their own* load history in
   Reports → My Loads, not the impersonated driver's, while every other
   fetch on that same page correctly uses `effectiveUserId`.
+
+### Role-based tabs (new UI direction, 2026-07-30, not in the original Fleet Tier spec)
+
+Every role gets Planner/Cards/Vault for themselves; each non-driver role
+additionally gets exactly one extra tab to the **left** of Planner —
+Lead/Dispatch/Admin. Each role tab is its own fresh, focused page (subtabs +
+a role-relevant chart/content area) — explicitly **not** a literal copy of
+the Planner page's load-planning shell (equipment/location cards, temp
+dial, Load button); those don't have an obvious meaning for a
+fleet-monitoring dashboard and would mean inventing behavior for controls
+that don't do anything real. Confirmed with user 2026-07-30 before
+building.
+
+**Shipped so far — Lead tab only** (Dispatch/Admin follow the same shape
+later, not started):
+- `role`/`companyId` hoisted into `CalculatorShellContext.tsx` (same
+  query shape as `NavMenu.tsx`'s own role fetch, but scoped to
+  `effectiveUserId` so admin impersonation reflects the impersonated
+  user's role — matches every other piece of shared shell state).
+  `NavMenu.tsx` itself was left alone (own independent fetch) since it's
+  also rendered outside the shell provider (e.g. `/admin`).
+- `CalculatorLayoutClient.tsx`'s tab bar is now role-aware: `ROLE_TABS`
+  maps `role -> {id,label,href}`, prepended to the always-present
+  Planner/Cards/Vault base tabs. A driver (or unresolved role) sees no
+  extra tab. Only `lead -> "Lead" (/calculator/lead)` is wired so far.
+- `app/calculator/components/CenteredSubTabs.tsx` (new, generic) —
+  extracts the "selected item scrolls to center" scroll-snap mechanic that
+  the tab bar and `PresetDial.tsx` (the Planner's A-E preset row) each
+  already implemented independently; this was the third copy, so it's now
+  shared. Reusable for Dispatch/Admin subtabs later.
+- `app/calculator/lead/page.tsx` — Dashboard / Tasks / Ledger subtabs via
+  `CenteredSubTabs`. Only Dashboard has real content; Tasks and Ledger are
+  honest "coming soon" placeholders, not a guess at unspecified
+  functionality (only Dashboard was actually specified).
+- `app/calculator/lead/EquipmentScheduleChart.tsx` — "who has the
+  equipment and when," a weekly roster grid (driver rows × day-of-week
+  columns, color-coded day/night/off). **Illustrative mock data only** —
+  confirmed with user before building that no driver-shift-schedule table
+  exists anywhere in the app; a real schedule feature is a separate,
+  later piece once this chart's shape is validated.
+
+**Verification note:** live-verified the Lead page's own content (subtabs
+centering + swapping, chart rendering) via direct navigation to
+`/calculator/lead`, and confirmed no regression to the existing
+Planner/Cards/Vault tab bar. Did **not** verify the tab actually appearing
+in the tab bar for a real lead-role user end-to-end — the only test
+company available is single-member (admin-only), and reassigning that
+sole admin's own role to `lead` to test would risk losing the ability to
+reassign it back (role dropdown is admin-only-visible) with no easy live-DB
+undo. Worth a real check once a second (non-admin) test member exists.
+
+#### Shipped 2026-07-30: Dispatch + Admin tabs, super-admin sees all
+
+- `app/calculator/dispatch/page.tsx` and `app/calculator/admin/page.tsx` —
+  same shell as Lead (`CenteredSubTabs`, Dashboard/Tasks/Ledger). Neither
+  had specific Dashboard content requested the way Lead's equipment
+  schedule was, so **all three subtabs on both are honest placeholders**
+  naming likely future content (dispatch: fleet-wide loads/cards overview;
+  admin: a lighter company-status glance, explicitly not a replacement for
+  the full `/admin` console) rather than guessed-at functionality.
+  `/calculator/admin` is deliberately a distinct route from the existing
+  top-level `/admin` page — same tab-shell pattern as Lead/Dispatch, not
+  the full management console.
+- `CalculatorShellContext.tsx` gained `isSuperAdmin` (via the same
+  `is_super_admin()` RPC `NavMenu.tsx` already calls, but keyed on
+  `authUserId` not `effectiveUserId` — super-admin status is about the
+  real signed-in account, not whoever they're impersonating).
+- `CalculatorLayoutClient.tsx`'s `ROLE_TABS` is now an ordered list
+  (Lead, Dispatch, Admin — also the left-to-right order super admins see
+  all three in). `tabsFor(role, isSuperAdmin)`: a super admin sees **all
+  three** role tabs regardless of their own company role, specifically so
+  one account can verify/QA every role tab without reassigning roles.
+  `activeTabFor` generalized from "find the one extra tab" to "find
+  whichever role tab's href prefix-matches the current path," since there
+  can now be more than one.
+- **Verification gap, same shape as Lead's:** the demo test account isn't
+  in the `super_admins` table and there's no live DB write access this
+  session to add it temporarily, so the actual "super admin sees all six
+  tabs" render couldn't be exercised end-to-end. Mitigated two ways
+  instead: (1) direct navigation to `/calculator/dispatch` and
+  `/calculator/admin` confirms both pages render correctly standalone; (2)
+  `tabsFor`/`activeTabFor` were run standalone in Node against every
+  role × `isSuperAdmin` combination (driver/lead/dispatch/admin, both
+  `isSuperAdmin` states) — all produced the correct tab set and correct
+  active-tab detection. Worth a real click-through once a genuine
+  super-admin test session is available.
 
 ### Website / landing page rework
 - `protankr.com` currently redirects straight into the calculator tool —
