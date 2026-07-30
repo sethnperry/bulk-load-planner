@@ -44,6 +44,7 @@ import TerminalCatalogModal from "./modals/TerminalCatalogModal";
 import LoadingModal from "./modals/LoadingModal";
 import ProductTempModal from "./modals/ProductTempModal";
 import CompartmentModal from "./modals/CompartmentModal";
+import TerminalChecklistModal from "./modals/TerminalChecklistModal";
 
 // ── UI ─────────────────────────────────────────────────────────────────────────
 import { styles } from "./ui/styles";
@@ -241,6 +242,7 @@ export default function CalculatorPage() {
   const [compModalOpen, setCompModalOpen] = useState(false);
   const [compModalComp, setCompModalComp] = useState<number | null>(null);
   const [tempDialOpen, setTempDialOpen] = useState(false);
+  const [checklistTerminalId, setChecklistTerminalId] = useState<string | null>(null);
 
   // ── Action row state ────────────────────────────────────────────────────────
   // activeSlotLetter mirrors PresetDial's own (cosmetic) centered/last-tapped
@@ -261,6 +263,40 @@ export default function CalculatorPage() {
     // timezone lives in terminalCatalog (from terminals table), not in my_terminals_with_status view
     return (terminals.terminalCatalog as any[])?.find((x) => String(x.terminal_id) === tid)?.timezone ?? null;
   }, [location.selectedTerminalId, terminals.terminalCatalog]);
+
+  // Priority terminal flagging: whenever the selected terminal changes,
+  // check whether it has an incomplete checklist for this driver -- if so,
+  // surface it as an overlay on top of the Planner (not a hard gate; see
+  // TerminalChecklistModal). No-op for terminals with no configured
+  // checklist items at all.
+  useEffect(() => {
+    const tid = location.selectedTerminalId;
+    if (!tid) return;
+    let cancelled = false;
+    (async () => {
+      const { data: itemRows } = await supabase
+        .from("terminal_checklist_items")
+        .select("id, item_type, required_count")
+        .eq("terminal_id", tid)
+        .eq("is_active", true);
+      if (cancelled || !itemRows || itemRows.length === 0) return;
+      const ids = itemRows.map((r: any) => r.id);
+      const { data: progRows } = await supabase
+        .from("terminal_checklist_progress")
+        .select("checklist_item_id, progress_count, is_checked")
+        .in("checklist_item_id", ids);
+      if (cancelled) return;
+      const progById = Object.fromEntries(((progRows ?? []) as any[]).map((p) => [p.checklist_item_id, p]));
+      const allDone = itemRows.every((item: any) => {
+        const p = progById[item.id];
+        return item.item_type === "training_loads"
+          ? (p?.progress_count ?? 0) >= (item.required_count ?? 1)
+          : Boolean(p?.is_checked);
+      });
+      if (!allDone) setChecklistTerminalId(tid);
+    })();
+    return () => { cancelled = true; };
+  }, [location.selectedTerminalId]);
 
   // ── Compartments ───────────────────────────────────────────────────────────
   const [compartments, setCompartments] = useState<CompRow[]>([]);
@@ -1462,6 +1498,13 @@ const lastProductInfoById = useMemo(() => {
         setSelectedTerminalId={location.setSelectedTerminalId}
         setTermOpen={setTermOpen}
         onChangeLocation={() => { setTermOpen(false); setLocOpen(true); }}
+      />
+
+      <TerminalChecklistModal
+        open={checklistTerminalId != null}
+        onClose={() => setChecklistTerminalId(null)}
+        terminalId={checklistTerminalId}
+        terminalName={terminalLabel}
       />
 
       <TerminalCatalogModal

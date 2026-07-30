@@ -181,6 +181,61 @@ auto-clears once every item is checked; whether it surfaces via the
 location button, Cards tab, or both (user said "and/or" originally, hasn't
 been pinned down further).
 
+#### Shipped 2026-08-03
+
+Migration (queued, not applied): `supabase/migrations/20260803000000_terminal_checklist.sql`
+adds `terminal_checklist_items` (company+terminal scoped, RLS mirrors the
+existing service_types/equipment pattern exactly -- full CRUD open to any
+active-company member, not role-gated at the RLS level; role gating for
+who can *edit* it is admin/lead-only in the UI, same convention as
+trucks/trailers), `terminal_checklist_progress` (per-driver, no direct
+client write at all -- only the two RPCs below touch it), and a nullable
+`load_log.training_checklist_item_id` tag column.
+
+Design decisions made (the three "still open" questions above, resolved):
+- **Auto-clears once every item is checked** -- no separate admin/dispatch
+  confirm step. Simpler, and matches the driver flow as described (the
+  checklist modal is a progress tracker, not an approval queue).
+- **Decoupled from `terminal_access` carding** -- this checklist is its own
+  independent gate, not a schema change to the existing card-visibility
+  system shipped in the "Terminal card / credential management" section
+  above. A terminal with zero configured checklist items has no gate at
+  all, so existing companies not using this feature see zero behavior
+  change.
+- **Surfaces via both** the location button (driver-facing, the primary
+  flow) and Fleet Cards (manager-facing progress readout) -- built both,
+  not just one.
+
+Built:
+- `toggle_terminal_checklist_item(p_item_id, p_checked)` RPC -- driver
+  checks/unchecks a manual step; rejects `training_loads`-type items (those
+  only ever move via real loads).
+- `record_terminal_checklist_load(p_load_id)` RPC -- called fire-and-forget
+  non-fatal from `useLoadWorkflow.ts` right after `complete_load` (same
+  pattern as `calculate_load_points`, added right alongside it). Finds the
+  first incomplete `training_loads` item for that terminal+driver, if any,
+  increments its progress, and tags the load via
+  `load_log.training_checklist_item_id`. No-ops silently otherwise.
+- `TerminalChecklistEditorModal.tsx` (new, admin) -- reachable via a
+  "Training Checklist" button inside the existing terminal edit modal
+  (`app/admin/page.tsx`'s `TerminalModal`, gated to existing/non-new
+  terminals only, same convention as the sensitive-equipment-data section).
+  Add/soft-delete steps, either `training_loads` (with a required count) or
+  `manual`.
+- `TerminalChecklistModal.tsx` (new, driver-facing) -- `app/calculator/page.tsx`
+  watches `location.selectedTerminalId`; whenever it changes, checks for an
+  incomplete checklist and if found, opens this modal as an **overlay on
+  top of the already-revealed Planner** (not a hard gate -- always
+  closeable, matches the user's "check off which step... before closing the
+  window revealing the planner" description literally, since the Planner
+  underneath was already showing). Manual items are checked via
+  `toggle_terminal_checklist_item`; training-load items show live
+  auto-tracked progress, read-only.
+- `FleetCardsModal.tsx` extended with a per-driver progress line ("2 of 5
+  training loads, 1 of 2 other steps") whenever the picked terminal has
+  checklist items configured -- the natural manager/dispatch visibility
+  extension the spec called for.
+
 ### Onboarding
 - Replace/rework the existing guided tour with short video clips.
 - Fleet training mode: new drivers inherit the fleet's terminal

@@ -19,6 +19,7 @@ import type { Role } from "@/lib/ui/driver/role";
 import AdminLoadsModal from "./AdminLoadsModal";
 import FleetCardsModal from "./FleetCardsModal";
 import IncentiveSettingsModal from "./IncentiveSettingsModal";
+import TerminalChecklistEditorModal from "./TerminalChecklistEditorModal";
 
 // ─────────────────────────────────────────────────────────────
 // Types
@@ -791,6 +792,7 @@ function TerminalModal({ terminal, companyId, allProducts, onClose, onDone }: {
   const [catalogSearch, setCatalogSearch] = useState("");
   const [saving,        setSaving]        = useState(false);
   const [err,           setErr]           = useState<string | null>(null);
+  const [checklistOpen, setChecklistOpen] = useState(false);
 
   function addFromCatalog(productId: string) {
     setAssigned(prev => [...prev, productId]);
@@ -969,6 +971,13 @@ function TerminalModal({ terminal, companyId, allProducts, onClose, onDone }: {
 
       <hr style={css.divider} />
 
+      {!isNew && (
+        <button type="button" style={{ ...css.btn("subtle"), width: "100%", marginBottom: 12 }}
+          onClick={() => setChecklistOpen(true)}>
+          Training Checklist
+        </button>
+      )}
+
       <div style={{ display: "flex", flexDirection: "column" as const, gap: 8, marginTop: 8 }}>
         <div style={{ display: "flex", gap: 8 }}>
           {!isNew && (
@@ -988,6 +997,15 @@ function TerminalModal({ terminal, companyId, allProducts, onClose, onDone }: {
         <button style={{ ...css.btn("primary"), width: "100%", textAlign: "center" as const }}
           onClick={save} disabled={saving}>{saving ? "Saving…" : isNew ? "Add Terminal" : "Save"}</button>
       </div>
+      {!isNew && (
+        <TerminalChecklistEditorModal
+          open={checklistOpen}
+          onClose={() => setChecklistOpen(false)}
+          companyId={companyId}
+          terminalId={terminal!.terminal_id}
+          terminalName={name}
+        />
+      )}
     </Modal>
   );
 }
