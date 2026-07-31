@@ -8,6 +8,12 @@ import { useEffect } from "react";
 export default function ServiceWorkerRegistration() {
   useEffect(() => {
     if (!("serviceWorker" in navigator)) return;
+    // Never register in dev -- cache-first build assets + auto re-registration
+    // on every reload means any local source change can appear to silently
+    // "not take effect" no matter how many times the dev server restarts,
+    // since the SW keeps re-caching whatever bundle was current at each
+    // reload. Cost several hours to track down once; don't reintroduce it.
+    if (process.env.NODE_ENV !== "production") return;
 
     // Only auto-reload when a service worker was already controlling this
     // page (i.e. an update took over mid-session or on a later visit) --

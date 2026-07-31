@@ -547,11 +547,112 @@ later, not started):
   honest "coming soon" placeholders, not a guess at unspecified
   functionality (only Dashboard was actually specified).
 - `app/calculator/lead/EquipmentScheduleChart.tsx` — "who has the
-  equipment and when," a weekly roster grid (driver rows × day-of-week
-  columns, color-coded day/night/off). **Illustrative mock data only** —
-  confirmed with user before building that no driver-shift-schedule table
-  exists anywhere in the app; a real schedule feature is a separate,
-  later piece once this chart's shape is validated.
+  equipment and when." **Illustrative mock data only** — confirmed with
+  user before building that no driver-shift-schedule table exists anywhere
+  in the app; a real schedule feature is a separate, later piece once this
+  chart's shape is validated. Went through three iterations same-day
+  (2026-07-30), converging on the current shape:
+  1. First cut: a weekly roster grid (driver rows × day-of-week columns).
+  2. Redesigned into a 24-hour timeline per a user reference image
+     (12am-noon-12am number line) — real clock axis, one row per driver,
+     per-day on/off state, a legend.
+  3. Fixed-50/50-axis pass, per explicit follow-up feedback: day shift
+     always fills the left half, night shift always the right half,
+     regardless of actual duration. Hour tick labels underneath are
+     *derived from each shift's own start/end hours* rather than a static
+     midnight-anchored axis — with this data (3a-3p / 3p-3a) that puts "3"
+     at both far edges instead of "12". No per-driver name/shift-hour
+     labels on the bar and no legend — the header boxes and bar colors
+     already say what's what. The per-day-of-week on/off concept from
+     iteration 2 was dropped here (not requested for this shape).
+  4. **Current shape**: title line uses a real flex gap between "Truck ·
+     25184" and "Trailer · 3151" (still hardcoded — no real equipment
+     binding on this page yet) instead of literal spaces in one string,
+     which HTML collapses to a single space — a real gap needs actual
+     layout, not whitespace characters. The bar's two halves now have the
+     same small gap as the header boxes (previously seamless). Below the
+     card, outside it, a vertical list of the full week (full day names,
+     not abbreviated) reappears — the per-day-of-week on/off concept from
+     iteration 2 is back, but rendered differently: a line spans from each
+     day name to the card's left edge when Pedro works that day, another
+     spans to the right edge when Seth works it, nothing on a day either
+     is off. Two follow-up tweaks landed on this: (a) the lines are a
+     neutral `rgba(255,255,255,0.08)` — same color as the chart card's own
+     border — rather than the day/night yellow/blue, since side + presence
+     already say who works that day and the color was reserved for the
+     header boxes/bar; (b) the day-name grid column is a **fixed width**
+     (`DAY_LIST_LABEL_WIDTH = 86`, sized to fit "Wednesday" without
+     wrapping) instead of `auto`, so every row's line length is identical
+     — with `auto` each line's length varied with that day's own name
+     width (e.g. "Sunday" vs "Wednesday"), which read as visually
+     staggered/misaligned. The current day's name is still colored to
+     whichever shift currently holds the equipment (yellow before 3pm,
+     blue from 3pm on) instead of the default gray — driven by the same
+     `useNow()` clock, comparing the live hour against
+     `DAY_SHIFT.startHour`/`endHour`.
+  5. **Equipment button + driver assignment**, per explicit follow-up: the
+     Lead Dashboard now has a real Equipment button — not a fresh
+     Lead-specific control, but the *exact same* Equipment sheet the
+     Planner uses (`shell.equipOpen`/`setEquipOpen`, already mounted once
+     in `CalculatorLayoutClient`'s `ShellChrome` and shared via
+     `CalculatorShellContext` — the same instance Cards/Vault already
+     reuse). `app/calculator/lead/page.tsx` replicates the Planner's own
+     `equipmentDetails` fetch (truck/trailer name + make, keyed off
+     `shell.equipment.selectedCombo`) and button styling verbatim. Only the
+     *result* of picking equipment differs from Planner: instead of
+     revealing compartment/load-planning UI, it reveals
+     `EquipmentScheduleChart` with a real `equipmentLabel` (or a "No
+     equipment selected" placeholder when `hasEquipment` is false) instead
+     of the old hardcoded "Truck · 25184 / Trailer · 3151". A second new
+     button, "Driver Assignment," opens `DriverAssignmentModal.tsx` (new)
+     — day/night driver name pickers sourced from the real company roster
+     (`user_companies` + `get_display_names_full`, same pattern as
+     `FleetCardsModal.tsx`). `EquipmentScheduleChart` gained
+     `dayDriverName`/`nightDriverName` props (falling back to the mock
+     "Pedro Guzman"/"Seth Perry" defaults) so an assignment immediately
+     updates the bar and the day-list's today-highlight. **No backing
+     table for the assignment itself** — same "mock data first" call
+     already made for the rest of this chart; the picked names live in
+     `LeadPage`'s own React state and are lost on reload. Shift
+     times/colors/workday patterns are still the pre-existing mock data;
+     only the *names* are now real/assignable. Buttons were initially
+     placed above the chart; moved below it per explicit follow-up to
+     match the Planner's own layout order (compartment display on top,
+     info cards/buttons underneath).
+  - **Hydration-mismatch fix** (still applies): the live clock calculation
+    (`useNow()`) must never call `new Date()` directly in a `useState`
+    initializer or in the render body — the server-rendered snapshot and
+    the client's first hydration pass land at different instants, which
+    Next.js flags as a hydration error and force-remounts the tree. Fixed
+    by starting state at `null` (identical server/first-client render)
+    and only resolving the real clock in a client-only `useEffect` after
+    mount. Any future "current time"-style widget in this codebase should
+    follow the same pattern.
+  - **Dev-server stale-content trap, cost significant time this session —
+    root cause found and fixed at the source.** Iterating on this file,
+    the dev server kept appearing to serve an old version no matter how
+    many times the page reloaded — even surviving a full `.next` wipe +
+    process restart + brand-new browser tab, with a stuck Next.js parse-
+    error overlay quoting old file content. Diagnosis, in order: (1) `tsc
+    --noEmit` passed clean the whole time — the source was never actually
+    broken; (2) direct disk `grep` of the compiled `.next/dev/static`
+    chunk showed the correct new content; (3) `curl` of that exact chunk
+    URL also returned the correct content byte-for-byte — proving the
+    Next.js dev server itself was always correct; (4) only the *browser
+    tab's own* `fetch()` of that same URL returned stale bytes. Actual
+    cause: `components/ServiceWorkerRegistration.tsx` registers
+    `public/sw.js` (cache-first for build assets) unconditionally on
+    every mount, in every environment — so each reload during dev
+    re-registers the SW and re-caches whatever bundle happened to be
+    current *at that reload*, meaning a single clear-and-check wasn't
+    durable against the *next* reload silently re-poisoning it again.
+    **Fixed at the source**: `ServiceWorkerRegistration.tsx` now skips
+    registration entirely when `process.env.NODE_ENV !== "production"` —
+    the standard guard for exactly this class of PWA dev-mode pain. Verified
+    post-fix: `navigator.serviceWorker.getRegistrations()` returns empty
+    after a reload in dev. This should prevent the whole class of "my
+    change isn't taking effect" confusion from recurring on this project —
+    if it ever does again, suspect something other than the SW now.
 
 **Verification note:** live-verified the Lead page's own content (subtabs
 centering + swapping, chart rendering) via direct navigation to
