@@ -936,8 +936,39 @@ tab is a standalone status board, checked manually, not reasoned about by
 the planner. Revisit only once there's real usage data on how often
 outages happen and how reliable the crowdsourced flags turn out to be.
 
-**Not yet built**: no app code yet — no Terminal tab UI, no STUD modals,
-no Edit Terminal modal. This is schema only.
+**App code shipped 2026-08-11** (`app/calculator/terminal/`), committed and
+pushed (`111fa80`): new universal Terminal tab (`page.tsx`) showing rack
+sub-tabs + a lane/arm grid (`RackLaneGrid.tsx`) + the rack's product list;
+`LaneStatusModal.tsx` (per-arm STUD, open to every role) and
+`RackProductStatusModal.tsx` (rack-level STUD, feeds
+`update_terminal_temp_bias` via `/api/fuel-temp`'s predicted temp, same
+error computation `useLoadWorkflow.ts` already does); `EditTerminalModal.tsx`
+(lead/dispatch/admin only, hidden from drivers — rack create/rename, product
+list curation mirroring `ManageTerminalProductsModal.tsx`'s pattern against
+`rack_product_status` instead of `terminal_products`, and lane/arm layout
+config). `CalculatorLayoutClient.tsx`'s tab bar now has Terminal as a
+universal tab; the shelved Lead/Dispatch/Admin role tabs and their
+`ROLE_TABS`/`ROLE_TAB_ORDER` machinery were removed in the same pass (the
+routes/components under `app/calculator/lead|dispatch|admin/` were left in
+place, just no longer reachable from the tab bar — not deleted outright).
+
+Lane/arm display labels (reversed order, numeric vs. alphabetic) are purely
+presentational (`labels.ts`) — `rack_arms.lane_number`/`arm_number` are
+always a stable 1-based physical position, never remapped; only the printed
+label changes. This also makes resizing a rack's lane/arm count trivial
+(`EditTerminalModal.tsx`'s layout save): insert blank rows for new tail
+positions, delete rows beyond the new count, never touch existing ones.
+
+`tsc --noEmit` is clean across the whole project. **Not yet live-verified in
+a browser** — three attempts to start a dev server for this session hit what
+looks like an environment/sandboxing issue (the tool reported success each
+time, but nothing was ever actually reachable via `curl` or browser
+`navigate`, even after adding `autoPort`/`--` port-forwarding to
+`.claude/launch.json`). Stopped after three attempts rather than keep
+retrying a wall that didn't look code-related. Worth a real click-through
+(create a rack, STUD a lane, STUD a rack product, confirm the temp-bias feed
+and the driver-hidden Edit Terminal gate) next time a working preview is
+available.
 
 Available to **all roles**, but with different capabilities:
 
