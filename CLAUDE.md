@@ -632,7 +632,15 @@ never in a migration file until this one (confirmed via a live query
   the Reports hub from the day it shipped — the fact that it was never
   caught suggests Reports hadn't been click-tested end-to-end since.
 
-### Role-based tabs (new UI direction, 2026-07-30, not in the original Fleet Tier spec)
+### ~~Role-based tabs (new UI direction, 2026-07-30, not in the original Fleet Tier spec)~~ — superseded 2026-08-03
+
+Entirely superseded by the Terminal Tier spec below (see "## Terminal Tier —
+Build Spec"). Per explicit user direction during a 2026-08-03 mockup
+walkthrough ("we pumped the brakes... this was scope creep"), the dedicated
+Lead/Dispatch/Admin tabs shipped here — including `EquipmentScheduleChart.tsx`
+and `DriverAssignmentModal.tsx` — are being **shelved entirely**, not moved
+into the nav menu or preserved elsewhere. Left below as a historical record
+only; don't build on top of any of it.
 
 Every role gets Planner/Cards/Vault for themselves; each non-driver role
 additionally gets exactly one extra tab to the **left** of Planner —
@@ -837,6 +845,217 @@ undo. Worth a real check once a second (non-admin) test member exists.
 ### Open questions (Fleet spec)
 - Tie-break rule if a split load has two compartments with exactly equal
   gallons of different products.
+
+## Terminal Tier — Build Spec (recorded 2026-08-03, not yet scoped into sprint work)
+
+Mockups walked through screen-by-screen with the user 2026-08-03 (Dispatch/
+Lead/Driver role screens, built in Inkscape). Nothing below is built yet.
+This directly supersedes the "Role-based tabs" work above — see that
+section's strikethrough note. Cross-check against "Architecture reality"
+below before touching schema, as always.
+
+### Tab structure
+- Base tab set for **every** role: Terminal | [contextual middle tab] | Cards
+  | Vault. No dedicated Lead/Dispatch/Admin tab anymore — that whole concept
+  is shelved (see "Role-based tabs" above).
+- Middle tab is contextual: Planner for driver/lead roles; **Dispatch** for
+  dispatch and admin roles by default.
+- **Admin toggle (maybe, if feasible)**: admin can flip themselves between
+  "admin mode" (Dispatch middle tab) and "lead driver mode" (Planner middle
+  tab) so they can personally load equipment when needed, without going
+  through the existing full-impersonation ("Set up planner for X") flow.
+  Nice-to-have, not confirmed as must-ship.
+- **Cards tab is contextual for admin/dispatch**: instead of their own cards
+  (neither role logs their own loads/cards in the field), it reflects
+  whichever driver is currently selected — same driver selected for the
+  Dispatch tab. Driver/lead roles keep their own Cards tab as today.
+- Vault tab: unchanged, every role keeps their own personal vault, no
+  changes needed.
+
+### Dispatch tab (new)
+Per-driver dashboard, reachable by selecting a driver (exact selection
+UI/modal not designed yet — flagged as open design work below, not blocking
+the rest of this spec). Shows for the selected driver:
+- Identity/context: name, store, region, shift schedule (day-of-week + time
+  range, e.g. "3p-3a"). **Store/region are believed to already exist
+  somewhere on profiles** (unconfirmed — verify live before building),
+  **shift schedule is net-new**, needs a new table/columns.
+- Terminal card list across all terminals, each with computed expiry state —
+  reuses the same `cardStateFor`-style logic as Fleet Cards/Credentials, not
+  new logic. "Not Carded" is just this app's existing "inactive" card state
+  relabeled to match field terminology — no new state needed, but verify the
+  existing enum/state naming live before assuming the mapping is 1:1.
+- Equipment summary (truck/trailer + make) and equipment registration
+  expiry — reuses existing equipment data.
+- A freeform dispatcher notes box, per driver. **New table** — visible and
+  editable by dispatch, lead, *and* admin (not dispatch-only).
+- Switching to the Terminal tab while a driver is selected opens directly
+  into that driver's current terminal (as a modal) rather than a bare
+  terminal picker — exact trigger/UX not fully speced, treat as a detail to
+  nail down during implementation.
+
+### Terminal tab (new — biggest net-new piece of this spec)
+
+**Schema shipped 2026-08-10.** Migration
+`supabase/migrations/20260810000000_terminal_racks_lanes_arms.sql` — applied
+directly to the live DB this session (had direct Postgres write access via
+the `pg` npm package, not just read — first time this project's had that
+rather than routing through the Supabase SQL editor) and confirmed live via
+a follow-up query: all three tables, the `allow_all_authenticated` RLS
+policy on each, and the three `updated_at` triggers all present.
+`terminal_racks` (rack naming + lane/arm layout config — count, reverse-
+order, numeric/alphabetic per rack), `rack_arms` (one row per physical
+lane × arm position, holding a `product_id` + free-text `status`), and
+`rack_product_status` (rack-level product-out flag + last API/temp
+reading). RLS on all three follows the `terminals`/`terminal_products`
+precedent exactly (confirmed live via `pg_policies` before writing this,
+alongside confirming `terminals` has no `company_id` at all — it's a
+shared cross-company catalog, so no company-scoped role-check function
+could apply here anyway): wide open to any authenticated user, with
+"Edit Terminal" being hidden from drivers enforced in the UI only, same
+risk profile equipment CRUD carried before its 2026-08-07 permission-split
+migration. `rack_arms.status` is deliberately a loose nullable `text`
+column, not an enum — the canned status list (e.g. "Arm Down," "No
+Premium") isn't fully enumerated yet.
+
+Also confirmed before writing this: `terminal_products.is_out_of_stock`
+already exists but has never actually been set `true` by any code path
+(grepped every reference — it's read/displayed and defaulted `false` on
+insert only) and is terminal-wide, not rack-scoped, so it can't represent
+"out at South Rack only" without changing its primary key. Left untouched
+rather than repurposed — `rack_product_status` is a clean new table, not
+a rack-scoped extension of the old column.
+
+**Deliberately decoupled from the Planner** — confirmed with the user:
+since the Planner doesn't ask the driver which rack they're loading at,
+any in-Planner warning based on rack-level outages would be a guess (the
+product could be fine at a different rack of the same terminal) and risks
+training drivers to distrust the flag. No `rack_id`/`terminal_id`
+awareness is being added to the load flow for this pass — the Terminal
+tab is a standalone status board, checked manually, not reasoned about by
+the planner. Revisit only once there's real usage data on how often
+outages happen and how reliable the crowdsourced flags turn out to be.
+
+**Not yet built**: no app code yet — no Terminal tab UI, no STUD modals,
+no Edit Terminal modal. This is schema only.
+
+Available to **all roles**, but with different capabilities:
+
+- **Structure**: a terminal has one or more named **Racks** (e.g. "North
+  Rack," "South Rack" — customizable names, some real-world racks are
+  lettered instead). Each rack has **Lanes** (numbered in the mockup, but
+  needs the same count/order customization as arms below) and each lane has
+  **Arms** (count varies per facility, sometimes in reverse order, e.g. 6-1
+  instead of 1-6). Each arm holds a product code (matches the existing
+  granular product catalog) and a status.
+- **Rack-level Product List**: shows every product available at that rack
+  with live API/temp readings.
+
+**STUD (= "status update") actions** — two distinct granularities, both
+crowdsourced for this first pass (open to any role, including drivers — no
+permission gate on *reading or submitting* a status update):
+1. **Lane-level**: tapping a lane opens a "Lane N — Status Update" modal,
+   one row per arm in that lane, each settable to a status like "Arm Down"
+   or a specific out-of-stock note (e.g. "No Premium"). Use case: one
+   specific arm is down/restricted, rest of the lane is fine.
+2. **Rack-level**: the "STUD" button at the bottom of the rack screen opens
+   a "Product Status Update" modal — pick a product, mark it e.g. "Product
+   Out," enter API + temp. Use case: a product is out across the *entire*
+   rack, not just one arm. **The API/temp entered here needs to feed the
+   existing fuel-temp-bias system** (`terminal_temp_bias` /
+   `update_terminal_temp_bias`) — same underlying data, new write path.
+   Needs its own design pass to fit the existing bucketing (hour-of-day/
+   month) — not just "add a row somewhere."
+
+Crowdsourcing model is explicitly a v1/experiment — "we'll see how
+crowdsourcing terminal statuses go." Long-term intent is terminal operators
+eventually get write access with everyone else moved to view-only for
+structural edits, but that's explicitly not this pass. Don't build any
+operator-specific role for this yet.
+
+**Edit Terminal** (structural configuration — separate from the STUD status
+actions above):
+- Name/create racks for the whole facility.
+- Per rack: edit the active product list (this is effectively the
+  previously-deferred punch-list item #9's admin-curated terminal product
+  list — **treat item 9's old spec as absorbed into this**, don't build it
+  separately), and edit lane/arm layout.
+- Layout customization, same shape for both lanes and arms: a count input,
+  a reverse-order toggle (icon: rounded-rectangle arrow, paired with a
+  toggle switch), and a numeric-vs-alphabetic toggle ("123" vs "ABC"
+  labeling — some racks/lanes are lettered, not numbered).
+- **Permission**: hidden entirely from drivers (not just disabled). Lead,
+  dispatch, and admin can all edit.
+
+### Driver Training (Lead/Admin-in-lead-mode feature)
+- A "Driver Training" button on the Planner (lead/admin-acting-as-lead
+  only) opens a driver-selection modal (exact modal design not yet done —
+  open task) to pick a trainee.
+- **Single-load model, decided 2026-08-03**: rather than reconciling two
+  separate load records (or figuring out "whose plan wins" when both people
+  are physically in the same truck), there's still only **one** real load —
+  one plan, one equipment combo, submitted once, created under the
+  **lead's** account (same as any load the lead would normally submit). A
+  new `trainee_id` reference is added to the load, separate from the
+  creator, purely so the load can be attributed to the trainee for
+  reporting.
+  - **Incentive points go to the lead** (the load's actual owner/creator) —
+    this falls out naturally from the existing points-go-to-creator logic,
+    no special-casing needed.
+  - **Trainee's "loads completed toward carding" count** is just a query
+    filtering on `trainee_id = me` — read-only, reporting only; the trainee
+    never has their own competing `load_log` row for this same physical
+    event.
+- **"Loading with [name]" banner**: shown on the lead's planner today (post-
+  trainee-selection). Decided: mirror the same banner on the trainee's own
+  planner too ("Training with [lead name]"), scoped as **part of the same
+  open experiment** below rather than solved separately — i.e., don't build
+  dedicated synced state just for this label; whatever mechanism ends up
+  handling the core "two devices, one physical load" problem should drive
+  this banner too.
+- **Explicitly unresolved, deliberately deferred to a real-world try-it-and-
+  see**: if both the lead and the trainee have their own Planner open on
+  their own phones during a training session, what actually happens? Does
+  the trainee's device need to be a read-only mirror of the lead's in-
+  progress plan, or does each device just independently plan and only the
+  lead's submission counts (with the trainee's parallel session being pure
+  UI, never actually written)? Not designed — explicit user call to try the
+  simplest version first (lead's device is the only one that actually
+  submits) and see what breaks in practice before building anything more
+  elaborate.
+- **Reports**: purely reporting-side, dialed in last, no new UI action
+  beyond what's above.
+  - Lead: report of training loads they've given, listing which trainees
+    and when.
+  - Driver: a report letting them view/track their own in-progress carding
+    status per terminal (their own training loads + which terminals they're
+    actively getting carded at) — a self-service tracking tool for the
+    driver, not a new driver-facing "give training" action.
+  - Both live in the existing Reports/NAV hub (`/calculator/reports`) as new
+    report types, not a new destination.
+
+### Explicitly shelved
+- The entire 2026-07-30 "Role-based tabs" Lead/Dispatch/Admin dedicated-tab
+  work — `EquipmentScheduleChart.tsx`, `DriverAssignmentModal.tsx`, the
+  Dashboard/Tasks/Ledger placeholder subtabs on all three role tabs. Not
+  moved into the nav menu, not preserved anywhere — a deliberate scope
+  pullback per explicit user direction ("we pumped the brakes... this was
+  scope creep"). If any of that functionality (e.g., equipment schedule
+  visibility, driver assignment) turns out to be wanted later, that's a
+  fresh scoping conversation, not a resurrection of this code as-is.
+
+### Open questions (Terminal Tier spec)
+- The "two devices, one physical load" concurrency question for Driver
+  Training (see above) — deliberately unresolved, try simplest version
+  first.
+- Exact driver-selection UI for both the Dispatch tab (dispatcher picking
+  which driver to view) and the Driver Training button (lead picking a
+  trainee) — not designed yet, flagged as open UI work.
+- Live verification needed before building: do `region`/local-area fields
+  already exist on `profiles` (or elsewhere)? Does the existing card/
+  terminal-access "inactive" state map cleanly to "Not Carded," or does it
+  need its own value? (Per this repo's own "Architecture reality" rule —
+  verify against the live DB, don't assume from the migrations folder.)
 
 ## Architecture reality (learned the hard way — READ THIS FIRST)
 
