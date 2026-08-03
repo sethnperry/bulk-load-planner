@@ -98,6 +98,10 @@ function TabBar() {
 
   function onScroll() {
     if (suppressScrollNavRef.current) return;
+    // "none" means we're on a non-tab destination (e.g. Reports) where no
+    // tab is meant to be highlighted -- scroll-driven auto-navigation would
+    // otherwise treat every settle as "closest tab != none" and push away.
+    if (active === "none") return;
     const container = scrollRef.current;
     if (!container) return;
     if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current);
@@ -242,6 +246,7 @@ function ShellChrome({ children }: { children: React.ReactNode }) {
         onSelectComboId={(id: string) => shell.equipment.setSelectedComboId(id)}
         onRefreshCombos={shell.equipment.fetchCombos}
         onTourAdvance={() => {}}
+        myRole={shell.role}
       />
 
       <ExpirationModal

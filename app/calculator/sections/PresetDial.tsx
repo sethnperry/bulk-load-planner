@@ -4,21 +4,25 @@
 // Preset letter dial (A-E) -- same centered-dial carousel pattern as the
 // header tab bar / Cards city selector (scroll-snap, tap-to-center), sitting
 // directly under the Planner/Cards/Vault tab bar per the design handoff.
-// Tap-to-load / hold-to-save-or-clear / shift+click-to-clear are unchanged
-// real behavior from usePlanSlots -- only scrolling/tapping to (re)center is
-// new, and deliberately does NOT itself trigger a load: scrolling just
-// previews which letter is centered, so a driver can't accidentally
-// overwrite their working plan by swiping past a slot.
+// Tapping an empty slot still saves straight through (nothing to lose);
+// tapping a FILLED slot opens page.tsx's action sheet (Load/Edit/Clear)
+// instead of loading immediately, so a stray tap can't silently blow away
+// the working plan. Hold-to-clear/hold-to-save remain a direct legacy
+// gesture. Scrolling to (re)center deliberately does NOT itself trigger any
+// action -- it just previews which letter is centered, so swiping past a
+// slot can't accidentally trigger anything either.
 
 import React, { useEffect, useRef, useState } from "react";
 
 export default function PresetDial({
-  slots, slotHas, disabled, onLoad, onSave, onClear, onTourAdvance, onActiveChange,
+  slots, slotHas, disabled, onTapFilled, onSave, onClear, onTourAdvance, onActiveChange,
 }: {
   slots: readonly number[];
   slotHas: Record<number, boolean>;
   disabled: boolean;
-  onLoad: (n: number) => void;
+  // Filled slot tapped -- opens an action sheet (Load / Edit / Clear) rather
+  // than loading (and silently overwriting the working plan) immediately.
+  onTapFilled: (n: number) => void;
   onSave: (n: number) => void;
   onClear: (n: number) => void;
   onTourAdvance?: (id: string) => void;
@@ -95,12 +99,15 @@ export default function PresetDial({
           const onPressEnd = () => {
             if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
           };
-          const onTap = (e: React.MouseEvent) => {
+          const onTap = () => {
             if (disabled || didLongPress) return;
             setActive(n);
             centerSlot(n, true);
-            if (e.shiftKey && has) { onClear(n); return; }
-            if (has) onLoad(n);
+            // A filled slot opens the action sheet (Load / Edit / Clear)
+            // instead of loading immediately -- no more silently blowing
+            // away the working plan on a stray tap. An empty slot has
+            // nothing to protect, so it still saves straight through.
+            if (has) onTapFilled(n);
             else { onSave(n); onTourAdvance?.("tour-plan-slots"); }
           };
 
@@ -118,7 +125,7 @@ export default function PresetDial({
                   border: "none", background: "transparent", padding: "3px 4px",
                   cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.4 : 1,
                 }}
-                title={disabled ? "Select a terminal first" : has ? "Tap to load · Hold to clear · Shift+click to clear" : "Tap to save · Hold to save"}
+                title={disabled ? "Select a terminal first" : has ? "Tap for options" : "Tap to save"}
               >
                 <span style={{
                   font: isActive ? "600 15px Outfit" : "500 12px Outfit",

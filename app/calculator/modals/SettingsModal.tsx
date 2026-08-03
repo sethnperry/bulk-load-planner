@@ -19,6 +19,8 @@ import React, { useEffect, useState } from "react";
 import { FullscreenModal } from "@/lib/ui/FullscreenModal";
 import { SelfProfileView } from "@/lib/ui/driver/SelfProfileView";
 import { useCalculatorShell } from "../CalculatorShellContext";
+import { supabase } from "@/lib/supabase/client";
+import JoinFleetView from "../components/JoinFleetView";
 
 function ToggleSwitch({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
   return (
@@ -110,12 +112,24 @@ function SettingsRow({ label, sub, right, onClick }: {
 export default function SettingsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const shell = useCalculatorShell();
   const { darkMode, accentColor, setDarkMode, setAccentColor } = shell.theme;
-  const [view, setView] = useState<"root" | "profile">("root");
+  const [view, setView] = useState<"root" | "profile" | "joinFleet">("root");
+  const [isSolo, setIsSolo] = useState(false);
 
   useEffect(() => { if (open) setView("root"); }, [open]);
 
+  // "Join a Fleet" only makes sense for a solo company -- an existing fleet
+  // member switching companies via a different invite code is a separate,
+  // unaddressed scenario, out of scope here.
+  useEffect(() => {
+    if (!open || !shell.companyId) return;
+    let cancelled = false;
+    supabase.from("companies").select("is_solo").eq("company_id", shell.companyId).maybeSingle()
+      .then(({ data }) => { if (!cancelled) setIsSolo(Boolean(data?.is_solo)); });
+    return () => { cancelled = true; };
+  }, [open, shell.companyId]);
+
   return (
-    <FullscreenModal open={open} title={view === "profile" ? "Profile" : "Settings"} onClose={onClose}>
+    <FullscreenModal open={open} title={view === "profile" ? "Profile" : view === "joinFleet" ? "Join a Fleet" : "Settings"} onClose={onClose}>
       {view === "profile" ? (
         <div>
           <button
@@ -130,6 +144,21 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
             ‹ Back to Settings
           </button>
           <SelfProfileView />
+        </div>
+      ) : view === "joinFleet" ? (
+        <div>
+          <button
+            type="button"
+            onClick={() => setView("root")}
+            style={{
+              display: "flex", alignItems: "center", gap: 4, marginBottom: 16,
+              border: "none", background: "none", padding: 0, cursor: "pointer",
+              fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,0.55)",
+            }}
+          >
+            ‹ Back to Settings
+          </button>
+          <JoinFleetView onJoined={() => { window.location.href = "/calculator"; }} />
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
@@ -163,6 +192,13 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
                 sub="Manage your plan and billing"
                 right={<ComingSoonTag />}
               />
+              {isSolo && (
+                <SettingsRow
+                  label="Join a Fleet"
+                  sub="Have an invite code from your company?"
+                  onClick={() => setView("joinFleet")}
+                />
+              )}
             </div>
           </div>
 

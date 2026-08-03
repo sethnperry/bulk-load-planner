@@ -78,10 +78,14 @@ and its save path does check/surface the Supabase error via `Banner`, so an
 admin who opens it before the migration runs gets an honest error message,
 not silent data loss. Left shipped as-is.
 
-**Migration queued, not yet applied**: `supabase/migrations/20260731000000_equipment_sharing_attribution.sql`
+**Migration applied 2026-07-31** (user ran it in the Supabase SQL editor):
+`supabase/migrations/20260731000000_equipment_sharing_attribution.sql`
 (adds `equipment_attachments.uploaded_by` + creates `equipment_sensitive_data`).
-Run in the Supabase SQL editor, then re-apply the attachment-attribution diff
-described above.
+The attachment-attribution diff (`DocHub.tsx`/`BinderModal.tsx`) was re-applied
+the same day and live-verified — the Docs modal's `uploaded_by` select renders
+with no error. `equipment_sensitive_data` also live-verified end-to-end: the
+admin-only "Sensitive Info" section on a truck accepts a Purchase Price save
+and reads it back correctly after reopening the modal.
 
 **Explicitly NOT done, flagged for later**:
 - **Inspections** — confirmed via repo-wide search that this doesn't exist
@@ -103,17 +107,68 @@ described above.
   this one checked out.
 
 ### Fleet-wide underloading dashboard
-- Aggregate "gallons left on the table" across all trucks/drivers — the
-  number that justifies the subscription to a fleet owner.
+
+**Shipped 2026-08-09.** Scope decisions made (asked, not guessed) before
+building, since the original spec was a single line:
+- **Metric**: reuses the already-computed Incentive System
+  `load_points.recovered_gallons` directly — not an independent
+  legal-max-vs-actual calculation. Cheap (pure aggregation UI, no new
+  calc engine) but means this dashboard only shows real numbers for
+  companies that have turned Incentives on and set at least one product
+  benchmark; otherwise it shows an explicit "not enabled" message rather
+  than a misleading zero.
+- **Audience**: admin + lead + dispatch — wider than Incentives/Payroll's
+  admin-only gating, matching the "fleet-wide cross-driver visibility"
+  precedent already used for Fleet Cards/Credentials. This needed a new
+  additive `load_points` SELECT policy
+  (`supabase/migrations/20260809000000_load_points_staff_read.sql`,
+  applied) since the existing `load_points_admin_read` policy (from the
+  original Incentive System migration) is admin-only, confirmed via
+  reading that migration directly — lead/dispatch would otherwise get
+  zero rows under RLS.
+- **Placement**: new "Underloading" button in `app/admin/page.tsx`'s
+  header, same row/pattern as Fleet Cards/Credentials/Incentives/Payroll.
+
+`app/admin/UnderloadingDashboardModal.tsx` (new) — deliberately simpler
+than `PayrollReportModal.tsx`: no CSV export, no per-load edit/
+recalculate, no per-load drill-down (that's what Payroll Report is for;
+this is the fleet-level pitch/health-check view, not a payroll audit
+tool). Date range is a simple lookback-days chip row (7d/30d/90d/All —
+the same pattern already duplicated in `MyLoadsModal.tsx`/
+`ScaleHistoryModal.tsx`/`RecordHistoryModal.tsx`, no shared component
+existed to import) rather than the Payroll Report's pay-period picker,
+since this shouldn't require pay-period settings to be configured just
+to show a number. Headline stats (total recovered gallons, loads, avg/
+load) above a per-driver leaderboard table (sorted by gallons desc, not
+alphabetical like Payroll's driver list — a leaderboard framing fits "the
+number that justifies the subscription" better than an alphabetical
+roster).
+
+**Live-verified 2026-08-09**: typecheck clean. Button renders correctly
+in `/admin`. Opened the modal against the same demo company's real
+Incentive System test data from earlier this session (edited/recalculated
+multiple times that same pass) — headline shows 1,800.0 recovered
+gallons / 1 load / avg 1800.0, per-driver row matches ("Test Testerson,
+1 loads, 1800.0 gal"). Confirms the new `load_points_staff_read` RLS
+policy change didn't need a role switch to verify reads (this session's
+signed-in user is already company admin, which already had read access
+before this policy — the *incremental* lead/dispatch grant itself
+wasn't separately re-verified with a non-admin role, same category of
+gap as this session's other role-matrix checks that could only be
+proven architecturally sound, not empirically, without a second live
+non-admin account). No console errors. Date-range chips (7d/30d/90d/All)
+all functional — didn't change the figures for this dataset since the
+test load falls within all four ranges.
+
+**Not built** (out of scope for this pass, no spec existed beyond the
+one-line description): no trend-over-time chart, no per-terminal or
+per-product breakdown, no export. If the dashboard needs more than a
+snapshot + leaderboard later, that's a separate scoping conversation.
 
 ### Terminal card / credential management (fleet-wide)
 - Fleet-wide view of who's carded where, filterable by terminal (so dispatch
   doesn't send an uncarded driver).
-- **Priority terminal flagging**: dispatch flags a specific terminal for a
-  *specific* driver (not all drivers) to prompt them to get carded there.
-  Surfaces in that driver's location button and/or Cards tab. Cards tab needs
-  a new "flagged" filter. Progress bar shows both driver and dispatcher how
-  many more training loads are needed until the flagged card goes active.
+- ~~**Priority terminal flagging**~~ — **removed 2026-08-05, see below.**
 
 #### Shipped 2026-08-01 (fleet card visibility only)
 
@@ -128,118 +183,48 @@ near-black-on-near-black — caught before it shipped, see `DARK_EXP_COLOR`
 in that file). Deliberately status-only — doesn't read/show
 `card_number`/`pin` (those stay in `user_terminal_cards`, untouched).
 
-Migration (queued, not applied): `supabase/migrations/20260801000000_fleet_terminal_card_visibility.sql`
+Migration applied 2026-07-31: `supabase/migrations/20260801000000_fleet_terminal_card_visibility.sql`
 adds one new, purely additive SELECT policy on `terminal_access` for
 admin+dispatch across the company — doesn't drop/replace whatever policy
-already exists there (unknown exact shape, no DB access to check). Only
-verified end-to-end for the *same-user* case (the one test company
-available has a single member, so cross-driver visibility itself is
-architecturally sound but not empirically confirmed the way the dispatch
-role's load-visibility swap was) — worth a real check with a second driver
-in the company after the migration runs.
+already exists there (unknown exact shape, no DB access to check). Live-
+verified post-apply: terminal search + per-terminal driver card list both
+render real data with no errors. Still only verified for the *same-user*
+case (the one test company available has a single member, so cross-driver
+visibility itself is architecturally sound but not empirically confirmed
+the way the dispatch role's load-visibility swap was) — worth a real check
+with a second driver in the company.
 
-**Priority terminal flagging — design confirmed with user 2026-08-01, not
-yet built (queued behind the Incentive System).** Bigger than a simple
-"N training loads" counter — it's a **customizable per-terminal checklist**
-with progress tracking, not a fixed rule:
+#### Removed 2026-08-05
 
-- **Per-terminal, admin-configurable checklist** — each terminal has its own
-  list of carding requirements, set on the terminal setup/admin page
-  (existing "Terminals" section in `app/admin/page.tsx`, or the terminal
-  product setup screen — same company-scoped-list pattern already
-  established by `service_types`/`permit_types`, reuse that shape rather
-  than inventing a new one). At minimum one item is "N training loads"
-  (the number itself is per-terminal, since terminals vary — e.g. 3 vs 5),
-  but the list can also hold arbitrary other steps ("anything else that may
-  be on the list to get carded" — safety briefing, paperwork, etc, not
-  load-count-based).
-- **Driver-facing flow**: when a driver selects a terminal in the Planner
-  that isn't active yet (flagged/in-training for them), a window opens
-  showing that terminal's checklist before the Planner is revealed. The
-  driver checks off which step they're on. Some items likely auto-track
-  (the "training loads" counter increments from actual completed loads at
-  that terminal once flagged), others are probably manually checked
-  (non-load steps) — exact auto-vs-manual split per item type still needs
-  nailing down at build time, but the checklist-with-mixed-item-types shape
-  itself is confirmed.
-- **Load tagging**: when the driver actually loads at a flagged/in-training
-  terminal, that load gets a DB note identifying it as a training load (or
-  whichever checklist step it corresponds to) — likely a nullable column
-  on `load_log` linking back to the checklist item, so a training load is
-  still a completely normal load, just annotated.
-- **Manager/dispatch visibility**: progress against the checklist (not just
-  a boolean "flagged or not") should be visible to admin/dispatch — natural
-  extension of `FleetCardsModal.tsx` (already shows per-driver per-terminal
-  status; this would add a progress readout, e.g. "2 of 5 training loads,
-  1 of 2 other steps").
-
-Still open at build time: exact schema (a `terminal_checklist_items`
-company+terminal-scoped table + a per-driver progress table, mirroring the
-`service_types`/`service_records` split already used for service history);
-whether "goes active" needs an explicit admin/dispatch confirm step or
-auto-clears once every item is checked; whether it surfaces via the
-location button, Cards tab, or both (user said "and/or" originally, hasn't
-been pinned down further).
-
-#### Shipped 2026-08-03
-
-Migration (queued, not applied): `supabase/migrations/20260803000000_terminal_checklist.sql`
-adds `terminal_checklist_items` (company+terminal scoped, RLS mirrors the
-existing service_types/equipment pattern exactly -- full CRUD open to any
-active-company member, not role-gated at the RLS level; role gating for
-who can *edit* it is admin/lead-only in the UI, same convention as
-trucks/trailers), `terminal_checklist_progress` (per-driver, no direct
-client write at all -- only the two RPCs below touch it), and a nullable
-`load_log.training_checklist_item_id` tag column.
-
-Design decisions made (the three "still open" questions above, resolved):
-- **Auto-clears once every item is checked** -- no separate admin/dispatch
-  confirm step. Simpler, and matches the driver flow as described (the
-  checklist modal is a progress tracker, not an approval queue).
-- **Decoupled from `terminal_access` carding** -- this checklist is its own
-  independent gate, not a schema change to the existing card-visibility
-  system shipped in the "Terminal card / credential management" section
-  above. A terminal with zero configured checklist items has no gate at
-  all, so existing companies not using this feature see zero behavior
-  change.
-- **Surfaces via both** the location button (driver-facing, the primary
-  flow) and Fleet Cards (manager-facing progress readout) -- built both,
-  not just one.
-
-Built:
-- `toggle_terminal_checklist_item(p_item_id, p_checked)` RPC -- driver
-  checks/unchecks a manual step; rejects `training_loads`-type items (those
-  only ever move via real loads).
-- `record_terminal_checklist_load(p_load_id)` RPC -- called fire-and-forget
-  non-fatal from `useLoadWorkflow.ts` right after `complete_load` (same
-  pattern as `calculate_load_points`, added right alongside it). Finds the
-  first incomplete `training_loads` item for that terminal+driver, if any,
-  increments its progress, and tags the load via
-  `load_log.training_checklist_item_id`. No-ops silently otherwise.
-- `TerminalChecklistEditorModal.tsx` (new, admin) -- reachable via a
-  "Training Checklist" button inside the existing terminal edit modal
-  (`app/admin/page.tsx`'s `TerminalModal`, gated to existing/non-new
-  terminals only, same convention as the sensitive-equipment-data section).
-  Add/soft-delete steps, either `training_loads` (with a required count) or
-  `manual`.
-- `TerminalChecklistModal.tsx` (new, driver-facing) -- `app/calculator/page.tsx`
-  watches `location.selectedTerminalId`; whenever it changes, checks for an
-  incomplete checklist and if found, opens this modal as an **overlay on
-  top of the already-revealed Planner** (not a hard gate -- always
-  closeable, matches the user's "check off which step... before closing the
-  window revealing the planner" description literally, since the Planner
-  underneath was already showing). Manual items are checked via
-  `toggle_terminal_checklist_item`; training-load items show live
-  auto-tracked progress, read-only.
-- `FleetCardsModal.tsx` extended with a per-driver progress line ("2 of 5
-  training loads, 1 of 2 other steps") whenever the picked terminal has
-  checklist items configured -- the natural manager/dispatch visibility
-  extension the spec called for.
+Priority terminal flagging was designed (2026-08-01) and built (2026-08-03)
+as a customizable per-terminal training checklist — `terminal_checklist_items`/
+`terminal_checklist_progress` tables, `toggle_terminal_checklist_item`/
+`record_terminal_checklist_load` RPCs, `TerminalChecklistEditorModal.tsx`
+(admin), `TerminalChecklistModal.tsx` (driver-facing overlay on terminal
+select), and a `FleetCardsModal.tsx` progress readout. All of it removed
+per user direction during the fleet-tier spec reconciliation pass — terminal
+card management moved to simple active/inactive/expiring status sorting
+(already how Cards tab / `FleetCardsModal` work) rather than a
+star/flag-based workflow, making the whole checklist concept vestigial
+before it ever reached the live database (the migration was still queued,
+never applied). Confirmed via repo-wide search that no references remain.
+If a driver-training/carding-progress feature is wanted again later, don't
+resurrect this design uncritically — it was never validated against real
+usage.
 
 ### Onboarding
-- Replace/rework the existing guided tour with short video clips.
-- Fleet training mode: new drivers inherit the fleet's terminal
-  history/presets instead of starting cold.
+- Replace/rework the existing guided tour with short video clips. **Blocked
+  on content** — needs actual video assets supplied/recorded before this
+  can be scoped or built; not started.
+- ~~Fleet training mode: new drivers inherit the fleet's terminal
+  history/presets instead of starting cold.~~ — **resolved 2026-08-09, no
+  build needed.** Confirmed with the user: terminals were never
+  company-specific to begin with — the star/"frequent" mechanism is
+  purely a personal convenience for a driver to avoid searching the full
+  city/terminal catalog, and every driver already has access to the
+  complete terminal catalog regardless of company or tenure. There's
+  nothing for a new fleet driver to be missing that "inheriting" would
+  fix — the existing architecture already covers this.
 
 ### Cross-company reading network
 - No new UI — temp/API readings already update silently across companies;
@@ -349,10 +334,10 @@ applied — no live DB write access this session):
   aren't enabled for the company.
 
 **Status (2026-08-04): payroll report shipped — Incentive System now
-fully complete.** Built and queued (migration
-`20260804000000_payroll_report.sql`, not yet applied — requires
-`20260802000000_incentive_system.sql` to be applied first since it adds a
-trigger on `load_points` and reuses `calculate_load_points`):
+fully complete.** Migrations `20260802000000_incentive_system.sql` and
+`20260804000000_payroll_report.sql` both applied 2026-07-31 (in that
+order — the second requires the first since it adds a trigger on
+`load_points` and reuses `calculate_load_points`):
 - `payroll_reports` table — purely a "this period was exported" marker, not
   a stored report. The report itself (table + CSV) is always computed live
   from `load_points` for whatever period is selected. Admin-only RLS.
@@ -402,6 +387,43 @@ trigger on `load_points` and reuses `calculate_load_points`):
   path), CSV export (driver name/ID, period, total points, blank "$
   amount" column) which also inserts the `payroll_reports` marker row and
   clears any stale flag shown for that period.
+
+**Full live verification pass, 2026-07-31** (all 5 queued migrations had
+been applied via the Supabase SQL editor by this point; this is the
+end-to-end check against real data, not just typecheck):
+- Enabled incentives + saved two live product benchmarks (B100, ULSD) via
+  `IncentiveSettingsModal.tsx` — save succeeded, no error, values persisted
+  on reopen.
+- Completed a real load with no matching benchmark: `calculate_load_points`
+  ran with no error and no points banner (correct no-op, not a crash).
+  Completed a second real load against the new ULSD benchmark: "You earned
+  1785.4 points on this load" banner appeared with the exact expected math
+  (actual gallons − benchmark gallons).
+- `PayrollReportModal.tsx` picked up the real load correctly (1785.4 pts,
+  1 load, matching avg), expandable to per-load and per-compartment detail.
+- Edit-and-recalculate live-verified twice (`edit_load_line` →
+  `recalculate_load_points` with `p_preserve_density = true`): each gallons
+  edit correctly shifted total points by the expected delta.
+- `flag_stale_payroll_reports` trigger live-verified: exported CSV once,
+  then edited a load line again — the "this period was exported before,
+  but points have changed since" banner correctly appeared on next open.
+- Fleet Cards (`terminal_access` admin+dispatch policy) live-verified:
+  terminal search + per-driver card status list both render real data, no
+  errors.
+- Equipment sharing attribution (`equipment_attachments.uploaded_by`) and
+  the new `equipment_sensitive_data` table both live-verified: the Docs
+  modal renders with no `42703`/`PGRST205` errors, and a Purchase Price
+  saved via the admin-only Sensitive Info section read back correctly
+  after reopening the modal.
+- Net result: all 5 migrations (`20260730000000_dispatch_role_load_visibility`,
+  `20260731000000_equipment_sharing_attribution`,
+  `20260801000000_fleet_terminal_card_visibility`,
+  `20260802000000_incentive_system`, `20260804000000_payroll_report`) are
+  confirmed working end-to-end against live data, not just applied cleanly.
+  Test artifacts left in the demo company from this pass (enabled
+  incentives, B100/ULSD benchmarks, one edited load, a test Purchase Price
+  value) were left in place rather than cleaned up, since this is the
+  persistent demo/QA company, not customer data.
 
 ### Roles & permissions
 
@@ -474,12 +496,11 @@ once dispatch was added there), the "Set up planner →" full-impersonation
 button, the invite button, or role reassignment. All of those stay
 admin-only (or admin/lead-only for equipment), unchanged.
 
-**Migration queued, not yet applied**: `supabase/migrations/20260730000000_dispatch_role_load_visibility.sql`
+**Migration applied 2026-07-31**: `supabase/migrations/20260730000000_dispatch_role_load_visibility.sql`
 swaps the `load_log`/`load_lines` "admins can read company member loads"
 policies from `role IN ('admin','lead')` to `role IN ('admin','dispatch')` —
 this is what actually makes the new "Loads" button return data for a
-dispatch user; the app-code gate alone isn't sufficient. **Run this in the
-Supabase SQL editor before testing dispatch's Loads view.** Also worth
+dispatch user; the app-code gate alone isn't sufficient. Also worth
 noting: this is a real behavior change, not additive — leads lose the
 cross-driver load visibility they currently have, since the matrix scopes
 that to Dispatch + Admin only. Both policies existed live already but were
@@ -487,31 +508,129 @@ never in a migration file until this one (confirmed via a live query
 2026-07-29 — see "Architecture reality" for why that's unsurprising here).
 
 **Explicitly NOT done, flagged for whenever each area is actually built**:
-- Fleet-wide terminal card / credential visibility for dispatch (the real
-  subject of the spec's Section 1.3) — the `driver_licenses`/
-  `driver_medical_cards`/`driver_port_ids`/`driver_twic_cards`/`attachments`
-  RLS policies (all currently `role = 'admin'` only, confirmed live) were
-  deliberately left untouched. Extending them to dispatch needs a real
-  product decision first: those policies are full `ALL` (CRUD), and giving
-  dispatch the same would let dispatch edit/delete another driver's license
-  record, which is more than "view who's carded where" implies — don't
-  extend blindly, ask.
-- The "priority terminal flagging" feature — brand new table/UI, not built.
-- **Security flag, not yet verified**: the actual role-reassignment code
-  path (`lib/ui/driver/MemberCard.tsx`'s `changeRole()`) is a bare client-side
-  `.update()` on `user_companies` with no in-component role check — its only
-  protection is whatever RLS exists on `user_companies` UPDATE, which is
-  **unconfirmed** (a keyword search for "role" in `pg_policies.qual` would
-  miss a function-based check like `is_company_admin()`). Also: the
-  `admin_set_user_company` RPC that exists live is dead code, never called
-  from anywhere in app-code — don't assume it's the enforcement path.
-  Worth a live-DB check before this ships further.
-- A likely pre-existing bug, found in passing, not fixed: `reports/page.tsx`'s
-  `useLoadHistory(authUserId)` call probably should be
-  `useLoadHistory(effectiveUserId)` — as written, an admin using "Set up
-  planner for [driver]" impersonation sees *their own* load history in
-  Reports → My Loads, not the impersonated driver's, while every other
-  fetch on that same page correctly uses `effectiveUserId`.
+- ~~Fleet-wide terminal card / credential visibility for dispatch~~ —
+  **shipped 2026-08-06.** Scope decision made (asked, not guessed): dispatch
+  gets **read-only** view of license/medical/TWIC expiry status, not the
+  admin-only tables' full `ALL`/CRUD access — matches "view who's carded
+  where," not "edit any driver's record."
+
+  Live `pg_policies` query (2026-08-06) confirmed the actual shape before
+  writing anything: `driver_licenses`/`driver_medical_cards`/
+  `driver_port_ids`/`driver_twic_cards` each have an admin-only `ALL` policy
+  plus a self-row-only SELECT — so dispatch (and even admin, for other
+  drivers) genuinely couldn't see anyone else's row before this. `attachments`
+  turned out to **already** have a company-wide SELECT policy (no role
+  restriction at all) — confirmed via the same query — so it needed no
+  change; only the four credential tables had the gap.
+
+  `supabase/migrations/20260806000000_dispatch_credential_visibility.sql`
+  (applied) adds one new additive SELECT policy per credential table
+  (`dl_admin_dispatch_read`, `dmc_admin_dispatch_read`,
+  `dpid_admin_dispatch_read`, `dtc_admin_dispatch_read`), admin+dispatch,
+  company-scoped — mirrors `terminal_access_admin_dispatch_read`'s own
+  shape from the terminal-card migration. Existing `xx_admin` (ALL) and
+  `xx_own` (SELECT) policies untouched; permissive policies OR together, so
+  this only extends read reach, never reduces access. Live-confirmed via
+  `pg_policies` post-apply: all four exist with the intended `qual`.
+
+  New UI: `app/admin/FleetCredentialsModal.tsx` (new) + a "Credentials"
+  button in `app/admin/page.tsx`'s header, gated `admin || dispatch` exactly
+  like Fleet Cards — same fetch pattern (`user_companies` + this session's
+  new `is_company_staff` roster-visibility fix + `get_display_names_full`),
+  status-only display (expiry + computed color state via `cardStateFor`/a
+  local `DARK_EXP_COLOR` override, same as `FleetCardsModal.tsx`'s own dark-
+  background palette fix) — no underlying license/card field data (number,
+  class, examiner) shown, matching the read-only decision. Deliberately
+  excludes `driver_port_ids` — that table is the freeform, multi-row
+  "Badges" list (Cards tab), a different shape from singular license/
+  medical/TWIC; the existing single-driver `CredentialsReportModal.tsx` (the
+  only prior "Credentials" UI in the app) already scopes out port IDs for
+  the same reason, so this isn't a new omission.
+
+  Live-verified against the same two-member company from the roster-
+  visibility fix: both "Seth Perry" and "Test Testerson" render in the new
+  modal, each correctly showing "Not on file" for License/Medical/TWIC
+  (accurate — this demo company has never had credential data entered, same
+  empty state the self-view Credentials report already shows). No console
+  errors.
+- ~~The "priority terminal flagging" feature — brand new table/UI, not built.~~
+  Since superseded: it *was* built later this session, then removed entirely
+  per explicit user direction — see "Removed 2026-08-05" further down. Not
+  coming back in this form; terminal card management uses simple status
+  sorting instead. This bullet is stale, kept only so the history reads
+  coherently.
+- ~~**Security flag, not yet verified**~~ — **resolved 2026-08-05.** Live
+  `pg_policies` query confirmed `user_companies_update_admin_or_super`
+  (UPDATE) has both `qual` and `with_check` set to `is_company_admin(company_id)`
+  — so `MemberCard.tsx`'s bare client-side `changeRole()` `.update()` really
+  is safe: RLS silently blocks the write (0 rows affected) for anyone who
+  isn't a company admin (or super admin, per `is_company_admin()`'s own
+  `is_super_admin()` short-circuit). `admin_set_user_company` is still
+  confirmed dead code, unrelated to this enforcement path.
+
+  **But confirming this surfaced a real, separate, more serious bug**: the
+  live SELECT policy on the same table (`user_companies_select_own_or_super`)
+  is `is_super_admin() OR user_id = auth.uid()` — **no admin/lead/dispatch
+  carve-out at all**. Three client call sites did a raw
+  `.select(...).eq("company_id", cid)` assuming they'd get the whole
+  company's rows back: `app/admin/page.tsx` (member roster), `FleetCardsModal.tsx`
+  (per-terminal driver list), `app/calculator/lead/DriverAssignmentModal.tsx`
+  (driver picker). For any non-super-admin, all three silently collapsed to
+  "just my own row" the moment a company had more than one member — which
+  is exactly why every one of those features carried an "only verified
+  same-user, worth checking with a second driver" caveat all session. The
+  single-member demo company never exposed it because `user_id = auth.uid()`
+  alone already returned the complete (1-row) result set.
+
+  Fixed via `supabase/migrations/20260805000000_user_companies_staff_roster_visibility.sql`
+  (applied): a new `is_company_staff(p_company_id)` function, mirroring
+  `is_company_admin()`'s own `SECURITY DEFINER` + `is_super_admin()`
+  short-circuit shape but checking `role in ('owner','admin','lead','dispatch')`
+  instead of admin-only, plus a purely additive SELECT policy using it —
+  the existing self-row policy is untouched, this just OR's in a second
+  permissive policy. Deliberately excludes plain drivers (they keep exactly
+  the self-row access they already had).
+
+  **Live-verified against a genuine second company member** (the demo
+  account gained a real second user, `Test Testerson`, mid-session — the
+  first time this session multi-member visibility could be tested for
+  real, not just architecturally reasoned about): `/admin` roster now shows
+  "USERS (2)" with both members' names/emails/Loads buttons rendering
+  correctly, and Fleet Cards' Chevron/Fort Lauderdale lookup shows both
+  drivers' real, distinct card expiry dates. No console errors either
+  place. `DriverAssignmentModal.tsx` (Lead tab) wasn't re-tested live this
+  pass but shares the identical query shape, so the same fix applies.
+- ~~A likely pre-existing bug, found in passing, not fixed~~ — **fixed
+  2026-08-05.** `app/calculator/reports/page.tsx`'s `useLoadHistory(authUserId)`
+  call (line 85) was the one fetch on that page not using `effectiveUserId`
+  like everything else there — swapped to `useLoadHistory(effectiveUserId)`,
+  removed the now-unused `authUserId` destructure. Confirmed via `tsc
+  --noEmit` and a live reload of `/calculator/reports` (My Loads still shows
+  "2" for the current non-impersonated user, as expected — impersonation
+  itself wasn't re-tested this pass, but the fetch now matches every other
+  query on the page).
+
+  **Second, unrelated bug found while trying to verify the above**:
+  `/calculator/reports` was unconditionally redirecting back to `/calculator`
+  on every load, both via direct navigation and via the nav-menu link.
+  Root cause: `CalculatorLayoutClient.tsx`'s `activeTabFor()` deliberately
+  returns `"none"` for the Reports route (so no tab bar entry falsely shows
+  as active — Reports is a nav-menu destination, not a tab-bar peer), but
+  the tab bar's scroll-snap handler (`onScroll`, ~line 99) didn't know about
+  that sentinel: it always compares "closest tab to viewport center" against
+  `active`, and since `"none"` can never equal a real tab id, the handler
+  treated Reports as if the user had scrolled the tab strip and immediately
+  `router.push()`'d to whichever tab happened to be centered (`planner`).
+  This fired on mount because the scroll-snap container's initial layout
+  settle is itself a scroll event. Fixed with a one-line early return
+  (`if (active === "none") return;`) at the top of `onScroll` — the tab bar
+  now simply never auto-navigates while on a non-tab route. Live-verified:
+  `/calculator/reports` now loads and stays put, full content renders
+  (My Loads, Scale/Service/Wash History, Expiring Items, Terminal Cards,
+  Credentials), no console errors. This bug predates this session's changes
+  entirely (unrelated to the `authUserId` fix above) and would have affected
+  the Reports hub from the day it shipped — the fact that it was never
+  caught suggests Reports hadn't been click-tested end-to-end since.
 
 ### Role-based tabs (new UI direction, 2026-07-30, not in the original Fleet Tier spec)
 
@@ -836,24 +955,164 @@ but don't assume that stays true if someone wires it in later.)
 5. **VIN keying / future dedup** — `vin_number` already exists on trucks &
    trailers (nullable text). Normalization (uppercase/trim) and indexing not
    yet done. Merge/reconciliation logic explicitly deferred.
-6. **Expiration modal — group by city.** Currently a flat list with the
-   selected city sorted to top, not visually grouped. Needs: per-city sections
-   with a visually stronger header, same treatment carried into the shared
-   report output.
-7. **Presets rework.**
-   - Tap a preset → action sheet ("Load Diesel" / "Edit Preset"), with a
-     confirm step ("Save current configuration as Preset B?") before any
-     overwrite — no more silent overwrite on tap.
-   - Presets store **only the product selection per compartment** — universal
-     across terminals (not per-terminal), per-user always (including future
-     Fleet tier — never shared/company-level).
-   - Headspace + CG slider move **out** of presets entirely.
-8. **Equipment settings (new UI).** Gear icon next to each equipment listing →
-   opens compartment capacity (trailer settings) + headspace + CG slider
-   (moved here from presets, see #7). This is equipment-table-scoped data,
-   intersects directly with the solo/fleet equipment schema — sequence with
-   any further equipment schema work, not standalone.
+6. ~~**Expiration modal — group by city.** Currently a flat list with the
+   selected city sorted to top, not visually grouped.~~ — **stale, checked
+   2026-08-06, no longer applicable.** Read the current code
+   (`modals/ExpirationModal.tsx`'s Terminal Cards section,
+   `useTerminalFilters.ts`'s `catalogTerminalsInCity`, and the Reports hub's
+   `buildTerminalCardsReport.ts`) before touching anything, and all three
+   already scope to a single city — `catalogTerminalsInCity` filters by
+   `selectedCity`/`selectedState`, and `buildTerminalCardsReportBody`'s own
+   header comment says "for a single city." Live-confirmed in the Browser
+   pane: the Expirations modal already renders one clearly-labeled section
+   ("TERMINAL CARDS — In Fort Lauderdale, FL") with every listed terminal
+   actually in that city — no flat cross-city list exists to group. This
+   note describes an architecture that predates the Cards-tab city-grouping
+   rework (`app/calculator/cards/page.tsx`, item #68 in the punch list
+   above) and was never updated after that shipped. Left as a struck-through
+   record rather than deleted, so a future pass doesn't waste time
+   rediscovering the same thing.
+7. ~~**Presets rework.**~~ — **shipped 2026-08-06.** Scope changed from the
+   original spec during a live clarifying pass with the user (see #8 below
+   too — both items landed together, not sequenced, since the "equipment
+   settings" destination turned out to already exist rather than needing a
+   new gear-icon modal):
+   - Tap a **filled** preset slot now opens an action sheet (`PresetActionSheet`,
+     new `app/calculator/components/PresetActionSheet.tsx`) — "Load {summary}"
+     / "Edit Preset" / "Clear Preset", with a confirm step in front of the
+     two destructive ones ("Save current configuration as Preset B? This
+     replaces what's currently saved there (ULSD Diesel #2).") — no more
+     silent overwrite on tap. Tapping an **empty** slot still saves straight
+     through (nothing to protect). `PresetDial.tsx`'s tap handler now calls
+     a new `onTapFilled` callback instead of `onLoad` directly for filled
+     slots; hold-to-clear/hold-to-save (a deliberate, non-accidental gesture)
+     is unchanged.
+   - Presets (slots 1-5, the driver-facing A-E letters) are now **terminal-
+     independent** — `usePlanSlots.ts`'s `planStoreKey` gives them a
+     user-only key (no terminal component) instead of the old per-terminal
+     one; server-side, `serverFetchSlots`/`serverUpsertSlot`/`serverDeleteSlot`
+     write/read a constant `UNIVERSAL_SCOPE` sentinel for `terminal_id`/
+     `combo_id` on those slots instead of the real ones. **No DB migration
+     needed** — `user_plan_slots.terminal_id`/`combo_id` are `NOT NULL text`
+     and part of the unique key, so a fixed non-null sentinel dedupes
+     correctly (unlike an actual `NULL`, which Postgres never treats as
+     equal to itself for uniqueness) — confirmed via the migration file
+     directly before assuming this was safe. Slot 0 (the autosave/last-load
+     draft, not a driver-facing "preset") is untouched, still keyed to the
+     real terminal/combo exactly as before.
+   - Presets now store **only the product selection per compartment** —
+     `buildSnapshot` gained a `stripFillLevel` option (used for slots 1-5,
+     not slot 0) that drops `capOverride` from each compartment before
+     saving. `cgSlider` is dropped from every snapshot, all slots included
+     — treated exactly like `tempF`'s existing "never restored" precedent
+     (`PlanSnapshot.cgSlider` is now optional, kept only so old stored
+     snapshots don't fail the type). Per explicit user clarification: the
+     driver still adjusts headspace (the drag handle) and CG live per load
+     exactly as today, unconstrained by any role — presets/CG were never
+     meant to be role-gated, only the **cap itself** is (see #8).
+   - **New, not in the original spec** — cross-terminal product-availability
+     check: loading a preset that references a product not sold at the
+     *current* terminal no longer silently mis-renders. A live derived value
+     (`unavailableComps` in `page.tsx`, comparing `compPlan` against
+     `terminalProducts`) drives three things: (a) `PlannerControls.tsx`
+     gives an affected compartment's bar a red diagonal-stripe fill + "N/A"
+     code instead of the generic teal fallback; (b) `CompartmentModal.tsx`
+     shows a "⚠ Product Not Available at this terminal — choose a
+     replacement below" banner when opened for such a comp, and `page.tsx`
+     auto-opens it for the first unresolved comp right after a preset load
+     (advancing to the next one once that specific comp is actually fixed,
+     not just dismissed — a dismiss stops the auto-advance rather than
+     re-trapping the driver); (c) the LOAD button's `onClick` (not its
+     `disabled` attribute — deliberately, so tapping it while blocked still
+     produces feedback instead of just doing nothing) shows "Cannot Load,
+     all planned products are not available at {terminal}" and refuses to
+     call `beginLoadToSupabase`. Live-verified end-to-end including the
+     partial-mismatch case (one comp resolved, one still unavailable) —
+     worth knowing if all comps are unavailable, the *pre-existing*
+     `planRows.length === 0` gate (a comp with no resolvable density data
+     was already excluded from weight calc) disables the button first via
+     the HTML `disabled` attribute, so the new message only fires in mixed
+     scenarios; that's fine, the load genuinely can't proceed either way.
+8. ~~**Equipment settings (new UI).**~~ — **shipped 2026-08-06, but not as a
+   new gear-icon modal.** Confirmed with the user before building: the gear
+   icon in the header is the user's own profile settings, unrelated: cap/
+   volume/unit-number editing belongs in the **existing** equipment modal
+   (`lib/ui/driver/EquipmentDetails.tsx`'s `TruckModal`/`TrailerModal`,
+   already shared by both `/admin`'s full console and the Planner's
+   fleet-mode `EquipmentModal.tsx`), not a new destination.
+   - `CompartmentEditor` gained a second column, "Cap — overflow prevention"
+     (`cap_gallons`), alongside the existing "Total Volume" (`max_gallons`,
+     informational only) — previously this field didn't exist in the
+     equipment modal at all.
+   - **A real, separate bug found and fixed while wiring this up**:
+     `TrailerModal.save()` deletes and reinserts every `trailer_compartments`
+     row on every save, but the reinsert only ever wrote `comp_number`/
+     `max_gallons`/`position` — `cap_gallons` was never included, so it
+     silently reverted to `null` (falling back to `max_gallons`) on *every*
+     trailer edit, not just ones that touched compartments. This predates
+     this session's changes entirely and wasn't something anyone could have
+     noticed from the UI (BinderModal.tsx's own separate cap editor, see
+     below, was the only place a value ever showed up again — it does a
+     direct `.update()`, not delete+reinsert, so it self-healed the exact
+     symptom that would have made this bug visible). Fixed by writing
+     `cap_gallons: c.cap_gallons ?? null` on the reinsert. Live-verified:
+     edited a trailer's identity fields with cap 4300/1250/3800 already set,
+     saved, reopened — all three caps intact.
+   - **Role-gated to admin/dispatch/lead**, per explicit user instruction —
+     "we don't want them going over the comp cap," with the driver still
+     free to use headspace/CG live per load, just never past whatever cap a
+     higher role set. `myRole` is threaded from `CalculatorShellContext`'s
+     existing `shell.role` through `EquipmentModal.tsx` → its internal
+     `EquipmentDetailsModal` → `AdminTruckModal`/`AdminTrailerModal` (this
+     path never received it before — only `/admin`'s own page already
+     threaded it, for the pre-existing admin-only `SensitiveInfoSection`).
+     Gating covers cap/volume *and* Unit # (also named explicitly by the
+     user) for **existing** equipment only — a brand-new truck/trailer
+     still needs a name to be created at all, and creation itself isn't
+     role-gated at the RLS level (a separate, already-documented gap, out of
+     scope here) — so `canEditRestricted = isNew || myRole === "admin" ||
+     "dispatch" || "lead"`. Validated server-round-trip live: a cap value
+     exceeding the compartment's total volume is rejected with "Cap can't
+     exceed a compartment's total volume," matching the explicit ask that
+     "higher roles also can't set a cap higher than the total volume."
+   - **BinderModal.tsx's own separate, ungated cap editor was removed**
+     (`CompartmentRowItem` in `app/calculator/modals/BinderModal.tsx`) —
+     consolidated into the one role-gated location above rather than
+     leaving two editable, un-synced copies (one of which had no gate at
+     all). Now read-only there, still showing the current value for anyone
+     reviewing the Binder.
+   - `SoloEquipmentModal.tsx` (the lightweight solo-tier equipment picker)
+     was deliberately left untouched — confirmed via code read that it has
+     no "edit existing equipment" flow at all (tap = select for pairing,
+     long-press = remove, "+" = add new only), so there's nothing there to
+     gate; solo companies are always `role = 'admin'` anyway per the
+     existing architecture, so this was never reachable for them regardless.
 9. **Terminal product setup — admin-curated, not driver-selected.**
+   **Role gate shipped 2026-08-06**; the rest of this item is still
+   unbuilt (deliberately, per explicit user scoping — see below).
+
+   `ManageTerminalProductsModal.tsx` (reachable from any compartment's
+   product picker via "Manage products at this terminal") toggles a
+   terminal's active product list — an action that affects **every driver**
+   who loads at that terminal, company-wide. It had **no role gate at all**
+   before this fix — confirmed via code read, not assumption. Fixed by
+   threading `myRole` from `page.tsx`'s existing `shell.role` through
+   `CompartmentModal.tsx` (new `myRole` prop) into a `canManageProducts =
+   myRole === "admin" || "dispatch" || "lead"` check that hides both the
+   "Manage products at this terminal" entry-point button and the modal
+   itself for anyone else — matches the equipment-cap gating pattern from
+   earlier this session. UI-level gate only, consistent with this
+   session's established precedent (equipment CRUD itself is also not
+   RLS-gated, a separately-flagged, deferred gap — see "Open questions"
+   below) — no `terminal_products` RLS change made here.
+
+   **Explicitly deferred, scoped down from this pass on purpose** (asked,
+   not guessed): the base-list curation UI, the driver-facing "terminal not
+   yet configured" fallback + request action, a queryable `terminal_requests`
+   table, and an admin bulk reset/reselect flow are all still exactly as
+   unbuilt as before. Mid-Grade/Plus gasoline was confirmed to get its own
+   slot in the eventual base list (not deferred as exotic) — recorded here
+   for whenever that UI actually gets built, not implemented yet.
    - Master product list stays fully **granular** — this is a hard constraint,
      not a preference. Product selection feeds the API/temp correction
      calculation directly (confirmed with user); merging e.g. B5 and Diesel
@@ -887,17 +1146,239 @@ but don't assume that stays true if someone wires it in later.)
      fail).
 
 ## Open questions / decisions still needed
-- Mid-Grade gasoline: own slot in the base list, or deferred as exotic?
-- Solo→fleet join flow: build the UI against the existing `redeem_invite`
-  system (see above) — but the **equipment reconciliation** part (VIN-matched
-  duplicate detection, "this will replace your equipment, continue?" warning,
-  admin review screen) is genuinely new and unbuilt.
-- Post-join permission split (drivers can update status/inspections but not
-  core specs/add/delete) — likely an `equipment_activity` append-only log
-  table, core `trucks`/`trailers` staying admin-locked. Not started; note that
-  RLS currently does NOT enforce this distinction at all (any active-company
-  member can already INSERT/UPDATE/DELETE trucks/trailers directly) — this is
-  a real gap to close when this ships, not just a UI nicety.
+- ~~Mid-Grade gasoline: own slot in the base list, or deferred as exotic?~~ —
+  **resolved 2026-08-06: own slot.** Recorded in item 9 above for whenever
+  the base-list curation UI actually gets built (not implemented yet).
+- ~~Solo→fleet join flow~~ — **resolved + shipped 2026-08-06.** Scope
+  collapsed significantly from the original framing: joining a fleet via
+  invite code **abandons** the solo company entirely (no equipment
+  migration/merge) rather than reconciling it, per explicit product
+  decision — company selection is via invite *code*, not name, so the
+  "which Gemini Trucking" disambiguation concern that prompted this
+  question doesn't actually apply (the code encodes `company_id` directly,
+  no matching step exists). This means the VIN-matching/reconciliation/
+  admin-review-screen machinery originally envisioned is now **unnecessary
+  and not built** — there's nothing to reconcile.
+
+  `app/calculator/components/JoinFleetView.tsx` (new) — invite-code entry
+  form, wired into `SettingsModal.tsx`'s Account section as a new "Join a
+  Fleet" row, shown only when the user's current active company has
+  `is_solo = true` (fetched fresh on modal open, not cached). Calls
+  `redeem_invite(p_code)` then, critically, **also** calls
+  `set_active_company(p_company_id)` — confirmed via live
+  `pg_get_functiondef` that `redeem_invite` only sets `active_company_id`
+  when it was previously **null** (`coalesce(existing, new)`), so a solo
+  user (who already has one) would join the fleet's `user_companies` table
+  but silently keep looking at their old solo company without this
+  explicit follow-up call. On success, hard-navigates to `/calculator`
+  (`window.location.href`) rather than trying to hot-swap
+  `CalculatorShellContext`'s state, so every piece of shell state
+  (role/companyId/equipment) refetches clean against the newly active
+  company.
+
+  Old solo company + its equipment are left completely untouched (not
+  deleted, not flagged) — same "abandon, don't reconcile" decision. This
+  means solo companies pile up unbounded over time as users leave them
+  behind; tracked in "Pre-launch cleanup" below, not urgent enough to
+  block this.
+
+  **Live-verified 2026-08-06** (partial — see gap below): typecheck clean.
+  The `isSolo` gate itself works exactly as coded — confirmed via a
+  temporary debug log against the real Supabase call (removed after
+  confirming, not left in the shipped file) that the shared demo/QA
+  company (`1391e05e-...`) genuinely has `is_solo = true` live, which is
+  why "Join a Fleet" rendered for it. This was a surprising result at
+  first — this is the same company with 2 real members, Fleet Cards,
+  Incentives, and Payroll Report all live-verified earlier this session —
+  but it's a real, pre-existing data artifact, not a bug in this gate:
+  there's no path today that flips `is_solo` to `false`, and this
+  company's second member (`Test Testerson`) was added directly to
+  `user_companies` mid-session for RLS testing, never through any
+  "convert solo to fleet" flow. So a company can be `is_solo = true` and
+  still have multiple real members and full fleet features enabled — the
+  flag only ever reflects *how a company was created*, not its current
+  member count. Worth knowing if `is_solo` is ever used elsewhere as a
+  proxy for "single-member company" — it isn't one.
+
+  With that confirmed, opened the actual `JoinFleetView` UI live (copy
+  renders correctly) and submitted a bogus code (`ZZZZ9999`) — got back
+  "Invite not found" rendered in the error banner, proving the full round
+  trip end-to-end: real Supabase auth session, real `redeem_invite` RPC
+  call, real Postgres exception, correctly caught and displayed by the
+  component's `catch` block.
+
+  **Not exercised**: an actual successful redeem (`set_active_company`
+  follow-up + real fleet membership). Doing that against this session's
+  only available test company would have meant redeeming a real invite
+  code and switching the shared demo/QA account's `active_company_id` away
+  from the persistent company this entire session's test data (Fleet
+  Cards, Incentives, Payroll Report artifacts) lives in — a disruption to
+  the established QA environment, not worth the risk for what's otherwise
+  a single, well-understood `coalesce`-driven code path already confirmed
+  correct via direct `pg_get_functiondef` reads earlier. The negative case
+  (row hidden when `is_solo = false`) is the untested `else` branch of the
+  exact same boolean gate just proven live — not separately verified, but
+  low-risk by symmetry. If a disposable solo company + a second disposable
+  fleet company with a real invite code are ever available, worth a real
+  end-to-end redeem to close this out fully.
+- ~~Post-join permission split~~ — **shipped 2026-08-07.** Mechanism decided
+  (asked, not guessed): column-level RLS restriction via trigger, not the
+  `equipment_activity` append-only log table originally floated — the
+  simpler option, since `trucks`/`trailers`' existing `status_code`/
+  `status_location`/`status_lat`/`status_lon`/`status_notes`/
+  `status_updated_at` columns already serve as "current status," no new
+  table needed.
+
+  **Verified live before writing anything** (this repo's own "don't trust
+  the migrations folder" rule, twice over here):
+  - `pg_policies` query confirmed `trucks_insert_active_company`/
+    `trailers_insert_active_company` (INSERT) and
+    `trucks_delete_active_company`/`trailers_delete_active_company`
+    (DELETE) exist live with **no role check at all** — just
+    `company_id = get_active_company_id()`, exactly matching what
+    "Key existing infrastructure" already said. `trucks_update_active_company`/
+    `trailers_update_active_company` (UPDATE) is the same shape.
+  - `pg_get_functiondef` on `delete_truck`/`delete_trailer` (also
+    live-only, no migration file) showed they're `SECURITY DEFINER` RPCs
+    that **already** enforce `role = 'admin'` internally — this is the
+    real, already-working enforcement path (`EquipmentDetails.tsx` only
+    ever calls these RPCs, never a raw `.delete()`). The bare table
+    DELETE policy being wide-open was still a real gap for anyone
+    bypassing the RPC via the client SDK directly, though.
+  - No RPC exists for INSERT at all — `TruckModal`/`TrailerModal`'s
+    `save()` call `.from("trucks"/"trailers").insert(...)` directly. This
+    was the one genuinely ungated write path.
+
+  `supabase/migrations/20260807000000_equipment_driver_permission_split.sql`
+  (queued, not yet applied):
+  - INSERT: tightened to `is_company_staff(company_id)` (admin/lead/
+    dispatch), matching the precedent already set for equipment cap/Unit#
+    editing (2026-08-06) — not a new/different role set.
+  - DELETE: tightened to `is_company_admin(company_id)` (admin **only**),
+    deliberately narrower than INSERT — matches `delete_truck`/
+    `delete_trailer`'s own existing role check exactly, so the RLS
+    backstop can't be looser than the app's already-shipped behavior.
+  - UPDATE: RLS itself is untouched (still company-scoped only). A new
+    `enforce_equipment_status_only_update()` `BEFORE UPDATE` trigger on
+    both tables does the actual column-level split — Postgres RLS
+    policies can't compare OLD vs NEW columns in a bare USING/WITH CHECK
+    expression, only a trigger can see both rows. Allow-lists the ~6
+    confirmed-live status columns (`to_jsonb(old) - allowed` vs
+    `to_jsonb(new) - allowed`) rather than deny-listing "core spec"
+    columns — deliberately, since this repo's own "Architecture reality"
+    section already documents `trucks`/`trailers` having several live
+    columns (`vin_number`, `make`, `model`, `year`, every
+    `reg_*`/`inspection_*`/`ifta_*`/`phmsa_*`/`alliance_*`/
+    `fleet_ins_*`/`hazmat_lic_*`/`inner_bridge_*`/`tank_*`/
+    `trailer_reg_*`/`trailer_inspection_*` pair, `notes`) never confirmed
+    complete or present in any migration file — an allow-list of the
+    known-safe status columns can't be broken by an unconfirmed column
+    turning out to exist (or not), a deny-list could.
+  - Staff (admin/lead/dispatch) bypass the trigger entirely via the same
+    `is_company_staff()` check, so their saves are unaffected.
+
+  **UI changes** (`lib/ui/driver/EquipmentDetails.tsx`), needed alongside
+  the migration — without them, a driver editing any of the many fields
+  the modal already let them touch (VIN, plate, make/model/year, every
+  permit date/notes field, general notes, Active toggle) would now hit
+  the new trigger's exception as a raw, unhandled-feeling Supabase error
+  on Save, since the modal's existing `canEditRestricted` gate (added
+  2026-08-06) only ever covered Unit #/cap/compartments, leaving
+  everything else wide open to any role:
+  - `PermitEditRow`/`TankEditRow` gained an `editable` prop (default
+    `true`, mirroring `CompartmentEditor`'s existing pattern) — disables
+    every date/notes input and hides the add/remove controls when false.
+  - `TruckModal`/`TrailerModal`: VIN/plate/make/model/year, every permit
+    row, the inspection-shop/issue-date "extra" inputs, tank rows, and
+    the general Notes field are now all gated on the existing
+    `canEditRestricted` flag exactly like Unit#/cap already were — not a
+    new flag, just extending the one that existed.
+  - Delete button gated to a new, narrower `canDelete = myRole ===
+    "admin"` (not the broader `canEditRestricted`) to match the RLS/RPC
+    admin-only rule exactly, rather than the admin/lead/dispatch set used
+    everywhere else in this modal.
+  - Deactivate/Reactivate button gated to `canEditRestricted` — `active`
+    isn't in the trigger's status-column allow-list, so a driver toggling
+    it would also trip the new restriction.
+  - The Save button itself is now hidden (not just disabled) for
+    `!canEditRestricted` — with every field already read-only there's
+    nothing left for a driver to submit, and hiding it avoids a
+    click-that-does-nothing.
+  - **The "+ Add Truck/Trailer" (`isNew`) entry point needed no change.**
+    Confirmed via code read that it's only reachable from two places:
+    `/admin/page.tsx`'s Equipment section (already gated
+    `myRole === "admin" || myRole === "lead"` at the section level,
+    predating this pass) and `SoloEquipmentModal.tsx`'s add-new flow
+    (only ever used by solo companies, whose sole member is always
+    `role = 'admin'` by the existing solo-provisioning design). No path
+    exists for a plain driver to reach `isNew` mode today, so
+    `canEditRestricted`'s existing `isNew || …` bypass stays correct
+    as-is — it was already effectively unreachable-by-drivers before this
+    change and still is now.
+
+  **Both migrations applied 2026-08-07/08, partial live verification —
+  see gap noted below.** Typecheck clean throughout.
+
+  **Real bug found and fixed during this pass**: the trigger's
+  `is_company_staff(new.company_id)` check resolves against `auth.uid()`,
+  which is `NULL` for any write made through a service-role Postgres
+  connection — exactly how `app/api/admin/setup/route.ts`'s
+  `serviceSupabase` client operates (already gated by its own
+  `verifyAdmin()` check at the API layer, so this is a fully-trusted
+  path). With `auth.uid()` null, `is_company_staff()` returned false, so
+  the trigger would have incorrectly blocked any *future* service-role
+  update to `trucks`/`trailers` touching a non-status column, regardless
+  of who was really behind it — caught only because verifying an
+  unrelated coupling flow happened to route through this same API and
+  exposed it. Fixed via
+  `supabase/migrations/20260808000000_equipment_status_trigger_service_role_fix.sql`
+  (applied): the trigger now returns early (bypasses entirely) when
+  `auth.uid() is null`, treating a null caller as an already-authorized
+  system/service context rather than an unprivileged driver. Confirmed
+  today's actual `claim_combo`/`set_primary_truck`/etc. operations (the
+  ones that surfaced this) don't even touch `trucks`/`trailers` directly
+  (only `equipment_combos`, `user_primary_trucks`, `user_primary_trailers`)
+  — so this specific bug wasn't actually firing in that flow, but the
+  fix is real and necessary for any future service-role write that does
+  touch these tables' non-status columns.
+
+  **Live-verified**: admin save path — opened an existing truck
+  (`25512-A`) via `/admin`'s Equipment section, changed Make to a test
+  value, saved with no error, reopened and confirmed the new value
+  persisted, then reverted it. Confirms the trigger's `is_company_staff()`
+  bypass works correctly for a real authenticated admin session and the
+  new INSERT/DELETE policies don't collaterally break normal admin
+  writes.
+
+  **Not verified — a real gap, not silently skipped**: the actual
+  driver-role restriction (UI read-only rendering *and* the trigger
+  rejecting a non-status change) was not exercised end-to-end with a
+  genuinely authenticated driver session. Attempted via the existing
+  "Set up planner for X" admin-impersonation feature (temporarily
+  reassigning a real company member to `driver`, then impersonating
+  them) — but this is a display-only overlay: `shell.role` correctly
+  reflects the impersonated user's role for client-side rendering
+  (so the read-only UI gating *would* render correctly), but any actual
+  `supabase.from(...).update(...)` call still authenticates as the real
+  signed-in admin's own JWT, never truly assuming the target's identity
+  — so this demo environment cannot exercise the trigger's rejection
+  path at all; only a genuine driver-role login could. Both real accounts
+  in the shared demo/QA company are admins, and creating a genuine
+  third, disposable driver-role test account was judged not worth the
+  session's remaining scope. Worth a real check if a driver-role login
+  ever becomes available. (Role was cleanly reassigned back to admin
+  after this attempt, confirmed via a fresh `/admin` load — no lasting
+  side effect.)
+
+  **Also confirmed, incidentally**: attempting this test surfaced a
+  separate, pre-existing, unrelated bug — coupling equipment for an
+  impersonated user via "Browse fleet & couple equipment" creates the
+  `equipment_combos` row correctly (company combo count went 1 → 3
+  across two attempts) but the claim doesn't surface as "my equipment" in
+  that impersonated Planner session. Confirmed this is unrelated to
+  today's migration (the coupling RPC only touches `equipment_combos`,
+  never `trucks`/`trailers`) — flagged here rather than chased further,
+  since it's outside this pass's scope.
 
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
@@ -918,6 +1399,19 @@ Add to this as more turn up.
   age with no completion), or (b) app-side logic to reuse/replace a combo's
   existing `planned` row instead of inserting a new one each time LOAD is
   tapped.
+
+- **Abandoned solo companies accumulate with no cleanup.** The solo→fleet
+  join flow (`app/calculator/components/JoinFleetView.tsx`, shipped
+  2026-08-06) deliberately **abandons** a user's solo company entirely when
+  they redeem a fleet invite code — no equipment migration, no deletion of
+  the old `companies`/`user_companies` rows, per explicit product decision
+  (see "Fleet Tier — Build Spec" → solo→fleet join flow). This means every
+  solo user who later joins a real fleet leaves an orphaned, never-cleaned-up
+  solo `companies` row behind forever — same shape as the `load_log` issue
+  above (unbounded, low-harm-per-row table growth). Worth a scheduled
+  cleanup pass eventually (e.g. flag/archive solo companies with no
+  `user_companies` row still pointing at them as `active_company_id`), not
+  urgent enough to block anything today.
 
 ## Files safe to delete
 - `supabase/migrations_old/` — superseded, confirmed not referenced.

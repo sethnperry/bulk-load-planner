@@ -39,14 +39,21 @@ function compareSavedAt(a: any, b: any): number {
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
 
+// Sentinel scope used for named presets (slots 1-5) so they're stored
+// terminal/combo-independent -- user_plan_slots.terminal_id/combo_id are
+// NOT NULL text and part of the unique key, so a constant, non-null value
+// here needs no schema migration and dedupes correctly (unlike NULL, which
+// Postgres never treats as equal to itself for uniqueness). Slot 0 (the
+// autosave/last-load draft, not a driver-facing "preset") keeps using the
+// real terminal/combo exactly as before.
+const UNIVERSAL_SCOPE = "__universal__";
+
 type Props = {
   authUserId: string;
   selectedTerminalId: string;
   selectedComboId: string;
   tempF: number;
-  cgSlider: number;
   compPlan: Record<number, CompPlanInput>;
-  setCgSlider: (v: number) => void;
   setCompPlan: (v: Record<number, CompPlanInput>) => void;
   compartmentsLoaded: boolean;
   // Called by useLoadWorkflow after completeLoad — writes slot 0 as equipment-scoped
@@ -55,8 +62,8 @@ type Props = {
 
 export function usePlanSlots({
   authUserId, selectedTerminalId, selectedComboId,
-  tempF, cgSlider, compPlan,
-  setCgSlider, setCompPlan,
+  tempF, compPlan,
+  setCompPlan,
   compartmentsLoaded,
   onSaveLastLoad,
 }: Props) {
@@ -89,9 +96,17 @@ export function usePlanSlots({
     return `proTankr:${who}:${term}`;
   }, [authUserId, selectedTerminalId]);
 
+  // Slot 0 (autosave/last-load draft) stays keyed per-terminal, exactly as
+  // before. Slots 1-5 (named A-E presets) are keyed per-user only -- no
+  // terminal component at all -- so the same preset shows up and loads
+  // regardless of which terminal is currently selected.
   const planStoreKey = useCallback(
-    (slot: number) => `${planScopeKey}:plan:slot:${slot}`,
-    [planScopeKey]
+    (slot: number) => {
+      if (slot === 0) return `${planScopeKey}:plan:slot:0`;
+      const who = authUserId ? `u:${authUserId}` : "anon";
+      return `proTankr:${who}:preset:slot:${slot}`;
+    },
+    [planScopeKey, authUserId]
   );
 
   const serverSyncEnabled = Boolean(authUserId);
@@ -130,36 +145,64 @@ export function usePlanSlots({
   }, [selectedTerminalId, planStoreKey, safeRead]);
 
   // ── Supabase server sync ──────────────────────────────────────────────────
+  // Slot 0 stays scoped to the real terminal/combo; slots 1-5 (presets) use
+  // UNIVERSAL_SCOPE so the same row is visible/loadable from any terminal.
+
+  function scopeFor(slot: number): { terminalId: string; comboId: string } | null {
+    if (slot === 0) {
+      if (!selectedTerminalId || !selectedComboId) return null;
+      return { terminalId: String(selectedTerminalId), comboId: String(selectedComboId) };
+    }
+    return { terminalId: UNIVERSAL_SCOPE, comboId: UNIVERSAL_SCOPE };
+  }
 
   async function serverFetchSlots(): Promise<Record<number, any>> {
-    if (!authUserId || !selectedTerminalId || !selectedComboId) return {};
-    const { data, error } = await supabase
+    if (!authUserId) return {};
+    const out: Record<number, any> = {};
+
+    if (selectedTerminalId && selectedComboId) {
+      const { data, error } = await supabase
+        .from("user_plan_slots")
+        .select("slot,payload,updated_at")
+        .eq("user_id", authUserId)
+        .eq("terminal_id", String(selectedTerminalId))
+        .eq("combo_id", String(selectedComboId))
+        .eq("slot", 0);
+      if (error) console.warn("serverFetchSlots (slot 0) error:", error.message);
+      else (data || []).forEach((r: any) => { out[Number(r.slot)] = r.payload ?? null; });
+    }
+
+    const { data: presetRows, error: presetErr } = await supabase
       .from("user_plan_slots")
       .select("slot,payload,updated_at")
       .eq("user_id", authUserId)
-      .eq("terminal_id", String(selectedTerminalId))
-      .eq("combo_id", String(selectedComboId))
-      .in("slot", [0, 1, 2, 3, 4, 5]);
-    if (error) { console.warn("serverFetchSlots error:", error.message); return {}; }
-    const out: Record<number, any> = {};
-    (data || []).forEach((r: any) => { out[Number(r.slot)] = r.payload ?? null; });
+      .eq("terminal_id", UNIVERSAL_SCOPE)
+      .eq("combo_id", UNIVERSAL_SCOPE)
+      .in("slot", [1, 2, 3, 4, 5]);
+    if (presetErr) console.warn("serverFetchSlots (presets) error:", presetErr.message);
+    else (presetRows || []).forEach((r: any) => { out[Number(r.slot)] = r.payload ?? null; });
+
     return out;
   }
 
   async function serverUpsertSlot(slot: number, payload: any) {
-    if (!authUserId || !selectedTerminalId || !selectedComboId) return;
+    if (!authUserId) return;
+    const scope = scopeFor(slot);
+    if (!scope) return;
     const { error } = await supabase.from("user_plan_slots").upsert({
-      user_id: authUserId, terminal_id: String(selectedTerminalId),
-      combo_id: String(selectedComboId), slot, payload,
+      user_id: authUserId, terminal_id: scope.terminalId,
+      combo_id: scope.comboId, slot, payload,
     }, { onConflict: "user_id,terminal_id,combo_id,slot" });
     if (error) console.warn("serverUpsertSlot error:", error.message);
   }
 
   async function serverDeleteSlot(slot: number) {
-    if (!authUserId || !selectedTerminalId || !selectedComboId) return;
+    if (!authUserId) return;
+    const scope = scopeFor(slot);
+    if (!scope) return;
     const { error } = await supabase.from("user_plan_slots").delete()
-      .eq("user_id", authUserId).eq("terminal_id", String(selectedTerminalId))
-      .eq("combo_id", String(selectedComboId)).eq("slot", slot);
+      .eq("user_id", authUserId).eq("terminal_id", scope.terminalId)
+      .eq("combo_id", scope.comboId).eq("slot", slot);
     if (error) console.warn("serverDeleteSlot error:", error.message);
   }
 
@@ -281,23 +324,34 @@ export function usePlanSlots({
 
   // ── Snapshot build/apply ──────────────────────────────────────────────────
 
+  // stripFillLevel drops capOverride from every compartment -- used for named
+  // presets (slots 1-5), which store only the product selection per the
+  // spec ("headspace + CG slider move out of presets entirely"). Slot 0
+  // (the autosave/last-load draft) keeps full fidelity, since it's plan
+  // continuity, not a driver-facing "preset."
   const buildSnapshot = useCallback(
-    (terminalId: string): PlanSnapshot => ({
-      v: 1, savedAt: Date.now(), terminalId,
-      tempF: Number(tempF) || 60,
-      cgSlider: Number(cgSlider) || 0.25,
-      compPlan,
-    }),
-    [tempF, cgSlider, compPlan]
+    (terminalId: string, opts?: { stripFillLevel?: boolean }): PlanSnapshot => {
+      const plan = opts?.stripFillLevel
+        ? Object.fromEntries(Object.entries(compPlan).map(([k, v]) => [k, { empty: v.empty, productId: v.productId }]))
+        : compPlan;
+      return {
+        v: 1, savedAt: Date.now(), terminalId,
+        tempF: Number(tempF) || 60,
+        compPlan: plan,
+      };
+    },
+    [tempF, compPlan]
   );
 
   const applySnapshot = useCallback((snap: PlanSnapshot) => {
     // NOTE: tempF is intentionally NOT restored from any snapshot.
     // The fuel temp prediction always owns tempF. Restoring it from saved state
     // would override the prediction every time a slot is switched or the page reloads.
-    setCgSlider(Number(snap.cgSlider) || 0.25);
+    // cgSlider is likewise never restored -- it's a live, driver-adjustable
+    // per-load control, never tied to a saved plan (old stored snapshots may
+    // still carry a cgSlider field; it's simply ignored here).
     setCompPlan(snap.compPlan || {});
-  }, [setCgSlider, setCompPlan]);
+  }, [setCompPlan]);
 
   // ── Server pull (once per scope) ──────────────────────────────────────────
 
@@ -330,7 +384,6 @@ export function usePlanSlots({
               savedAt: sp.savedAtISO ? (Date.parse(String(sp.savedAtISO)) || Date.now()) : Date.now(),
               terminalId: String(sp.terminalId ?? selectedTerminalId),
               tempF: typeof sp.tempF === "number" ? sp.tempF : 60,
-              cgSlider: typeof sp.cgSlider === "number" ? sp.cgSlider : 0.25,
               compPlan: sp.compPlan ?? {},
             };
             try { localStorage.setItem(planStoreKey(s), JSON.stringify(normalized)); setSlotBump((v) => v + 1); } catch {}
@@ -351,7 +404,7 @@ export function usePlanSlots({
             // NOTE: tempF is intentionally NOT restored from snapshot.
             // The fuel temp prediction always dominates on load/refresh.
             // tempF is only ever set by the prediction hook or manually by the user.
-            if (typeof local0.cgSlider === "number") setCgSlider(local0.cgSlider);
+            // cgSlider is likewise never restored -- see applySnapshot.
             if (local0.compPlan && typeof local0.compPlan === "object") setCompPlan(local0.compPlan);
             planDirtyRef.current = false;
             lastAppliedScopeRef.current = planScopeKey;
@@ -422,7 +475,6 @@ export function usePlanSlots({
 
     if (skipLocalRestore) {
       safeDelete(planStoreKey(0));
-      setCgSlider(0.25);
       setCompPlan({});
     } else if (raw && raw.v === 1 && String(raw.terminalId) === String(selectedTerminalId)) {
       applySnapshot(raw);
@@ -441,7 +493,7 @@ export function usePlanSlots({
     if (!selectedTerminalId) return;
     if (planRestoreReadyRef.current) return;
     planDirtyRef.current = true;
-  }, [selectedTerminalId, tempF, cgSlider, compPlan]);
+  }, [selectedTerminalId, tempF, compPlan]);
 
   // ── Debounced autosave slot 0 ─────────────────────────────────────────────
 
@@ -457,7 +509,7 @@ export function usePlanSlots({
       refreshSlotHas();
     }, 350);
     return () => { if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current); };
-  }, [selectedTerminalId, tempF, cgSlider, compPlan, buildSnapshot, planStoreKey, safeWrite, refreshSlotHas]);
+  }, [selectedTerminalId, tempF, compPlan, buildSnapshot, planStoreKey, safeWrite, refreshSlotHas]);
 
   // ── Server sync helpers ───────────────────────────────────────────────────
 
@@ -485,7 +537,7 @@ export function usePlanSlots({
 
   const saveToSlot = useCallback((slot: number) => {
     if (!selectedTerminalId) return;
-    const snap = buildSnapshot(String(selectedTerminalId));
+    const snap = buildSnapshot(String(selectedTerminalId), { stripFillLevel: slot !== 0 });
     safeWrite(planStoreKey(slot), snap);
     refreshSlotHas();
     afterLocalSlotWrite(slot);
@@ -503,13 +555,25 @@ export function usePlanSlots({
     if (!selectedTerminalId) return;
     const raw = safeRead(planStoreKey(slot)) as PlanSnapshot | null;
     if (!raw || raw.v !== 1) return;
-    if (String(raw.terminalId) !== String(selectedTerminalId)) return;
+    // Terminal-match is only meaningful for slot 0 (the real per-terminal
+    // draft) -- named presets (1-5) are terminal-independent by design, so
+    // they load regardless of which terminal is currently selected.
+    if (slot === 0 && String(raw.terminalId) !== String(selectedTerminalId)) return;
     planRestoreReadyRef.current = planScopeKey;
     applySnapshot(raw);
     queueMicrotask(() => {
       if (planRestoreReadyRef.current === planScopeKey) planRestoreReadyRef.current = null;
     });
   }, [selectedTerminalId, planStoreKey, safeRead, applySnapshot, planScopeKey]);
+
+  // Read-only peek at a slot's saved compPlan, for showing a real summary
+  // (e.g. "Load Diesel, Regular") in the action sheet before committing to
+  // load or overwrite it. Never mutates anything.
+  const peekSlot = useCallback((slot: number): PlanSnapshot | null => {
+    const raw = safeRead(planStoreKey(slot)) as PlanSnapshot | null;
+    if (!raw || raw.v !== 1) return null;
+    return raw;
+  }, [planStoreKey, safeRead]);
 
   // Public: refresh slot 0 from load_log after a completed load
   // Called by page.tsx post-completeLoad so slip seat state updates without reload
@@ -537,6 +601,7 @@ export function usePlanSlots({
     saveToSlot,
     clearSlot,
     loadFromSlot,
+    peekSlot,
     refreshLastLoad,
   };
 }

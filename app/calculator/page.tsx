@@ -36,6 +36,7 @@ import { useFuelTempPrediction } from "./hooks/useFuelTempPrediction";
 // ── Sections ───────────────────────────────────────────────────────────────────
 import PlannerControls from "./sections/PlannerControls";
 import PresetDial from "./sections/PresetDial";
+import PresetActionSheet from "./components/PresetActionSheet";
 
 // ── Modals ─────────────────────────────────────────────────────────────────────
 import LocationModal from "./modals/LocationModal";
@@ -44,7 +45,6 @@ import TerminalCatalogModal from "./modals/TerminalCatalogModal";
 import LoadingModal from "./modals/LoadingModal";
 import ProductTempModal from "./modals/ProductTempModal";
 import CompartmentModal from "./modals/CompartmentModal";
-import TerminalChecklistModal from "./modals/TerminalChecklistModal";
 
 // ── UI ─────────────────────────────────────────────────────────────────────────
 import { styles } from "./ui/styles";
@@ -242,7 +242,6 @@ export default function CalculatorPage() {
   const [compModalOpen, setCompModalOpen] = useState(false);
   const [compModalComp, setCompModalComp] = useState<number | null>(null);
   const [tempDialOpen, setTempDialOpen] = useState(false);
-  const [checklistTerminalId, setChecklistTerminalId] = useState<string | null>(null);
 
   // ── Action row state ────────────────────────────────────────────────────────
   // activeSlotLetter mirrors PresetDial's own (cosmetic) centered/last-tapped
@@ -263,40 +262,6 @@ export default function CalculatorPage() {
     // timezone lives in terminalCatalog (from terminals table), not in my_terminals_with_status view
     return (terminals.terminalCatalog as any[])?.find((x) => String(x.terminal_id) === tid)?.timezone ?? null;
   }, [location.selectedTerminalId, terminals.terminalCatalog]);
-
-  // Priority terminal flagging: whenever the selected terminal changes,
-  // check whether it has an incomplete checklist for this driver -- if so,
-  // surface it as an overlay on top of the Planner (not a hard gate; see
-  // TerminalChecklistModal). No-op for terminals with no configured
-  // checklist items at all.
-  useEffect(() => {
-    const tid = location.selectedTerminalId;
-    if (!tid) return;
-    let cancelled = false;
-    (async () => {
-      const { data: itemRows } = await supabase
-        .from("terminal_checklist_items")
-        .select("id, item_type, required_count")
-        .eq("terminal_id", tid)
-        .eq("is_active", true);
-      if (cancelled || !itemRows || itemRows.length === 0) return;
-      const ids = itemRows.map((r: any) => r.id);
-      const { data: progRows } = await supabase
-        .from("terminal_checklist_progress")
-        .select("checklist_item_id, progress_count, is_checked")
-        .in("checklist_item_id", ids);
-      if (cancelled) return;
-      const progById = Object.fromEntries(((progRows ?? []) as any[]).map((p) => [p.checklist_item_id, p]));
-      const allDone = itemRows.every((item: any) => {
-        const p = progById[item.id];
-        return item.item_type === "training_loads"
-          ? (p?.progress_count ?? 0) >= (item.required_count ?? 1)
-          : Boolean(p?.is_checked);
-      });
-      if (!allDone) setChecklistTerminalId(tid);
-    })();
-    return () => { cancelled = true; };
-  }, [location.selectedTerminalId]);
 
   // ── Compartments ───────────────────────────────────────────────────────────
   const [compartments, setCompartments] = useState<CompRow[]>([]);
@@ -510,6 +475,9 @@ export default function CalculatorPage() {
   // on a completely fresh mount.
   const [baselineOverrides, setBaselineOverrides] = useState(() => overridesSnapshot(compPlan, cgSlider));
   const [captureBaselineNext, setCaptureBaselineNext] = useState(false);
+  // Which preset slot (1-5) the action sheet is open for, if any -- set by
+  // PresetDial's onTapFilled when a filled slot is tapped.
+  const [presetSheetSlot, setPresetSheetSlot] = useState<number | null>(null);
 
   // Fires once compPlan has actually re-rendered post-load (loadFromSlot
   // applies asynchronously via the hook's own setCompPlan), so the baseline
@@ -807,7 +775,7 @@ export default function CalculatorPage() {
   // Must be declared BEFORE loadWorkflow so planSlots.refreshLastLoad is defined
   const planSlots = usePlanSlots({
     authUserId: effectiveUserId, selectedTerminalId: location.selectedTerminalId, selectedComboId: equipment.selectedComboId,
-    tempF, cgSlider, compPlan, setCgSlider, setCompPlan,
+    tempF, compPlan, setCompPlan,
     compartmentsLoaded: compartments.length > 0,
   });
 
@@ -817,6 +785,94 @@ export default function CalculatorPage() {
     for (const p of terminalProducts) { if (p.product_id) m.set(p.product_id, p.product_name ?? p.product_id); }
     return m;
   }, [terminalProducts]);
+
+  // Preset action sheet summary -- a preset saved at a different terminal
+  // may reference a product not sold here, which productNameById (scoped to
+  // the *current* terminal) won't resolve; surfaced honestly rather than
+  // silently dropped, since that's exactly the mismatch the LOAD-blocking
+  // flow below also has to catch.
+  const presetSheetSummary = useMemo(() => {
+    if (presetSheetSlot == null) return "";
+    const snap = planSlots.peekSlot(presetSheetSlot);
+    const plan = snap?.compPlan;
+    if (!plan) return "Empty";
+    const names = new Set<string>();
+    let hasUnavailable = false;
+    for (const v of Object.values(plan)) {
+      if (!v || v.empty || !v.productId) continue;
+      const name = productNameById.get(v.productId);
+      if (name) names.add(name); else hasUnavailable = true;
+    }
+    const parts = Array.from(names);
+    if (hasUnavailable) parts.push("unavailable product");
+    return parts.length > 0 ? parts.join(", ") : "Empty";
+  }, [presetSheetSlot, planSlots, productNameById]);
+
+  // Compartments whose planned product isn't sold at the currently selected
+  // terminal -- almost always the result of loading a preset saved at a
+  // different terminal (presets are terminal-independent, per the rework
+  // above). A live derived value (not a one-time check at load time) so it
+  // also catches a terminal switch after the fact. Feeds both the
+  // auto-resolve flow below and the LOAD button's hard block.
+  const unavailableComps = useMemo(() => {
+    const availableIds = new Set(terminalProducts.map((p) => p.product_id));
+    const result: number[] = [];
+    for (const [compStr, v] of Object.entries(compPlan)) {
+      if (!v || v.empty || !v.productId) continue;
+      if (!availableIds.has(v.productId)) result.push(Number(compStr));
+    }
+    return result.sort((a, b) => a - b);
+  }, [compPlan, terminalProducts]);
+
+  // Auto-resolve flow: right after a preset load, open the first unavailable
+  // comp's Edit Comp modal with the "Product Not Available" banner. Once
+  // that specific comp is actually fixed (no longer in unavailableComps),
+  // auto-advance to the next one. A dismiss without fixing stops the
+  // auto-advance -- the driver can still resolve manually later, or just
+  // hit LOAD and get the hard-block message below.
+  const [checkAvailabilityNext, setCheckAvailabilityNext] = useState(false);
+  const autoResolveActiveRef = useRef(false);
+  const resolvingCompRef = useRef<number | null>(null);
+  const prevCompModalOpenRef = useRef(false);
+
+  useEffect(() => {
+    if (!checkAvailabilityNext) return;
+    setCheckAvailabilityNext(false);
+    if (unavailableComps.length > 0) {
+      const first = unavailableComps[0];
+      autoResolveActiveRef.current = true;
+      resolvingCompRef.current = first;
+      setCompModalComp(first);
+      setCompModalOpen(true);
+      setSelectedComp(first);
+    }
+  }, [checkAvailabilityNext, unavailableComps]);
+
+  useEffect(() => {
+    const wasOpen = prevCompModalOpenRef.current;
+    prevCompModalOpenRef.current = compModalOpen;
+    if (!wasOpen || compModalOpen) return; // only on open -> closed
+    if (!autoResolveActiveRef.current) return;
+
+    const justClosedComp = resolvingCompRef.current;
+    const stillUnavailable = justClosedComp != null && unavailableComps.includes(justClosedComp);
+    if (stillUnavailable) {
+      // Dismissed without fixing -- stop auto-advancing.
+      autoResolveActiveRef.current = false;
+      resolvingCompRef.current = null;
+      return;
+    }
+    if (unavailableComps.length > 0) {
+      const next = unavailableComps[0];
+      resolvingCompRef.current = next;
+      setCompModalComp(next);
+      setCompModalOpen(true);
+      setSelectedComp(next);
+    } else {
+      autoResolveActiveRef.current = false;
+      resolvingCompRef.current = null;
+    }
+  }, [compModalOpen, unavailableComps]);
 
   const loadWorkflow = useLoadWorkflow({
     authUserId: effectiveUserId || null,
@@ -1024,6 +1080,11 @@ const lastProductInfoById = useMemo(() => {
   }), []);
 
   // ── Derived load state ─────────────────────────────────────────────────────
+  // unavailableComps is deliberately NOT folded into loadDisabled -- per
+  // spec, tapping LOAD while it's non-empty should produce an explicit
+  // "Cannot Load" message (see loadBlockedMsg below), not just a silently
+  // inert button, so a driver who ignores the compartment-bar warning still
+  // gets told exactly why.
   const loadDisabled =
     loadWorkflow.beginLoadBusy ||
     !equipment.selectedComboId ||
@@ -1032,6 +1093,11 @@ const lastProductInfoById = useMemo(() => {
     !location.selectedCity ||
     !location.selectedCityId ||
     planRows.length === 0;
+
+  const [loadBlockedMsg, setLoadBlockedMsg] = useState<string | null>(null);
+  useEffect(() => {
+    if (unavailableComps.length === 0) setLoadBlockedMsg(null);
+  }, [unavailableComps]);
 
   const loadLabel = loadWorkflow.beginLoadBusy ? "Loading…"
     : loadWorkflow.loadReport ? "RELOAD"
@@ -1064,13 +1130,39 @@ const lastProductInfoById = useMemo(() => {
           slots={planSlots.PLAN_SLOTS}
           slotHas={planSlots.slotHas}
           disabled={!location.selectedTerminalId}
-          onLoad={(n) => { planSlots.loadFromSlot(n); setCaptureBaselineNext(true); }}
+          onTapFilled={(n) => setPresetSheetSlot(n)}
           onSave={(n) => { planSlots.saveToSlot(n); setBaselineOverrides(overridesSnapshot(compPlan, cgSlider)); }}
           onClear={planSlots.clearSlot}
           onTourAdvance={tourAdvanceIfTarget}
           onActiveChange={setActiveSlotLetter}
         />
       </div>
+
+      <PresetActionSheet
+        open={presetSheetSlot != null}
+        letter={presetSheetSlot != null ? String.fromCharCode(64 + presetSheetSlot) : ""}
+        summary={presetSheetSummary}
+        onLoad={() => {
+          if (presetSheetSlot != null) {
+            planSlots.loadFromSlot(presetSheetSlot);
+            setCaptureBaselineNext(true);
+            setCheckAvailabilityNext(true);
+          }
+          setPresetSheetSlot(null);
+        }}
+        onConfirmEdit={() => {
+          if (presetSheetSlot != null) {
+            planSlots.saveToSlot(presetSheetSlot);
+            setBaselineOverrides(overridesSnapshot(compPlan, cgSlider));
+          }
+          setPresetSheetSlot(null);
+        }}
+        onConfirmClear={() => {
+          if (presetSheetSlot != null) planSlots.clearSlot(presetSheetSlot);
+          setPresetSheetSlot(null);
+        }}
+        onClose={() => setPresetSheetSlot(null)}
+      />
 
       {/* Action row -- left: "Save plan {letter}" once a temporary cap
           override exists anywhere (a concrete "diverges from saved" signal);
@@ -1139,6 +1231,7 @@ const lastProductInfoById = useMemo(() => {
         selectedTerminalId={location.selectedTerminalId ?? ""}
         terminalName={terminalLabel}
         onTerminalProductsChanged={fetchTerminalProducts}
+        myRole={shell.role}
       />
 
       {/* CG Slider — always visible */}
@@ -1356,7 +1449,15 @@ const lastProductInfoById = useMemo(() => {
             </button>
 
             {/* Load button */}
-            <button type="button" onClick={loadWorkflow.beginLoadToSupabase} disabled={loadDisabled}
+            <button type="button"
+              onClick={() => {
+                if (unavailableComps.length > 0) {
+                  setLoadBlockedMsg(`Cannot Load, all planned products are not available at ${terminalLabel || "this terminal"}`);
+                  return;
+                }
+                loadWorkflow.beginLoadToSupabase();
+              }}
+              disabled={loadDisabled}
               style={{
                 borderRadius: 6, border: "none", background: themeFill(shell.theme.darkMode, shell.theme.accentColor), padding: "10px 14px", width: "100%",
                 cursor: loadDisabled ? "not-allowed" : "pointer", opacity: loadDisabled ? 0.5 : 1,
@@ -1365,6 +1466,10 @@ const lastProductInfoById = useMemo(() => {
             >
               <span style={{ fontSize: 16, fontWeight: 700, color: themeTextOnFill(shell.theme.darkMode), letterSpacing: 0.3 }}>{loadLabel}</span>
             </button>
+
+            {loadBlockedMsg && (
+              <div style={{ ...styles.error, textAlign: "center" as const }}>{loadBlockedMsg}</div>
+            )}
 
             {/* Load summary */}
             <div style={{ borderRadius: 16, background: "rgba(255,255,255,0.03)", padding: "10px 14px" }}>
@@ -1498,13 +1603,6 @@ const lastProductInfoById = useMemo(() => {
         setSelectedTerminalId={location.setSelectedTerminalId}
         setTermOpen={setTermOpen}
         onChangeLocation={() => { setTermOpen(false); setLocOpen(true); }}
-      />
-
-      <TerminalChecklistModal
-        open={checklistTerminalId != null}
-        onClose={() => setChecklistTerminalId(null)}
-        terminalId={checklistTerminalId}
-        terminalName={terminalLabel}
       />
 
       <TerminalCatalogModal

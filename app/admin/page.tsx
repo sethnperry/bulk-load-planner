@@ -18,9 +18,10 @@ import type { Member } from "@/lib/ui/driver/types";
 import type { Role } from "@/lib/ui/driver/role";
 import AdminLoadsModal from "./AdminLoadsModal";
 import FleetCardsModal from "./FleetCardsModal";
+import FleetCredentialsModal from "./FleetCredentialsModal";
 import IncentiveSettingsModal from "./IncentiveSettingsModal";
-import TerminalChecklistEditorModal from "./TerminalChecklistEditorModal";
 import PayrollReportModal from "./PayrollReportModal";
+import UnderloadingDashboardModal from "./UnderloadingDashboardModal";
 
 // ─────────────────────────────────────────────────────────────
 // Types
@@ -793,7 +794,6 @@ function TerminalModal({ terminal, companyId, allProducts, onClose, onDone }: {
   const [catalogSearch, setCatalogSearch] = useState("");
   const [saving,        setSaving]        = useState(false);
   const [err,           setErr]           = useState<string | null>(null);
-  const [checklistOpen, setChecklistOpen] = useState(false);
 
   function addFromCatalog(productId: string) {
     setAssigned(prev => [...prev, productId]);
@@ -972,13 +972,6 @@ function TerminalModal({ terminal, companyId, allProducts, onClose, onDone }: {
 
       <hr style={css.divider} />
 
-      {!isNew && (
-        <button type="button" style={{ ...css.btn("subtle"), width: "100%", marginBottom: 12 }}
-          onClick={() => setChecklistOpen(true)}>
-          Training Checklist
-        </button>
-      )}
-
       <div style={{ display: "flex", flexDirection: "column" as const, gap: 8, marginTop: 8 }}>
         <div style={{ display: "flex", gap: 8 }}>
           {!isNew && (
@@ -998,15 +991,6 @@ function TerminalModal({ terminal, companyId, allProducts, onClose, onDone }: {
         <button style={{ ...css.btn("primary"), width: "100%", textAlign: "center" as const }}
           onClick={save} disabled={saving}>{saving ? "Saving…" : isNew ? "Add Terminal" : "Save"}</button>
       </div>
-      {!isNew && (
-        <TerminalChecklistEditorModal
-          open={checklistOpen}
-          onClose={() => setChecklistOpen(false)}
-          companyId={companyId}
-          terminalId={terminal!.terminal_id}
-          terminalName={name}
-        />
-      )}
     </Modal>
   );
 }
@@ -1058,8 +1042,10 @@ export default function AdminPage() {
   const [profileModal, setProfileModal] = useState<{ member: Member; onSaved: (u: Partial<Member>) => void } | null>(null);
   const [loadsModal, setLoadsModal] = useState<{ userId: string; displayName: string } | null>(null);
   const [fleetCardsOpen, setFleetCardsOpen] = useState(false);
+  const [fleetCredsOpen, setFleetCredsOpen] = useState(false);
   const [incentiveSettingsOpen, setIncentiveSettingsOpen] = useState(false);
   const [payrollReportOpen, setPayrollReportOpen] = useState(false);
+  const [underloadingOpen, setUnderloadingOpen] = useState(false);
   const [truckModal,   setTruckModal]   = useState<Truck | null | "new">(null);
   const [trailerModal, setTrailerModal] = useState<Trailer | null | "new">(null);
   const [comboModal,   setComboModal]   = useState<Combo | null | "new">(null);
@@ -1120,10 +1106,10 @@ export default function AdminPage() {
       let compMap: Record<string, Compartment[]> = {};
       if (tIds.length > 0) {
         const { data: compRows } = await supabase.from("trailer_compartments")
-          .select("trailer_id, comp_number, max_gallons, position").in("trailer_id", tIds).order("comp_number");
+          .select("trailer_id, comp_number, max_gallons, position, cap_gallons").in("trailer_id", tIds).order("comp_number");
         for (const c of (compRows ?? []) as any[]) {
           if (!compMap[c.trailer_id]) compMap[c.trailer_id] = [];
-          compMap[c.trailer_id].push({ comp_number: c.comp_number, max_gallons: c.max_gallons, position: c.position });
+          compMap[c.trailer_id].push({ comp_number: c.comp_number, max_gallons: c.max_gallons, position: c.position, cap_gallons: c.cap_gallons ?? null });
         }
       }
 
@@ -1303,6 +1289,12 @@ export default function AdminPage() {
               Fleet Cards
             </button>
           )}
+          {(myRole === "admin" || myRole === "dispatch") && (
+            <button type="button" onClick={() => setFleetCredsOpen(true)}
+              style={{ fontSize: 12, fontWeight: 800, padding: "7px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.75)", cursor: "pointer", whiteSpace: "nowrap" as const }}>
+              Credentials
+            </button>
+          )}
           {myRole === "admin" && (
             <button type="button" onClick={() => setIncentiveSettingsOpen(true)}
               style={{ fontSize: 12, fontWeight: 800, padding: "7px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.75)", cursor: "pointer", whiteSpace: "nowrap" as const }}>
@@ -1313,6 +1305,12 @@ export default function AdminPage() {
             <button type="button" onClick={() => setPayrollReportOpen(true)}
               style={{ fontSize: 12, fontWeight: 800, padding: "7px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.75)", cursor: "pointer", whiteSpace: "nowrap" as const }}>
               Payroll
+            </button>
+          )}
+          {(myRole === "admin" || myRole === "lead" || myRole === "dispatch") && (
+            <button type="button" onClick={() => setUnderloadingOpen(true)}
+              style={{ fontSize: 12, fontWeight: 800, padding: "7px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.75)", cursor: "pointer", whiteSpace: "nowrap" as const }}>
+              Underloading
             </button>
           )}
           <NavMenu />
@@ -1619,8 +1617,10 @@ export default function AdminPage() {
         />
       )}
       <FleetCardsModal open={fleetCardsOpen} onClose={() => setFleetCardsOpen(false)} companyId={companyId!} />
+      <FleetCredentialsModal open={fleetCredsOpen} onClose={() => setFleetCredsOpen(false)} companyId={companyId!} />
       <IncentiveSettingsModal open={incentiveSettingsOpen} onClose={() => setIncentiveSettingsOpen(false)} companyId={companyId!} />
       <PayrollReportModal open={payrollReportOpen} onClose={() => setPayrollReportOpen(false)} companyId={companyId!} />
+      <UnderloadingDashboardModal open={underloadingOpen} onClose={() => setUnderloadingOpen(false)} companyId={companyId!} />
     </div>
   );
 }

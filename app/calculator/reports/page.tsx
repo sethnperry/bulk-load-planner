@@ -80,9 +80,9 @@ function ReportTile({ title, sub, stat, statColor, onClick, disabled }: {
 
 export default function ReportsPage() {
   const shell = useCalculatorShell();
-  const { effectiveUserId, authUserId, equipment, terminals, expirations } = shell;
+  const { effectiveUserId, equipment, terminals, expirations } = shell;
 
-  const loadHistory = useLoadHistory(authUserId);
+  const loadHistory = useLoadHistory(effectiveUserId);
   useEffect(() => { loadHistory.fetch(null); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [companyId, setCompanyId] = useState<string | null>(null);

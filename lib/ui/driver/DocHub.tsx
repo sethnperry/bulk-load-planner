@@ -19,12 +19,7 @@ export type AttachmentRecord = {
   mime_type: string;
   page_order: number;
   uploaded_at: string;
-  // uploaded_by intentionally not selected yet -- the column doesn't exist
-  // live until supabase/migrations/20260731000000_equipment_sharing_attribution.sql
-  // is applied (confirmed via a direct PostgREST query 2026-07-31: selecting
-  // it 400s with "column does not exist"). Re-add uploaded_by here (and to
-  // both hooks' .select() calls, both upload .insert() calls below, and the
-  // BinderModal.tsx tooltip) once that migration has actually run.
+  uploaded_by: string | null;
 };
 
 // Grouped by category slug
@@ -86,7 +81,7 @@ export function useAttachments(
     setLoading(true);
     const { data } = await supabase
       .from("equipment_attachments")
-      .select("id, category, category_label, file_path, original_name, mime_type, page_order, uploaded_at")
+      .select("id, category, category_label, file_path, original_name, mime_type, page_order, uploaded_at, uploaded_by")
       .eq("company_id", companyId)
       .eq("equipment_type", equipmentType)
       .eq("equipment_id", equipmentId)
@@ -134,7 +129,7 @@ export function usePermitAttachments(
     setLoading(true);
     const { data } = await supabase
       .from("equipment_attachments")
-      .select("id, category, category_label, file_path, original_name, mime_type, page_order, uploaded_at, permit_type_id")
+      .select("id, category, category_label, file_path, original_name, mime_type, page_order, uploaded_at, uploaded_by, permit_type_id")
       .eq("company_id", companyId)
       .eq("equipment_type", equipmentType)
       .eq("equipment_id", equipmentId)
@@ -498,6 +493,8 @@ export function DocHubModal({
         .upload(filePath, pendingFile, { contentType: pendingFile.type, upsert: false });
       if (storageErr) throw storageErr;
 
+      const { data: { user } } = await supabase.auth.getUser();
+
       // Insert DB row
       const { error: dbErr } = await supabase.from("equipment_attachments").insert({
         id: newId,
@@ -510,6 +507,7 @@ export function DocHubModal({
         original_name: pendingFile.name,
         mime_type: pendingFile.type || "application/octet-stream",
         page_order: pageOrder,
+        uploaded_by: user?.id ?? null,
       });
       if (dbErr) {
         // Rollback storage upload

@@ -425,10 +425,12 @@ function UnitInfoRow({
 
 // ─── Compartments (trailer only) ────────────────────────────────────────────
 // max_gallons ("total volume") stays informational only; cap_gallons is the
-// real ceiling the load-planning solver uses. Confirmed with user: the
-// planner's per-load drag handle only ever adjusts a *temporary* override
-// bounded to this cap -- it never exceeds it -- so this is the one place
-// the cap itself gets configured.
+// real ceiling the load-planning solver uses. Read-only here -- editing the
+// cap is now role-gated to admin/dispatch/lead and lives in the Equipment
+// modal's CompartmentEditor (lib/ui/driver/EquipmentDetails.tsx) instead,
+// so there's exactly one editable place for it rather than two un-synced
+// (and previously ungated) copies. This just shows the current value for
+// anyone reviewing the Binder.
 
 type CompartmentRow = {
   trailer_id: string;
@@ -438,44 +440,12 @@ type CompartmentRow = {
 };
 
 function CompartmentRowItem({
-  comp, isExpanded, onToggleExpand, onSaved,
+  comp, isExpanded, onToggleExpand,
 }: {
   comp: CompartmentRow;
   isExpanded: boolean;
   onToggleExpand: () => void;
-  onSaved: () => void;
 }) {
-  const [cap, setCap] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!isExpanded) return;
-    setCap(comp.cap_gallons != null ? String(comp.cap_gallons) : String(comp.max_gallons));
-    setErr(null);
-  }, [isExpanded, comp]);
-
-  async function save() {
-    const val = Number(cap);
-    if (!Number.isFinite(val) || val <= 0) { setErr("Enter a valid capacity."); return; }
-    if (val > comp.max_gallons) { setErr(`Cap can't exceed the total volume (${Math.round(comp.max_gallons).toLocaleString()} gal).`); return; }
-    setBusy(true);
-    setErr(null);
-    try {
-      const { error } = await supabase
-        .from("trailer_compartments")
-        .update({ cap_gallons: val })
-        .eq("trailer_id", comp.trailer_id)
-        .eq("comp_number", comp.comp_number);
-      if (error) throw error;
-      onSaved();
-    } catch (e: any) {
-      setErr(e?.message ?? "Failed to save.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
   const effectiveCap = comp.cap_gallons ?? comp.max_gallons;
 
   return (
@@ -486,16 +456,14 @@ function CompartmentRowItem({
       </div>
       {isExpanded && (
         <div style={{ padding: "4px 2px 14px" }} onClick={(e) => e.stopPropagation()}>
-          {err && <div style={{ color: "#fca5a5", fontSize: 12, marginBottom: 8 }}>{err}</div>}
           <div style={{ marginBottom: 10 }}>
             <label style={labelStyle}>Total volume (informational only)</label>
             <div style={{ fontSize: 14, color: "rgba(255,255,255,0.55)" }}>{Math.round(comp.max_gallons).toLocaleString()} gal</div>
           </div>
-          <div style={{ marginBottom: 10 }}>
-            <label style={labelStyle}>Cap (overflow prevention -- used for load planning)</label>
-            <input type="number" value={cap} onChange={(e) => setCap(e.target.value)} style={inputStyle} />
+          <div>
+            <label style={labelStyle}>Cap (overflow prevention -- edit in Equipment)</label>
+            <div style={{ fontSize: 14, color: "rgba(255,255,255,0.55)" }}>{Math.round(effectiveCap).toLocaleString()} gal</div>
           </div>
-          <button type="button" onClick={save} disabled={busy} style={saveBtnStyle}>{busy ? "Saving…" : "Save"}</button>
         </div>
       )}
     </div>
@@ -539,7 +507,6 @@ function CompartmentsSection({
           comp={c}
           isExpanded={expandedId === `trailer-comp-${c.comp_number}`}
           onToggleExpand={() => onToggleExpand(`trailer-comp-${c.comp_number}`)}
-          onSaved={load}
         />
       ))}
     </div>
@@ -672,10 +639,23 @@ function PermitRow({
     setErr(null);
     setConfirmingDelete(false);
   }, [isExpanded, row.record]);
-  // Attribution tooltip ("Uploaded by X") deferred -- equipment_attachments
-  // has no uploaded_by column live yet, see DocHub.tsx's AttachmentRecord
-  // comment. Re-add here once supabase/migrations/20260731000000_equipment_sharing_attribution.sql
-  // has actually been applied.
+
+  // Attribution tooltip ("Uploaded by X") -- same resolve-on-demand pattern
+  // as RecordHistoryModal.tsx's Logged-by names.
+  const [namesByUserId, setNamesByUserId] = useState<Record<string, string>>({});
+  useEffect(() => {
+    const ids = Array.from(new Set(pages.map((p) => p.uploaded_by).filter((x): x is string => !!x)));
+    const missing = ids.filter((id) => !(id in namesByUserId));
+    if (missing.length === 0) return;
+    (async () => {
+      const { data } = await supabase.rpc("get_display_names_full", { p_user_ids: missing });
+      const next: Record<string, string> = {};
+      for (const nameRow of (data ?? []) as any[]) {
+        if (nameRow?.user_id) next[nameRow.user_id] = nameRow.display_name ?? "Unknown";
+      }
+      setNamesByUserId((prev) => ({ ...prev, ...next }));
+    })();
+  }, [pages]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function save() {
     setBusy(true);
@@ -740,10 +720,12 @@ function PermitRow({
       const filePath = `${companyId}/${unitKind}/${unitId}/permit_${row.type.permit_type_id}/${newId}.${ext}`;
       const { error: storageErr } = await supabase.storage.from("equipment-docs").upload(filePath, file, { contentType: file.type, upsert: false });
       if (storageErr) throw storageErr;
+      const { data: { user } } = await supabase.auth.getUser();
       const { error: dbErr } = await supabase.from("equipment_attachments").insert({
         id: newId, company_id: companyId, equipment_type: unitKind, equipment_id: unitId,
         category: row.type.permit_type_id, category_label: row.type.name, permit_type_id: row.type.permit_type_id,
         file_path: filePath, original_name: file.name, mime_type: file.type || "application/octet-stream", page_order: pageOrder,
+        uploaded_by: user?.id ?? null,
       });
       if (dbErr) { await supabase.storage.from("equipment-docs").remove([filePath]); throw dbErr; }
       onDocsChanged();
@@ -803,7 +785,11 @@ function PermitRow({
           <div style={{ marginBottom: 10 }}>
             <label style={labelStyle}>Document{pages.length > 1 ? "s" : ""}</label>
             {pages.map((p) => (
-              <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, padding: "6px 10px", marginBottom: 4 }}>
+              <div
+                key={p.id}
+                title={p.uploaded_by ? `Uploaded by ${namesByUserId[p.uploaded_by] ?? "…"}` : undefined}
+                style={{ display: "flex", alignItems: "center", gap: 8, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, padding: "6px 10px", marginBottom: 4 }}
+              >
                 <span style={{ fontSize: 14 }}>{p.mime_type?.startsWith("image/") ? "🖼" : "📄"}</span>
                 <span style={{ flex: 1, fontSize: 12, color: "rgba(255,255,255,0.8)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>{p.original_name}</span>
                 <button type="button" onClick={() => setPreviewGroup({ category: row.type.permit_type_id, label: row.type.name, pages })} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.75)", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>View</button>

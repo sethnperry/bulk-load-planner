@@ -21,6 +21,7 @@ export default function CompartmentModal({
   selectedTerminalId,
   terminalName,
   onTerminalProductsChanged,
+  myRole,
 }: {
   open: boolean;
   compNumber: number | null;
@@ -33,12 +34,21 @@ export default function CompartmentModal({
   selectedTerminalId?: string;
   terminalName?: string;
   onTerminalProductsChanged?: () => void;
+  myRole?: string | null;
 }) {
+  // Curating a terminal's active product list affects every driver who loads
+  // there company-wide -- matches the equipment-cap gating precedent, not a
+  // per-driver preference.
+  const canManageProducts = myRole === "admin" || myRole === "dispatch" || myRole === "lead";
   const [manageOpen, setManageOpen] = useState(false);
   if (compNumber == null) return null;
 
   const sel = compPlan?.[compNumber];
   const isEmpty = !!sel?.empty || !sel?.productId;
+  // A product selected but not among this terminal's own products -- almost
+  // always a preset loaded from a different terminal. Called out explicitly
+  // rather than just silently showing no row checked.
+  const notAvailable = !isEmpty && !terminalProducts.some((p: any) => p.product_id === sel?.productId);
 
   const rowStyle = (active: boolean): React.CSSProperties => ({
     textAlign: "left", padding: "12px 14px", borderRadius: 6,
@@ -55,6 +65,11 @@ export default function CompartmentModal({
         <div style={{ fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.45)", textTransform: "uppercase" as const, letterSpacing: 0.5 }}>
           Product for Comp {compNumber}
         </div>
+        {notAvailable && (
+          <div style={{ padding: "10px 12px", borderRadius: 6, border: "1px solid rgba(239,68,68,0.3)", background: "rgba(239,68,68,0.10)", color: "#fca5a5", fontSize: 13, fontWeight: 700 }}>
+            ⚠ Product Not Available at this terminal — choose a replacement below.
+          </div>
+        )}
         <div style={{ display: "grid", gap: 6 }}>
 
           {/* MT / Empty */}
@@ -114,7 +129,7 @@ export default function CompartmentModal({
           })}
         </div>
 
-        {selectedTerminalId && (
+        {selectedTerminalId && canManageProducts && (
           <button
             type="button"
             onClick={() => setManageOpen(true)}
@@ -129,7 +144,7 @@ export default function CompartmentModal({
         )}
       </div>
 
-      {selectedTerminalId && (
+      {selectedTerminalId && canManageProducts && (
         <ManageTerminalProductsModal
           open={manageOpen}
           onClose={() => setManageOpen(false)}

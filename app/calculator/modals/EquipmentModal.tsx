@@ -90,6 +90,7 @@ type Props = {
   onSelectComboId: (id: string) => void;
   onRefreshCombos: () => void;
   onTourAdvance?: (id: string) => void;
+  myRole?: string | null;
 };
 
 type View = "list" | "new_tare" | "confirm_target";
@@ -145,6 +146,7 @@ function EquipmentDetailsModal({
   companyId,
   onDecoupleRequest,
   onSaved,
+  myRole,
 }: {
   open: boolean;
   onClose: () => void;
@@ -154,6 +156,7 @@ function EquipmentDetailsModal({
   companyId?: string | null;
   onDecoupleRequest: () => void;
   onSaved: () => void;
+  myRole?: string | null;
 }) {
   const c = target?.combo;
   const truck = target?.truck;
@@ -199,7 +202,7 @@ function EquipmentDetailsModal({
       if (tr) {
         const { data: comps, error: compsErr } = await supabase
           .from("trailer_compartments")
-          .select("comp_number, max_gallons, position")
+          .select("comp_number, max_gallons, position, cap_gallons")
           .eq("trailer_id", tr.trailer_id)
           .order("position");
         if (!compsErr && comps) {
@@ -207,6 +210,7 @@ function EquipmentDetailsModal({
             comp_number: Number(r.comp_number),
             max_gallons: Number(r.max_gallons),
             position:    Number(r.position),
+            cap_gallons: r.cap_gallons != null ? Number(r.cap_gallons) : null,
           }));
         }
       }
@@ -319,6 +323,7 @@ function EquipmentDetailsModal({
           companyId={companyIdSafe}
           onClose={() => setTruckEditOpen(false)}
           onDone={() => { setTruckEditOpen(false); void reloadDetails(); }}
+          myRole={myRole ?? undefined}
         />
       )}
 
@@ -329,6 +334,7 @@ function EquipmentDetailsModal({
           companyId={companyIdSafe}
           onClose={() => setTrailerEditOpen(false)}
           onDone={() => { setTrailerEditOpen(false); void reloadDetails(); }}
+          myRole={myRole ?? undefined}
         />
       )}
 
@@ -1030,7 +1036,7 @@ export default function EquipmentModal({
   open, onClose, authUserId, setupSession,
   combos, combosLoading, combosError,
   selectedComboId, onSelectComboId, onRefreshCombos,
-  onTourAdvance,
+  onTourAdvance, myRole,
 }: Props) {
   const [view, setView] = useState<View>("list");
   const [localErr, setLocalErr] = useState<string | null>(null);
@@ -1793,6 +1799,7 @@ export default function EquipmentModal({
         onClose={() => { setDetailsOpen(false); setDetailsTarget(null); }}
         target={detailsTarget}
         companyId={companyId}
+        myRole={myRole}
         forceInUse={Boolean(detailsTarget?.combo && String(detailsTarget.combo.combo_id) === String(selectedComboId))}
         claimedByName={detailsTarget?.combo
           ? (isMine(detailsTarget.combo)

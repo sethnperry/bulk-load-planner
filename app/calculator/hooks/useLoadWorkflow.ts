@@ -336,15 +336,6 @@ try {
   console.warn("calculate_load_points failed (non-fatal):", e);
 }
 
-// Priority terminal flagging: tag this load against an incomplete
-// training-loads checklist item, if the terminal has one. Silent,
-// non-fatal -- no-ops if there's no incomplete requirement to tag.
-try {
-  await supabase.rpc("record_terminal_checklist_load", { p_load_id: activeLoadId });
-} catch (e) {
-  console.warn("record_terminal_checklist_load failed (non-fatal):", e);
-}
-
 // Fallback: persist "last observed" API/temp so LoadingModal can show previous API on reload
 // (Non-fatal if RLS blocks it)
 try {

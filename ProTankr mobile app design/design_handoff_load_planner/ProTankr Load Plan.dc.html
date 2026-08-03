@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics="">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&amp;display=swap">
+<style>body{margin:0;background:#e9e7e1;font-family:Outfit,sans-serif}
+.pt-tabscroll{scrollbar-width:none;-ms-overflow-style:none}
+.pt-tabscroll::-webkit-scrollbar{display:none}
+</style>
+</helmet>
+
+<div style="padding:40px;display:flex;flex-direction:column;gap:16px;align-items:flex-start">
+<div style="font:500 13px Outfit;color:rgba(0,0,0,0.55);max-width:520px">Restructured shell: full-bleed header (hamburger / bell / gear), an alerts &amp; expirations cluster capped to a fixed height (scrolls if more items come in), then a Planner / Cards / Vault tab bar. Planner tab holds everything we built (presets, compartments, CG, location/temp/load). Cards tab is a terminal-card wallet with city sub-tabs. Vault is a placeholder for credential storage.</div>
+
+<x-import component-from-global-scope="IOSDevice" from="./ios-frame.jsx" dark="true" hint-size="393,852">
+<div style="height:100%;background:#0b0b0b;font-family:Outfit,sans-serif;color:#fff;display:flex;flex-direction:column;overflow:hidden;position:relative">
+
+<div style="padding:60px 16px 0;background:linear-gradient(180deg, #ffffff 0%, #f2f2f2 100%);flex-shrink:0;position:relative;overflow:visible">
+<div style="display:flex;align-items:center;justify-content:space-between">
+<button onClick="{{ onToggleNav }}" aria-label="Open navigation menu" style="display:flex;flex-direction:column;justify-content:center;align-items:center;gap:5px;width:36px;height:36px;border:none;background:none;cursor:pointer;padding:0;flex-shrink:0">
+<span style="display:block;width:18px;height:2px;border-radius:2px;background:rgba(0,0,0,0.85)"></span>
+<span style="display:block;width:18px;height:2px;border-radius:2px;background:rgba(0,0,0,0.85)"></span>
+<span style="display:block;width:18px;height:2px;border-radius:2px;background:rgba(0,0,0,0.85)"></span>
+</button>
+<div></div>
+<div style="display:flex;gap:26px;flex-shrink:0;align-items:center">
+<button onClick="{{ onOpenExp }}" aria-label="Alerts" style="position:relative;border:none;background:none;cursor:pointer;padding:0;display:flex;align-items:center;justify-content:center">
+<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="rgba(0,0,0,0.85)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
+<sc-if value="{{ alertCount }}" hint-placeholder-val="{{ false }}"><span style="position:absolute;top:-4px;right:-14px;min-width:15px;height:15px;padding:0 3px;border-radius:8px;background:#ef4444;font:500 9px Outfit;color:#fff;display:flex;align-items:center;justify-content:center">{{ alertCount }}</span></sc-if>
+</button>
+<button onClick="{{ onOpenEquip }}" aria-label="Settings" style="border:none;background:none;cursor:pointer;padding:0;display:flex;align-items:center;justify-content:center">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(0,0,0,0.85)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+</button>
+</div>
+</div>
+
+<div ref="{{ tabScrollRef }}" onScroll="{{ onTabScroll }}" class="pt-tabscroll" style="margin-top:18px;display:flex;gap:8px;overflow-x:auto;scroll-snap-type:x mandatory;padding:0 calc(50% - 60px);-webkit-overflow-scrolling:touch">
+<sc-for list="{{ tabs }}" as="tab" hint-placeholder-count="3">
+<div onClick="{{ tab.onClick }}" style="flex:0 0 120px;scroll-snap-align:center;display:flex;justify-content:center;cursor:pointer">
+<div style="padding:14px 2px;font:{{ tab.weight }} {{ tab.size }} Outfit;color:{{ tab.color }};transition:all 150ms ease">{{ tab.label }}</div>
+</div>
+</sc-for>
+</div>
+<div style="display:flex">
+<div style="flex:1;height:1px;background:rgba(0,0,0,0.15)"></div>
+<div style="flex:1;height:2px;background:#111"></div>
+<div style="flex:1;height:1px;background:rgba(0,0,0,0.15)"></div>
+</div>
+</div>
+
+<div class="pt-tabscroll" style="flex:1;overflow-y:auto;padding:16px">
+
+<sc-if value="{{ isPlanner }}" hint-placeholder-val="{{ true }}">
+<div>
+
+<div ref="{{ presetScrollRef }}" onScroll="{{ onPresetScroll }}" class="pt-tabscroll" style="display:flex;gap:10px;overflow-x:auto;scroll-snap-type:x mandatory;padding:4px calc(50% - 30px);-webkit-overflow-scrolling:touch">
+<sc-for list="{{ presetChips }}" as="p" hint-placeholder-count="5">
+<div onClick="{{ p.onClick }}" style="flex:0 0 60px;scroll-snap-align:center;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;cursor:pointer">
+<div style="font:{{ p.weight }} {{ p.size }} Outfit;color:{{ p.textColor }};transition:all 150ms ease">{{ p.letter }}</div>
+<span style="width:4px;height:4px;border-radius:50%;background:{{ p.dotColor }}"></span>
+</div>
+</sc-for>
+</div>
+
+<sc-if value="{{ showActionRow }}" hint-placeholder-val="{{ false }}">
+<div style="margin-top:12px;width:100%;display:flex;justify-content:space-between">
+<sc-if value="{{ showSave }}" hint-placeholder-val="{{ false }}">
+<button onClick="{{ onSave }}" style="font:500 12px Outfit;color:rgba(255,255,255,0.75);border:none;background:none;padding:6px 0;cursor:pointer">{{ saveLabel }}</button>
+</sc-if>
+<sc-if value="{{ showSave }}" hint-placeholder-val="{{ false }}"><span></span></sc-if>
+<sc-if value="{{ showEditProduct }}" hint-placeholder-val="{{ false }}">
+<button onClick="{{ onOpenPicker }}" style="margin-left:auto;font:500 12px Outfit;color:rgba(255,255,255,0.75);border:none;background:none;padding:6px 0;cursor:pointer">{{ editProductLabel }}</button>
+</sc-if>
+</div>
+</sc-if>
+
+<div style="margin-top:16px;display:flex;gap:8px;align-items:flex-end;justify-content:center">
+<sc-for list="{{ compRows }}" as="item" hint-placeholder-count="5">
+<div style="display:flex;flex-direction:column;align-items:center;flex:0 0 {{ item.widthPct }}%;min-width:0">
+<div style="font: 500 11px Outfit; color: rgba(255,255,255,0.4); margin-bottom: 4px">{{ item.num }}</div>
+<div onClick="{{ item.onBarClick }}" style="position:relative;width:100%;height:150px;border-radius:10px 10px 6px 6px;background:rgba(255,255,255,0.06);cursor:pointer;overflow:visible">
+<div style="position:absolute;left:0;right:0;height:1px;background:rgba(255,255,255,0.22);top:{{ item.capTopPct }}%"></div>
+<div style="position:absolute;left:10%;right:10%;bottom:0;border-radius:3px 3px 0 0;overflow:hidden;height:{{ item.fillPct }}%;background:{{ item.color }};transition:height 120ms ease;box-shadow:{{ item.fillGlow }}"></div>
+<div onPointerDown="{{ item.onHandleDown }}" onPointerMove="{{ item.onHandleMove }}" onPointerUp="{{ item.onHandleUp }}" style="position: absolute; left: 50%; transform: translate(-50%,-50%); top: {{ item.fillTopPct }}%; width: 36px; height: 5px; border-radius: 3px; cursor: ns-resize; box-shadow: 0 1px 4px rgba(0,0,0,0.5); touch-action: none; background-color: #fff">
+</div>
+<sc-if value="{{ item.dragging }}" hint-placeholder-val="{{ false }}">
+<div style="position:absolute;left:50%;transform:translateX(-50%);top:calc({{ item.fillTopPct }}% - 26px);background:#1c1c1c;border:1px solid rgba(255,255,255,0.15);border-radius:7px;padding:2px 7px;font:500 10px Outfit;white-space:nowrap;box-shadow:0 4px 12px rgba(0,0,0,0.5)">{{ item.gallonsText }} gal</div>
+</sc-if>
+</div>
+<div style="margin-top:5px;font:500 11px Outfit;color:{{ item.textColor }}">{{ item.code }}</div>
+<div style="margin-top:1px;font:500 12px Outfit;color:rgba(140,140,140,0.9)">{{ item.gallonsText }}</div>
+</div>
+</sc-for>
+</div>
+
+<div style="margin-top:16px">
+<div onPointerDown="{{ onCGDown }}" onPointerMove="{{ onCGMove }}" onPointerUp="{{ onCGUp }}" style="position:relative;height:28px;touch-action:none;cursor:ew-resize">
+<div style="position:absolute;top:11px;left:0;right:0;height:4px;border-radius:999px;background:rgba(255,255,255,0.10)"></div>
+<div style="position:absolute;top:50%;left:{{ cgLeftPct }}%;transform:translate(-50%,-50%);width:22px;height:22px;border-radius:50%;background:#d9d9d9"></div>
+</div>
+<div style="display:flex;justify-content:space-between;margin-top:6px;font:500 10px Outfit;color:rgba(255,255,255,0.3)"><span>Rear</span><span>Front</span></div>
+</div>
+
+<div style="margin-top:14px;display:flex;flex-direction:column;gap:10px">
+<button onClick="{{ onOpenEquip }}" style="width:100%;text-align:left;border-radius:16px;border:1px solid rgba(255,255,255,0.10);background:rgba(255,255,255,0.03);padding:14px;display:flex;justify-content:space-between;align-items:center;cursor:pointer">
+<div style="display:flex;gap:18px">
+<div><div style="font:500 14px Outfit;color:#fff">Truck · 25184</div><div style="margin-top:2px;font:500 11px Outfit;color:rgba(255,255,255,0.4)">Kenworth</div></div>
+<div><div style="font:500 14px Outfit;color:#fff">Trailer · 3151</div><div style="margin-top:2px;font:500 11px Outfit;color:rgba(255,255,255,0.4)">MAC</div></div>
+</div>
+<div style="font:500 13px Outfit;color:rgba(255,255,255,0.25)">›</div>
+</button>
+<button style="width:100%;text-align:left;border-radius:16px;border:1px solid rgba(255,255,255,0.10);background:rgba(255,255,255,0.03);padding:14px;display:flex;justify-content:space-between;align-items:center;cursor:pointer">
+<div><div style="font:500 14px Outfit;color:#fff">Terminal 14</div><div style="margin-top:2px;font:500 11px Outfit;color:rgba(255,255,255,0.4)">Baytown, TX · Card # 4471 · PIN 0629</div></div>
+<div style="font:500 13px Outfit;color:rgba(255,255,255,0.25)">›</div>
+</button>
+<button onClick="{{ onOpenTemp }}" style="width:100%;text-align:left;border-radius:16px;border:1px solid {{ tempBorder }};background:{{ tempBg }};padding:14px;display:flex;justify-content:space-between;align-items:center;cursor:pointer">
+<div><div style="font:500 14px Outfit;color:{{ tempTextColor }}">{{ tempHeadline }}</div><div style="margin-top:2px;font:500 11px Outfit;color:{{ tempSubColor }}">{{ tempSub }}</div></div>
+<span style="font:500 13px Outfit;color:rgba(255,255,255,0.25)">›</span>
+</button>
+</div>
+
+<div style="border-radius: 16px; color: #111; text-align: center; padding: 14px; margin-top: 10px; background-color: #fff; display: flex; align-items: center; justify-content: center; min-height: 32px; height: 32px">
+<div style="font:500 14px Outfit">LOAD</div>
+</div>
+
+<div style="border-radius: 16px; background: rgba(255,255,255,0.03); padding: 14px; margin-top: 10px">
+<div style="font:500 14px Outfit;color:#fff">{{ totalGallonsText }} gal</div>
+<div style="margin-top:2px;display:flex;gap:14px">
+<div style="font:500 11px Outfit;color:rgba(255,255,255,0.4)">Target <span style="color:rgba(255,255,255,0.55)">{{ targetWeightText }}</span></div>
+<div style="font:500 11px Outfit;color:rgba(255,255,255,0.4)">Actual <span style="color:rgba(255,255,255,0.55)">{{ totalWeightText }}</span></div>
+<div style="font:500 11px Outfit;color:rgba(255,255,255,0.4)">Diff <span style="color:{{ remainingColor }}">{{ diffText }}</span></div>
+</div>
+</div>
+<div style="margin-top:10px;font:500 10px Outfit;color:rgba(255,255,255,0.32);line-height:1.4">Product API &amp; temp confirm automatically after this load — sharpens the number for the next driver at this terminal.</div>
+
+</div>
+</sc-if>
+
+<sc-if value="{{ isCards }}" hint-placeholder-val="{{ false }}">
+<div>
+<div ref="{{ cityScrollRef }}" onScroll="{{ onCityScroll }}" class="pt-tabscroll" style="display:flex;gap:12px;overflow-x:auto;scroll-snap-type:x mandatory;padding:6px calc(50% - 55px) 10px;border-bottom:1px solid rgba(255,255,255,0.08);-webkit-overflow-scrolling:touch">
+<sc-for list="{{ cityTabs }}" as="c" hint-placeholder-count="3">
+<div onClick="{{ c.onClick }}" style="flex:0 0 110px;scroll-snap-align:center;display:flex;justify-content:center;cursor:pointer">
+<div style="padding:0 0 4px;font:{{ c.weight }} {{ c.size }} Outfit;color:{{ c.color }};border-bottom:2px solid {{ c.border }};transition:all 150ms ease;white-space:nowrap">{{ c.label }}</div>
+</div>
+</sc-for>
+</div>
+<div style="margin-top:16px;display:flex;flex-direction:column;gap:12px">
+<sc-for list="{{ terminalCards }}" as="card" hint-placeholder-count="2">
+<div style="border-radius:18px;padding:18px;background:linear-gradient(135deg, rgba(255,255,255,0.09), rgba(255,255,255,0.02));border:1px solid rgba(255,255,255,0.10)">
+<div style="display:flex;justify-content:space-between;align-items:flex-start">
+<div style="font:500 14px Outfit">{{ card.terminal }}</div>
+<div style="font:500 10px Outfit;color:{{ card.statusColor }}">{{ card.statusText }}</div>
+</div>
+<div style="margin-top:22px;font:500 20px Outfit;letter-spacing:.06em">{{ card.number }}</div>
+<div style="margin-top:10px;display:flex;justify-content:space-between">
+<div><div style="font:500 9px Outfit;letter-spacing:.06em;color:rgba(255,255,255,0.4);text-transform:uppercase">PIN</div><div style="font:500 13px Outfit;margin-top:2px">{{ card.pin }}</div></div>
+<div><div style="font:500 9px Outfit;letter-spacing:.06em;color:rgba(255,255,255,0.4);text-transform:uppercase">Expires</div><div style="font:500 13px Outfit;margin-top:2px">{{ card.expires }}</div></div>
+</div>
+</div>
+</sc-for>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isVault }}" hint-placeholder-val="{{ false }}">
+<div style="display:flex;flex-direction:column;gap:8px">
+<sc-for list="{{ vaultItems }}" as="v" hint-placeholder-count="3">
+<div style="border-radius:14px;border:1px solid rgba(255,255,255,0.10);background:rgba(255,255,255,0.03);padding:12px 14px;display:flex;justify-content:space-between;align-items:center">
+<div><div style="font:500 13px Outfit">{{ v.label }}</div><div style="margin-top:2px;font:500 11px Outfit;color:rgba(255,255,255,0.4)">{{ v.username }}</div></div>
+<button onClick="{{ v.onToggle }}" style="font:500 12px Outfit;color:rgba(255,255,255,0.7);background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);border-radius:8px;padding:6px 10px;cursor:pointer">{{ v.display }}</button>
+</div>
+</sc-for>
+</div>
+</sc-if>
+
+</div>
+
+<sc-if value="{{ equipOpen }}" hint-placeholder-val="{{ false }}">
+<div onClick="{{ onOpenEquip }}" style="position:absolute;inset:0;background:rgba(0,0,0,0.55);z-index:80;display:flex;align-items:flex-end">
+<div onClick="{{ stop }}" style="width:100%;background:#141414;border-radius:20px 20px 0 0;border-top:1px solid rgba(255,255,255,0.1);padding:16px;display:flex;flex-direction:column;gap:8px">
+<div style="font:500 14px Outfit;margin-bottom:2px">Select Equipment</div>
+<div style="border-radius:12px;border:1px solid rgba(255,166,35,0.4);background:rgba(255,166,35,0.10);padding:12px;font:500 13px Outfit">Kenworth T680 · 42B <span style="float:right;color:rgb(255,166,35)">✓</span></div>
+<div style="border-radius:12px;border:1px solid rgba(255,255,255,0.10);background:rgba(255,255,255,0.04);padding:12px;font:500 13px Outfit;color:rgba(255,255,255,0.7)">Peterbilt 579 · 18C</div>
+<div style="border-radius:12px;border:1px solid rgba(255,255,255,0.10);background:rgba(255,255,255,0.04);padding:12px;font:500 13px Outfit;color:rgba(255,255,255,0.7)">Kenworth T680 · 07A</div>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ expOpen }}" hint-placeholder-val="{{ false }}">
+<div onClick="{{ onOpenExp }}" style="position:absolute;inset:0;background:rgba(0,0,0,0.55);z-index:80;display:flex;align-items:flex-end">
+<div onClick="{{ stop }}" style="width:100%;background:#141414;border-radius:20px 20px 0 0;border-top:1px solid rgba(255,255,255,0.1);padding:16px;display:flex;flex-direction:column;gap:8px">
+<div style="font:500 14px Outfit;margin-bottom:2px">Expirations</div>
+<div style="display:flex;gap:10px;padding:12px;border-radius:12px;background:rgba(239,68,68,0.10);border:1px solid rgba(239,68,68,0.30)"><span style="font:500 13px Outfit;color:#ef4444">⛔</span><div><div style="font:500 13px Outfit">Terminal 14 card — expired</div><div style="font:500 11px Outfit;color:rgba(255,255,255,0.5);margin-top:2px">Renew before next load here</div></div></div>
+<div style="display:flex;gap:10px;padding:12px;border-radius:12px;background:rgba(234,179,8,0.10);border:1px solid rgba(234,179,8,0.30)"><span style="font:500 13px Outfit;color:#eab308">⚠</span><div><div style="font:500 13px Outfit">Medical card — 6 days</div><div style="font:500 11px Outfit;color:rgba(255,255,255,0.5);margin-top:2px">Expires soon</div></div></div>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ tempOpen }}" hint-placeholder-val="{{ false }}">
+<div onClick="{{ onOpenTemp }}" style="position:absolute;inset:0;background:rgba(0,0,0,0.55);z-index:80;display:flex;align-items:flex-end">
+<div onClick="{{ stop }}" style="width:100%;background:#141414;border-radius:20px 20px 0 0;border-top:1px solid rgba(255,255,255,0.1);padding:18px 16px 20px;display:flex;flex-direction:column;gap:4px">
+<div style="display:flex;justify-content:space-between;align-items:baseline"><div style="font:500 14px Outfit">Predicted Temperature</div><div style="font:500 13px Outfit;color:{{ tempTextColor }}">{{ tempConfidenceLabel }}</div></div>
+<div style="font:500 11px Outfit;color:rgba(255,255,255,0.45);margin-top:2px">{{ tempSourceText }}</div>
+<div style="text-align:center;margin-top:18px;font:500 44px Outfit;letter-spacing:-.02em">{{ tempDisplayValue }}°F</div>
+<div onPointerDown="{{ onTempDown }}" onPointerMove="{{ onTempMove }}" onPointerUp="{{ onTempUp }}" style="margin-top:14px;position:relative;height:28px;touch-action:none;cursor:ew-resize">
+<div style="position:absolute;top:11px;left:0;right:0;height:4px;border-radius:999px;background:rgba(255,255,255,0.10)"></div>
+<div style="position:absolute;top:50%;left:{{ tempPct }}%;transform:translate(-50%,-50%);width:22px;height:22px;border-radius:50%;background:#d9d9d9"></div>
+</div>
+<div style="display:flex;justify-content:space-between;margin-top:6px;font:500 10px Outfit;color:rgba(255,255,255,0.3)"><span>60°F</span><span>110°F</span></div>
+<div style="display:flex;gap:8px;margin-top:16px">
+<button onClick="{{ onUseNetwork }}" style="flex:1;padding:12px;border-radius:12px;border:1px solid rgba(255,255,255,0.14);background:rgba(255,255,255,0.05);color:rgba(255,255,255,0.85);font:500 13px Outfit;cursor:pointer">Use network prediction</button>
+<button onClick="{{ onOpenTemp }}" style="flex:1;padding:12px;border-radius:12px;background:rgb(255,166,35);color:#111;font:500 13px Outfit;cursor:pointer">Set manually</button>
+</div>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ showPopover }}" hint-placeholder-val="{{ false }}">
+<div onClick="{{ onClosePicker }}" style="position:absolute;inset:0;background:rgba(0,0,0,0.55);z-index:80;display:flex;align-items:flex-end">
+<div onClick="{{ stop }}" style="width:100%;background:#141414;border-radius:20px 20px 0 0;border-top:1px solid rgba(255,255,255,0.1);padding:16px;display:flex;flex-direction:column;gap:8px">
+<div style="font:500 14px Outfit;margin-bottom:2px">{{ openIndexLabel }} — choose product</div>
+<div style="display:flex;flex-direction:column;gap:6px">
+<sc-for list="{{ activeChoices }}" as="choice" hint-placeholder-count="5">
+<button onClick="{{ choice.onSelect }}" style="display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:12px;border:1px solid {{ choice.border }};background:{{ choice.bg }};cursor:pointer;text-align:left">
+<span style="width:10px;height:10px;border-radius:50%;background:{{ choice.color }};flex-shrink:0"></span>
+<div style="flex:1;min-width:0">
+<div style="font:500 13px Outfit;color:rgba(255,255,255,0.9)">{{ choice.code }} · {{ choice.name }}</div>
+<sc-if value="{{ choice.subtext }}" hint-placeholder-val="{{ false }}">
+<div style="margin-top:1px;font:500 10px Outfit;color:rgba(255,255,255,0.4)">{{ choice.subtext }}</div>
+</sc-if>
+</div>
+<sc-if value="{{ choice.dyed }}" hint-placeholder-val="{{ false }}">
+<span style="font:500 9px Outfit;letter-spacing:.04em;color:#ef4444;border:1px solid rgba(239,68,68,0.4);border-radius:5px;padding:2px 6px;flex-shrink:0">DYED</span>
+</sc-if>
+<sc-if value="{{ choice.current }}" hint-placeholder-val="{{ false }}">
+<span style="font:500 14px Outfit;color:#4ade80;flex-shrink:0">✓</span>
+</sc-if>
+</button>
+</sc-for>
+</div>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ navOpen }}" hint-placeholder-val="{{ false }}">
+<div onClick="{{ onToggleNav }}" style="position:absolute;inset:0;z-index:80">
+<div onClick="{{ stop }}" style="position:absolute;top:60px;left:16px;width:220px;background:#111;border:1px solid rgba(255,255,255,0.1);border-radius:14px;box-shadow:0 16px 48px rgba(0,0,0,0.7);overflow:hidden">
+<div style="padding:12px 14px 10px;border-bottom:1px solid rgba(255,255,255,0.07)"><div style="font:500 10px Outfit;letter-spacing:.05em;color:rgba(255,255,255,0.35);text-transform:uppercase">Signed in as</div><div style="margin-top:3px;font:500 13px Outfit;color:rgba(255,255,255,0.85)">driver@fleetco.com</div></div>
+<div style="padding:6px">
+<div style="padding:9px 10px;font:500 13px Outfit;color:rgba(255,255,255,0.75)">◉ Profile</div>
+<div style="padding:9px 10px;font:500 13px Outfit;color:rgba(255,255,255,0.75)">? Learn</div>
+<div style="padding:9px 10px;font:500 13px Outfit;color:#e05555">↩ Sign Out</div>
+</div>
+</div>
+</div>
+</sc-if>
+
+</div>
+</x-import>
+</div>
+
+
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+const COMPS = [
+  { max: 1200 }, { max: 1200 }, { max: 1000 }, { max: 1000 }, { max: 800 },
+];
+// Real catalog from products_rows.csv (button_code, hex_code, display_name)
+const PRODUCTS = {
+  ULSD: { code: 'D2', name: 'ULSD Diesel #2', color: '#FFD400', lbsPerGal: 7.05, verified: true, updated: '2h ago', dyed: false },
+  DYED: { code: 'DYED', name: 'Off-road Dyed Diesel', color: '#FFD400', lbsPerGal: 7.05, verified: true, updated: '6h ago', dyed: true },
+  REG87: { code: '87', name: 'Regular Unleaded E10 87', color: '#FFFFFF', lbsPerGal: 6.15, verified: false, updated: null, dyed: false },
+  E85: { code: 'E85', name: 'Flex Fuel E85', color: '#0A84FF', lbsPerGal: 6.58, verified: true, updated: '1d ago', dyed: false },
+  JETA: { code: 'JET', name: 'Jet Fuel (Jet A)', color: '#FFD400', lbsPerGal: 6.75, verified: true, updated: '3h ago', dyed: false, unNumber: 'UN1863' },
+};
+const ALLOWED_LBS = 46000;
+const EMPTY_PRESET = () => ({ products: [null, null, null, null, null], caps: [0.975, 0.975, 0.975, 0.975, 0.975], cg: 0.5 });
+
+const CITIES = ['Baytown, TX', 'Houston, TX', 'Beaumont, TX'];
+const TERMINAL_CARDS = {
+  'Baytown, TX': [
+    { terminal: 'Terminal 14', number: '•••• 4471', pin: '0629', expires: 'Expired', statusText: 'EXPIRED', statusColor: '#ef4444' },
+    { terminal: 'Terminal 9', number: '•••• 2208', pin: '7714', expires: '112 days', statusText: 'ACTIVE', statusColor: '#4ade80' },
+  ],
+  'Houston, TX': [
+    { terminal: 'Terminal 3', number: '•••• 5590', pin: '3341', expires: '48 days', statusText: 'ACTIVE', statusColor: '#4ade80' },
+  ],
+  'Beaumont, TX': [
+    { terminal: 'Terminal 1', number: '•••• 8827', pin: '9012', expires: '6 days', statusText: 'EXPIRING', statusColor: '#eab308' },
+  ],
+};
+
+class Component extends DCLogic {
+  state = {
+    products: ['ULSD', 'ULSD', 'ULSD', 'ULSD', 'ULSD'],
+    caps: [0.975, 0.975, 0.975, 0.975, 0.95],
+    cg: 0.5,
+    activePreset: 'A',
+    modified: false,
+    openIndex: null,
+    selectedIndex: null,
+    manualFill: [null, null, null, null, null], // fraction 0-1 of cap, per compartment — on-the-fly override
+    draggingHandle: null,
+    equipOpen: false, expOpen: false, navOpen: false, tempOpen: false,
+    networkTemp: 86, manualTemp: null, tempConfidence: 'good', // 'good' | 'check' | 'bad'
+    activeTab: 'planner',
+    activeCity: 'Baytown, TX',
+    vaultRevealed: {},
+    presets: {
+      A: { products: ['ULSD', 'ULSD', 'ULSD', 'ULSD', 'ULSD'], caps: [0.975, 0.975, 0.975, 0.975, 0.95], cg: 0.5 },
+      B: { products: ['ULSD', 'ULSD', null, 'DYED', 'DYED'], caps: [0.95, 0.95, 1, 0.9, 0.9], cg: 0.58 },
+      C: { products: ['REG87', 'REG87', 'REG87', null, null], caps: [0.975, 0.975, 0.975, 1, 1], cg: 0.5 },
+      D: null,
+      E: null,
+    },
+  };
+
+  componentDidMount() {
+    if (this._tabScrollEl) this._tabScrollEl.scrollLeft = 0;
+    if (this._presetScrollEl) this._presetScrollEl.scrollLeft = 0;
+    if (this._cityScrollEl) this._cityScrollEl.scrollLeft = 0;
+  }
+
+  centerOnTap(e, applyState) {
+    const el = e.currentTarget;
+    const container = el.parentElement;
+    const target = el.offsetLeft + el.offsetWidth / 2 - container.clientWidth / 2;
+    container.scrollTo({ left: target, behavior: 'smooth' });
+    applyState();
+  }
+
+  centerIndexOf(container) {
+    const rect = container.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    let best = null, bestDist = Infinity;
+    Array.from(container.children).forEach((child, i) => {
+      const r = child.getBoundingClientRect();
+      const d = Math.abs((r.left + r.width / 2) - centerX);
+      if (d < bestDist) { bestDist = d; best = i; }
+    });
+    return best;
+  }
+
+  computePlan(products, caps, cg, manualFill) {
+    const effMax = COMPS.map((c, i) => (products[i] ? c.max * caps[i] : 0));
+    const lpg = products.map((p) => (p ? PRODUCTS[p].lbsPerGal : 0));
+    const autoIdx = [0, 1, 2, 3, 4].filter((i) => manualFill[i] == null);
+    const sumWeightAtFull = autoIdx.reduce((s, i) => s + effMax[i] * lpg[i], 0);
+    const manualWeight = [0, 1, 2, 3, 4].reduce((s, i) => s + (manualFill[i] != null ? manualFill[i] * effMax[i] * lpg[i] : 0), 0);
+    const f = sumWeightAtFull > 0 ? Math.max(0, Math.min(1, (ALLOWED_LBS - manualWeight) / sumWeightAtFull)) : 0;
+    const gallons = COMPS.map((c, i) => (manualFill[i] != null ? manualFill[i] * effMax[i] : effMax[i] * f));
+
+    const shiftFrac = (cg - 0.5) * 2;
+    const shiftGroup = (idxs, amount, sign) => {
+      const active = idxs.filter((i) => effMax[i] > 0 && manualFill[i] == null);
+      const totalCap = active.reduce((s, i) => s + effMax[i], 0);
+      if (totalCap <= 0) return 0;
+      let moved = 0;
+      active.forEach((i) => {
+        const share = amount * (effMax[i] / totalCap);
+        if (sign > 0) {
+          const room = effMax[i] - gallons[i];
+          const add = Math.min(room, share);
+          gallons[i] += add; moved += add;
+        } else {
+          const rem = Math.min(gallons[i], share);
+          gallons[i] -= rem; moved += rem;
+        }
+      });
+      return moved;
+    };
+    if (Math.abs(shiftFrac) > 0.001) {
+      const frontCap = effMax[0] + effMax[1];
+      const rearCap = effMax[3] + effMax[4];
+      const totalMovable = Math.min(frontCap, rearCap) * 0.25 * Math.abs(shiftFrac);
+      if (shiftFrac > 0) {
+        const removed = shiftGroup([3, 4], totalMovable, -1);
+        shiftGroup([0, 1], removed, 1);
+      } else {
+        const removed = shiftGroup([0, 1], totalMovable, -1);
+        shiftGroup([3, 4], removed, 1);
+      }
+    }
+    const weight = gallons.reduce((s, g, i) => s + g * lpg[i], 0);
+    return { gallons, weight };
+  }
+
+  loadPreset(letter) {
+    this.setState((s) => {
+      const preset = s.presets[letter] || EMPTY_PRESET();
+      return {
+        products: [...preset.products], caps: [...preset.caps], cg: preset.cg,
+        manualFill: [null, null, null, null, null],
+        activePreset: letter, modified: false, openIndex: null,
+      };
+    });
+  }
+
+  updateFillFromEvent(i, e) {
+    const rect = e.currentTarget.parentElement.getBoundingClientRect();
+    const relY = (e.clientY - rect.top) / rect.height;
+    const capFrac = this.state.caps[i];
+    const frac = Math.max(0, Math.min(capFrac, 1 - relY));
+    this.setState((s) => { const manualFill = [...s.manualFill]; manualFill[i] = frac; return { manualFill, modified: !!s.activePreset }; });
+  }
+
+  updateTempFromEvent(e) {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const relX = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const manualTemp = Math.round(60 + relX * 50);
+    this.setState({ manualTemp });
+  }
+
+  updateCGFromEvent(e) {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const relX = (e.clientX - rect.left) / rect.width;
+    const cg = Math.max(0, Math.min(1, relX));
+    this.setState((s) => ({ cg, modified: !!s.activePreset }));
+  }
+
+  renderVals() {
+    const st = this.state;
+    const plan = this.computePlan(st.products, st.caps, st.cg, st.manualFill);
+    const totalGallons = plan.gallons.reduce((a, b) => a + b, 0);
+    const remaining = ALLOWED_LBS - plan.weight;
+    const unstable = st.cg < 0.42;
+    const tempDisplayValue = st.manualTemp != null ? st.manualTemp : st.networkTemp;
+    const networkLabel = st.tempConfidence === 'good' ? '3 recent loads' : st.tempConfidence === 'check' ? '1 stale reading' : 'no recent readings';
+
+    const totalMax = COMPS.reduce((s, c) => s + c.max, 0);
+    const compRows = [4, 3, 2, 1, 0].map((i) => {
+      const c = COMPS[i];
+      const widthPct = ((c.max / totalMax) * 100 * 0.94).toFixed(2);
+      const pid = st.products[i];
+      const prod = pid ? PRODUCTS[pid] : null;
+      const fillPct = Math.max(0, Math.min(100, (plan.gallons[i] / c.max) * 100));
+      const capTopPct = Math.max(0, (1 - st.caps[i]) * 100);
+      const isManual = st.manualFill[i] != null;
+      return {
+        num: i + 1,
+        widthPct,
+        code: prod ? prod.code : '—',
+        color: prod ? prod.color : 'rgba(255,255,255,0.10)',
+        textColor: prod ? prod.color : 'rgba(255,255,255,0.25)',
+        fillPct: fillPct.toFixed(1),
+        fillTopPct: (100 - fillPct).toFixed(1),
+        fillGlow: isManual ? '0 0 10px rgba(255,255,255,0.35)' : 'none',
+        capTopPct: capTopPct.toFixed(1),
+        dragging: st.draggingHandle === i,
+        gallonsText: Math.round(plan.gallons[i]).toLocaleString(),
+        onBarClick: () => this.setState((s) => ({ selectedIndex: s.selectedIndex === i ? null : i, openIndex: null })),
+        onHandleDown: (e) => { e.stopPropagation(); e.currentTarget.setPointerCapture(e.pointerId); this._fillDragging = i; this.setState({ draggingHandle: i }); this.updateFillFromEvent(i, e); },
+        onHandleMove: (e) => { if (this._fillDragging !== i) return; this.updateFillFromEvent(i, e); },
+        onHandleUp: () => { this._fillDragging = null; this.setState({ draggingHandle: null }); },
+      };
+    });
+
+    const presetChips = ['A', 'B', 'C', 'D', 'E'].map((letter) => {
+      const configured = !!st.presets[letter];
+      const active = st.activePreset === letter;
+      const modified = active && st.modified;
+      return {
+        letter, modified,
+        textColor: active ? '#fff' : (configured ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.25)'),
+        dotColor: active ? '#fff' : 'transparent',
+        weight: active ? '600' : '500',
+        size: active ? '15px' : '12px',
+        onClick: (e) => this.centerOnTap(e, () => this.loadPreset(letter)),
+      };
+    });
+
+    const activeChoices = st.openIndex == null ? [] : Object.keys(PRODUCTS).map((id) => {
+      const p = PRODUCTS[id];
+      const isCurrent = st.products[st.openIndex] === id;
+      return {
+        id, code: p.code, name: p.name, color: p.color, dyed: p.dyed, current: isCurrent,
+        subtext: p.unNumber || '',
+        border: isCurrent ? 'rgba(74,222,128,0.4)' : 'rgba(255,255,255,0.12)',
+        bg: isCurrent ? 'rgba(74,222,128,0.08)' : 'rgba(255,255,255,0.05)',
+        onSelect: () => {
+          const idx = st.openIndex;
+          this.setState((s) => { const products = [...s.products]; products[idx] = id; return { products, openIndex: null, selectedIndex: null, modified: !!s.activePreset }; });
+        },
+      };
+    }).concat([{
+      id: 'empty', code: 'Empty', name: 'Empty', color: 'rgba(255,255,255,0.15)', dyed: false, subtext: '',
+      current: st.openIndex != null && st.products[st.openIndex] == null,
+      border: 'rgba(255,255,255,0.12)', bg: 'rgba(255,255,255,0.05)',
+      onSelect: () => {
+        const idx = st.openIndex;
+        this.setState((s) => { const products = [...s.products]; products[idx] = null; return { products, openIndex: null, selectedIndex: null, modified: !!s.activePreset }; });
+      },
+    }]);
+
+    const alertItems = [
+      { text: 'Terminal 14 card expired', dot: '#ef4444' },
+      { text: 'DOT physical · 21d', dot: '#eab308' },
+      { text: 'Medical card · 6d', dot: '#eab308' },
+      { text: 'Terminal 9 · 90d', dot: '#4ade80' },
+      { text: 'Hazmat · 12d', dot: '#eab308' },
+    ]; // still used inside the Expirations modal
+    if (st.tempConfidence !== 'good') {
+      alertItems.push({ text: 'Temp confidence low', dot: '#eab308' });
+    }
+
+    const tabDefs = [['planner', 'Planner'], ['cards', 'Cards'], ['vault', 'Vault']];
+    const tabs = tabDefs.map(([id, label]) => {
+      const active = st.activeTab === id;
+      return {
+        label, id,
+        color: active ? '#111' : 'rgba(0,0,0,0.35)',
+        borderColor: active ? '#111' : 'transparent',
+        weight: active ? '500' : '400',
+        size: active ? '16px' : '14px',
+        isPlanner: id === 'planner', isCards: id === 'cards', isVault: id === 'vault',
+        onClick: (e) => this.centerOnTap(e, () => this.setState({ activeTab: id })),
+      };
+    });
+
+    const cityTabs = CITIES.map((city) => {
+      const active = st.activeCity === city;
+      return {
+        label: city, active,
+        border: active ? '#fff' : 'transparent',
+        color: active ? '#fff' : 'rgba(255,255,255,0.4)',
+        weight: active ? '500' : '400',
+        size: active ? '13px' : '11px',
+        onClick: (e) => this.centerOnTap(e, () => this.setState({ activeCity: city })),
+      };
+    });
+    const terminalCards = TERMINAL_CARDS[st.activeCity] || [];
+
+    const vaultData = [
+      { id: 'v1', label: 'Terminal 14 portal', username: 'driver.42b@fleetco.com' },
+      { id: 'v2', label: 'Fleet dispatch', username: 'unit25184' },
+    ];
+    const vaultItems = vaultData.map((v) => ({
+      label: v.label, username: v.username,
+      display: st.vaultRevealed[v.id] ? '••••••••' : 'Show',
+      onToggle: () => this.setState((s) => ({ vaultRevealed: { ...s.vaultRevealed, [v.id]: !s.vaultRevealed[v.id] } })),
+    }));
+
+    return {
+      compRows, presetChips, activeChoices,
+      showPopover: st.openIndex != null,
+      openIndexLabel: st.openIndex != null ? `Comp ${st.openIndex + 1}` : '',
+      totalGallonsText: Math.round(totalGallons).toLocaleString(),
+      totalWeightText: Math.round(plan.weight).toLocaleString() + ' lbs',
+      targetWeightText: ALLOWED_LBS.toLocaleString() + ' lbs',
+      diffText: (remaining >= 0 ? '−' : '+') + Math.round(Math.abs(remaining)).toLocaleString() + ' lbs',
+      remainingColor: remaining >= 0 ? '#4ade80' : '#ef4444',
+      unstable, unstableText: unstable ? '⚠ Unstable' : 'Stable',
+      unstableColor: unstable ? '#ef4444' : '#4ade80',
+      cgLeftPct: (st.cg * 100).toFixed(1),
+      onCGDown: (e) => { e.currentTarget.setPointerCapture(e.pointerId); this._cgDragging = true; this.updateCGFromEvent(e); },
+      onCGMove: (e) => { if (!this._cgDragging) return; this.updateCGFromEvent(e); },
+      onCGUp: () => { this._cgDragging = false; },
+      equipOpen: st.equipOpen, expOpen: st.expOpen, navOpen: st.navOpen,
+      stop: (e) => e.stopPropagation(),
+      onOpenEquip: () => this.setState((s) => ({ equipOpen: !s.equipOpen })),
+      onOpenExp: () => this.setState((s) => ({ expOpen: !s.expOpen })),
+      onToggleNav: () => this.setState((s) => ({ navOpen: !s.navOpen })),
+      tempOpen: st.tempOpen,
+      onOpenTemp: () => this.setState((s) => ({ tempOpen: !s.tempOpen })),
+      onTempDown: (e) => { e.currentTarget.setPointerCapture(e.pointerId); this._tempDragging = true; this.updateTempFromEvent(e); },
+      onTempMove: (e) => { if (!this._tempDragging) return; this.updateTempFromEvent(e); },
+      onTempUp: () => { this._tempDragging = false; },
+      onUseNetwork: () => this.setState({ manualTemp: null }),
+      tempDisplayValue, tempPct: (((tempDisplayValue - 60) / 50) * 100).toFixed(1),
+      tempSourceText: st.manualTemp != null ? 'Manually set — overrides prediction' : `Prediction · ${networkLabel}`,
+      tempConfidenceLabel: st.manualTemp != null ? 'Manual' : (st.tempConfidence === 'good' ? 'Good' : st.tempConfidence === 'check' ? 'Check' : 'Low confidence'),
+      tempHeadline: `${tempDisplayValue}°F predicted product temp`,
+      tempSub: st.manualTemp != null ? 'Manual override active' : (st.tempConfidence === 'good' ? 'High confidence' : st.tempConfidence === 'check' ? 'Medium confidence' : 'Low confidence'),
+      tempSubColor: st.manualTemp != null ? '#4ade80' : (st.tempConfidence === 'good' ? '#4ade80' : st.tempConfidence === 'check' ? '#eab308' : '#ef4444'),
+      tempTextColor: st.manualTemp != null ? '#fff' : (st.tempConfidence === 'good' ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.92)'),
+      tempBorder: 'rgba(255,255,255,0.08)',
+      tempBg: st.manualTemp != null ? 'rgba(255,255,255,0.05)' : (st.tempConfidence === 'good' ? 'rgba(255,255,255,0.02)' : st.tempConfidence === 'check' ? 'rgba(255,255,255,0.045)' : 'rgba(255,255,255,0.07)'),
+      showEditProduct: st.selectedIndex != null,
+      editProductLabel: st.selectedIndex != null ? `Edit Comp ${st.selectedIndex + 1} product` : '',
+      onOpenPicker: () => this.setState((s) => ({ openIndex: s.selectedIndex })),
+      onClosePicker: () => this.setState({ openIndex: null }),
+      showActionRow: (!!st.activePreset && st.modified) || st.selectedIndex != null,
+      showSave: !!st.activePreset && st.modified,
+      saveLabel: `Save changes to ${st.activePreset}`,
+      onSave: () => this.setState((s) => ({
+        presets: { ...s.presets, [s.activePreset]: { products: [...s.products], caps: [...s.caps], cg: s.cg } },
+        modified: false,
+      })),
+      alertItems, alertCount: alertItems.length, activePresetLetter: st.activePreset || '',
+      tabs, isPlanner: st.activeTab === 'planner', isCards: st.activeTab === 'cards', isVault: st.activeTab === 'vault',
+      tabScrollRef: (el) => { this._tabScrollEl = el; },
+      onTabScroll: (e) => {
+        const container = e.currentTarget;
+        clearTimeout(this._tabScrollT);
+        this._tabScrollT = setTimeout(() => {
+          const best = this.centerIndexOf(container);
+          const id = ['planner', 'cards', 'vault'][best];
+          if (id && id !== this.state.activeTab) this.setState({ activeTab: id });
+        }, 80);
+      },
+      presetScrollRef: (el) => { this._presetScrollEl = el; },
+      onPresetScroll: (e) => {
+        const container = e.currentTarget;
+        clearTimeout(this._presetScrollT);
+        this._presetScrollT = setTimeout(() => {
+          const best = this.centerIndexOf(container);
+          const letter = ['A', 'B', 'C', 'D', 'E'][best];
+          if (letter && letter !== this.state.activePreset) this.loadPreset(letter);
+        }, 80);
+      },
+      cityScrollRef: (el) => { this._cityScrollEl = el; },
+      onCityScroll: (e) => {
+        const container = e.currentTarget;
+        clearTimeout(this._cityScrollT);
+        this._cityScrollT = setTimeout(() => {
+          const best = this.centerIndexOf(container);
+          const city = CITIES[best];
+          if (city && city !== this.state.activeCity) this.setState({ activeCity: city });
+        }, 80);
+      },
+      cityTabs, terminalCards, vaultItems,
+    };
+  }
+}
+
+</script>
+</body>
+</html>

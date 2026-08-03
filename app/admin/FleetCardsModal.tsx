@@ -1,16 +1,15 @@
 "use client";
 // app/admin/FleetCardsModal.tsx
 //
-// Fleet Tier Section 1.3, part 1: "fleet-wide view of who's carded where,
-// filterable by terminal, so dispatch doesn't send an uncarded driver."
-// Pick a terminal, see every company driver's card status there --
-// mirrors AdminLoadsModal's pattern (fetch internally, own its own state,
-// no new state needed on the admin page).
+// Fleet Tier Section 1.3: "fleet-wide view of who's carded where, filterable
+// by terminal, so dispatch doesn't send an uncarded driver." Pick a
+// terminal, see every company driver's card status there -- mirrors
+// AdminLoadsModal's pattern (fetch internally, own its own state, no new
+// state needed on the admin page).
 //
 // Deliberately status-only (carded_on + computed expiry state) -- doesn't
 // read/show card_number/PIN (those stay in user_terminal_cards, untouched
-// here). Priority terminal flagging (the other half of this spec section)
-// isn't built yet -- see CLAUDE.md for why.
+// here).
 
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
@@ -30,8 +29,7 @@ const DARK_EXP_COLOR: Record<CardState, string> = {
 };
 
 type TerminalOption = { terminal_id: string; terminal_name: string; city: string | null; state: string | null; renewal_days: number | null };
-type DriverStatus = { user_id: string; display_name: string; cardedOn: string | null; expiresISO: string | null; checklistSummary: string | null };
-type ChecklistItem = { id: string; item_type: "training_loads" | "manual"; required_count: number | null };
+type DriverStatus = { user_id: string; display_name: string; cardedOn: string | null; expiresISO: string | null };
 
 type Props = {
   open: boolean;
@@ -69,49 +67,18 @@ export default function FleetCardsModal({ open, onClose, companyId }: Props) {
       const memberIds = (memberRows ?? []).map((m: any) => m.user_id).filter(Boolean);
       if (memberIds.length === 0) { setDrivers([]); return; }
 
-      const [{ data: profileRows }, { data: accessRows }, { data: checklistItems }] = await Promise.all([
+      const [{ data: profileRows }, { data: accessRows }] = await Promise.all([
         supabase.rpc("get_display_names_full", { p_user_ids: memberIds }),
         supabase.from("terminal_access").select("user_id, carded_on").eq("terminal_id", t.terminal_id).in("user_id", memberIds),
-        supabase.from("terminal_checklist_items").select("id, item_type, required_count").eq("terminal_id", t.terminal_id).eq("is_active", true),
       ]);
       const nameById = Object.fromEntries(((profileRows ?? []) as any[]).map((p) => [p.user_id, p.display_name ?? "Unknown"]));
       const accessById = Object.fromEntries(((accessRows ?? []) as any[]).map((r) => [r.user_id, r.carded_on]));
       const renewalDays = t.renewal_days ?? 90;
 
-      const items = (checklistItems ?? []) as ChecklistItem[];
-      const progressByUserItem: Record<string, Record<string, { progress_count: number; is_checked: boolean }>> = {};
-      if (items.length > 0) {
-        const { data: progRows } = await supabase
-          .from("terminal_checklist_progress")
-          .select("user_id, checklist_item_id, progress_count, is_checked")
-          .in("checklist_item_id", items.map((i) => i.id))
-          .in("user_id", memberIds);
-        for (const p of (progRows ?? []) as any[]) {
-          (progressByUserItem[p.user_id] ??= {})[p.checklist_item_id] = { progress_count: p.progress_count, is_checked: p.is_checked };
-        }
-      }
-
-      function checklistSummaryFor(uid: string): string | null {
-        if (items.length === 0) return null;
-        const training = items.filter((i) => i.item_type === "training_loads");
-        const manual = items.filter((i) => i.item_type === "manual");
-        const parts: string[] = [];
-        if (training.length > 0) {
-          const totalReq = training.reduce((s, i) => s + (i.required_count ?? 1), 0);
-          const totalDone = training.reduce((s, i) => s + Math.min(i.required_count ?? 1, progressByUserItem[uid]?.[i.id]?.progress_count ?? 0), 0);
-          parts.push(`${totalDone} of ${totalReq} training loads`);
-        }
-        if (manual.length > 0) {
-          const doneManual = manual.filter((i) => progressByUserItem[uid]?.[i.id]?.is_checked).length;
-          parts.push(`${doneManual} of ${manual.length} other steps`);
-        }
-        return parts.join(", ");
-      }
-
       const rows: DriverStatus[] = memberIds.map((uid: string) => {
         const cardedOn = accessById[uid] ?? null;
         const expiresISO = cardedOn ? addDaysISO_(cardedOn, renewalDays) : null;
-        return { user_id: uid, display_name: nameById[uid] ?? "Unknown", cardedOn, expiresISO, checklistSummary: checklistSummaryFor(uid) };
+        return { user_id: uid, display_name: nameById[uid] ?? "Unknown", cardedOn, expiresISO };
       }).sort((a, b) => a.display_name.localeCompare(b.display_name));
       setDrivers(rows);
     } finally {
@@ -168,16 +135,11 @@ export default function FleetCardsModal({ open, onClose, companyId }: Props) {
             drivers.map((d) => {
               const state = cardStateFor(d.expiresISO);
               return (
-                <div key={d.user_id} style={{ padding: "10px 12px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", marginBottom: 6 }}>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: "rgba(255,255,255,0.85)" }}>{d.display_name}</div>
-                    <div style={{ fontSize: 12, fontWeight: 800, color: DARK_EXP_COLOR[state], textAlign: "right" as const, flexShrink: 0 }}>
-                      {d.expiresISO ? formatMDYWithCountdown_(d.expiresISO) : "Not carded"}
-                    </div>
+                <div key={d.user_id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "10px 12px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", marginBottom: 6 }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "rgba(255,255,255,0.85)" }}>{d.display_name}</div>
+                  <div style={{ fontSize: 12, fontWeight: 800, color: DARK_EXP_COLOR[state], textAlign: "right" as const, flexShrink: 0 }}>
+                    {d.expiresISO ? formatMDYWithCountdown_(d.expiresISO) : "Not carded"}
                   </div>
-                  {d.checklistSummary && (
-                    <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginTop: 4 }}>{d.checklistSummary}</div>
-                  )}
                 </div>
               );
             })

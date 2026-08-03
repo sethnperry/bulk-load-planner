@@ -96,15 +96,27 @@ export default function PlannerControls(props: any) {
                 const sel = compPlan?.[compNumber];
                 const isEmpty = !!sel?.empty || !sel?.productId;
                 const prod = !isEmpty ? terminalProducts.find((p: any) => p.product_id === sel?.productId) : null;
+                // A product selected but not found among this terminal's own
+                // products means the plan (almost always a preset loaded
+                // from a different terminal) references something not sold
+                // here -- distinct from "empty," needs its own callout, not
+                // a silent generic-teal fallback.
+                const notAvailable = !isEmpty && !prod;
                 const productName = isEmpty ? "" : ((prod?.display_name ?? prod?.product_name ?? "").trim() || "Product");
                 const code = isEmpty
                   ? "MT"
-                  : String(prod?.button_code ?? prod?.product_code ?? (productName.split(" ")[0] || "PRD")).trim().toUpperCase();
+                  : notAvailable
+                    ? "N/A"
+                    : String(prod?.button_code ?? prod?.product_code ?? (productName.split(" ")[0] || "PRD")).trim().toUpperCase();
 
                 // Product fill color — use hex_code if available
                 const hexColor = typeof prod?.hex_code === "string" && prod.hex_code.trim() ? prod.hex_code.trim() : null;
-                const fillColor = isEmpty ? "rgba(255,255,255,0.08)" : (hexColor ?? "rgba(64,220,200,0.82)");
-                const codeColor = isEmpty ? "rgba(255,255,255,0.30)" : (hexColor ?? "rgba(255,255,255,0.85)");
+                const fillColor = isEmpty
+                  ? "rgba(255,255,255,0.08)"
+                  : notAvailable
+                    ? "repeating-linear-gradient(135deg, rgba(239,68,68,0.35) 0px, rgba(239,68,68,0.35) 6px, rgba(239,68,68,0.15) 6px, rgba(239,68,68,0.15) 12px)"
+                    : (hexColor ?? "rgba(64,220,200,0.82)");
+                const codeColor = isEmpty ? "rgba(255,255,255,0.30)" : notAvailable ? "#ef4444" : (hexColor ?? "rgba(255,255,255,0.85)");
 
                 const capLineTopPct = (1 - capPct) * 100;
                 const isDragging = draggingComp === compNumber;
