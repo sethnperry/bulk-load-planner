@@ -75,6 +75,13 @@ export default function EditTerminalModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // Renewal period lives on `terminals` itself (not per-rack) -- it already
+  // feeds useExpirations.ts/cardStateFor-style expiry math everywhere a
+  // terminal card shows up (Planner, Fleet Cards, Dispatch tab, etc, all via
+  // terminals.renewal_days, default 90). It was previously only editable in
+  // the old /admin terminal editor; this is the same column, surfaced here
+  // too since fleet staff manage terminals from the Terminal tab now.
+  const [renewalDays, setRenewalDays] = useState<number | null>(null);
 
   async function loadRacks() {
     setLoading(true);
@@ -89,10 +96,28 @@ export default function EditTerminalModal({
     setLoading(false);
   }
 
+  async function loadTerminalInfo() {
+    const { data } = await supabase
+      .from("terminals")
+      .select("renewal_days")
+      .eq("terminal_id", terminalId)
+      .maybeSingle();
+    setRenewalDays((data as { renewal_days: number | null } | null)?.renewal_days ?? 90);
+  }
+
+  async function saveRenewalDays(days: number) {
+    setError(null);
+    const { error: err } = await supabase.from("terminals").update({ renewal_days: days }).eq("terminal_id", terminalId);
+    if (err) { setError(err.message); return; }
+    setRenewalDays(days);
+    onChanged();
+  }
+
   useEffect(() => {
     if (!open || !terminalId) return;
     setView("racks");
     loadRacks();
+    loadTerminalInfo();
   }, [open, terminalId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const selectedRack = racks.find((r) => r.rack_id === selectedRackId) ?? null;
@@ -155,6 +180,8 @@ export default function EditTerminalModal({
           onAssignArms={(id) => { setSelectedRackId(id); setView("assign"); }}
           onRenamed={loadRacks}
           onDeleteRack={deleteRack}
+          renewalDays={renewalDays}
+          onSaveRenewalDays={saveRenewalDays}
         />
       )}
 
@@ -179,6 +206,7 @@ export default function EditTerminalModal({
 function RacksView({
   terminalName, racks, loading, error, newRackName, setNewRackName, onAddRack, saving,
   onEditLayout, onEditProducts, onAssignArms, onRenamed, onDeleteRack,
+  renewalDays, onSaveRenewalDays,
 }: {
   terminalName?: string;
   racks: TerminalRack[];
@@ -193,10 +221,14 @@ function RacksView({
   onAssignArms: (rackId: string) => void;
   onRenamed: () => void;
   onDeleteRack: (rackId: string) => void;
+  renewalDays: number | null;
+  onSaveRenewalDays: (days: number) => void;
 }) {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [renewalDraft, setRenewalDraft] = useState(String(renewalDays ?? 90));
+  useEffect(() => { setRenewalDraft(String(renewalDays ?? 90)); }, [renewalDays]);
 
   async function saveRename(rackId: string) {
     const name = renameValue.trim();
@@ -206,10 +238,39 @@ function RacksView({
     onRenamed();
   }
 
+  function commitRenewalDays() {
+    const n = parseInt(renewalDraft, 10);
+    if (Number.isFinite(n) && n > 0) onSaveRenewalDays(n);
+    else setRenewalDraft(String(renewalDays ?? 90));
+  }
+
   return (
     <div style={{ display: "grid", gap: 12 }}>
       <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)" }}>
         Racks{terminalName ? <> at <span style={{ color: "rgba(255,255,255,0.75)", fontWeight: 700 }}>{terminalName}</span></> : ""}. Hidden from drivers — lead/dispatch/admin only.
+      </div>
+
+      <div style={{ borderRadius: 10, border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)", padding: 12, display: "flex", alignItems: "center", gap: 12 }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>Access Renewal Period</div>
+          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginTop: 2 }}>
+            Days after a driver's last visit before their card here needs renewal — drives the expiration warnings for every driver's card at this terminal.
+          </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+          <input
+            type="text" inputMode="numeric" value={renewalDraft}
+            onChange={(e) => setRenewalDraft(e.target.value.replace(/[^0-9]/g, ""))}
+            onFocus={(e) => e.currentTarget.select()}
+            onBlur={commitRenewalDays}
+            style={{
+              width: 52, padding: "6px 4px", borderRadius: 6, textAlign: "center" as const,
+              border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.05)", color: "#fff",
+              fontSize: 14, fontWeight: 800, boxSizing: "border-box" as const,
+            }}
+          />
+          <span style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>days</span>
+        </div>
       </div>
 
       {error && <div style={{ color: "#f87171", fontSize: 12 }}>{error}</div>}

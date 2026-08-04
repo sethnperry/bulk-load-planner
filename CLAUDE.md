@@ -1363,6 +1363,48 @@ end to end rather than stopping once the requested items worked):
   existing own/admin-dispatch-read policies) — migration
   `20260812000000_dispatch_tab_and_driver_training.sql` (applied).
 
+### Access Renewal Period field on Edit Terminal (shipped 2026-08-04)
+
+User asked for a place to set the terminal card renewal/expiration period,
+to feed the expiration notification system, on the Terminal tab. Turned out
+**no new schema was needed** — `terminals.renewal_days` (int, default 90)
+already exists live and already feeds every expiry computation in the app
+(`useExpirations.ts`, `useTerminals.ts`, `ExpirationModal.tsx`,
+`MyTerminalsModal.tsx`, `TerminalCatalogModal.tsx`, `FleetCardsModal.tsx`,
+`DriverCardsReadOnly.tsx`, `dispatch/page.tsx` — all read `terminal.renewal_days
+?? 90`), and was already editable in the old `/admin` console's own
+`TerminalModal` (`app/admin/page.tsx`'s "Renewal Days" field). The gap was
+narrower than the request implied: the *new* Terminal Tier's own
+`EditTerminalModal.tsx` (the rack/lane/arm editor fleet staff actually use
+now) had no field for it at all.
+
+Added directly to `RacksView` (the top-level "Edit Terminal" screen) in
+`EditTerminalModal.tsx`, above the rack list — per explicit user direction
+("put it in the Edit Terminal modal because it applies to the entire
+terminal," not per-rack. `EditTerminalModal` fetches/saves `terminals.renewal_days`
+alongside its existing `terminal_racks` load (`loadTerminalInfo`/
+`saveRenewalDays`, save-on-blur, same tap-to-select-all-adjacent numeric
+input pattern already used elsewhere in this file), defaulting the input to
+90 when the column is somehow null.
+
+**Live-verified 2026-08-04** end-to-end against the real Global South
+terminal — not just that the UI didn't error, that the write actually lands:
+read initial value (90) via the app, edited to 45 through the real input
+(tap-to-select-all + blur-to-save), confirmed via a direct service-role
+Postgres REST query that `terminals.renewal_days` was actually 45 live (not
+just reflected client-side), closed and reopened the modal to confirm a
+fresh DB fetch also shows 45 (not a stale local echo), then reset back to 90
+the same way and re-confirmed live. One real bug caught mid-verification
+and self-corrected: an initial synthetic-event test dispatched a raw `blur`
+event, which doesn't reach React's `onBlur` (React listens for the
+bubbling `focusout` event, not `blur`, which doesn't bubble) — the input
+visually updated (via the `input` event, which does bubble and does drive
+`onChange`) but the save handler never fired, at first looking like a
+false negative on the DB check. Switched to calling the real `.blur()` DOM
+method (which the browser itself turns into a proper `focusout`), and the
+write round-tripped correctly. No test data left behind — the terminal is
+back at its real value (90) post-verification.
+
 ### Driver Training (Lead/Admin-in-lead-mode feature)
 - A "Driver Training" button on the Planner (lead/admin-acting-as-lead
   only) opens a driver-selection modal (exact modal design not yet done —
