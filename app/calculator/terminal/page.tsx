@@ -17,7 +17,7 @@ import LaneStatusModal from "./LaneStatusModal";
 import RackProductStatusModal from "./RackProductStatusModal";
 import EditTerminalModal from "./EditTerminalModal";
 import type { TerminalRack, RackArm, RackLane, RackProductStatusRow, ProductLite } from "./types";
-import { computeLaneOffsets } from "./labels";
+import { displayLabel } from "./labels";
 
 function PlaceholderPanel({ title, note }: { title: string; note: string }) {
   return (
@@ -116,7 +116,6 @@ export default function TerminalPage() {
 
   const activeRack = racks.find((r) => r.rack_id === activeRackId) ?? null;
   const subTabs: CenteredSubTab[] = racks.map((r) => ({ id: r.rack_id, label: r.rack_name }));
-  const laneOffsets = useMemo(() => computeLaneOffsets(racks), [racks]);
   const rackProductStatusById = useMemo(() => {
     const m: Record<string, RackProductStatusRow> = {};
     for (const rp of rackProducts) m[rp.product_id] = rp;
@@ -155,8 +154,6 @@ export default function TerminalPage() {
           <div style={{ marginBottom: 18 }}>
             <div style={{ fontSize: 15, fontWeight: 800, color: "#fff", marginBottom: 10 }}>{activeRack.rack_name} Lane Map</div>
             <RackLaneGrid
-              rack={activeRack}
-              laneOffset={laneOffsets[activeRack.rack_id] ?? 0}
               arms={arms}
               lanes={lanes}
               rackProductStatusById={rackProductStatusById}
@@ -222,9 +219,9 @@ export default function TerminalPage() {
         <LaneStatusModal
           open={selectedLane != null}
           onClose={() => setSelectedLane(null)}
-          rack={activeRack}
-          laneOffset={laneOffsets[activeRack.rack_id] ?? 0}
+          rackId={activeRack.rack_id}
           laneNumber={selectedLane}
+          laneLabelText={displayLabel(lanes.find((l) => l.lane_number === selectedLane)?.label, selectedLane)}
           arms={arms}
           laneIsDown={lanes.find((l) => l.lane_number === selectedLane)?.is_down ?? false}
           productsById={productsById}

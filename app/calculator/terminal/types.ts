@@ -6,16 +6,13 @@ export type TerminalRack = {
   rack_id: string;
   terminal_id: string;
   rack_name: string;
-  lane_count: number;
-  lane_reversed: boolean;
-  arm_count: number;
-  arm_reversed: boolean;
   created_at: string;
 };
 
 export type RackLane = {
   rack_id: string;
   lane_number: number;
+  label: string | null;
   is_down: boolean;
   updated_at: string;
   updated_by: string | null;
@@ -26,6 +23,7 @@ export type RackArm = {
   rack_id: string;
   lane_number: number;
   arm_number: number;
+  label: string | null;
   product_ids: string[];
   is_down: boolean;
   out_product_ids: string[];

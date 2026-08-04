@@ -1,23 +1,24 @@
 "use client";
 // app/calculator/terminal/RackLaneGrid.tsx
 //
-// One card per lane (per the user's mockup), each showing its arms as
-// stacked-product columns. Tapping a card opens that lane's Status Update
-// modal -- this is the crowdsourced "mark something down" entry point,
-// open to every role.
+// One card per lane, each showing its own arms as stacked-product columns
+// -- lanes are enumerated from the actual rack_lanes rows and each lane's
+// arms from the actual rack_arms rows, not from a rack-wide count, since
+// lanes can have different numbers of arms (per explicit user direction).
+// Tapping a card opens that lane's Status Update modal -- open to every
+// role.
 //
 // Layered down/out visual logic (confirmed against the actual mockup
 // screenshot): an arm renders fully "down" (red circle-slash over the
 // whole column) when either it's explicitly flagged down, or every
 // product currently on it is out (whether flagged out on this specific
-// arm, or out rack-wide via the bottom STUD button) -- there's nothing
-// usable there regardless of cause. A single out product on a multi-
-// product arm that still has another valid product just gets a
+// arm, or out rack-wide via the bottom STUD button). A single out product
+// on a multi-product arm that still has another valid product just gets a
 // strikethrough on that one product; the arm itself stays normal.
 
 import React from "react";
-import type { TerminalRack, RackArm, RackLane, RackProductStatusRow, ProductLite } from "./types";
-import { laneLabel, armLabel } from "./labels";
+import type { RackArm, RackLane, RackProductStatusRow, ProductLite } from "./types";
+import { displayLabel } from "./labels";
 
 function NoSymbol() {
   return (
@@ -29,32 +30,27 @@ function NoSymbol() {
 }
 
 export default function RackLaneGrid({
-  rack,
-  laneOffset,
-  arms,
   lanes,
+  arms,
   rackProductStatusById,
   productsById,
   onSelectLane,
 }: {
-  rack: TerminalRack;
-  laneOffset: number;
-  arms: RackArm[];
   lanes: RackLane[];
+  arms: RackArm[];
   rackProductStatusById: Record<string, RackProductStatusRow>;
   productsById: Record<string, ProductLite>;
-  onSelectLane: (localLaneNumber: number) => void;
+  onSelectLane: (laneNumber: number) => void;
 }) {
-  const armByPos = React.useMemo(() => {
-    const m = new Map<string, RackArm>();
-    for (const a of arms) m.set(`${a.lane_number}:${a.arm_number}`, a);
+  const armsByLane = React.useMemo(() => {
+    const m = new Map<number, RackArm[]>();
+    for (const a of arms) {
+      if (!m.has(a.lane_number)) m.set(a.lane_number, []);
+      m.get(a.lane_number)!.push(a);
+    }
+    for (const list of m.values()) list.sort((a, b) => a.arm_number - b.arm_number);
     return m;
   }, [arms]);
-  const laneDownByNumber = React.useMemo(() => {
-    const m = new Map<number, boolean>();
-    for (const l of lanes) m.set(l.lane_number, l.is_down);
-    return m;
-  }, [lanes]);
 
   function isProductOut(arm: RackArm, pid: string): boolean {
     return arm.out_product_ids.includes(pid) || rackProductStatusById[pid]?.is_out === true;
@@ -65,18 +61,21 @@ export default function RackLaneGrid({
     return arm.product_ids.every((pid) => isProductOut(arm, pid));
   }
 
-  const lanePositions = Array.from({ length: rack.lane_count }, (_, i) => i + 1);
-  const armPositions = Array.from({ length: rack.arm_count }, (_, i) => i + 1);
+  const sortedLanes = [...lanes].sort((a, b) => a.lane_number - b.lane_number);
+
+  if (sortedLanes.length === 0) {
+    return <div style={{ fontSize: 13, color: "rgba(255,255,255,0.3)" }}>No lanes configured yet.</div>;
+  }
 
   return (
     <div style={{ display: "grid", gap: 10 }}>
-      {lanePositions.map((lanePos) => {
-        const laneDown = laneDownByNumber.get(lanePos) ?? false;
+      {sortedLanes.map((lane) => {
+        const laneArms = armsByLane.get(lane.lane_number) ?? [];
         return (
           <button
-            key={lanePos}
+            key={lane.lane_number}
             type="button"
-            onClick={() => onSelectLane(lanePos)}
+            onClick={() => onSelectLane(lane.lane_number)}
             style={{
               display: "flex", alignItems: "stretch", gap: 0, width: "100%",
               borderRadius: 18, border: "none", cursor: "pointer", textAlign: "left" as const,
@@ -85,25 +84,25 @@ export default function RackLaneGrid({
           >
             <div style={{
               flexShrink: 0, width: 36, display: "flex", alignItems: "center", justifyContent: "center",
-              background: laneDown ? "#ef4444" : "rgba(255,255,255,0.08)",
+              background: lane.is_down ? "#ef4444" : "rgba(255,255,255,0.08)",
               color: "#fff", fontSize: 15, fontWeight: 800, alignSelf: "stretch",
             }}>
-              {laneLabel(lanePos, rack, laneOffset)}
+              {displayLabel(lane.label, lane.lane_number)}
             </div>
 
-            <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "space-around", padding: "10px 6px", gap: 4 }}>
-              {armPositions.map((armPos) => {
-                const arm = armByPos.get(`${lanePos}:${armPos}`);
-                const pids = arm?.product_ids ?? [];
-                const down = arm ? isArmDown(arm) : false;
+            <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: laneArms.length ? "space-around" : "center", padding: "10px 6px", gap: 4 }}>
+              {laneArms.length === 0 && <span style={{ color: "rgba(255,255,255,0.2)", fontSize: 12 }}>No arms configured</span>}
+              {laneArms.map((arm) => {
+                const pids = arm.product_ids;
+                const down = isArmDown(arm);
                 return (
-                  <div key={armPos} style={{ position: "relative", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minWidth: 28, minHeight: 28, gap: 1 }}>
+                  <div key={arm.arm_id} style={{ position: "relative", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minWidth: 28, minHeight: 28, gap: 1 }}>
                     {pids.length === 0 && <span style={{ color: "rgba(255,255,255,0.2)", fontSize: 13 }}>—</span>}
                     {pids.map((pid) => {
                       const p = productsById[pid];
                       const code = (p?.button_code ?? "").trim() || "?";
                       const color = (p?.hex_code ?? "").trim() || "rgba(255,255,255,0.7)";
-                      const outHere = arm ? isProductOut(arm, pid) : false;
+                      const outHere = isProductOut(arm, pid);
                       return (
                         <span
                           key={pid}

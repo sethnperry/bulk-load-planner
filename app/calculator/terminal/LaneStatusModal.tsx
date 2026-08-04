@@ -3,16 +3,15 @@
 //
 // "Lane N — Status Update" -- the per-lane STUD action, open to every role.
 // Toggle buttons only (Lane Down / Arm Down / Product Out), no text fields
-// or freeform notes. Tightened to one compact row per arm per explicit
-// user feedback against a reference screenshot -- product code + small
-// inline toggle buttons on the same line, not a card per arm. Lane Down
-// is the first row, styled the same way as the arm rows below it.
+// or freeform notes. One compact row per arm -- product code(s) + small
+// inline toggle buttons on the same line. Lane Down lives in the header,
+// to the right of the title, rather than its own row in the content.
 
 import React, { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { FullscreenModal } from "@/lib/ui/FullscreenModal";
-import type { TerminalRack, RackArm, RackLane, ProductLite } from "./types";
-import { laneLabel, armLabel } from "./labels";
+import type { RackArm, ProductLite } from "./types";
+import { displayLabel } from "./labels";
 
 function SmallToggle({ label, active, color = "#ef4444", onClick }: { label: string; active: boolean; color?: string; onClick: () => void }) {
   return (
@@ -34,9 +33,9 @@ function SmallToggle({ label, active, color = "#ef4444", onClick }: { label: str
 export default function LaneStatusModal({
   open,
   onClose,
-  rack,
-  laneOffset,
+  rackId,
   laneNumber,
+  laneLabelText,
   arms,
   laneIsDown,
   productsById,
@@ -45,9 +44,9 @@ export default function LaneStatusModal({
 }: {
   open: boolean;
   onClose: () => void;
-  rack: TerminalRack;
-  laneOffset: number;
+  rackId: string;
   laneNumber: number;
+  laneLabelText: string;
   arms: RackArm[];
   laneIsDown: boolean;
   productsById: Record<string, ProductLite>;
@@ -90,7 +89,7 @@ export default function LaneStatusModal({
     const now = new Date().toISOString();
 
     const { error: laneErr } = await supabase.from("rack_lanes").upsert(
-      { rack_id: rack.rack_id, lane_number: laneNumber, is_down: laneDownDraft, updated_at: now, updated_by: authUserId || null },
+      { rack_id: rackId, lane_number: laneNumber, is_down: laneDownDraft, updated_at: now, updated_by: authUserId || null },
       { onConflict: "rack_id,lane_number" }
     );
     if (laneErr) { setError(laneErr.message); setSaving(false); return; }
@@ -119,8 +118,9 @@ export default function LaneStatusModal({
   return (
     <FullscreenModal
       open={open}
-      title={`Lane ${laneLabel(laneNumber, rack, laneOffset)} — Status Update`}
+      title={`Lane ${laneLabelText} — Status Update`}
       onClose={onClose}
+      headerRight={<SmallToggle label="LANE DOWN" active={laneDownDraft} onClick={() => setLaneDownDraft((v) => !v)} />}
       footer={
         <button
           onClick={save}
@@ -135,17 +135,14 @@ export default function LaneStatusModal({
       <div>
         {error && <div style={{ color: "#f87171", fontSize: 12, marginBottom: 10 }}>{error}</div>}
 
-        <div style={rowStyle}>
-          <span style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>
-            Lane {laneLabel(laneNumber, rack, laneOffset)}
-          </span>
-          <SmallToggle label="LANE DOWN" active={laneDownDraft} onClick={() => setLaneDownDraft((v) => !v)} />
-        </div>
+        {laneArms.length === 0 && (
+          <div style={{ fontSize: 13, color: "rgba(255,255,255,0.3)", padding: "12px 0" }}>No arms configured for this lane.</div>
+        )}
 
         {laneArms.map((a) => (
           <div key={a.arm_id} style={rowStyle}>
             <div style={{ display: "flex", alignItems: "baseline", gap: 6, minWidth: 0, overflow: "hidden" }}>
-              <span style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", flexShrink: 0 }}>Arm {armLabel(a.arm_number, rack)}</span>
+              <span style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", flexShrink: 0 }}>Arm {displayLabel(a.label, a.arm_number)}</span>
               {a.product_ids.length === 0 ? (
                 <span style={{ fontSize: 12, color: "rgba(255,255,255,0.25)" }}>—</span>
               ) : (
@@ -165,7 +162,7 @@ export default function LaneStatusModal({
               )}
             </div>
             <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
-              <SmallToggle label="DOWN" active={armDownDraft[a.arm_id] ?? a.is_down} onClick={() => setArmDownDraft((prev) => ({ ...prev, [a.arm_id]: !(prev[a.arm_id] ?? a.is_down) }))} />
+              <SmallToggle label="ARM" active={armDownDraft[a.arm_id] ?? a.is_down} onClick={() => setArmDownDraft((prev) => ({ ...prev, [a.arm_id]: !(prev[a.arm_id] ?? a.is_down) }))} />
               {a.product_ids.map((pid) => {
                 const p = productsById[pid];
                 const code = (p?.button_code ?? "").trim() || "?";

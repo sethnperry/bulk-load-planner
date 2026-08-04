@@ -1171,6 +1171,61 @@ content, and no street-address field exists anywhere in the schema
 asks as scoped to the tab's own content area (lane map + product list),
 not a request to add fabricated address data or restructure shared chrome.
 
+### Lane Status modal tightening + explicit lane/arm labels (2026-08-04, same day continued)
+
+Two more rounds of feedback against a real screenshot, same session:
+
+**Lane Status modal tightening**: `FullscreenModal` gained an optional
+`headerRight` slot (purely additive — `min-w-[64px] flex justify-end`
+replacing the old fixed empty spacer, so every other modal using this
+shared component is unaffected). `LaneStatusModal.tsx`'s "Lane Down"
+toggle moved there, out of a redundant content row that just repeated the
+title. Per-arm rows collapsed further: the arm-level toggle relabeled
+from "DOWN" to "ARM" so it reads as "which thing are you toggling" in
+parallel with the product-code toggles next to it (`[ARM] [D2] [DYED]`),
+rather than describing state redundantly against the row's own "Arm N"
+label.
+
+**Explicit lane/arm labels, replacing the count+reversed scheme entirely**
+— migration `20260814000000_explicit_lane_arm_labels.sql` (applied). Root
+cause: the original count+reversed model assumed every lane in a rack had
+the same number of arms, which is false at real facilities. Rather than
+bolt on a per-lane override, replaced the whole computed-labeling approach
+with **explicit, directly-editable text** on `rack_lanes.label` /
+`rack_arms.label`:
+- `rack_lanes` was previously sparse (a row only existed once a lane's
+  down-status had been touched); it's now the source of truth for which
+  lanes exist at all, backfilled from every lane referenced by an existing
+  `rack_arms` row.
+- `terminal_racks.lane_count`/`lane_reversed`/`arm_count`/`arm_reversed`
+  (and the already-unused `lane_alpha`/`arm_alpha`) are now **fully
+  unused** — left in the DB rather than dropped, same call as the alpha
+  columns before them. `TerminalRack`'s TypeScript type no longer carries
+  them at all.
+- `labels.ts` collapsed from `computeLaneOffsets`/`laneLabel`/`armLabel`
+  down to one `displayLabel(label, fallback)` helper — the continuous-
+  across-racks computation this replaced is gone entirely, not hidden
+  behind a flag; full manual control made it unnecessary (an admin can
+  retype a continuous number in seconds if they want one).
+- `EditTerminalModal.tsx`'s Layout view rebuilt from a "set counts, hit
+  Save" form into a **live-editing grid**: `+ Add Lane` / `+ Arm` per lane
+  / `×` to remove either, and a `LabelInput` (tap-to-select-all, save on
+  blur — same mobile-friendly "replace don't edit" pattern the STUD modal
+  fields got earlier the same day) on every lane and arm. No separate
+  save step — every action persists immediately, matching how
+  `AssignArmsView`/`ProductsView` already worked.
+- `RackLaneGrid.tsx` now enumerates lanes/arms from the actual
+  `rack_lanes`/`rack_arms` rows rather than a rack-wide count, so lanes
+  legitimately render with different arm counts side by side.
+
+Live-verified end to end: added a 7th arm to one lane while removing one
+from another (5 vs. 7 arms on adjacent lanes, both rendering correctly on
+the live grid), renamed a lane's label to "A1" via tap-to-select-all, and
+confirmed it immediately propagated to the Lane Map header badge, the
+Lane Status modal's title, and the Assign Arm Products view — all three
+read the same live DB value now, nothing cached or recomputed
+separately. `tsc --noEmit` clean throughout both rounds.
+
 - **Tab bar**: `CalculatorLayoutClient.tsx`'s middle tab is now genuinely
   contextual — `tabsFor(role, adminActingAsLead)` swaps in Dispatch (href
   `/calculator/dispatch`, same `id: "planner"` so active-tab detection stays

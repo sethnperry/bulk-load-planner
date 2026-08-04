@@ -15,9 +15,12 @@ type Props = {
    * - ReactNode => render that node
    */
   footer?: ReactNode | null;
+
+  /** Optional content in the header's right slot (replaces the plain spacer). */
+  headerRight?: ReactNode;
 };
 
-export function FullscreenModal({ open, title, onClose, children, footer }: Props) {
+export function FullscreenModal({ open, title, onClose, children, footer, headerRight }: Props) {
   useEffect(() => {
     if (!open) return;
 
@@ -80,7 +83,7 @@ export function FullscreenModal({ open, title, onClose, children, footer }: Prop
 
             <div className="text-base font-semibold">{title}</div>
 
-            <div className="w-[64px]" />
+            <div className="min-w-[64px] flex justify-end">{headerRight}</div>
           </div>
 
           {/* Content */}
