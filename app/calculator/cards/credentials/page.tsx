@@ -283,29 +283,43 @@ export default function CredentialsPage() {
   const shell = useCalculatorShell();
   const { effectiveUserId } = shell;
 
+  // Contextual for dispatch/admin viewing a selected driver -- see
+  // cards/page.tsx's own header comment for the full rationale (cards
+  // should look identical for every role, only whose data differs).
+  const isDispatchContext = (shell.role === "dispatch" || shell.role === "admin" || shell.isSuperAdmin) && Boolean(shell.selectedDriverId);
+  const targetUserId = isDispatchContext ? shell.selectedDriverId : effectiveUserId;
+  const [driverName, setDriverName] = useState("");
+
+  useEffect(() => {
+    if (!isDispatchContext || !shell.selectedDriverId) { setDriverName(""); return; }
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase.rpc("get_display_names_full", { p_user_ids: [shell.selectedDriverId] });
+      if (!cancelled) setDriverName((data ?? [])[0]?.display_name ?? "this driver");
+    })();
+    return () => { cancelled = true; };
+  }, [isDispatchContext, shell.selectedDriverId]);
+
   const [license, setLicense] = useState<(LicenseRow & { id: string }) | null | undefined>(undefined);
   const [medical, setMedical] = useState<(MedicalRow & { id: string }) | null | undefined>(undefined);
   const [twic, setTwic] = useState<(TwicRow & { id: string }) | null | undefined>(undefined);
-  const [companyId, setCompanyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!effectiveUserId) return;
+    if (!targetUserId) return;
+    setLicense(undefined); setMedical(undefined); setTwic(undefined);
     (async () => {
-      const { data: s } = await supabase.from("user_settings").select("active_company_id").eq("user_id", effectiveUserId).maybeSingle();
-      setCompanyId((s?.active_company_id as string | null) ?? null);
-
       const [{ data: l, error: le }, { data: m, error: me }, { data: t, error: te }] = await Promise.all([
-        supabase.from("driver_licenses").select("*").eq("user_id", effectiveUserId).maybeSingle(),
-        supabase.from("driver_medical_cards").select("*").eq("user_id", effectiveUserId).maybeSingle(),
-        supabase.from("driver_twic_cards").select("*").eq("user_id", effectiveUserId).maybeSingle(),
+        supabase.from("driver_licenses").select("*").eq("user_id", targetUserId).maybeSingle(),
+        supabase.from("driver_medical_cards").select("*").eq("user_id", targetUserId).maybeSingle(),
+        supabase.from("driver_twic_cards").select("*").eq("user_id", targetUserId).maybeSingle(),
       ]);
       if (le || me || te) setError((le ?? me ?? te)?.message ?? "Failed to load credentials.");
       setLicense((l as any) ?? null);
       setMedical((m as any) ?? null);
       setTwic((t as any) ?? null);
     })();
-  }, [effectiveUserId]);
+  }, [targetUserId]);
 
   const saveLicense = async (v: LicenseRow) => {
     if (license?.id) {
@@ -313,7 +327,7 @@ export default function CredentialsPage() {
       if (err) { setError(err.message); return; }
       setLicense({ ...v, id: license.id });
     } else {
-      const { data, error: err } = await supabase.from("driver_licenses").insert({ user_id: effectiveUserId, company_id: companyId, ...v }).select("*").single();
+      const { data, error: err } = await supabase.from("driver_licenses").insert({ user_id: targetUserId, company_id: shell.companyId, ...v }).select("*").single();
       if (err) { setError(err.message); return; }
       setLicense(data as any);
     }
@@ -331,7 +345,7 @@ export default function CredentialsPage() {
       if (err) { setError(err.message); return; }
       setMedical({ ...v, id: medical.id });
     } else {
-      const { data, error: err } = await supabase.from("driver_medical_cards").insert({ user_id: effectiveUserId, company_id: companyId, ...v }).select("*").single();
+      const { data, error: err } = await supabase.from("driver_medical_cards").insert({ user_id: targetUserId, company_id: shell.companyId, ...v }).select("*").single();
       if (err) { setError(err.message); return; }
       setMedical(data as any);
     }
@@ -349,7 +363,7 @@ export default function CredentialsPage() {
       if (err) { setError(err.message); return; }
       setTwic({ ...v, id: twic.id });
     } else {
-      const { data, error: err } = await supabase.from("driver_twic_cards").insert({ user_id: effectiveUserId, company_id: companyId, ...v }).select("*").single();
+      const { data, error: err } = await supabase.from("driver_twic_cards").insert({ user_id: targetUserId, company_id: shell.companyId, ...v }).select("*").single();
       if (err) { setError(err.message); return; }
       setTwic(data as any);
     }
@@ -366,6 +380,11 @@ export default function CredentialsPage() {
   return (
     <div>
       <CardsSubTabs />
+      {isDispatchContext && (
+        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginBottom: 14 }}>
+          Viewing <span style={{ color: "rgba(255,255,255,0.8)", fontWeight: 700 }}>{driverName || "…"}</span>'s credentials.
+        </div>
+      )}
       {error && <div className="text-sm text-red-400 mb-3">{error}</div>}
       {loading ? (
         <div style={{ textAlign: "center" as const, color: "rgba(255,255,255,0.3)", fontSize: 14, padding: "60px 20px" }}>Loading…</div>

@@ -12,12 +12,13 @@
 // my_terminals_with_status view already returns every status for every
 // starred terminal).
 
-import React, { useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase/client";
 import { useCalculatorShell } from "../CalculatorShellContext";
+import { useTerminals } from "../hooks/useTerminals";
 import { formatMDY, formatMDYWithCountdown_ } from "../utils/dates";
 import CardsSubTabs from "./CardsSubTabs";
-import DriverCardsReadOnly from "./DriverCardsReadOnly";
 import FlippableCard from "./FlippableCard";
 import SourcingModal from "../modals/SourcingModal";
 import { FullscreenModal } from "@/lib/ui/FullscreenModal";
@@ -37,6 +38,7 @@ function TerminalCard({
   lastVisitISO, onSetAccessDate,
   confirmAction, setConfirmAction,
   onOpenSourcing, onSelect, onDeactivate, onRemove,
+  walletLabel = "your wallet",
 }: {
   t: any; tid: string; expiresISO: string | null; state: CardState;
   isFlipped: boolean; isSelected: boolean;
@@ -45,7 +47,11 @@ function TerminalCard({
   updateDraft: (patch: Partial<{ cardNumber: string; pin: string; privateNote: string }>) => void;
   lastVisitISO: string; onSetAccessDate: (iso: string) => void;
   confirmAction: null | "deactivate" | "remove"; setConfirmAction: (a: null | "deactivate" | "remove") => void;
-  onOpenSourcing: () => void; onSelect: () => void; onDeactivate: () => void; onRemove: () => void;
+  onOpenSourcing: () => void; onSelect?: () => void; onDeactivate: () => void; onRemove: () => void;
+  // Defaults to "your wallet" for the driver's own view; dispatch/admin
+  // viewing a selected driver's cards passes "{driverName}'s wallet" so the
+  // remove-confirm copy stays accurate about whose cards these are.
+  walletLabel?: string;
 }) {
   const name = String(t.terminal_name ?? "Terminal");
   const [base, shade] = toneFor(name);
@@ -138,7 +144,7 @@ function TerminalCard({
 
         {confirmAction === null && (
           <div style={{ display: "flex", gap: 8 }}>
-            <button type="button" onClick={onSelect} style={btnPrimary}>Select</button>
+            {onSelect && <button type="button" onClick={onSelect} style={btnPrimary}>Select</button>}
             {lastVisitISO && <button type="button" onClick={() => setConfirmAction("deactivate")} style={btnDanger}>Deactivate</button>}
             <button type="button" onClick={() => setConfirmAction("remove")} style={btnDanger}>Remove</button>
           </div>
@@ -157,7 +163,7 @@ function TerminalCard({
         {confirmAction === "remove" && (
           <div style={{ padding: "10px 12px", borderRadius: 6, border: "1px solid rgba(153,27,27,0.25)", background: "rgba(153,27,27,0.06)" }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: "#3a1414", marginBottom: 8 }}>
-              Remove this card from your wallet? Card number, PIN, and notes stay saved if you add it back later.
+              Remove this card from {walletLabel}? Card number, PIN, and notes stay saved if you add it back later.
             </div>
             <div style={{ display: "flex", gap: 8 }}>
               <button type="button" onClick={onRemove} style={{ ...btnDanger, flex: 1 }}>Yes, remove card</button>
@@ -279,6 +285,56 @@ function AddCardSheet({
   );
 }
 
+// ── Driver-scoped card data (card #/PIN/note), mirroring
+// CalculatorShellContext.tsx's own cardDataByTerminalId/setCardDataForTerminal_
+// but parametrized by an arbitrary target user id instead of effectiveUserId.
+// A second independent copy is correct here (not the desync risk that hook
+// hoisting exists to avoid) since this is deliberately a DIFFERENT user's
+// data, not a duplicate view of the same one -- the whole point is that
+// dispatch/admin and the viewed driver never share this state.
+
+function useDriverCardData(userId: string) {
+  const [data, setData] = useState<Record<string, { cardNumber: string; pin: string; privateNote: string }>>({});
+
+  useEffect(() => {
+    if (!userId) { setData({}); return; }
+    let cancelled = false;
+    (async () => {
+      const { data: rows } = await supabase
+        .from("user_terminal_cards")
+        .select("terminal_id, card_number, private_note, pin")
+        .eq("user_id", userId);
+      if (cancelled) return;
+      const map: Record<string, { cardNumber: string; pin: string; privateNote: string }> = {};
+      for (const row of (rows ?? []) as any[]) {
+        map[String(row.terminal_id)] = { cardNumber: row.card_number ?? "", pin: row.pin ?? "", privateNote: row.private_note ?? "" };
+      }
+      setData(map);
+    })();
+    return () => { cancelled = true; };
+  }, [userId]);
+
+  const setForTerminal = useCallback(async (terminalId: string, patch: { cardNumber: string; pin: string; privateNote: string }) => {
+    setData((prev) => ({ ...prev, [terminalId]: patch }));
+    if (!userId) return;
+    await supabase.from("user_terminal_cards").upsert(
+      {
+        user_id: userId,
+        terminal_id: terminalId,
+        card_number: patch.cardNumber,
+        private_note: patch.privateNote,
+        pin: patch.pin || null,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "user_id,terminal_id" }
+    );
+  }, [userId]);
+
+  return { data, setForTerminal };
+}
+
+const noop = () => {};
+
 // ── Cards tab: Terminals sub-tab ─────────────────────────────────────────────
 
 export default function CardsPage() {
@@ -286,12 +342,46 @@ export default function CardsPage() {
   const { terminals, location, cardDataByTerminalId, setCardDataForTerminal_, authUserId, myTerminalIdSet } = shell;
   const router = useRouter();
 
-  // Contextual for dispatch/admin viewing a selected driver -- see
-  // DriverCardsReadOnly.tsx's own header comment for why this is
-  // deliberately status-only rather than the full flip-card editor below.
+  // Contextual for dispatch/admin viewing a selected driver -- per explicit
+  // user direction, cards should "look identical for every role", the only
+  // difference being whose data is shown, so this renders the exact same
+  // TerminalCard flip-card UI as the driver's own view, just pointed at the
+  // selected driver's data (full edit parity, backed by the
+  // 20260815000000 migration's admin/dispatch write policies).
   // Checked below the JSX return (not an early return here) so every hook
   // in this component still runs on every render, same count either way.
   const isDispatchContext = (shell.role === "dispatch" || shell.role === "admin" || shell.isSuperAdmin) && Boolean(shell.selectedDriverId);
+  const driverId = isDispatchContext ? shell.selectedDriverId : "";
+
+  // Second useTerminals instance, scoped to the selected driver instead of
+  // effectiveUserId -- safe to always call (rules of hooks); it's a no-op
+  // whenever driverId is empty. No "current terminal" concept applies to a
+  // driver you're viewing, so selectedTerminalId/setSelectedTerminalId are
+  // stubbed out.
+  const driverTerminals = useTerminals(driverId, "", noop, null);
+  const driverCardData = useDriverCardData(driverId);
+  const [driverName, setDriverName] = useState("");
+
+  useEffect(() => {
+    if (!driverId) { setDriverName(""); return; }
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase.rpc("get_display_names_full", { p_user_ids: [driverId] });
+      if (!cancelled) setDriverName((data ?? [])[0]?.display_name ?? "this driver");
+    })();
+    return () => { cancelled = true; };
+  }, [driverId]);
+
+  // Unified active data source -- own vs. driver-scoped -- so the render
+  // path below is truly one code path, not two divergent ones.
+  const activeTerminals = isDispatchContext ? driverTerminals : terminals;
+  const activeCardDataByTerminalId = isDispatchContext ? driverCardData.data : cardDataByTerminalId;
+  const activeSetCardDataForTerminal = isDispatchContext ? driverCardData.setForTerminal : setCardDataForTerminal_;
+  const activeMyTerminalIdSet = useMemo(
+    () => isDispatchContext ? new Set((driverTerminals.terminals ?? []).map((t: any) => String(t.terminal_id))) : myTerminalIdSet,
+    [isDispatchContext, driverTerminals.terminals, myTerminalIdSet]
+  );
+  const walletLabel = isDispatchContext ? `${driverName || "this driver"}'s wallet` : "your wallet";
 
   const [filter, setFilter] = useState<FilterKey>("all");
   const [flippedId, setFlippedId] = useState<string | null>(null);
@@ -304,12 +394,12 @@ export default function CardsPage() {
   const cityRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   const enriched = useMemo(() => {
-    return (terminals.terminals ?? []).map((t: any) => {
+    return (activeTerminals.terminals ?? []).map((t: any) => {
       const tid = String(t.terminal_id);
-      const expiresISO = terminals.terminalDisplayInfo(t, tid);
+      const expiresISO = activeTerminals.terminalDisplayInfo(t, tid);
       return { t, tid, expiresISO, state: cardStateFor(expiresISO) };
     });
-  }, [terminals.terminals, terminals.terminalDisplayInfo]);
+  }, [activeTerminals.terminals, activeTerminals.terminalDisplayInfo]);
 
   const cityGroups = useMemo(() => {
     const filtered = enriched.filter((i) => matchesFilter(i.state, filter));
@@ -328,13 +418,13 @@ export default function CardsPage() {
   }, [enriched, filter]);
 
   const handleFlipOpen = (tid: string) => {
-    const saved = cardDataByTerminalId[tid];
+    const saved = activeCardDataByTerminalId[tid];
     setDraft({ cardNumber: saved?.cardNumber ?? "", pin: saved?.pin ?? "", privateNote: saved?.privateNote ?? "" });
     setConfirmAction(null);
     setFlippedId(tid);
   };
   const handleFlipClose = () => {
-    if (flippedId) setCardDataForTerminal_(flippedId, draft);
+    if (flippedId) activeSetCardDataForTerminal(flippedId, draft);
     setConfirmAction(null);
     setFlippedId(null);
   };
@@ -345,38 +435,42 @@ export default function CardsPage() {
     router.push("/calculator");
   };
   const handleDeactivate = (tid: string) => {
-    terminals.setAccessDateForTerminal(tid, "");
+    activeTerminals.setAccessDateForTerminal(tid, "");
     setConfirmAction(null);
     setFlippedId(null);
   };
   const handleRemove = (tid: string) => {
-    terminals.toggleTerminalStar(tid, true);
+    activeTerminals.toggleTerminalStar(tid, true);
     setConfirmAction(null);
     setFlippedId(null);
   };
   const handleAddCard = async (terminalId: string, fields: { lastVisit: string; cardNumber: string; pin: string; privateNote: string }) => {
-    await terminals.toggleTerminalStar(terminalId, false);
-    if (fields.lastVisit) await terminals.setAccessDateForTerminal(terminalId, fields.lastVisit);
+    await activeTerminals.toggleTerminalStar(terminalId, false);
+    if (fields.lastVisit) await activeTerminals.setAccessDateForTerminal(terminalId, fields.lastVisit);
     if (fields.cardNumber || fields.pin || fields.privateNote) {
-      await setCardDataForTerminal_(terminalId, { cardNumber: fields.cardNumber, pin: fields.pin, privateNote: fields.privateNote });
+      await activeSetCardDataForTerminal(terminalId, { cardNumber: fields.cardNumber, pin: fields.pin, privateNote: fields.privateNote });
     }
   };
 
   const cities = cityGroups.map((g) => g.city);
 
-  if (isDispatchContext) {
-    return <DriverCardsReadOnly driverId={shell.selectedDriverId} />;
-  }
-
   return (
     <div>
       <CardsSubTabs />
 
-      {terminals.termError && <div className="text-sm text-red-400 mb-3">{terminals.termError}</div>}
+      {isDispatchContext && (
+        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginBottom: 14 }}>
+          Viewing <span style={{ color: "rgba(255,255,255,0.8)", fontWeight: 700 }}>{driverName || "…"}</span>'s terminal cards.
+        </div>
+      )}
 
-      {(terminals.terminals ?? []).length === 0 ? (
+      {activeTerminals.termError && <div className="text-sm text-red-400 mb-3">{activeTerminals.termError}</div>}
+
+      {(activeTerminals.terminals ?? []).length === 0 ? (
         <div style={{ textAlign: "center" as const, color: "rgba(255,255,255,0.3)", fontSize: 14, padding: "60px 20px", lineHeight: 1.5 }}>
-          No starred terminals yet.<br />Star a terminal from the Planner to see its card here.
+          {isDispatchContext
+            ? <>No terminal cards yet for {driverName || "this driver"}.</>
+            : <>No starred terminals yet.<br />Star a terminal from the Planner to see its card here.</>}
         </div>
       ) : (
         <>
@@ -427,19 +521,20 @@ export default function CardsPage() {
                         key={tid}
                         t={t} tid={tid} expiresISO={expiresISO} state={state}
                         isFlipped={flippedId === tid}
-                        isSelected={tid === String(location.selectedTerminalId)}
+                        isSelected={!isDispatchContext && tid === String(location.selectedTerminalId)}
                         onFlipOpen={() => handleFlipOpen(tid)}
                         onFlipClose={handleFlipClose}
-                        draft={flippedId === tid ? draft : { cardNumber: cardDataByTerminalId[tid]?.cardNumber ?? "", pin: cardDataByTerminalId[tid]?.pin ?? "", privateNote: cardDataByTerminalId[tid]?.privateNote ?? "" }}
+                        draft={flippedId === tid ? draft : { cardNumber: activeCardDataByTerminalId[tid]?.cardNumber ?? "", pin: activeCardDataByTerminalId[tid]?.pin ?? "", privateNote: activeCardDataByTerminalId[tid]?.privateNote ?? "" }}
                         updateDraft={(patch) => setDraft((d) => ({ ...d, ...patch }))}
-                        lastVisitISO={terminals.accessDateByTerminalId[tid] ?? ""}
-                        onSetAccessDate={(iso) => terminals.setAccessDateForTerminal(tid, iso)}
+                        lastVisitISO={activeTerminals.accessDateByTerminalId[tid] ?? ""}
+                        onSetAccessDate={(iso) => activeTerminals.setAccessDateForTerminal(tid, iso)}
                         confirmAction={flippedId === tid ? confirmAction : null}
                         setConfirmAction={setConfirmAction}
                         onOpenSourcing={() => setSourcingTerminal({ id: tid, name: String(t.terminal_name ?? tid) })}
-                        onSelect={() => handleSelect(tid)}
+                        onSelect={isDispatchContext ? undefined : () => handleSelect(tid)}
                         onDeactivate={() => handleDeactivate(tid)}
                         onRemove={() => handleRemove(tid)}
+                        walletLabel={walletLabel}
                       />
                     ))}
                   </div>
@@ -466,7 +561,7 @@ export default function CardsPage() {
         open={addOpen}
         onClose={() => setAddOpen(false)}
         terminalCatalog={terminals.terminalCatalog}
-        myTerminalIdSet={myTerminalIdSet}
+        myTerminalIdSet={activeMyTerminalIdSet}
         onAdd={handleAddCard}
       />
 

@@ -210,37 +210,45 @@ export default function BadgesPage() {
   const shell = useCalculatorShell();
   const { effectiveUserId } = shell;
 
+  // Contextual for dispatch/admin viewing a selected driver -- see
+  // cards/page.tsx's own header comment for the full rationale (cards
+  // should look identical for every role, only whose data differs).
+  const isDispatchContext = (shell.role === "dispatch" || shell.role === "admin" || shell.isSuperAdmin) && Boolean(shell.selectedDriverId);
+  const targetUserId = isDispatchContext ? shell.selectedDriverId : effectiveUserId;
+  const [driverName, setDriverName] = useState("");
+
+  useEffect(() => {
+    if (!isDispatchContext || !shell.selectedDriverId) { setDriverName(""); return; }
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase.rpc("get_display_names_full", { p_user_ids: [shell.selectedDriverId] });
+      if (!cancelled) setDriverName((data ?? [])[0]?.display_name ?? "this driver");
+    })();
+    return () => { cancelled = true; };
+  }, [isDispatchContext, shell.selectedDriverId]);
+
   const [badges, setBadges] = useState<BadgeRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [companyId, setCompanyId] = useState<string | null>(null);
   const [filter, setFilter] = useState<FilterKey>("all");
   const [flippedId, setFlippedId] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
 
   const load = async () => {
-    if (!effectiveUserId) return;
+    if (!targetUserId) return;
     setLoading(true);
     setError(null);
     const { data, error: err } = await supabase
       .from("driver_port_ids")
       .select("id, port_name, category, expiration_date")
-      .eq("user_id", effectiveUserId)
+      .eq("user_id", targetUserId)
       .order("expiration_date", { ascending: true, nullsFirst: false });
     if (err) setError(err.message);
     else setBadges((data ?? []) as BadgeRow[]);
     setLoading(false);
   };
 
-  useEffect(() => { load(); }, [effectiveUserId]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    if (!effectiveUserId || companyId) return;
-    (async () => {
-      const { data } = await supabase.from("user_settings").select("active_company_id").eq("user_id", effectiveUserId).maybeSingle();
-      setCompanyId((data?.active_company_id as string | null) ?? null);
-    })();
-  }, [effectiveUserId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); }, [targetUserId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const filtered = useMemo(
     () => badges.filter((b) => matchesFilter(cardStateFor(b.expiration_date), filter)),
@@ -263,7 +271,7 @@ export default function BadgesPage() {
   const handleAdd = async (v: { port_name: string; category: string | null; expiration_date: string | null }) => {
     const { data, error: err } = await supabase
       .from("driver_port_ids")
-      .insert({ user_id: effectiveUserId, company_id: companyId, ...v })
+      .insert({ user_id: targetUserId, company_id: shell.companyId, ...v })
       .select("id, port_name, category, expiration_date")
       .single();
     if (err) { setError(err.message); return; }
@@ -274,11 +282,19 @@ export default function BadgesPage() {
     <div>
       <CardsSubTabs />
 
+      {isDispatchContext && (
+        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginBottom: 14 }}>
+          Viewing <span style={{ color: "rgba(255,255,255,0.8)", fontWeight: 700 }}>{driverName || "…"}</span>'s badges.
+        </div>
+      )}
+
       {error && <div className="text-sm text-red-400 mb-3">{error}</div>}
 
       {!loading && badges.length === 0 ? (
         <div style={{ textAlign: "center" as const, color: "rgba(255,255,255,0.3)", fontSize: 14, padding: "60px 20px", lineHeight: 1.5 }}>
-          No badges yet.<br />Add a facility-access badge to keep track of its expiration.
+          {isDispatchContext
+            ? <>No badges yet for {driverName || "this driver"}.</>
+            : <>No badges yet.<br />Add a facility-access badge to keep track of its expiration.</>}
         </div>
       ) : (
         <>

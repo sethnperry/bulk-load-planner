@@ -1405,6 +1405,121 @@ method (which the browser itself turns into a proper `focusout`), and the
 write round-tripped correctly. No test data left behind — the terminal is
 back at its real value (90) post-verification.
 
+### Cards tab: full look-and-edit parity for dispatch/admin (shipped 2026-08-04)
+
+Per explicit user direction: "all the cards should look identical for every
+role. the only difference is whose cards they belong to. that gets
+determined on the dispatch tab by the driver selected." This directly
+supersedes the original 2026-08-04 Dispatch-tab Cards decision
+(`DriverCardsReadOnly.tsx`, a separate simplified status-only list) — that
+component is now deleted. Scope confirmed explicitly before building (asked,
+not guessed, given the sensitivity of the permission expansion): **all
+three** Cards sub-tabs (Terminals, Badges, Credentials) get full edit
+parity, not just Terminals, and dispatch/admin get real write access (not
+just an identical-looking read-only view) — reversing the earlier
+`FleetCredentialsModal` "status-only, not full record access" scope-down
+for this specific in-context-editing flow (`FleetCredentialsModal.tsx`
+itself is untouched, still status-only — this is a different, new editing
+surface).
+
+**Migrations applied** (live pg_policies queried before writing either, per
+this repo's own rule):
+- `20260815000000_dispatch_cards_write_parity.sql` — `my_terminals` had
+  *zero* admin/dispatch access at all before this (confirmed live); added
+  full SELECT/INSERT/UPDATE/DELETE. `terminal_access`/`user_terminal_cards`
+  already had the admin/dispatch READ policy from the original Dispatch-tab
+  migration; added the missing INSERT/UPDATE/DELETE. All ten new policies
+  mirror the existing read policies' exact `EXISTS`-via-`user_companies`
+  shape, scoped to admin+dispatch only (not lead — lead never reaches this
+  contextual view, the Dispatch tab itself is admin/dispatch-only).
+- `20260815010000_dispatch_credential_write_parity.sql` — a genuine
+  surprise found while verifying live state first: `driver_licenses`/
+  `driver_medical_cards`/`driver_twic_cards`/`driver_port_ids` **already**
+  each had an admin-only `ALL` policy (`dl_admin` etc.) that isn't scoped to
+  the row's own `user_id` at all — just checks the *querying* user is a
+  company admin for that row's `company_id` — so any company admin already
+  had full CRUD on every driver's credential record before this pass; only
+  **dispatch** write was the actual gap. Added one purely-additive
+  `xx_dispatch_write` policy per table, mirroring `xx_admin`'s exact shape
+  for `role = 'dispatch'`.
+
+  **Noted in passing, deliberately NOT fixed (pre-existing, out of scope)**:
+  `xx_own` on all four credential tables is SELECT-only — there is no
+  own-row INSERT/UPDATE/DELETE policy at all, meaning a non-admin driver's
+  own Credentials-tab save should fail under RLS today unless they happen
+  to be their solo company's sole admin (solo companies are always
+  `role = 'admin'`). Flagged, not chased further this pass — same category
+  of "found while verifying something else" gap this project has surfaced
+  several times before.
+
+**App code**:
+- `app/calculator/cards/page.tsx` (Terminals): `isDispatchContext` now
+  drives a second `useTerminals(driverId, ...)` hook instance (safe to
+  always call per rules-of-hooks; a no-op whenever `driverId` is empty) plus
+  a new local `useDriverCardData(userId)` hook mirroring
+  `CalculatorShellContext.tsx`'s own `cardDataByTerminalId`/
+  `setCardDataForTerminal_` shape but parametrized by an arbitrary target
+  user instead of `effectiveUserId` — a second independent copy is correct
+  here (not the desync risk hook-hoisting exists to avoid elsewhere),
+  since the whole point is that dispatch/admin and the viewed driver never
+  share this state. `TerminalCard`'s `onSelect` prop is now optional (hidden
+  in dispatch context — "Select" sets the *viewer's own* current-terminal
+  state and navigates to the Planner, which has no meaning when looking at
+  someone else's cards), and a new `walletLabel` prop feeds the
+  Deactivate/Remove confirm copy ("Remove this card from Kyle Tatro's
+  wallet?" instead of "your wallet"). `DriverCardsReadOnly.tsx` deleted.
+- `app/calculator/cards/badges/page.tsx` / `credentials/page.tsx`: simpler
+  than Terminals since these tables already had explicit
+  `.eq("user_id", ...)` filters — swapped `effectiveUserId` for a
+  `targetUserId = isDispatchContext ? shell.selectedDriverId :
+  effectiveUserId` throughout, and insert calls now use `shell.companyId`
+  (already resolved for the viewer) instead of a separate per-page
+  `user_settings` lookup. Both gained the same "Viewing {driverName}'s
+  badges/credentials" header note as Terminals.
+
+**A real, separate bug found and fixed while live-verifying this** (not
+present before this pass — introduced by the new RLS, caught immediately
+by testing rather than shipped): `useTerminals.ts`'s `loadMyTerminals()`
+queried `my_terminals_with_status` with **no `.eq("user_id", ...)` filter
+at all** — it had always silently relied on RLS alone to mean "only my own
+rows," which was true back when `my_terminals`/`terminal_access` only had
+owner-scoped SELECT policies. The moment admin/dispatch got read access to
+*other* users' rows too, this unfiltered query started returning every
+company member's starred terminals flattened into one array with no
+`user_id` to distinguish them — for a driver (Kyle Tatro) with zero rows of
+their own, this meant the viewing admin's *own* terminals rendered instead,
+mislabeled under "Viewing Kyle Tatro's terminal cards," with the same
+terminal_id appearing once per company member who'd starred it (surfaced
+immediately as a very visible "Encountered two children with the same key"
+React error, not a silent data leak). Root cause confirmed by direct
+Postgres query (Kyle: 0 rows in both `my_terminals` and `terminal_access`)
+before touching any code. Fixed with one line
+(`.eq("user_id", effectiveUserId)`) — correct and necessary for both the
+own-view and driver-scoped-view call sites, since the query was never
+actually scoped by the application layer at all, only ever by RLS.
+
+**Live-verified end-to-end, 2026-08-04**, against a real second company
+member (Kyle Tatro, zero pre-existing terminal data — a clean case to prove
+scoping, not muddied by pre-existing rows): selected Kyle on the Dispatch
+tab, opened Cards → Terminals (showed the correct empty state after the fix,
+not leaked data), added a real Chevron card with a card number via the
+identical `TerminalCard` UI the driver would use, confirmed via a direct
+Postgres query that the write landed on **Kyle's** `my_terminals`/
+`terminal_access`/`user_terminal_cards` rows (not the admin's own), then
+removed it through the same UI (confirm copy correctly read "Remove this
+card from Kyle Tatro's wallet?") and confirmed the unstar landed correctly
+while `terminal_access`/`user_terminal_cards` were preserved per the
+confirm copy's own promise ("stays saved if you add it back later") — then
+manually cleaned up those two leftover rows directly, since Kyle is a real
+driver account, not throwaway demo data. Badges and Credentials sub-tabs
+both confirmed rendering the correct "Viewing Kyle Tatro's
+badges/credentials" empty states with no leaked data (these two were never
+at risk of the `useTerminals.ts` class of bug — they already had explicit
+`user_id` filters). Re-loaded the driver's own (non-dispatch) Cards view
+afterward as a regression check — renders normally, "Select" button
+present (correctly shown only for the own-view case), no duplicate-key
+errors on this fresh load. `tsc --noEmit` clean throughout.
+
 ### Driver Training (Lead/Admin-in-lead-mode feature)
 - A "Driver Training" button on the Planner (lead/admin-acting-as-lead
   only) opens a driver-selection modal (exact modal design not yet done —

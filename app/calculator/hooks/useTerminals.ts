@@ -100,6 +100,7 @@ export function useTerminals(
       const { data, error } = await supabase
         .from("my_terminals_with_status")
         .select("*")
+        .eq("user_id", effectiveUserId)
         .order("state",         { ascending: true })
         .order("city",          { ascending: true })
         .order("terminal_name", { ascending: true });
