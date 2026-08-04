@@ -959,16 +959,43 @@ label changes. This also makes resizing a rack's lane/arm count trivial
 (`EditTerminalModal.tsx`'s layout save): insert blank rows for new tail
 positions, delete rows beyond the new count, never touch existing ones.
 
-`tsc --noEmit` is clean across the whole project. **Not yet live-verified in
-a browser** — three attempts to start a dev server for this session hit what
-looks like an environment/sandboxing issue (the tool reported success each
-time, but nothing was ever actually reachable via `curl` or browser
-`navigate`, even after adding `autoPort`/`--` port-forwarding to
-`.claude/launch.json`). Stopped after three attempts rather than keep
-retrying a wall that didn't look code-related. Worth a real click-through
-(create a rack, STUD a lane, STUD a rack product, confirm the temp-bias feed
-and the driver-hidden Edit Terminal gate) next time a working preview is
-available.
+`tsc --noEmit` is clean across the whole project.
+
+**Fully live-verified 2026-08-04**, in a real logged-in session (this
+session's own dev-server sandboxing issue never got resolved, but
+`preview_start` with a plain `url` — pointing straight at the *other*
+already-running chat's `localhost:3000` — worked once the user actually
+logged in there). This surfaced three real bugs no amount of typechecking
+would have caught, all fixed the same pass:
+
+1. **A newly created rack never got its `rack_arms` grid seeded** — only
+   happened when someone opened Edit Lane/Arm Layout and hit Save, so a
+   fresh rack's Lane Map and product-assignment UI both silently rendered
+   as if the rack had no arms at all. Fixed: `addRack()` now seeds the
+   grid immediately at the table's own defaults.
+2. **No UI existed to assign a product to a specific arm at all** — the
+   rack's product list (`ProductsView`) and its layout config
+   (`LayoutView`) never actually connected to individual `rack_arms` rows,
+   so the Lane Map always rendered every cell blank regardless of setup.
+   New `AssignArmsView` (reachable via a new "Assign Arm Products" button
+   per rack) — this was a real gap in the original build, not a deferred
+   scope decision.
+3. **Tab bar navigation silently no-op'd** when toggling admin
+   act-as-lead while sitting on `/calculator/dispatch` — see the "Roles &
+   permissions" section below for the fix (it's really a tab-bar bug, not
+   Terminal-tab-specific, but was caught testing this flow).
+
+With those fixed, end-to-end confirmed working against real data: create
+rack → seed grid → add product to rack's list → assign it to a specific
+arm → Lane Map reflects it live → STUD a lane (Arm Down flag renders on
+the grid) → STUD a rack product with API/temp → **confirmed a real
+`terminal_temp_bias` row updated 5 seconds later** (not just that the
+write succeeded, that the downstream RPC actually fired) → Edit Terminal
+correctly hidden from context where it shouldn't show, present where it
+should. Driver-role gating itself (hidden entirely, not just disabled)
+is still only architecturally verified, not tested with a real
+driver-role login — same category of gap this project has flagged
+elsewhere for role-matrix checks.
 
 Available to **all roles**, but with different capabilities:
 
@@ -1023,10 +1050,41 @@ admin act-as-lead toggle, Driver Training). Built in one continuous pass per
 explicit user direction ("keep rolling... I don't want to stop you to fix
 anything you will naturally fix in the process") — punch-list review deferred
 to the user rather than pausing per-feature. `tsc --noEmit` clean throughout.
-Still not live-browser-verified — same session dev-server environment issue
-as the Terminal tab schema pass (tool reports success, nothing actually
-reachable via `curl`/`navigate`; tried again this pass, same result, not
-retried further).
+
+**Fully live-verified 2026-08-04**, same real logged-in session as the
+Terminal tab pass above. Found and fixed **one real bug**: toggling admin
+act-as-lead while sitting on `/calculator/dispatch` relabels the middle tab
+"Planner" without changing the URL — the tab bar's click handler compared
+`t.id !== active`, and both the Planner and Dispatch tab variants
+deliberately share `id: "planner"` (to keep active-tab detection simple
+across the swap), so a click was silently treated as "already here, just
+re-center" instead of navigating. Fixed by comparing the actual `pathname`
+against `t.href` instead. End-to-end confirmed working with real company
+roster data (6 real drivers, not demo placeholders): driver picker → real
+identity/region/division render → schedule toggle persists
+(`driver_schedules` row confirmed via direct query) → notes save on blur
+(`dispatcher_notes` confirmed) → Cards tab correctly goes read-only
+contextual **only when using real in-app tab navigation** (a full
+`navigate()`-style page reload — not something a real user ever does by
+tapping tabs — resets `CalculatorShellContext`'s in-memory
+`selectedDriverId`, which looked like a bug during testing but isn't one)
+→ Terminal tab correctly infers the selected driver's own most-recent-load
+terminal (visibly different rack setup than the tester's own location) →
+act-as-lead toggle + the tab-bar fix above → Driver Training picker
+(correctly excludes self) → picking a trainee and tapping LOAD wrote a
+real `load_log` row with `trainee_id` correctly set to the trainee, `user_id`
+correctly staying the lead → canceling the test load cleanly deleted the
+row (confirms the existing "planned row" cleanup path, not a new gap).
+Test artifacts (a note, a schedule toggle) were cleaned up after verifying;
+the test load was canceled, not completed, so no fake payroll/incentive
+data was created. The Terminal tab's "North Rack" test setup at Global
+South was deliberately left in place as a working example, not cleaned up.
+
+**Not verified**: the trainee-side "Training with X" banner (needs a
+second real driver-role login, not available this session — same
+limitation this project already documents for other role-matrix checks)
+and driver-role gating of Edit Terminal (architecturally sound, not
+empirically tested with a real driver account).
 
 - **Tab bar**: `CalculatorLayoutClient.tsx`'s middle tab is now genuinely
   contextual — `tabsFor(role, adminActingAsLead)` swaps in Dispatch (href
