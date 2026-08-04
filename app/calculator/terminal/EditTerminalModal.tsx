@@ -110,6 +110,25 @@ export default function EditTerminalModal({
     onChanged();
   }
 
+  // Cascades manually -- rack_lanes/rack_arms/rack_product_status all
+  // reference rack_id as a plain column, not a DB-level FK with ON DELETE
+  // CASCADE, so an unassisted delete of the terminal_racks row would leave
+  // orphaned rows behind. Found while testing -- there was no way to
+  // delete a rack at all before this (only rename/reconfigure it), a real
+  // gap once test racks started accumulating.
+  async function deleteRack(rackId: string) {
+    setSaving(true);
+    setError(null);
+    await supabase.from("rack_arms").delete().eq("rack_id", rackId);
+    await supabase.from("rack_lanes").delete().eq("rack_id", rackId);
+    await supabase.from("rack_product_status").delete().eq("rack_id", rackId);
+    const { error: err } = await supabase.from("terminal_racks").delete().eq("rack_id", rackId);
+    setSaving(false);
+    if (err) { setError(err.message); return; }
+    await loadRacks();
+    onChanged();
+  }
+
   const titleFor: Record<View, string> = {
     racks: "Edit Terminal", layout: "Lane / Arm Layout", products: "Rack Product List", assign: "Assign Arm Products",
   };
@@ -135,6 +154,7 @@ export default function EditTerminalModal({
           onEditProducts={(id) => { setSelectedRackId(id); setView("products"); }}
           onAssignArms={(id) => { setSelectedRackId(id); setView("assign"); }}
           onRenamed={loadRacks}
+          onDeleteRack={deleteRack}
         />
       )}
 
@@ -158,7 +178,7 @@ export default function EditTerminalModal({
 
 function RacksView({
   terminalName, racks, loading, error, newRackName, setNewRackName, onAddRack, saving,
-  onEditLayout, onEditProducts, onAssignArms, onRenamed,
+  onEditLayout, onEditProducts, onAssignArms, onRenamed, onDeleteRack,
 }: {
   terminalName?: string;
   racks: TerminalRack[];
@@ -172,9 +192,11 @@ function RacksView({
   onEditProducts: (rackId: string) => void;
   onAssignArms: (rackId: string) => void;
   onRenamed: () => void;
+  onDeleteRack: (rackId: string) => void;
 }) {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   async function saveRename(rackId: string) {
     const name = renameValue.trim();
@@ -242,6 +264,36 @@ function RacksView({
           >
             Assign Arm Products
           </button>
+
+          {confirmDeleteId === r.rack_id ? (
+            <div style={{ borderRadius: 8, border: "1px solid rgba(239,68,68,0.3)", background: "rgba(239,68,68,0.08)", padding: 10, display: "grid", gap: 8 }}>
+              <div style={{ fontSize: 12, color: "rgba(255,255,255,0.7)" }}>
+                Delete <strong>{r.rack_name}</strong>? This removes its lanes, arms, and product list — cannot be undone.
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  type="button" onClick={() => { onDeleteRack(r.rack_id); setConfirmDeleteId(null); }}
+                  style={{ flex: 1, fontSize: 12, fontWeight: 800, padding: "8px 10px", borderRadius: 6, border: "1px solid rgba(239,68,68,0.4)", background: "rgba(239,68,68,0.18)", color: "#f87171", cursor: "pointer" }}
+                >
+                  Yes, delete
+                </button>
+                <button
+                  type="button" onClick={() => setConfirmDeleteId(null)}
+                  style={{ flex: 1, fontSize: 12, fontWeight: 700, padding: "8px 10px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.04)", color: "#fff", cursor: "pointer" }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConfirmDeleteId(r.rack_id)}
+              style={{ width: "100%", fontSize: 11, fontWeight: 600, padding: "6px 10px", borderRadius: 6, border: "none", background: "none", color: "rgba(239,68,68,0.6)", cursor: "pointer" }}
+            >
+              Delete Rack
+            </button>
+          )}
         </div>
       ))}
 

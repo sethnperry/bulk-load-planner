@@ -1226,6 +1226,30 @@ Lane Status modal's title, and the Assign Arm Products view — all three
 read the same live DB value now, nothing cached or recomputed
 separately. `tsc --noEmit` clean throughout both rounds.
 
+**Two more gaps found and fixed during this same live-testing pass**
+(2026-08-04, continued — not requested, found by exercising the feature
+end to end rather than stopping once the requested items worked):
+- **No way to delete a whole rack** — `RacksView` only ever had
+  rename/reconfigure actions; a test rack created by mistake had no path
+  to remove it. Added a "Delete Rack" action with an inline confirm step
+  (matching the app's existing confirm-in-place pattern, e.g. Cards tab's
+  deactivate/remove). `rack_lanes`/`rack_arms`/`rack_product_status` all
+  reference `rack_id` as a plain column, not a DB-level FK with `ON DELETE
+  CASCADE`, so the delete cascades manually in app code (children first,
+  then the rack) — verified live via direct query afterward that zero
+  orphaned `rack_arms`/`rack_lanes` rows were left behind.
+- **The rack-wide "Product Out" STUD button's cascade to the Lane Map
+  grid had only been reasoned through, not actually exercised** (earlier
+  verification confirmed the DB write and the `terminal_temp_bias` feed,
+  but not that the grid's "effectively down" logic correctly reads
+  `rack_product_status.is_out` live). Marked "93" out rack-wide on a real
+  multi-lane, multi-product rack (South Rack) and confirmed: every arm
+  whose *only* product was 93 flipped to the full circle-slash, every
+  arm carrying 93 *alongside* another still-available product (D2 or 87)
+  correctly showed just a strikethrough on 93 with the arm otherwise
+  normal, and the Product List row grayed out — all from the one toggle,
+  no per-arm action needed.
+
 - **Tab bar**: `CalculatorLayoutClient.tsx`'s middle tab is now genuinely
   contextual — `tabsFor(role, adminActingAsLead)` swaps in Dispatch (href
   `/calculator/dispatch`, same `id: "planner"` so active-tab detection stays
