@@ -777,6 +777,7 @@ export default function CalculatorPage() {
   const planSlots = usePlanSlots({
     authUserId: effectiveUserId, selectedTerminalId: location.selectedTerminalId, selectedComboId: equipment.selectedComboId,
     tempF, compPlan, setCompPlan,
+    cgSlider, setCgSlider,
     compartmentsLoaded: compartments.length > 0,
   });
 

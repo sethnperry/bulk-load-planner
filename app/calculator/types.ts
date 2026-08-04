@@ -124,9 +124,11 @@ export type PlanSnapshot = {
   savedAt: number;
   terminalId: string;
   tempF?: number;
-  // Never written by new saves -- CG slider is a live, driver-adjustable
-  // per-load control, not something a preset remembers. Optional only so
-  // old stored snapshots (written before this changed) don't fail the type.
+  // Written on every save (2026-08-04+); restored only for named presets
+  // (slots 1-5), not slot 0's autosave/last-load draft -- see
+  // usePlanSlots.ts's applySnapshot(). Optional only so old snapshots from
+  // before this changed (or slot-0 snapshots, which never restore it) don't
+  // fail the type.
   cgSlider?: number;
   compPlan: Record<number, CompPlanInput>;
 };

@@ -55,6 +55,8 @@ type Props = {
   tempF: number;
   compPlan: Record<number, CompPlanInput>;
   setCompPlan: (v: Record<number, CompPlanInput>) => void;
+  cgSlider: number;
+  setCgSlider: (v: number) => void;
   compartmentsLoaded: boolean;
   // Called by useLoadWorkflow after completeLoad — writes slot 0 as equipment-scoped
   onSaveLastLoad?: (payload: any) => Promise<void>;
@@ -64,6 +66,7 @@ export function usePlanSlots({
   authUserId, selectedTerminalId, selectedComboId,
   tempF, compPlan,
   setCompPlan,
+  cgSlider, setCgSlider,
   compartmentsLoaded,
   onSaveLastLoad,
 }: Props) {
@@ -325,10 +328,13 @@ export function usePlanSlots({
   // ── Snapshot build/apply ──────────────────────────────────────────────────
 
   // stripFillLevel drops capOverride from every compartment -- used for named
-  // presets (slots 1-5), which store only the product selection per the
-  // spec ("headspace + CG slider move out of presets entirely"). Slot 0
-  // (the autosave/last-load draft) keeps full fidelity, since it's plan
-  // continuity, not a driver-facing "preset."
+  // presets (slots 1-5), which store only the product selection + CG (per
+  // explicit 2026-08-04 direction: CG is saved with the preset and restored
+  // when the driver taps it, reversing the original "CG never lives in a
+  // preset" call). Slot 0 (the autosave/last-load draft) keeps full
+  // fidelity, since it's plan continuity, not a driver-facing "preset" --
+  // its cgSlider is still saved (harmless) but never restored, see
+  // applySnapshot below.
   const buildSnapshot = useCallback(
     (terminalId: string, opts?: { stripFillLevel?: boolean }): PlanSnapshot => {
       const plan = opts?.stripFillLevel
@@ -337,21 +343,22 @@ export function usePlanSlots({
       return {
         v: 1, savedAt: Date.now(), terminalId,
         tempF: Number(tempF) || 60,
+        cgSlider: Number(cgSlider),
         compPlan: plan,
       };
     },
-    [tempF, compPlan]
+    [tempF, cgSlider, compPlan]
   );
 
-  const applySnapshot = useCallback((snap: PlanSnapshot) => {
+  const applySnapshot = useCallback((snap: PlanSnapshot, opts?: { restoreCg?: boolean }) => {
     // NOTE: tempF is intentionally NOT restored from any snapshot.
     // The fuel temp prediction always owns tempF. Restoring it from saved state
     // would override the prediction every time a slot is switched or the page reloads.
-    // cgSlider is likewise never restored -- it's a live, driver-adjustable
-    // per-load control, never tied to a saved plan (old stored snapshots may
-    // still carry a cgSlider field; it's simply ignored here).
     setCompPlan(snap.compPlan || {});
-  }, [setCompPlan]);
+    if (opts?.restoreCg && typeof snap.cgSlider === "number" && Number.isFinite(snap.cgSlider)) {
+      setCgSlider(snap.cgSlider);
+    }
+  }, [setCompPlan, setCgSlider]);
 
   // ── Server pull (once per scope) ──────────────────────────────────────────
 
@@ -384,6 +391,7 @@ export function usePlanSlots({
               savedAt: sp.savedAtISO ? (Date.parse(String(sp.savedAtISO)) || Date.now()) : Date.now(),
               terminalId: String(sp.terminalId ?? selectedTerminalId),
               tempF: typeof sp.tempF === "number" ? sp.tempF : 60,
+              cgSlider: typeof sp.cgSlider === "number" ? sp.cgSlider : undefined,
               compPlan: sp.compPlan ?? {},
             };
             try { localStorage.setItem(planStoreKey(s), JSON.stringify(normalized)); setSlotBump((v) => v + 1); } catch {}
@@ -560,7 +568,9 @@ export function usePlanSlots({
     // they load regardless of which terminal is currently selected.
     if (slot === 0 && String(raw.terminalId) !== String(selectedTerminalId)) return;
     planRestoreReadyRef.current = planScopeKey;
-    applySnapshot(raw);
+    // Named presets (1-5) snap the CG slider to whatever was saved with them;
+    // slot 0 (autosave/last-load draft) never restores CG -- see applySnapshot.
+    applySnapshot(raw, { restoreCg: slot !== 0 });
     queueMicrotask(() => {
       if (planRestoreReadyRef.current === planScopeKey) planRestoreReadyRef.current = null;
     });
