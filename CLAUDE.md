@@ -1377,6 +1377,46 @@ but don't assume that stays true if someone wires it in later.)
      was already excluded from weight calc) disables the button first via
      the HTML `disabled` attribute, so the new message only fires in mixed
      scenarios; that's fine, the load genuinely can't proceed either way.
+
+   **Real data-loss bug found and fixed 2026-08-04**, while live-testing
+   this session's other work in a real logged-in session for the first
+   time (everything above had only ever been typechecked/guest-tested).
+   The account's actual presets came back wrong: Preset A showed "Load
+   Empty" and Presets D/E showed as completely unset. Root cause: the
+   terminal-independent migration above was never fully carried out for
+   this account — a `terminal_id = '__universal__'` row existed for slot 1
+   but with an accidentally-empty `compPlan` (likely a leftover test save
+   from whoever built the rework), and slots 4/5 had no universal-scope row
+   at all, only old per-terminal rows going back months. Fixed via a
+   one-off direct DB backfill (not a migration file — this was account
+   data repair, not a schema change) restoring each slot's most recent
+   real per-terminal `compPlan`. **This bug is specific to whichever
+   accounts were mid-migration when the rework shipped** — not something
+   that would recur for a fresh preset save, and not audited across every
+   account, just this one during live testing.
+
+   **CG reversed back into presets, 2026-08-04, per explicit user
+   direction** — "the CG needs to save with the product selection... when
+   the driver taps a preset it should snap to the last CG that was saved
+   with that specific preset." This directly reverses the bullet above
+   ("`cgSlider` is dropped from every snapshot... presets/CG were never
+   meant to be role-gated") — that original call is superseded, not
+   historical color anymore. `PlanSnapshot.cgSlider` is now written on
+   every save (`buildSnapshot`) and restored on load, but **only for named
+   presets (slots 1-5)**, not slot 0's autosave/last-load draft, which
+   keeps its original "CG is live, never restored" behavior — `applySnapshot`
+   takes a new `{ restoreCg? }` option, `loadFromSlot` passes `restoreCg:
+   slot !== 0`, every other `applySnapshot` call site (last-load-from-log,
+   slot-0-on-terminal-change) is untouched. **A second real bug caught
+   while wiring this up**: the server-pull effect's local-cache
+   normalization step built its own plain object and silently dropped
+   `cgSlider` even when the server payload had it — so a correct DB row
+   would still silently fail to restore CG once cached locally. Fixed by
+   including `cgSlider` in that normalization. Live-verified end-to-end in
+   the real session: tapping Preset A now shows "PRESET A / Load ULSD
+   Diesel #2," and the CG slider visibly snaps to 0.64 (the value actually
+   saved with that preset) on load — confirmed via both the DOM input value
+   and the underlying `localStorage`/DB state, not just the UI rendering.
 8. ~~**Equipment settings (new UI).**~~ — **shipped 2026-08-06, but not as a
    new gear-icon modal.** Confirmed with the user before building: the gear
    icon in the header is the user's own profile settings, unrelated: cap/
