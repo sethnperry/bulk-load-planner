@@ -16,9 +16,10 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { FullscreenModal } from "@/lib/ui/FullscreenModal";
-import type { TerminalRack, RackArm, ProductLite } from "./types";
+import type { TerminalRack, RackArm, RackProductStatusRow, ProductLite } from "./types";
+import { positionLabel } from "./labels";
 
-type View = "racks" | "layout" | "products";
+type View = "racks" | "layout" | "products" | "assign";
 
 const GROUPS: { label: string; test: (name: string) => boolean }[] = [
   { label: "Diesel", test: (n) => /diesel|heating oil|marine gas oil|hvo|\bkerosene\b/i.test(n) },
@@ -102,18 +103,40 @@ export default function EditTerminalModal({
     if (!name) return;
     setSaving(true);
     setError(null);
-    const { error: err } = await supabase.from("terminal_racks").insert({ terminal_id: terminalId, rack_name: name });
+    const { data: newRack, error: err } = await supabase
+      .from("terminal_racks").insert({ terminal_id: terminalId, rack_name: name })
+      .select("rack_id, lane_count, arm_count").single();
+    if (err) { setSaving(false); setError(err.message); return; }
+
+    // Seed the rack_arms grid immediately at the table's own defaults --
+    // without this, a freshly created rack has zero rack_arms rows until
+    // someone happens to open Edit Lane/Arm Layout and hits Save (that's
+    // the only other place these rows get created/resized), so both the
+    // Lane Map and Assign Arm Products render as if the rack were empty.
+    // Found live-testing, not caught by typecheck.
+    const seed: { rack_id: string; lane_number: number; arm_number: number }[] = [];
+    for (let lane = 1; lane <= newRack.lane_count; lane++) {
+      for (let arm = 1; arm <= newRack.arm_count; arm++) {
+        seed.push({ rack_id: newRack.rack_id, lane_number: lane, arm_number: arm });
+      }
+    }
+    const { error: seedErr } = await supabase.from("rack_arms").insert(seed);
     setSaving(false);
-    if (err) { setError(err.message); return; }
+    if (seedErr) { setError(seedErr.message); return; }
+
     setNewRackName("");
     await loadRacks();
     onChanged();
   }
 
+  const titleFor: Record<View, string> = {
+    racks: "Edit Terminal", layout: "Lane / Arm Layout", products: "Rack Product List", assign: "Assign Arm Products",
+  };
+
   return (
     <FullscreenModal
       open={open}
-      title={view === "racks" ? "Edit Terminal" : view === "layout" ? "Lane / Arm Layout" : "Rack Product List"}
+      title={titleFor[view]}
       onClose={() => { if (view === "racks") onClose(); else setView("racks"); }}
       footer={view === "racks" ? undefined : null}
     >
@@ -129,6 +152,7 @@ export default function EditTerminalModal({
           saving={saving}
           onEditLayout={(id) => { setSelectedRackId(id); setView("layout"); }}
           onEditProducts={(id) => { setSelectedRackId(id); setView("products"); }}
+          onAssignArms={(id) => { setSelectedRackId(id); setView("assign"); }}
           onRenamed={loadRacks}
         />
       )}
@@ -146,13 +170,20 @@ export default function EditTerminalModal({
           onChanged={onChanged}
         />
       )}
+
+      {view === "assign" && selectedRack && (
+        <AssignArmsView
+          rack={selectedRack}
+          onChanged={onChanged}
+        />
+      )}
     </FullscreenModal>
   );
 }
 
 function RacksView({
   terminalName, racks, loading, error, newRackName, setNewRackName, onAddRack, saving,
-  onEditLayout, onEditProducts, onRenamed,
+  onEditLayout, onEditProducts, onAssignArms, onRenamed,
 }: {
   terminalName?: string;
   racks: TerminalRack[];
@@ -164,6 +195,7 @@ function RacksView({
   saving: boolean;
   onEditLayout: (rackId: string) => void;
   onEditProducts: (rackId: string) => void;
+  onAssignArms: (rackId: string) => void;
   onRenamed: () => void;
 }) {
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -228,6 +260,13 @@ function RacksView({
               Edit Lane/Arm Layout
             </button>
           </div>
+          <button
+            type="button"
+            onClick={() => onAssignArms(r.rack_id)}
+            style={{ width: "100%", fontSize: 12, fontWeight: 700, padding: "8px 10px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.04)", color: "#fff", cursor: "pointer" }}
+          >
+            Assign Arm Products
+          </button>
         </div>
       ))}
 
@@ -442,6 +481,106 @@ function ProductsView({ rack, onChanged }: { rack: TerminalRack; onChanged: () =
               </button>
             );
           })}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Assigns a product to each physical (lane, arm) position -- the piece the
+// original build was missing: the rack's product list (ProductsView above)
+// and the layout config (LayoutView above) never actually connected a
+// product to a specific arm, so the Lane Map always rendered every cell
+// blank. Found live-testing with a real account, not caught by typecheck.
+function AssignArmsView({ rack, onChanged }: { rack: TerminalRack; onChanged: () => void }) {
+  const [arms, setArms] = useState<RackArm[]>([]);
+  const [rackProducts, setRackProducts] = useState<RackProductStatusRow[]>([]);
+  const [productsById, setProductsById] = useState<Record<string, ProductLite>>({});
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [savingKey, setSavingKey] = useState<string | null>(null);
+
+  async function load() {
+    setLoading(true);
+    setError(null);
+    const [{ data: armRows, error: armErr }, { data: prodRows, error: prodErr }, { data: allProducts }] = await Promise.all([
+      supabase.from("rack_arms").select("*").eq("rack_id", rack.rack_id),
+      supabase.from("rack_product_status").select("*").eq("rack_id", rack.rack_id).eq("active", true),
+      supabase.from("products").select("product_id, product_name, display_name, button_code, hex_code, is_dyed"),
+    ]);
+    if (armErr || prodErr) { setError(armErr?.message ?? prodErr?.message ?? "Failed to load."); setLoading(false); return; }
+    setArms(((armRows ?? []) as RackArm[]).sort((a, b) => a.lane_number - b.lane_number || a.arm_number - b.arm_number));
+    setRackProducts((prodRows ?? []) as RackProductStatusRow[]);
+    const map: Record<string, ProductLite> = {};
+    for (const p of (allProducts ?? []) as ProductLite[]) map[p.product_id] = p;
+    setProductsById(map);
+    setLoading(false);
+  }
+
+  useEffect(() => { load(); }, [rack.rack_id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function assign(armId: string, productId: string) {
+    setSavingKey(armId);
+    const { error: err } = await supabase.from("rack_arms").update({ product_id: productId || null }).eq("arm_id", armId);
+    setSavingKey(null);
+    if (err) { setError(err.message); return; }
+    setArms((prev) => prev.map((a) => (a.arm_id === armId ? { ...a, product_id: productId || null } : a)));
+    onChanged();
+  }
+
+  const lanes = useMemo(() => {
+    const byLane = new Map<number, RackArm[]>();
+    for (const a of arms) {
+      if (!byLane.has(a.lane_number)) byLane.set(a.lane_number, []);
+      byLane.get(a.lane_number)!.push(a);
+    }
+    return Array.from(byLane.entries()).sort(([a], [b]) => a - b);
+  }, [arms]);
+
+  if (rackProducts.length === 0 && !loading) {
+    return (
+      <div style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", textAlign: "center" as const, padding: "24px 0" }}>
+        Add products to this rack's product list first (Edit Product List), then come back here to assign them to specific arms.
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "grid", gap: 14 }}>
+      <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)" }}>
+        Which product each arm currently carries at <span style={{ color: "rgba(255,255,255,0.75)", fontWeight: 700 }}>{rack.rack_name}</span>.
+      </div>
+      {error && <div style={{ color: "#f87171", fontSize: 12 }}>{error}</div>}
+      {loading && <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 13 }}>Loading…</div>}
+
+      {!loading && lanes.map(([laneNum, laneArms]) => (
+        <div key={laneNum} style={{ borderRadius: 10, border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)", padding: 10, display: "grid", gap: 8 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>
+            Lane {positionLabel(laneNum, rack.lane_count, rack.lane_reversed, rack.lane_alpha)}
+          </div>
+          {laneArms.map((a) => (
+            <div key={a.arm_id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+              <span style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", flexShrink: 0, width: 60 }}>
+                Arm {positionLabel(a.arm_number, rack.arm_count, rack.arm_reversed, rack.arm_alpha)}
+              </span>
+              <select
+                value={a.product_id ?? ""}
+                onChange={(e) => assign(a.arm_id, e.target.value)}
+                disabled={savingKey === a.arm_id}
+                style={{ flex: 1, padding: "6px 8px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.12)", background: "#111", color: "white", fontSize: 12 }}
+              >
+                <option value="">— Unassigned —</option>
+                {rackProducts.map((rp) => {
+                  const p = productsById[rp.product_id];
+                  return (
+                    <option key={rp.product_id} value={rp.product_id}>
+                      {p ? (p.product_name ?? p.display_name ?? "Product") : rp.product_id}
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+          ))}
         </div>
       ))}
     </div>

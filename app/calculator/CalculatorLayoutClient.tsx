@@ -126,7 +126,19 @@ function TabBar() {
           return (
             <div
               key={t.id}
-              onClick={() => { if (t.id !== active) router.push(t.href); else centerTab(t.id, true); }}
+              onClick={() => {
+                // Compare against the actual pathname, not just t.id -- the
+                // middle slot's id stays "planner" whether it's showing
+                // Planner or Dispatch (so active-tab detection stays simple
+                // across the swap), but that means an id match alone can't
+                // tell "already on this exact route" from "same slot,
+                // different route" -- e.g. toggling admin act-as-lead while
+                // sitting on /calculator/dispatch relabels this tab
+                // "Planner" without changing the URL, and an id-only check
+                // would then treat tapping it as a no-op re-center instead
+                // of actually navigating to /calculator. Found live-testing.
+                if (pathname !== t.href) router.push(t.href); else centerTab(t.id, true);
+              }}
               style={{ flex: "0 0 120px", scrollSnapAlign: "center", display: "flex", justifyContent: "center", cursor: "pointer" }}
             >
               <div style={{
