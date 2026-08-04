@@ -33,25 +33,33 @@ import {
 import type { Role } from "@/lib/ui/driver/role";
 
 // Terminal Tier pivot (2026-08-03, see CLAUDE.md "Terminal Tier — Build
-// Spec"): the old per-role Lead/Dispatch/Admin tabs are shelved entirely --
-// every role now gets the same base tab set. Terminal is universal (all
-// roles, structural editing gated inside the page itself). The middle tab
-// is contextual: dispatch, and admin (unless acting-as-lead), get Dispatch
-// in place of Planner -- neither role plans their own loads day to day.
+// Spec"). Every tab now has a stable, unique id regardless of role --
+// Dispatch and Planner used to share id "planner" so the tab bar could
+// toggle between them for admin, which caused a real bug: landing on bare
+// /calculator (Planner's route) while the tab bar's "Dispatch" slot
+// highlighted itself (same shared id) made it look like Dispatch was
+// showing when Planner content actually was. Fixed by giving admin real,
+// separate Dispatch AND Planner tabs (no more toggle) instead of trying to
+// keep one shared slot honest.
+//
+// Dispatch never gets a Planner tab -- dispatchers don't get in a truck.
+// Admin and super admins get both, since "admins should have the planner
+// used by lead drivers" (see page.tsx's canDriverTrain).
 const TERMINAL_TAB = { id: "terminal", label: "Terminal", href: "/calculator/terminal" };
+const DISPATCH_TAB = { id: "dispatch", label: "Dispatch", href: "/calculator/dispatch" };
 const PLANNER_TAB = { id: "planner", label: "Planner", href: "/calculator" };
-const DISPATCH_TAB = { id: "planner", label: "Dispatch", href: "/calculator/dispatch" };
 const CARDS_TAB = { id: "cards", label: "Cards", href: "/calculator/cards" };
 const VAULT_TAB = { id: "vault", label: "Vault", href: "/calculator/vault" };
 
-function tabsFor(role: Role | null, adminActingAsLead: boolean) {
-  const showsDispatch = role === "dispatch" || (role === "admin" && !adminActingAsLead);
-  return [TERMINAL_TAB, showsDispatch ? DISPATCH_TAB : PLANNER_TAB, CARDS_TAB, VAULT_TAB];
+function tabsFor(role: Role | null, isSuperAdmin: boolean) {
+  if (role === "dispatch") return [TERMINAL_TAB, DISPATCH_TAB, CARDS_TAB, VAULT_TAB];
+  if (role === "admin" || isSuperAdmin) return [TERMINAL_TAB, DISPATCH_TAB, PLANNER_TAB, CARDS_TAB, VAULT_TAB];
+  return [TERMINAL_TAB, PLANNER_TAB, CARDS_TAB, VAULT_TAB]; // driver, lead, or unresolved
 }
 
-function activeTabFor(pathname: string | null, tabs: ReturnType<typeof tabsFor>): string | "none" {
+function activeTabFor(pathname: string | null): string | "none" {
   if (pathname?.startsWith("/calculator/terminal")) return "terminal";
-  if (pathname?.startsWith("/calculator/dispatch")) return "planner";
+  if (pathname?.startsWith("/calculator/dispatch")) return "dispatch";
   if (pathname?.startsWith("/calculator/cards")) return "cards";
   if (pathname?.startsWith("/calculator/vault")) return "vault";
   // Reports is a nav-menu destination, not a peer of Planner/Cards/Vault --
@@ -66,8 +74,8 @@ function TabBar() {
   const router = useRouter();
   const shell = useCalculatorShell();
   const darkMode = shell.theme.darkMode;
-  const tabs = useMemo(() => tabsFor(shell.role, shell.adminActingAsLead), [shell.role, shell.adminActingAsLead]);
-  const active = activeTabFor(pathname, tabs);
+  const tabs = useMemo(() => tabsFor(shell.role, shell.isSuperAdmin), [shell.role, shell.isSuperAdmin]);
+  const active = activeTabFor(pathname);
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const suppressScrollNavRef = useRef(false);
@@ -126,19 +134,7 @@ function TabBar() {
           return (
             <div
               key={t.id}
-              onClick={() => {
-                // Compare against the actual pathname, not just t.id -- the
-                // middle slot's id stays "planner" whether it's showing
-                // Planner or Dispatch (so active-tab detection stays simple
-                // across the swap), but that means an id match alone can't
-                // tell "already on this exact route" from "same slot,
-                // different route" -- e.g. toggling admin act-as-lead while
-                // sitting on /calculator/dispatch relabels this tab
-                // "Planner" without changing the URL, and an id-only check
-                // would then treat tapping it as a no-op re-center instead
-                // of actually navigating to /calculator. Found live-testing.
-                if (pathname !== t.href) router.push(t.href); else centerTab(t.id, true);
-              }}
+              onClick={() => { if (t.id !== active) router.push(t.href); else centerTab(t.id, true); }}
               style={{ flex: "0 0 120px", scrollSnapAlign: "center", display: "flex", justifyContent: "center", cursor: "pointer" }}
             >
               <div style={{

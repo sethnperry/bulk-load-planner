@@ -860,17 +860,80 @@ below before touching schema, as always.
   is shelved (see "Role-based tabs" above).
 - Middle tab is contextual: Planner for driver/lead roles; **Dispatch** for
   dispatch and admin roles by default.
-- **Admin toggle (maybe, if feasible)**: admin can flip themselves between
+- ~~**Admin toggle (maybe, if feasible)**: admin can flip themselves between
   "admin mode" (Dispatch middle tab) and "lead driver mode" (Planner middle
-  tab) so they can personally load equipment when needed, without going
-  through the existing full-impersonation ("Set up planner for X") flow.
-  Nice-to-have, not confirmed as must-ship.
+  tab)...~~ — **superseded 2026-08-04, see "Tab bar fix" below.** Built as a
+  toggle first (`adminActingAsLead`), then explicitly replaced per user
+  direction: admin/super-admin get **both** Dispatch and Planner as
+  permanent, separate tabs (not a toggle) — "dispatchers never get in a
+  truck" but admins routinely need both views without a mode switch.
 - **Cards tab is contextual for admin/dispatch**: instead of their own cards
   (neither role logs their own loads/cards in the field), it reflects
   whichever driver is currently selected — same driver selected for the
   Dispatch tab. Driver/lead roles keep their own Cards tab as today.
 - Vault tab: unchanged, every role keeps their own personal vault, no
   changes needed.
+
+### Tab bar fix — Planner access for admin/super-admin (shipped 2026-08-04)
+
+Bug reported live: "the app loads to the dispatch tab but shows the
+planner. if I change tabs and go back to dispatch it shows the actual
+dispatch tab." **Root cause**: the original toggle-based design had
+Dispatch and Planner sharing one tab id (`"planner"`, swapped between the
+two hrefs based on `adminActingAsLead`) — for bare `/calculator`,
+`activeTabFor` returned `"planner"`, which highlighted whichever tab
+currently held that shared id (Dispatch, by default for admin), while the
+actually-rendered route (`/calculator` itself) was the real Planner page.
+Highlight and content disagreed by construction, not a rendering bug.
+
+**Fix, per explicit user direction** ("add a planner tab for super admins
+and admin roles... admins should have the planner used by lead drivers, no
+need for jump in as Lead, dispatchers never get in a truck"):
+- `CalculatorLayoutClient.tsx`: every tab now has a permanently unique id
+  (`terminal`/`dispatch`/`planner`/`cards`/`vault`). `tabsFor(role,
+  isSuperAdmin)`: dispatch → Terminal/Dispatch/Cards/Vault (no Planner,
+  ever); admin or super-admin → Terminal/Dispatch/Planner/Cards/Vault
+  (both, permanent, not a toggle); everyone else → Terminal/Planner/Cards/
+  Vault. `activeTabFor` now does a straight pathname-prefix match per tab
+  instead of the old "find the one extra tab" logic — the shared-id class
+  of bug can't recur since ids are unique.
+- `adminActingAsLead` removed entirely from `CalculatorShellContext.tsx`
+  (state + setter) — no toggle state left to desync.
+- `app/calculator/page.tsx` (Planner): removed the "Acting as Lead Driver /
+  ← Back to Dispatch" banner. Added a **one-time landing redirect** — a
+  module-level `hasCheckedDefaultLanding` flag (must be module-level, not
+  component state: this page genuinely unmounts/remounts on every route
+  nav, so component state can't survive a round-trip to another tab and
+  back) gates a `useEffect` that sends dispatch/admin/super-admin users
+  from bare `/calculator` to `/calculator/dispatch` on first landing only —
+  so those roles still land on Dispatch by default, but visiting Planner
+  afterward (via the new permanent tab) is never bounced back.
+  `canDriverTrain` simplified to `role === "lead" || role === "admin" ||
+  isSuperAdmin` (was gated on the now-removed toggle).
+- `app/calculator/dispatch/page.tsx`: removed both the "Jump in as Lead
+  Driver →" (no driver selected) and "Act as Lead Driver" (driver selected)
+  buttons entirely, along with the now-unused `role`/`canActAsLead`
+  variables — per "no need to have a jump in as Lead on dispatch tab."
+- `isDispatchContext` in `app/calculator/terminal/page.tsx` and
+  `app/calculator/cards/page.tsx` simplified from `(role === "dispatch" ||
+  (role === "admin" && !adminActingAsLead)) && selectedDriverId` to
+  `(role === "dispatch" || role === "admin" || isSuperAdmin) &&
+  selectedDriverId` — the contextual (viewing-a-selected-driver) behavior
+  for these two tabs no longer depends on a mode that doesn't exist anymore.
+
+**Live-verified 2026-08-04**: `tsc --noEmit` clean. Fresh load of
+`/calculator` as the real admin account correctly redirects to
+`/calculator/dispatch` (driver picker, no Jump-in-as-Lead button). Tab bar
+renders Terminal/Dispatch/Planner/Cards/Vault as five distinct tabs.
+Clicking Planner navigates to real Planner content (equipment/terminal
+cards, presets, LOAD button, Driver Training) with the Planner tab itself
+correctly highlighted — the exact mismatch that was reported is gone.
+Clicking back to Dispatch still works and still shows only "‹ Change
+Driver" with no act-as-lead button anywhere. (Some stale "export doesn't
+exist" build errors surfaced in the console during this check from a
+now-superseded version of `labels.ts` — confirmed via `grep` that no
+current file imports anything but `displayLabel`; this is the known
+`read_console_messages`-buffers-forever behavior, not a live regression.)
 
 ### Dispatch tab (new)
 Per-driver dashboard, reachable by selecting a driver (exact selection
@@ -1352,7 +1415,11 @@ end to end rather than stopping once the requested items worked):
 policy (see Dispatch tab section above). `DriverTrainingModal.tsx` (new,
 wraps the shared `DriverPicker.tsx`) opens from a "Driver Training" text
 button on the Planner, visible for `canDriverTrain = role === "lead" ||
-(role === "admin" && adminActingAsLead)`. Picking a trainee just sets local
+role === "admin" || isSuperAdmin` (updated same day — see "Tab bar fix"
+above; originally gated on the now-removed `adminActingAsLead` toggle, now
+admin/super-admin always have lead-level Driver Training capability on
+their permanent Planner tab, no mode switch needed). Picking a trainee just
+sets local
 `traineeId`/`traineeName` state on the Planner page — no write happens until
 the lead actually begins a load. `useLoadWorkflow.ts`'s `beginLoadToSupabase`
 takes a new `trainingTraineeId` prop and, right after `setActiveLoadId`,

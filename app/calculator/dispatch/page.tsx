@@ -67,7 +67,7 @@ function SectionCard({ title, children }: { title: string; children: React.React
 
 export default function DispatchPage() {
   const shell = useCalculatorShell();
-  const { selectedDriverId, setSelectedDriverId, companyId, role, effectiveUserId } = shell;
+  const { selectedDriverId, setSelectedDriverId, companyId, effectiveUserId } = shell;
 
   const [identity, setIdentity] = useState<DriverIdentity | null>(null);
   const [schedule, setSchedule] = useState<{ days: number[]; start: string; end: string }>({ days: [], start: "", end: "" });
@@ -78,8 +78,6 @@ export default function DispatchPage() {
   const [notes, setNotes] = useState("");
   const [notesSaving, setNotesSaving] = useState(false);
   const [loading, setLoading] = useState(false);
-
-  const canActAsLead = role === "admin";
 
   useEffect(() => {
     if (!selectedDriverId) return;
@@ -196,15 +194,6 @@ export default function DispatchPage() {
   if (!selectedDriverId) {
     return (
       <div style={{ paddingTop: 4 }}>
-        {canActAsLead && (
-          <button
-            type="button"
-            onClick={() => shell.setAdminActingAsLead(true)}
-            style={{ width: "100%", marginBottom: 14, padding: "10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.6)", fontSize: 13, fontWeight: 700, cursor: "pointer" }}
-          >
-            Jump in as Lead Driver →
-          </button>
-        )}
         <div style={{ fontSize: 13, color: "rgba(255,255,255,0.45)", marginBottom: 10 }}>Select a driver to view.</div>
         <DriverPicker companyId={companyId} onPick={(id) => setSelectedDriverId(id)} />
       </div>
@@ -213,15 +202,10 @@ export default function DispatchPage() {
 
   return (
     <div style={{ paddingTop: 4 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+      <div style={{ marginBottom: 14 }}>
         <button type="button" onClick={() => setSelectedDriverId("")} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.5)", fontSize: 13, fontWeight: 700, cursor: "pointer", padding: 0 }}>
           ‹ Change Driver
         </button>
-        {canActAsLead && (
-          <button type="button" onClick={() => shell.setAdminActingAsLead(true)} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.35)", fontSize: 12, fontWeight: 600, cursor: "pointer", padding: 0 }}>
-            Act as Lead Driver
-          </button>
-        )}
       </div>
 
       {loading && <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 13 }}>Loading…</div>}

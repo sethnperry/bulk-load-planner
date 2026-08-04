@@ -36,7 +36,7 @@ export default function TerminalPage() {
   // viewer's own location.selectedTerminalId -- there's no live GPS/check-in
   // signal to know where a driver physically is, so "most recent load's
   // terminal" is the best available proxy.
-  const isDispatchContext = (shell.role === "dispatch" || (shell.role === "admin" && !shell.adminActingAsLead)) && Boolean(shell.selectedDriverId);
+  const isDispatchContext = (shell.role === "dispatch" || shell.role === "admin" || shell.isSuperAdmin) && Boolean(shell.selectedDriverId);
   const [driverTerminalId, setDriverTerminalId] = useState<string | null>(null);
 
   useEffect(() => {

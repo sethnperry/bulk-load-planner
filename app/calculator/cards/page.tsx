@@ -291,7 +291,7 @@ export default function CardsPage() {
   // deliberately status-only rather than the full flip-card editor below.
   // Checked below the JSX return (not an early return here) so every hook
   // in this component still runs on every render, same count either way.
-  const isDispatchContext = (shell.role === "dispatch" || (shell.role === "admin" && !shell.adminActingAsLead)) && Boolean(shell.selectedDriverId);
+  const isDispatchContext = (shell.role === "dispatch" || shell.role === "admin" || shell.isSuperAdmin) && Boolean(shell.selectedDriverId);
 
   const [filter, setFilter] = useState<FilterKey>("all");
   const [flippedId, setFlippedId] = useState<string | null>(null);

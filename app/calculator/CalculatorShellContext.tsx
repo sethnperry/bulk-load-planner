@@ -57,12 +57,13 @@ type ShellValue = {
   setCardDataForTerminal_: (terminalId: string, data: CardData) => Promise<void>;
   theme: ReturnType<typeof useTheme>;
   // Role of effectiveUserId in their active company -- null until resolved.
-  // Drives the role-specific tab (Lead/Dispatch/Admin) shown left of Planner.
+  // Drives which tabs CalculatorLayoutClient's tabsFor() shows (Dispatch/
+  // Planner for admin, Dispatch only for dispatch, Planner only otherwise).
   role: Role | null;
   companyId: string | null;
   // Super admins (is_super_admin() RPC, same one NavMenu.tsx already uses)
-  // see ALL role tabs regardless of their own company role -- lets one
-  // account verify Lead/Dispatch/Admin tabs without reassigning roles.
+  // get the same Dispatch+Planner tab set as admin, regardless of their own
+  // company role -- lets one account verify both without reassigning roles.
   isSuperAdmin: boolean;
   // Which driver a dispatch/admin user currently has selected -- shared so
   // the Dispatch tab, the contextual Cards tab, and the Terminal tab's
@@ -71,12 +72,6 @@ type ShellValue = {
   // driver/lead roles.
   selectedDriverId: string;
   setSelectedDriverId: (id: string) => void;
-  // Admin-only, session-local (not persisted): lets an admin temporarily see
-  // Planner instead of Dispatch as their middle tab, so they can personally
-  // load equipment without the full "Set up planner for X" impersonation
-  // flow. Meaningless for every other role.
-  adminActingAsLead: boolean;
-  setAdminActingAsLead: (v: boolean) => void;
 };
 
 const ShellContext = createContext<ShellValue | null>(null);
@@ -240,7 +235,6 @@ export function CalculatorShellProvider({ children }: { children: React.ReactNod
   };
 
   const [selectedDriverId, setSelectedDriverId] = useState("");
-  const [adminActingAsLead, setAdminActingAsLead] = useState(false);
 
   const value: ShellValue = {
     authEmail, authUserId, setupSession, effectiveUserId,
@@ -252,7 +246,6 @@ export function CalculatorShellProvider({ children }: { children: React.ReactNod
     theme,
     role, companyId, isSuperAdmin,
     selectedDriverId, setSelectedDriverId,
-    adminActingAsLead, setAdminActingAsLead,
   };
 
   return <ShellContext.Provider value={value}>{children}</ShellContext.Provider>;

@@ -27,6 +27,15 @@ import { useCalculatorShell } from "./CalculatorShellContext";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { supabase } from "@/lib/supabase/client";
 
+// Module-level (not component state) so it survives this page component
+// unmounting/remounting on every route change, but still resets on a true
+// full reload -- exactly the "did we already do the once-per-session
+// landing redirect" flag needs. A ref/useState living inside the component
+// can't do this: this page genuinely remounts every time the user
+// navigates back to it, which would make a same-scope flag "fresh" again
+// on every visit, defeating the "once per session" intent below.
+let hasCheckedDefaultLanding = false;
+
 // ── Hooks ──────────────────────────────────────────────────────────────────────
 import { usePlanSlots } from "./hooks/usePlanSlots";
 import { useLoadWorkflow } from "./hooks/useLoadWorkflow";
@@ -212,6 +221,27 @@ export default function CalculatorPage() {
   const shell = useCalculatorShell();
   const { authUserId, setupSession, effectiveUserId, equipment, location, terminals, expirations } = shell;
   const router = useRouter();
+
+  // Dispatch/admin's real home is the Dispatch tab, not this one -- but
+  // whatever actually lands the app on bare /calculator (e.g. a login
+  // redirect that doesn't know about roles) doesn't know that. Previously
+  // this showed up as a real bug: the tab bar's "Dispatch" slot would
+  // highlight itself (it used to share an id with Planner) while this
+  // page's Planner content rendered underneath -- tapping away and back
+  // "fixed" it only because that was a real navigation to /calculator/
+  // dispatch. Redirecting once per session on first landing here fixes the
+  // actual mismatch instead of just the symptom; gated on `role` being
+  // resolved (not null) so driver/lead never get caught in a flash-redirect
+  // while role is still loading, and only fires once so tapping the
+  // Planner tab later (a deliberate, real visit) is never bounced away.
+  useEffect(() => {
+    if (hasCheckedDefaultLanding) return;
+    if (shell.role == null) return;
+    hasCheckedDefaultLanding = true;
+    if (shell.role === "dispatch" || shell.role === "admin" || shell.isSuperAdmin) {
+      router.replace("/calculator/dispatch");
+    }
+  }, [shell.role, shell.isSuperAdmin, router]);
 
   // ── Card data (card number + PIN + private note, per terminal, per user) ──
   // Owned in CalculatorShellContext now -- the new Cards tab route needs the
@@ -876,10 +906,11 @@ export default function CalculatorPage() {
     }
   }, [compModalOpen, unavailableComps]);
 
-  // ── Driver Training (lead / admin-acting-as-lead only) ─────────────────────
+  // ── Driver Training (lead / admin only -- admins get "the planner used by
+  // lead drivers", per explicit direction, not a toggle) ─────────────────────
   // Single-load model -- see CLAUDE.md. traineeId just tags whatever load
   // this session submits next; no second plan, no second load_log row.
-  const canDriverTrain = shell.role === "lead" || (shell.role === "admin" && shell.adminActingAsLead);
+  const canDriverTrain = shell.role === "lead" || shell.role === "admin" || shell.isSuperAdmin;
   const [traineeId, setTraineeId] = useState("");
   const [traineeName, setTraineeName] = useState("");
   const [trainingModalOpen, setTrainingModalOpen] = useState(false);
@@ -1152,19 +1183,6 @@ const lastProductInfoById = useMemo(() => {
             onClick={() => { clearSetupSession(); router.push("/admin"); }}
             style={{ fontSize: 12, fontWeight: 700, padding: "6px 12px", borderRadius: 8, border: "1px solid rgba(251,146,60,0.40)", background: "rgba(251,146,60,0.15)", color: "#fb923c", cursor: "pointer", whiteSpace: "nowrap" as const }}>
             ← Return to Admin
-          </button>
-        </div>
-      )}
-
-      {/* Admin acting as lead driver -- see CalculatorLayoutClient.tsx's
-          tabsFor(); this is the way back to the Dispatch tab. */}
-      {shell.role === "admin" && shell.adminActingAsLead && (
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 14px", marginBottom: 8, borderRadius: 12, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.10)" }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: "rgba(255,255,255,0.7)" }}>Acting as Lead Driver</div>
-          <button type="button"
-            onClick={() => { shell.setAdminActingAsLead(false); router.push("/calculator/dispatch"); }}
-            style={{ fontSize: 12, fontWeight: 700, padding: "6px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.06)", color: "#fff", cursor: "pointer", whiteSpace: "nowrap" as const }}>
-            ← Back to Dispatch
           </button>
         </div>
       )}
