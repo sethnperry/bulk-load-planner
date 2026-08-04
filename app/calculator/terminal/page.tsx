@@ -29,7 +29,28 @@ function PlaceholderPanel({ title, note }: { title: string; note: string }) {
 
 export default function TerminalPage() {
   const shell = useCalculatorShell();
-  const terminalId = shell.location.selectedTerminalId;
+
+  // Dispatch/admin context: when a driver is selected, show *their* current
+  // terminal (inferred from their most recent load) instead of the
+  // viewer's own location.selectedTerminalId -- there's no live GPS/check-in
+  // signal to know where a driver physically is, so "most recent load's
+  // terminal" is the best available proxy.
+  const isDispatchContext = (shell.role === "dispatch" || (shell.role === "admin" && !shell.adminActingAsLead)) && Boolean(shell.selectedDriverId);
+  const [driverTerminalId, setDriverTerminalId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isDispatchContext) { setDriverTerminalId(null); return; }
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from("load_log").select("terminal_id").eq("user_id", shell.selectedDriverId)
+        .order("created_at", { ascending: false }).limit(1).maybeSingle();
+      if (!cancelled) setDriverTerminalId((data as any)?.terminal_id ?? null);
+    })();
+    return () => { cancelled = true; };
+  }, [isDispatchContext, shell.selectedDriverId]);
+
+  const terminalId = isDispatchContext ? driverTerminalId : shell.location.selectedTerminalId;
   const terminal = useMemo(
     () => (shell.terminals.terminalCatalog as any[])?.find((t) => String(t.terminal_id) === String(terminalId)) ?? null,
     [shell.terminals.terminalCatalog, terminalId]
@@ -95,7 +116,10 @@ export default function TerminalPage() {
   if (!terminalId) {
     return (
       <div style={{ paddingTop: 4 }}>
-        <PlaceholderPanel title="No terminal selected" note="Pick a location and terminal in the Planner to see its rack status here." />
+        <PlaceholderPanel
+          title="No terminal selected"
+          note={isDispatchContext ? "This driver has no recent loads to infer a terminal from." : "Pick a location and terminal in the Planner to see its rack status here."}
+        />
       </div>
     );
   }

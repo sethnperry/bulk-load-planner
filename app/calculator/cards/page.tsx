@@ -17,6 +17,7 @@ import { useRouter } from "next/navigation";
 import { useCalculatorShell } from "../CalculatorShellContext";
 import { formatMDY, formatMDYWithCountdown_ } from "../utils/dates";
 import CardsSubTabs from "./CardsSubTabs";
+import DriverCardsReadOnly from "./DriverCardsReadOnly";
 import FlippableCard from "./FlippableCard";
 import SourcingModal from "../modals/SourcingModal";
 import { FullscreenModal } from "@/lib/ui/FullscreenModal";
@@ -285,6 +286,13 @@ export default function CardsPage() {
   const { terminals, location, cardDataByTerminalId, setCardDataForTerminal_, authUserId, myTerminalIdSet } = shell;
   const router = useRouter();
 
+  // Contextual for dispatch/admin viewing a selected driver -- see
+  // DriverCardsReadOnly.tsx's own header comment for why this is
+  // deliberately status-only rather than the full flip-card editor below.
+  // Checked below the JSX return (not an early return here) so every hook
+  // in this component still runs on every render, same count either way.
+  const isDispatchContext = (shell.role === "dispatch" || (shell.role === "admin" && !shell.adminActingAsLead)) && Boolean(shell.selectedDriverId);
+
   const [filter, setFilter] = useState<FilterKey>("all");
   const [flippedId, setFlippedId] = useState<string | null>(null);
   const [draft, setDraft] = useState<{ cardNumber: string; pin: string; privateNote: string }>({ cardNumber: "", pin: "", privateNote: "" });
@@ -355,6 +363,10 @@ export default function CardsPage() {
   };
 
   const cities = cityGroups.map((g) => g.city);
+
+  if (isDispatchContext) {
+    return <DriverCardsReadOnly driverId={shell.selectedDriverId} />;
+  }
 
   return (
     <div>

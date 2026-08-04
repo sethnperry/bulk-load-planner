@@ -35,23 +35,23 @@ import type { Role } from "@/lib/ui/driver/role";
 // Terminal Tier pivot (2026-08-03, see CLAUDE.md "Terminal Tier — Build
 // Spec"): the old per-role Lead/Dispatch/Admin tabs are shelved entirely --
 // every role now gets the same base tab set. Terminal is universal (all
-// roles, structural editing gated inside the page itself); the Dispatch
-// role eventually gets a contextual middle tab in place of Planner, but
-// that's a separate, later piece -- Planner stays the middle tab for every
-// role for now.
-const BASE_TABS = [
-  { id: "terminal", label: "Terminal", href: "/calculator/terminal" },
-  { id: "planner", label: "Planner", href: "/calculator" },
-  { id: "cards", label: "Cards", href: "/calculator/cards" },
-  { id: "vault", label: "Vault", href: "/calculator/vault" },
-] as const;
+// roles, structural editing gated inside the page itself). The middle tab
+// is contextual: dispatch, and admin (unless acting-as-lead), get Dispatch
+// in place of Planner -- neither role plans their own loads day to day.
+const TERMINAL_TAB = { id: "terminal", label: "Terminal", href: "/calculator/terminal" };
+const PLANNER_TAB = { id: "planner", label: "Planner", href: "/calculator" };
+const DISPATCH_TAB = { id: "planner", label: "Dispatch", href: "/calculator/dispatch" };
+const CARDS_TAB = { id: "cards", label: "Cards", href: "/calculator/cards" };
+const VAULT_TAB = { id: "vault", label: "Vault", href: "/calculator/vault" };
 
-function tabsFor(_role: Role | null, _isSuperAdmin: boolean) {
-  return [...BASE_TABS];
+function tabsFor(role: Role | null, adminActingAsLead: boolean) {
+  const showsDispatch = role === "dispatch" || (role === "admin" && !adminActingAsLead);
+  return [TERMINAL_TAB, showsDispatch ? DISPATCH_TAB : PLANNER_TAB, CARDS_TAB, VAULT_TAB];
 }
 
 function activeTabFor(pathname: string | null, tabs: ReturnType<typeof tabsFor>): string | "none" {
   if (pathname?.startsWith("/calculator/terminal")) return "terminal";
+  if (pathname?.startsWith("/calculator/dispatch")) return "planner";
   if (pathname?.startsWith("/calculator/cards")) return "cards";
   if (pathname?.startsWith("/calculator/vault")) return "vault";
   // Reports is a nav-menu destination, not a peer of Planner/Cards/Vault --
@@ -66,7 +66,7 @@ function TabBar() {
   const router = useRouter();
   const shell = useCalculatorShell();
   const darkMode = shell.theme.darkMode;
-  const tabs = useMemo(() => tabsFor(shell.role, shell.isSuperAdmin), [shell.role, shell.isSuperAdmin]);
+  const tabs = useMemo(() => tabsFor(shell.role, shell.adminActingAsLead), [shell.role, shell.adminActingAsLead]);
   const active = activeTabFor(pathname, tabs);
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);

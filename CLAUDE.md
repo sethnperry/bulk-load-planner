@@ -1018,6 +1018,66 @@ actions above):
 - **Permission**: hidden entirely from drivers (not just disabled). Lead,
   dispatch, and admin can all edit.
 
+**Shipped 2026-08-04** (Dispatch tab, Cards/Terminal contextual behavior,
+admin act-as-lead toggle, Driver Training). Built in one continuous pass per
+explicit user direction ("keep rolling... I don't want to stop you to fix
+anything you will naturally fix in the process") — punch-list review deferred
+to the user rather than pausing per-feature. `tsc --noEmit` clean throughout.
+Still not live-browser-verified — same session dev-server environment issue
+as the Terminal tab schema pass (tool reports success, nothing actually
+reachable via `curl`/`navigate`; tried again this pass, same result, not
+retried further).
+
+- **Tab bar**: `CalculatorLayoutClient.tsx`'s middle tab is now genuinely
+  contextual — `tabsFor(role, adminActingAsLead)` swaps in Dispatch (href
+  `/calculator/dispatch`, same `id: "planner"` so active-tab detection stays
+  simple) for dispatch role and admin role (unless acting-as-lead).
+- **`shell.selectedDriverId`/`shell.adminActingAsLead`** (new, in
+  `CalculatorShellContext.tsx`) — shared so Dispatch/Cards/Terminal agree on
+  the same driver across tab switches without re-picking, and so the admin
+  toggle is a single source of truth the tab bar, Planner, and Dispatch page
+  all read.
+- **`app/calculator/dispatch/page.tsx`** — fully replaced the old
+  Dashboard/Tasks/Ledger placeholder (that content is gone now, not kept
+  alongside). `DriverPicker.tsx` (new, shared component) to pick a driver,
+  then: identity header (name, "Store {division}" — **`division` is a
+  best-effort label for the mockup's "Store 495," not a confirmed match**,
+  worth confirming the actual intended field if it matters; region/local_area
+  already existed on `profiles`), an inline weekly-schedule editor (day
+  toggles + shift time range, `driver_schedules`, new table), a terminal
+  card list (status-only, reusing `terminal_access`/`user_terminal_cards`
+  reads), an equipment + registration-expiry summary
+  (`user_primary_trucks`/`user_primary_trailers` → `trucks`/`trailers`), and
+  a notes box (`dispatcher_notes`, new table, staff-only per the spec — no
+  self-read policy, so **a plain lead has no UI entry point to this page at
+  all today** even though `dispatcher_notes`'s RLS already permits lead
+  read/write; the Dispatch *tab* itself is only reachable by dispatch/admin
+  roles via the tab bar. Flagged, not solved — a real gap if leads are
+  expected to actually use these notes day to day.)
+- **Cards tab, contextual** (`cards/page.tsx` + new `DriverCardsReadOnly.tsx`):
+  when dispatch/admin has a driver selected, shows that driver's card
+  status — **deliberately read-only**, not the "same controls as the driver"
+  full parity originally described. Confirmed live before building that
+  `user_terminal_cards` had *zero* admin/dispatch RLS access at all (only
+  `owner_*` policies) — granting cross-user *write* access to another
+  driver's card numbers/PINs is a real permission expansion, so this pass
+  only added a read policy (`user_terminal_cards_admin_dispatch_read`,
+  mirroring `terminal_access_admin_dispatch_read`'s exact shape) and built a
+  status-only view, matching the precedent already set by
+  `FleetCardsModal.tsx`/`FleetCredentialsModal.tsx` for this exact class of
+  feature. Full write parity would need a deliberate follow-up decision, not
+  something to assume.
+- **Terminal tab, contextual**: when arriving with a driver selected
+  (dispatch/admin context), the terminal shown is inferred from that
+  driver's most recent `load_log` row rather than the viewer's own
+  `location.selectedTerminalId` — there's no GPS/check-in signal to know
+  where a driver physically is, so "most recent load's terminal" is the best
+  available proxy, not a precise "where are they right now" signal.
+- **`load_log.trainee_id`** (new column) + `load_log_select_trainee` RLS
+  policy (narrowly scoped to `trainee_id = auth.uid()`, doesn't touch the
+  existing own/admin-dispatch-read policies) — migration
+  `20260812000000_dispatch_tab_and_driver_training.sql` (applied).
+
 ### Driver Training (Lead/Admin-in-lead-mode feature)
 - A "Driver Training" button on the Planner (lead/admin-acting-as-lead
   only) opens a driver-selection modal (exact modal design not yet done —
@@ -1063,7 +1123,32 @@ actions above):
     actively getting carded at) — a self-service tracking tool for the
     driver, not a new driver-facing "give training" action.
   - Both live in the existing Reports/NAV hub (`/calculator/reports`) as new
-    report types, not a new destination.
+    report types, not a new destination. **Not built this pass** — spec
+    itself says "dialed in last," left for a future pass.
+
+**Shipped 2026-08-04**: `load_log.trainee_id` + narrow trainee-read RLS
+policy (see Dispatch tab section above). `DriverTrainingModal.tsx` (new,
+wraps the shared `DriverPicker.tsx`) opens from a "Driver Training" text
+button on the Planner, visible for `canDriverTrain = role === "lead" ||
+(role === "admin" && adminActingAsLead)`. Picking a trainee just sets local
+`traineeId`/`traineeName` state on the Planner page — no write happens until
+the lead actually begins a load. `useLoadWorkflow.ts`'s `beginLoadToSupabase`
+takes a new `trainingTraineeId` prop and, right after `setActiveLoadId`,
+fires a plain (non-blocking, non-fatal) `UPDATE load_log SET trainee_id =
+...` on the row it just created — no RPC change needed, `load_log_update_own`
+already covers it. "Loading with {trainee}" renders next to the Driver
+Training button once picked, matching the mockup's placement (below RELOAD,
+above the gal/lbs summary).
+
+**Trainee-side "Training with {lead}" banner**: built as the "try the
+simplest version first" cut per the open question below — every driver's
+own Planner (not just leads) polls (30s interval, not a live subscription)
+`select user_id from load_log where trainee_id = effectiveUserId and status
+= 'planned'` and, if found, resolves the lead's name via
+`get_display_names_full` and shows the banner. This is *a* answer to the
+"two devices, one physical load" question, not *the* answer — it only
+proves whether a trainee tag exists, says nothing about keeping two
+in-progress plans in sync, and was deliberately left that simple.
 
 ### Explicitly shelved
 - The entire 2026-07-30 "Role-based tabs" Lead/Dispatch/Admin dedicated-tab
@@ -1077,16 +1162,25 @@ actions above):
 
 ### Open questions (Terminal Tier spec)
 - The "two devices, one physical load" concurrency question for Driver
-  Training (see above) — deliberately unresolved, try simplest version
-  first.
-- Exact driver-selection UI for both the Dispatch tab (dispatcher picking
-  which driver to view) and the Driver Training button (lead picking a
-  trainee) — not designed yet, flagged as open UI work.
-- Live verification needed before building: do `region`/local-area fields
-  already exist on `profiles` (or elsewhere)? Does the existing card/
-  terminal-access "inactive" state map cleanly to "Not Carded," or does it
-  need its own value? (Per this repo's own "Architecture reality" rule —
-  verify against the live DB, don't assume from the migrations folder.)
+  Training — still genuinely unresolved (see the trainee-side banner note
+  above); the polling banner only proves a trainee tag exists, doesn't
+  solve concurrent planning on two devices.
+- ~~Exact driver-selection UI...~~ — **resolved 2026-08-04.**
+  `DriverPicker.tsx` (search + list, shared by the Dispatch tab and Driver
+  Training) is the answer — simple by design, no fancier UX was specified.
+- ~~Live verification needed... region/local-area...~~ — **resolved
+  2026-08-04.** Confirmed live: `profiles.region` and `profiles.local_area`
+  both already exist (also `division`, `employee_number`, `hire_date` —
+  `get_display_names_full` already returns all of them). No `store` field
+  exists anywhere; the Dispatch tab's "Store {division}" label is a
+  best-effort guess at what the mockup's "Store 495" maps to, **not
+  confirmed** — worth double-checking if it matters. The existing "inactive"
+  terminal-access state was **not** separately re-verified this pass (the
+  Dispatch tab's card list derives "Not Carded" from the absence of a
+  `terminal_access`/`user_terminal_cards` row entirely, not from reading an
+  explicit inactive flag — functionally equivalent for display purposes,
+  but the underlying enum question from the original spec is still
+  technically open).
 
 ## Architecture reality (learned the hard way — READ THIS FIRST)
 

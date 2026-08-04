@@ -33,6 +33,7 @@ type Props = {
   onRefreshTerminalAccess?: () => Promise<void>;    // re-fetch terminal expiry dates
   onPostLoadComplete?: () => Promise<void>;         // re-read load_log for slot 0 / slip seat
   predictedTempF?: number | null;                  // what the predictor said at plan time
+  trainingTraineeId?: string | null;                // Driver Training: tag this load for a trainee (see CLAUDE.md)
 };
 
 export function useLoadWorkflow({
@@ -46,6 +47,7 @@ export function useLoadWorkflow({
   onRefreshTerminalAccess,
   onPostLoadComplete,
   predictedTempF,
+  trainingTraineeId,
 }: Props) {
   const [activeLoadId, setActiveLoadId] = useState<string | null>(null);
   const [beginLoadBusy, setBeginLoadBusy] = useState(false);
@@ -142,6 +144,16 @@ export function useLoadWorkflow({
 
       setActiveLoadId(result.load_id);
 
+      // Driver Training: tag this load for the trainee (single-load model --
+      // see CLAUDE.md "Terminal Tier — Build Spec"). Plain UPDATE on the
+      // lead's own just-created row, already covered by load_log_update_own;
+      // no RPC change needed. Non-fatal -- a failure here shouldn't block
+      // the load itself, just the training attribution.
+      if (trainingTraineeId && result.load_id) {
+        supabase.from("load_log").update({ trainee_id: trainingTraineeId }).eq("load_id", result.load_id)
+          .then(({ error }) => { if (error) console.error("[training] failed to tag trainee_id:", error.message); });
+      }
+
       // Reset terminal access expiry — driver is actively loading, so re-card them now.
       // begin_load doesn't touch terminal_access, so we do it here.
       if (selectedTerminalId && authUserId) {
@@ -188,6 +200,7 @@ export function useLoadWorkflow({
     beginLoadBusy, selectedComboId, selectedTerminalId, selectedState, selectedCity,
     selectedCityId, planRows, plannedGallonsTotal, plannedWeightLbs,
     tare, cgBias, ambientTempF, tempF, setProductInputs, onRefreshTerminalAccess, authUserId,
+    trainingTraineeId,
   ]);
 
   // ── Cancel (Loading modal closed before LOADED is tapped) ─────────────────

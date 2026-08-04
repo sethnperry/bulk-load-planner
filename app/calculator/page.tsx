@@ -37,6 +37,7 @@ import { useFuelTempPrediction } from "./hooks/useFuelTempPrediction";
 import PlannerControls from "./sections/PlannerControls";
 import PresetDial from "./sections/PresetDial";
 import PresetActionSheet from "./components/PresetActionSheet";
+import DriverTrainingModal from "./components/DriverTrainingModal";
 
 // ── Modals ─────────────────────────────────────────────────────────────────────
 import LocationModal from "./modals/LocationModal";
@@ -874,6 +875,37 @@ export default function CalculatorPage() {
     }
   }, [compModalOpen, unavailableComps]);
 
+  // ── Driver Training (lead / admin-acting-as-lead only) ─────────────────────
+  // Single-load model -- see CLAUDE.md. traineeId just tags whatever load
+  // this session submits next; no second plan, no second load_log row.
+  const canDriverTrain = shell.role === "lead" || (shell.role === "admin" && shell.adminActingAsLead);
+  const [traineeId, setTraineeId] = useState("");
+  const [traineeName, setTraineeName] = useState("");
+  const [trainingModalOpen, setTrainingModalOpen] = useState(false);
+
+  // Trainee-side mirror of the "Loading with X" banner above -- every
+  // driver (not just leads) can be a trainee, so this checks unconditionally.
+  // Deliberately simple polling, not a live subscription -- see CLAUDE.md's
+  // "two devices, one physical load" open question; this is the "try the
+  // simplest version first" cut, not a solved real-time sync problem.
+  const [trainingLeadName, setTrainingLeadName] = useState<string | null>(null);
+  useEffect(() => {
+    if (!effectiveUserId) return;
+    let cancelled = false;
+    async function check() {
+      const { data } = await supabase
+        .from("load_log").select("user_id").eq("trainee_id", effectiveUserId).eq("status", "planned")
+        .order("created_at", { ascending: false }).limit(1).maybeSingle();
+      const leadUserId = (data as any)?.user_id ?? null;
+      if (!leadUserId) { if (!cancelled) setTrainingLeadName(null); return; }
+      const { data: nameRows } = await supabase.rpc("get_display_names_full", { p_user_ids: [leadUserId] });
+      if (!cancelled) setTrainingLeadName((nameRows ?? [])[0]?.display_name ?? "your lead");
+    }
+    check();
+    const id = setInterval(check, 30000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [effectiveUserId]);
+
   const loadWorkflow = useLoadWorkflow({
     authUserId: effectiveUserId || null,
     selectedComboId: equipment.selectedComboId,
@@ -890,6 +922,7 @@ export default function CalculatorPage() {
     onRefreshTerminalAccess: terminals.refreshTerminalAccessForUser,
     onPostLoadComplete: planSlots.refreshLastLoad,
     predictedTempF: predictedFuelTempF,
+    trainingTraineeId: traineeId || null,
   });
 
   // Seed the Target/Actual/Diff summary from the last *completed* load for
@@ -1119,6 +1152,25 @@ const lastProductInfoById = useMemo(() => {
             style={{ fontSize: 12, fontWeight: 700, padding: "6px 12px", borderRadius: 8, border: "1px solid rgba(251,146,60,0.40)", background: "rgba(251,146,60,0.15)", color: "#fb923c", cursor: "pointer", whiteSpace: "nowrap" as const }}>
             ← Return to Admin
           </button>
+        </div>
+      )}
+
+      {/* Admin acting as lead driver -- see CalculatorLayoutClient.tsx's
+          tabsFor(); this is the way back to the Dispatch tab. */}
+      {shell.role === "admin" && shell.adminActingAsLead && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 14px", marginBottom: 8, borderRadius: 12, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.10)" }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "rgba(255,255,255,0.7)" }}>Acting as Lead Driver</div>
+          <button type="button"
+            onClick={() => { shell.setAdminActingAsLead(false); router.push("/calculator/dispatch"); }}
+            style={{ fontSize: 12, fontWeight: 700, padding: "6px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.06)", color: "#fff", cursor: "pointer", whiteSpace: "nowrap" as const }}>
+            ← Back to Dispatch
+          </button>
+        </div>
+      )}
+
+      {trainingLeadName && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", marginBottom: 8, borderRadius: 12, background: "rgba(74,222,128,0.08)", border: "1px solid rgba(74,222,128,0.25)" }}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: "#4ade80" }}>Training with {trainingLeadName}</span>
         </div>
       )}
 
@@ -1471,6 +1523,30 @@ const lastProductInfoById = useMemo(() => {
               <div style={{ ...styles.error, textAlign: "center" as const }}>{loadBlockedMsg}</div>
             )}
 
+            {canDriverTrain && (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                <button
+                  type="button"
+                  onClick={() => setTrainingModalOpen(true)}
+                  style={{ background: "none", border: "none", color: "rgba(255,255,255,0.5)", fontSize: 13, fontWeight: 700, cursor: "pointer", padding: 0 }}
+                >
+                  Driver Training
+                </button>
+                {traineeName && (
+                  <span style={{ fontSize: 13, color: "#4ade80", fontWeight: 600 }}>
+                    Loading with {traineeName}
+                    <button
+                      type="button"
+                      onClick={() => { setTraineeId(""); setTraineeName(""); }}
+                      style={{ background: "none", border: "none", color: "rgba(255,255,255,0.3)", fontSize: 12, cursor: "pointer", marginLeft: 6, padding: 0 }}
+                    >
+                      ✕
+                    </button>
+                  </span>
+                )}
+              </div>
+            )}
+
             {/* Load summary */}
             <div style={{ borderRadius: 16, background: "rgba(255,255,255,0.03)", padding: "10px 14px" }}>
               <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8 }}>
@@ -1522,6 +1598,13 @@ const lastProductInfoById = useMemo(() => {
       <div id="tour-fleet-instruction" style={{ display: "none" }} />
 
       {/* ── Modals ── */}
+      <DriverTrainingModal
+        open={trainingModalOpen}
+        onClose={() => setTrainingModalOpen(false)}
+        companyId={shell.companyId}
+        excludeUserId={effectiveUserId}
+        onPick={(id, name) => { setTraineeId(id); setTraineeName(name); }}
+      />
       <LoadingModal
         open={loadWorkflow.loadingOpen} onClose={loadWorkflow.cancelActiveLoad}
         styles={styles}

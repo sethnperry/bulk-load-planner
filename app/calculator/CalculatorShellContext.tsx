@@ -64,6 +64,19 @@ type ShellValue = {
   // see ALL role tabs regardless of their own company role -- lets one
   // account verify Lead/Dispatch/Admin tabs without reassigning roles.
   isSuperAdmin: boolean;
+  // Which driver a dispatch/admin user currently has selected -- shared so
+  // the Dispatch tab, the contextual Cards tab, and the Terminal tab's
+  // auto-open-to-their-terminal behavior all agree on the same driver
+  // without re-picking on every tab switch. Meaningless (and unused) for
+  // driver/lead roles.
+  selectedDriverId: string;
+  setSelectedDriverId: (id: string) => void;
+  // Admin-only, session-local (not persisted): lets an admin temporarily see
+  // Planner instead of Dispatch as their middle tab, so they can personally
+  // load equipment without the full "Set up planner for X" impersonation
+  // flow. Meaningless for every other role.
+  adminActingAsLead: boolean;
+  setAdminActingAsLead: (v: boolean) => void;
 };
 
 const ShellContext = createContext<ShellValue | null>(null);
@@ -226,6 +239,9 @@ export function CalculatorShellProvider({ children }: { children: React.ReactNod
     }
   };
 
+  const [selectedDriverId, setSelectedDriverId] = useState("");
+  const [adminActingAsLead, setAdminActingAsLead] = useState(false);
+
   const value: ShellValue = {
     authEmail, authUserId, setupSession, effectiveUserId,
     equipment, location, terminals, expirations,
@@ -235,6 +251,8 @@ export function CalculatorShellProvider({ children }: { children: React.ReactNod
     cardDataByTerminalId, setCardDataForTerminal_,
     theme,
     role, companyId, isSuperAdmin,
+    selectedDriverId, setSelectedDriverId,
+    adminActingAsLead, setAdminActingAsLead,
   };
 
   return <ShellContext.Provider value={value}>{children}</ShellContext.Provider>;
