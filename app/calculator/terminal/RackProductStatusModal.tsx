@@ -177,7 +177,8 @@ export default function RackProductStatusModal({
           <div>
             <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.4)", marginBottom: 6, textTransform: "uppercase" as const }}>API</div>
             <input
-              type="number" inputMode="decimal" value={api} onChange={(e) => setApi(e.target.value)}
+              type="text" inputMode="decimal" value={api} onChange={(e) => setApi(e.target.value)}
+              onFocus={(e) => e.currentTarget.select()}
               placeholder="50.6"
               style={{ width: "100%", boxSizing: "border-box" as const, padding: "10px 12px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.03)", color: "white", fontSize: 14 }}
             />
@@ -185,7 +186,8 @@ export default function RackProductStatusModal({
           <div>
             <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.4)", marginBottom: 6, textTransform: "uppercase" as const }}>Temp (°F)</div>
             <input
-              type="number" inputMode="decimal" value={tempF} onChange={(e) => setTempF(e.target.value)}
+              type="text" inputMode="decimal" value={tempF} onChange={(e) => setTempF(e.target.value)}
+              onFocus={(e) => e.currentTarget.select()}
               placeholder="75.6"
               style={{ width: "100%", boxSizing: "border-box" as const, padding: "10px 12px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.03)", color: "white", fontSize: 14 }}
             />

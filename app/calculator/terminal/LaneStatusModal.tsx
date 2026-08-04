@@ -2,11 +2,11 @@
 // app/calculator/terminal/LaneStatusModal.tsx
 //
 // "Lane N — Status Update" -- the per-lane STUD action, open to every role.
-// Redesigned per explicit user direction (2026-08-04, working from a real
-// mockup screenshot): no text fields or quick-chip freeform notes -- just
-// toggle buttons for Lane Down (the whole lane), Arm Down (one arm,
-// whatever products are on it), and Product Out (one specific product on
-// an arm that carries more than one, e.g. a blender).
+// Toggle buttons only (Lane Down / Arm Down / Product Out), no text fields
+// or freeform notes. Tightened to one compact row per arm per explicit
+// user feedback against a reference screenshot -- product code + small
+// inline toggle buttons on the same line, not a card per arm. Lane Down
+// is the first row, styled the same way as the arm rows below it.
 
 import React, { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
@@ -14,16 +14,16 @@ import { FullscreenModal } from "@/lib/ui/FullscreenModal";
 import type { TerminalRack, RackArm, RackLane, ProductLite } from "./types";
 import { laneLabel, armLabel } from "./labels";
 
-function ToggleChip({ label, active, color = "#ef4444", onClick }: { label: string; active: boolean; color?: string; onClick: () => void }) {
+function SmallToggle({ label, active, color = "#ef4444", onClick }: { label: string; active: boolean; color?: string; onClick: () => void }) {
   return (
     <button
       type="button"
       onClick={onClick}
       style={{
-        fontSize: 12, fontWeight: 800, padding: "6px 12px", borderRadius: 999, cursor: "pointer",
+        fontSize: 10, fontWeight: 800, padding: "4px 8px", borderRadius: 999, cursor: "pointer", flexShrink: 0,
         border: `1px solid ${active ? color : "rgba(255,255,255,0.15)"}`,
         background: active ? `${color}26` : "rgba(255,255,255,0.04)",
-        color: active ? color : "rgba(255,255,255,0.6)",
+        color: active ? color : "rgba(255,255,255,0.55)",
       }}
     >
       {label}
@@ -111,6 +111,11 @@ export default function LaneStatusModal({
     onClose();
   }
 
+  const rowStyle: React.CSSProperties = {
+    display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
+    padding: "9px 2px", borderBottom: "1px solid rgba(255,255,255,0.07)",
+  };
+
   return (
     <FullscreenModal
       open={open}
@@ -127,34 +132,49 @@ export default function LaneStatusModal({
         </button>
       }
     >
-      <div style={{ display: "grid", gap: 14 }}>
-        {error && <div style={{ color: "#f87171", fontSize: 12 }}>{error}</div>}
+      <div>
+        {error && <div style={{ color: "#f87171", fontSize: 12, marginBottom: 10 }}>{error}</div>}
 
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderRadius: 10, border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)", padding: 12 }}>
-          <span style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>Whole lane</span>
-          <ToggleChip label="Lane Down" active={laneDownDraft} onClick={() => setLaneDownDraft((v) => !v)} />
+        <div style={rowStyle}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>
+            Lane {laneLabel(laneNumber, rack, laneOffset)}
+          </span>
+          <SmallToggle label="LANE DOWN" active={laneDownDraft} onClick={() => setLaneDownDraft((v) => !v)} />
         </div>
 
         {laneArms.map((a) => (
-          <div key={a.arm_id} style={{ borderRadius: 10, border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)", padding: 10, display: "grid", gap: 8 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <span style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>Arm {armLabel(a.arm_number, rack)}</span>
-              <ToggleChip label="Arm Down" active={armDownDraft[a.arm_id] ?? a.is_down} onClick={() => setArmDownDraft((prev) => ({ ...prev, [a.arm_id]: !(prev[a.arm_id] ?? a.is_down) }))} />
+          <div key={a.arm_id} style={rowStyle}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 6, minWidth: 0, overflow: "hidden" }}>
+              <span style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", flexShrink: 0 }}>Arm {armLabel(a.arm_number, rack)}</span>
+              {a.product_ids.length === 0 ? (
+                <span style={{ fontSize: 12, color: "rgba(255,255,255,0.25)" }}>—</span>
+              ) : (
+                <span style={{ fontSize: 13, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
+                  {a.product_ids.map((pid, i) => {
+                    const p = productsById[pid];
+                    const code = (p?.button_code ?? "").trim() || "?";
+                    const color = (p?.hex_code ?? "").trim() || "rgba(255,255,255,0.7)";
+                    return (
+                      <React.Fragment key={pid}>
+                        {i > 0 && <span style={{ color: "rgba(255,255,255,0.3)" }}> / </span>}
+                        <span style={{ color }}>{code}</span>
+                      </React.Fragment>
+                    );
+                  })}
+                </span>
+              )}
             </div>
-            {a.product_ids.length === 0 ? (
-              <div style={{ fontSize: 12, color: "rgba(255,255,255,0.3)" }}>Unassigned</div>
-            ) : (
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" as const }}>
-                {a.product_ids.map((pid) => {
-                  const p = productsById[pid];
-                  const name = p ? (p.product_name ?? p.display_name ?? "Product") : pid;
-                  const active = (outDraft[a.arm_id] ?? a.out_product_ids).includes(pid);
-                  return (
-                    <ToggleChip key={pid} label={`${name} Out`} active={active} onClick={() => toggleProductOut(a.arm_id, pid)} />
-                  );
-                })}
-              </div>
-            )}
+            <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+              <SmallToggle label="DOWN" active={armDownDraft[a.arm_id] ?? a.is_down} onClick={() => setArmDownDraft((prev) => ({ ...prev, [a.arm_id]: !(prev[a.arm_id] ?? a.is_down) }))} />
+              {a.product_ids.map((pid) => {
+                const p = productsById[pid];
+                const code = (p?.button_code ?? "").trim() || "?";
+                const active = (outDraft[a.arm_id] ?? a.out_product_ids).includes(pid);
+                return (
+                  <SmallToggle key={pid} label={code} active={active} onClick={() => toggleProductOut(a.arm_id, pid)} />
+                );
+              })}
+            </div>
           </div>
         ))}
       </div>
