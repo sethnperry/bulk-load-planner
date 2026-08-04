@@ -1086,6 +1086,91 @@ limitation this project already documents for other role-matrix checks)
 and driver-role gating of Edit Terminal (architecturally sound, not
 empirically tested with a real driver account).
 
+### Terminal tab visual redesign (2026-08-04)
+
+User provided a real mockup screenshot and a written punch list after the
+first Terminal tab pass; this is a from-scratch redesign of the Lane Map
+and its two STUD modals to match it, plus real schema changes it required
+— migration `20260813000000_rack_arms_blenders_and_lane_status.sql`
+(applied). `tsc --noEmit` clean; live-verified end-to-end in the same real
+session (blender assignment, product-out toggle, and the circle-slash
+"fully down" rendering all confirmed against actual DB state and a
+screenshot, not just that the UI didn't crash).
+
+- **Continuous lane numbering across racks** (`labels.ts`): a terminal's
+  second rack no longer restarts at lane 1 — e.g. South Rack 1-5, North
+  Rack continues at 6-10. Deliberately **derived, not stored**:
+  `computeLaneOffsets(racks)` orders racks by `created_at` and sums
+  `lane_count` running totals, so it can never drift out of sync with the
+  racks list the way a stored offset column could if a rack's lane count
+  changed later. `TerminalRack.created_at` added to the type (the column
+  already existed in the original migration, just wasn't selected before).
+- **No more letter option, for either lanes or arms.** The original build
+  had `lane_alpha`/`arm_alpha` toggles; both removed from the UI (per
+  explicit "we don't need a letter option for arms," extended to lanes too
+  since a global continuous numbering scheme and per-rack lettering don't
+  compose sensibly). The `lane_alpha`/`arm_alpha` **columns are still in
+  the DB**, just unused going forward — not worth a migration to drop them.
+- **Blender arms — up to 3 products on one arm.** `rack_arms.product_id`
+  (single) → `product_ids uuid[]` (existing single assignments preserved
+  via `array[product_id] where product_id is not null` during the
+  migration, not discarded). `AssignArmsView` in `EditTerminalModal.tsx`
+  changed from a `<select>` to multi-select toggle chips capped at
+  `MAX_PRODUCTS_PER_ARM = 3`.
+- **Structured Lane Down / Arm Down / Product Out, replacing the old
+  free-text `rack_arms.status`.** Per explicit direction ("no need for a
+  text field or clear button or slow fill button" — toggle buttons only):
+  - New `rack_lanes` table (`rack_id, lane_number, is_down`) — lane-level
+    down state didn't exist as a concept before this pass at all.
+  - `rack_arms.is_down` (whole arm) + `rack_arms.out_product_ids` (which
+    of *this arm's own* products are flagged out) replace the dropped
+    `status` column.
+  - `LaneStatusModal.tsx` rebuilt: a "Lane Down" toggle at the top, then
+    per arm an "Arm Down" toggle plus one "{Product} Out" toggle per
+    product currently on that arm.
+- **Layered down/out rendering logic** (`RackLaneGrid.tsx`,
+  reverse-engineered from the actual mockup screenshot, not just the
+  written punch list — the image showed two visually distinct treatments
+  that the text alone didn't fully specify): an arm renders **fully
+  down** (a red circle-slash "no" icon over the whole column) when either
+  `arm.is_down` is true, or *every* product currently on that arm is out
+  for any reason — flagged out on this specific arm
+  (`out_product_ids`), or out **rack-wide** via the bottom STUD button
+  (`rack_product_status.is_out` for that product) — the two signals are
+  read together, not stored redundantly. If an arm has multiple products
+  and at least one is still available, only the individually-out
+  product(s) get a plain strikethrough; the arm itself stays normal. This
+  is why the mockup shows a lone product (Transmix, alone on its arm)
+  circle-slashed while a two-product arm with one product out just shows
+  a strikethrough on that one code — confirmed this reasoning against the
+  screenshot pixel-by-pixel before writing the rendering logic, then
+  reproduced the same visual live by marking one product out on a
+  two-product arm (strikethrough, arm still normal) and then the second
+  (arm flips to full circle-slash).
+- **Product List polish**: added `products.description` to the row
+  (matches the mockup's "(pipeline interface mixture)"-style annotations),
+  wider gap between the API and temp columns, explicit "API —" / "—°F"
+  placeholders instead of blank space when a product has no reading yet
+  (per "always show" — the columns no longer shift depending on data
+  presence), and the whole row dims + strikes through when
+  `rack_product_status.is_out` is true (previously just an "OUT" badge).
+- **`RackProductStatusModal.tsx` (rack-level STUD)**: API/temp fields now
+  prefill from that product's own last reading when selected, instead of
+  starting blank. Done button moved out of the sticky footer into normal
+  content flow (`footer={null}`), per "move the done button up so it
+  stays just under everything."
+- **Sub-tab active color**: `CenteredSubTabs` now gets `accentColor="#ffffff"`
+  on the Terminal tab's rack picker (was defaulting to the component's own
+  cyan) — "sub tab should be white not blue."
+
+**Not done this pass, flagged not guessed**: the mockup's header
+("Marathon / 425 South 20th Street, Tampa, FL") wasn't touched — that's
+the app's shared header chrome across every tab, not Terminal-tab-specific
+content, and no street-address field exists anywhere in the schema
+(`terminals` only has city/state/lat/lon). Read the punch list's itemized
+asks as scoped to the tab's own content area (lane map + product list),
+not a request to add fabricated address data or restructure shared chrome.
+
 - **Tab bar**: `CalculatorLayoutClient.tsx`'s middle tab is now genuinely
   contextual — `tabsFor(role, adminActingAsLead)` swaps in Dispatch (href
   `/calculator/dispatch`, same `id: "planner"` so active-tab detection stays

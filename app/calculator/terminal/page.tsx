@@ -16,7 +16,8 @@ import RackLaneGrid from "./RackLaneGrid";
 import LaneStatusModal from "./LaneStatusModal";
 import RackProductStatusModal from "./RackProductStatusModal";
 import EditTerminalModal from "./EditTerminalModal";
-import type { TerminalRack, RackArm, RackProductStatusRow, ProductLite } from "./types";
+import type { TerminalRack, RackArm, RackLane, RackProductStatusRow, ProductLite } from "./types";
+import { computeLaneOffsets } from "./labels";
 
 function PlaceholderPanel({ title, note }: { title: string; note: string }) {
   return (
@@ -61,6 +62,7 @@ export default function TerminalPage() {
   const [racks, setRacks] = useState<TerminalRack[]>([]);
   const [activeRackId, setActiveRackId] = useState("");
   const [arms, setArms] = useState<RackArm[]>([]);
+  const [lanes, setLanes] = useState<RackLane[]>([]);
   const [rackProducts, setRackProducts] = useState<RackProductStatusRow[]>([]);
   const [productsById, setProductsById] = useState<Record<string, ProductLite>>({});
   const [loading, setLoading] = useState(false);
@@ -86,13 +88,15 @@ export default function TerminalPage() {
   useEffect(() => { loadRacks(); }, [loadRacks]);
 
   const loadRackDetail = useCallback(async () => {
-    if (!activeRackId) { setArms([]); setRackProducts([]); return; }
-    const [{ data: armRows, error: armErr }, { data: prodRows, error: prodErr }] = await Promise.all([
+    if (!activeRackId) { setArms([]); setLanes([]); setRackProducts([]); return; }
+    const [{ data: armRows, error: armErr }, { data: laneRows, error: laneErr }, { data: prodRows, error: prodErr }] = await Promise.all([
       supabase.from("rack_arms").select("*").eq("rack_id", activeRackId),
+      supabase.from("rack_lanes").select("*").eq("rack_id", activeRackId),
       supabase.from("rack_product_status").select("*").eq("rack_id", activeRackId).eq("active", true),
     ]);
-    if (armErr || prodErr) { setError(armErr?.message ?? prodErr?.message ?? "Failed to load rack detail."); return; }
+    if (armErr || laneErr || prodErr) { setError(armErr?.message ?? laneErr?.message ?? prodErr?.message ?? "Failed to load rack detail."); return; }
     setArms((armRows ?? []) as RackArm[]);
+    setLanes((laneRows ?? []) as RackLane[]);
     setRackProducts((prodRows ?? []) as RackProductStatusRow[]);
   }, [activeRackId]);
 
@@ -103,7 +107,7 @@ export default function TerminalPage() {
   useEffect(() => {
     (async () => {
       const { data } = await supabase.from("products")
-        .select("product_id, product_name, display_name, button_code, hex_code, is_dyed");
+        .select("product_id, product_name, display_name, description, button_code, hex_code, is_dyed");
       const map: Record<string, ProductLite> = {};
       for (const p of (data ?? []) as ProductLite[]) map[p.product_id] = p;
       setProductsById(map);
@@ -112,6 +116,12 @@ export default function TerminalPage() {
 
   const activeRack = racks.find((r) => r.rack_id === activeRackId) ?? null;
   const subTabs: CenteredSubTab[] = racks.map((r) => ({ id: r.rack_id, label: r.rack_name }));
+  const laneOffsets = useMemo(() => computeLaneOffsets(racks), [racks]);
+  const rackProductStatusById = useMemo(() => {
+    const m: Record<string, RackProductStatusRow> = {};
+    for (const rp of rackProducts) m[rp.product_id] = rp;
+    return m;
+  }, [rackProducts]);
 
   if (!terminalId) {
     return (
@@ -139,38 +149,48 @@ export default function TerminalPage() {
       {!loading && racks.length > 0 && activeRack && (
         <>
           <div style={{ marginBottom: 14 }}>
-            <CenteredSubTabs tabs={subTabs} activeId={activeRackId} onChange={setActiveRackId} />
+            <CenteredSubTabs tabs={subTabs} activeId={activeRackId} onChange={setActiveRackId} accentColor="#ffffff" />
           </div>
 
-          <div style={{ borderRadius: 14, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", padding: 14, marginBottom: 14 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: "#fff", marginBottom: 10 }}>{activeRack.rack_name} Lane Map</div>
+          <div style={{ marginBottom: 18 }}>
+            <div style={{ fontSize: 15, fontWeight: 800, color: "#fff", marginBottom: 10 }}>{activeRack.rack_name} Lane Map</div>
             <RackLaneGrid
               rack={activeRack}
+              laneOffset={laneOffsets[activeRack.rack_id] ?? 0}
               arms={arms}
+              lanes={lanes}
+              rackProductStatusById={rackProductStatusById}
               productsById={productsById}
               onSelectLane={setSelectedLane}
             />
           </div>
 
-          <div style={{ borderRadius: 14, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", padding: 14, marginBottom: 14 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: "#fff", marginBottom: 10 }}>{activeRack.rack_name} Product List</div>
+          <div style={{ marginBottom: 18 }}>
+            <div style={{ fontSize: 15, fontWeight: 800, color: "#fff", marginBottom: 10 }}>{activeRack.rack_name} Product List</div>
             {rackProducts.length === 0 && (
               <div style={{ fontSize: 12, color: "rgba(255,255,255,0.35)" }}>No products configured for this rack yet.</div>
             )}
-            <div style={{ display: "grid", gap: 6 }}>
+            <div style={{ display: "grid", gap: 8 }}>
               {rackProducts.map((rp) => {
                 const p = productsById[rp.product_id];
                 const name = p ? (p.product_name ?? p.display_name ?? "Product") : rp.product_id;
+                const code = (p?.button_code ?? "").trim();
                 const color = (p?.hex_code ?? "").trim() || "rgba(255,255,255,0.7)";
                 return (
-                  <div key={rp.product_id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 12 }}>
-                    <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <span style={{ width: 8, height: 8, borderRadius: "50%", background: color }} />
-                      <span style={{ color: "#fff", fontWeight: 600 }}>{name}</span>
-                      {rp.is_out && <span style={{ color: "#f87171", fontWeight: 800, fontSize: 10 }}>OUT</span>}
+                  <div key={rp.product_id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 12, gap: 12, opacity: rp.is_out ? 0.5 : 1 }}>
+                    <span style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0 }}>
+                      <span style={{ width: 8, height: 8, borderRadius: "50%", background: color, flexShrink: 0 }} />
+                      <span style={{ color, fontWeight: 800 }}>{code}</span>
+                      <span style={{ color: "#fff", fontWeight: 600, textDecoration: rp.is_out ? "line-through" : "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
+                        {name}
+                      </span>
+                      {p?.description && (
+                        <span style={{ color: "rgba(255,255,255,0.3)", fontSize: 11, whiteSpace: "nowrap" as const }}>({p.description})</span>
+                      )}
                     </span>
-                    <span style={{ color: "rgba(255,255,255,0.4)" }}>
-                      {rp.last_api != null ? `API ${rp.last_api}` : ""} {rp.last_temp_f != null ? `· ${rp.last_temp_f}°F` : ""}
+                    <span style={{ display: "flex", gap: 16, flexShrink: 0, color: "rgba(255,255,255,0.4)" }}>
+                      <span style={{ minWidth: 52, textAlign: "right" as const }}>{rp.last_api != null ? `API ${rp.last_api}` : "API —"}</span>
+                      <span style={{ minWidth: 52, textAlign: "right" as const }}>{rp.last_temp_f != null ? `${rp.last_temp_f}°F` : "—°F"}</span>
                     </span>
                   </div>
                 );
@@ -203,8 +223,10 @@ export default function TerminalPage() {
           open={selectedLane != null}
           onClose={() => setSelectedLane(null)}
           rack={activeRack}
+          laneOffset={laneOffsets[activeRack.rack_id] ?? 0}
           laneNumber={selectedLane}
           arms={arms}
+          laneIsDown={lanes.find((l) => l.lane_number === selectedLane)?.is_down ?? false}
           productsById={productsById}
           authUserId={shell.effectiveUserId}
           onSaved={loadRackDetail}

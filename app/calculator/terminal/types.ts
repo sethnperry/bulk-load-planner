@@ -8,10 +8,17 @@ export type TerminalRack = {
   rack_name: string;
   lane_count: number;
   lane_reversed: boolean;
-  lane_alpha: boolean;
   arm_count: number;
   arm_reversed: boolean;
-  arm_alpha: boolean;
+  created_at: string;
+};
+
+export type RackLane = {
+  rack_id: string;
+  lane_number: number;
+  is_down: boolean;
+  updated_at: string;
+  updated_by: string | null;
 };
 
 export type RackArm = {
@@ -19,8 +26,9 @@ export type RackArm = {
   rack_id: string;
   lane_number: number;
   arm_number: number;
-  product_id: string | null;
-  status: string | null;
+  product_ids: string[];
+  is_down: boolean;
+  out_product_ids: string[];
   status_updated_at: string | null;
   status_updated_by: string | null;
 };
@@ -39,6 +47,7 @@ export type ProductLite = {
   product_id: string;
   product_name: string | null;
   display_name: string | null;
+  description: string | null;
   button_code: string | null;
   hex_code: string | null;
   is_dyed: boolean | null;

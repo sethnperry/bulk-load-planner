@@ -45,16 +45,18 @@ export default function RackProductStatusModal({
   useEffect(() => {
     if (!open) return;
     setProductId(rackProducts[0]?.product_id ?? "");
-    setIsOut(true);
-    setApi("");
-    setTempF("");
     setError(null);
   }, [open, rackProducts]);
 
+  // Prefills from this product's own last reading -- per explicit user
+  // direction, the STUD form should start from the current known state,
+  // not blank, since most updates are a small correction not a fresh entry.
   useEffect(() => {
     if (!open || !productId) return;
     const row = rackProducts.find((r) => r.product_id === productId);
     setIsOut(row?.is_out ?? true);
+    setApi(row?.last_api != null ? String(row.last_api) : "");
+    setTempF(row?.last_temp_f != null ? String(row.last_temp_f) : "");
   }, [productId, open, rackProducts]);
 
   async function save() {
@@ -125,16 +127,7 @@ export default function RackProductStatusModal({
       open={open}
       title="Product Status Update"
       onClose={onClose}
-      footer={
-        <button
-          onClick={save}
-          disabled={saving || !productId}
-          className="w-full rounded-2xl bg-[#111] px-4 py-3 font-semibold text-white border border-white/15 hover:bg-[#151515]"
-          style={{ opacity: saving || !productId ? 0.6 : 1 }}
-        >
-          {saving ? "Saving…" : "Done"}
-        </button>
-      }
+      footer={null}
     >
       <div style={{ display: "grid", gap: 14 }}>
         {error && <div style={{ color: "#f87171", fontSize: 12 }}>{error}</div>}
@@ -201,6 +194,15 @@ export default function RackProductStatusModal({
         <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", lineHeight: 1.5 }}>
           API and temp are optional — supplying both feeds this terminal's fuel-temp prediction the same way completing a real load does.
         </div>
+
+        <button
+          onClick={save}
+          disabled={saving || !productId}
+          className="w-full rounded-2xl bg-[#111] px-4 py-3 font-semibold text-white border border-white/15 hover:bg-[#151515]"
+          style={{ opacity: saving || !productId ? 0.6 : 1 }}
+        >
+          {saving ? "Saving…" : "Done"}
+        </button>
       </div>
     </FullscreenModal>
   );

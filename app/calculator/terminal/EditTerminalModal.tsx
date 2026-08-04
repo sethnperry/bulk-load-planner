@@ -9,7 +9,7 @@
 // own comment), so this is a UI-only gate, same risk profile as equipment
 // CRUD carried before its 2026-08-07 permission-split migration.
 //
-// Three internal views rather than three stacked modals -- simpler than
+// Four internal views rather than four stacked modals -- simpler than
 // juggling overlapping FullscreenModal instances for what's really just
 // content-swapping within one sheet.
 
@@ -17,9 +17,10 @@ import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { FullscreenModal } from "@/lib/ui/FullscreenModal";
 import type { TerminalRack, RackArm, RackProductStatusRow, ProductLite } from "./types";
-import { positionLabel } from "./labels";
+import { laneLabel, armLabel, computeLaneOffsets } from "./labels";
 
 type View = "racks" | "layout" | "products" | "assign";
+const MAX_PRODUCTS_PER_ARM = 3;
 
 const GROUPS: { label: string; test: (name: string) => boolean }[] = [
   { label: "Diesel", test: (n) => /diesel|heating oil|marine gas oil|hvo|\bkerosene\b/i.test(n) },
@@ -97,6 +98,7 @@ export default function EditTerminalModal({
   }, [open, terminalId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const selectedRack = racks.find((r) => r.rack_id === selectedRackId) ?? null;
+  const laneOffsets = useMemo(() => computeLaneOffsets(racks), [racks]);
 
   async function addRack() {
     const name = newRackName.trim();
@@ -174,6 +176,7 @@ export default function EditTerminalModal({
       {view === "assign" && selectedRack && (
         <AssignArmsView
           rack={selectedRack}
+          laneOffset={laneOffsets[selectedRack.rack_id] ?? 0}
           onChanged={onChanged}
         />
       )}
@@ -290,10 +293,8 @@ function RacksView({
 function LayoutView({ rack, onSaved }: { rack: TerminalRack; onSaved: () => Promise<void> }) {
   const [laneCount, setLaneCount] = useState(rack.lane_count);
   const [laneReversed, setLaneReversed] = useState(rack.lane_reversed);
-  const [laneAlpha, setLaneAlpha] = useState(rack.lane_alpha);
   const [armCount, setArmCount] = useState(rack.arm_count);
   const [armReversed, setArmReversed] = useState(rack.arm_reversed);
-  const [armAlpha, setArmAlpha] = useState(rack.arm_alpha);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -302,8 +303,8 @@ function LayoutView({ rack, onSaved }: { rack: TerminalRack; onSaved: () => Prom
     setError(null);
 
     const { error: updErr } = await supabase.from("terminal_racks").update({
-      lane_count: laneCount, lane_reversed: laneReversed, lane_alpha: laneAlpha,
-      arm_count: armCount, arm_reversed: armReversed, arm_alpha: armAlpha,
+      lane_count: laneCount, lane_reversed: laneReversed,
+      arm_count: armCount, arm_reversed: armReversed,
     }).eq("rack_id", rack.rack_id);
     if (updErr) { setError(updErr.message); setSaving(false); return; }
 
@@ -340,6 +341,9 @@ function LayoutView({ rack, onSaved }: { rack: TerminalRack; onSaved: () => Prom
 
       <div style={{ borderRadius: 10, border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)", padding: 12, display: "grid", gap: 4 }}>
         <div style={{ fontSize: 12, fontWeight: 800, color: "rgba(255,255,255,0.4)", textTransform: "uppercase" as const, marginBottom: 4 }}>Lanes</div>
+        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginBottom: 4 }}>
+          Lane numbers continue across every rack at this terminal (e.g. South Rack 1-5, North Rack 6-10) — never restart at 1.
+        </div>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 0" }}>
           <span style={{ fontSize: 13, color: "rgba(255,255,255,0.7)" }}>How many lanes?</span>
           <input
@@ -348,8 +352,7 @@ function LayoutView({ rack, onSaved }: { rack: TerminalRack; onSaved: () => Prom
             style={{ width: 64, padding: "6px 8px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.03)", color: "white", fontSize: 13, textAlign: "center" as const }}
           />
         </div>
-        <ToggleRow label="Reverse order (e.g. 5-1 instead of 1-5)" value={laneReversed} onChange={setLaneReversed} />
-        <ToggleRow label="Letter lanes (A, B, C…) instead of numbers" value={laneAlpha} onChange={setLaneAlpha} />
+        <ToggleRow label="Reverse order within this rack" value={laneReversed} onChange={setLaneReversed} />
       </div>
 
       <div style={{ borderRadius: 10, border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)", padding: 12, display: "grid", gap: 4 }}>
@@ -363,7 +366,6 @@ function LayoutView({ rack, onSaved }: { rack: TerminalRack; onSaved: () => Prom
           />
         </div>
         <ToggleRow label="Reverse order (e.g. 6-1 instead of 1-6)" value={armReversed} onChange={setArmReversed} />
-        <ToggleRow label="Letter arms (A, B, C…) instead of numbers" value={armAlpha} onChange={setArmAlpha} />
       </div>
 
       <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", lineHeight: 1.5 }}>
@@ -487,12 +489,11 @@ function ProductsView({ rack, onChanged }: { rack: TerminalRack; onChanged: () =
   );
 }
 
-// Assigns a product to each physical (lane, arm) position -- the piece the
-// original build was missing: the rack's product list (ProductsView above)
-// and the layout config (LayoutView above) never actually connected a
-// product to a specific arm, so the Lane Map always rendered every cell
-// blank. Found live-testing with a real account, not caught by typecheck.
-function AssignArmsView({ rack, onChanged }: { rack: TerminalRack; onChanged: () => void }) {
+// Assigns up to MAX_PRODUCTS_PER_ARM products to each physical (lane, arm)
+// position -- some arms are blenders and carry more than one product at
+// once (per explicit user direction + mockup, e.g. an arm showing both
+// "D2" and "DYED"). Multi-select checkboxes, not a single dropdown.
+function AssignArmsView({ rack, laneOffset, onChanged }: { rack: TerminalRack; laneOffset: number; onChanged: () => void }) {
   const [arms, setArms] = useState<RackArm[]>([]);
   const [rackProducts, setRackProducts] = useState<RackProductStatusRow[]>([]);
   const [productsById, setProductsById] = useState<Record<string, ProductLite>>({});
@@ -506,7 +507,7 @@ function AssignArmsView({ rack, onChanged }: { rack: TerminalRack; onChanged: ()
     const [{ data: armRows, error: armErr }, { data: prodRows, error: prodErr }, { data: allProducts }] = await Promise.all([
       supabase.from("rack_arms").select("*").eq("rack_id", rack.rack_id),
       supabase.from("rack_product_status").select("*").eq("rack_id", rack.rack_id).eq("active", true),
-      supabase.from("products").select("product_id, product_name, display_name, button_code, hex_code, is_dyed"),
+      supabase.from("products").select("product_id, product_name, display_name, description, button_code, hex_code, is_dyed"),
     ]);
     if (armErr || prodErr) { setError(armErr?.message ?? prodErr?.message ?? "Failed to load."); setLoading(false); return; }
     setArms(((armRows ?? []) as RackArm[]).sort((a, b) => a.lane_number - b.lane_number || a.arm_number - b.arm_number));
@@ -519,12 +520,15 @@ function AssignArmsView({ rack, onChanged }: { rack: TerminalRack; onChanged: ()
 
   useEffect(() => { load(); }, [rack.rack_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function assign(armId: string, productId: string) {
-    setSavingKey(armId);
-    const { error: err } = await supabase.from("rack_arms").update({ product_id: productId || null }).eq("arm_id", armId);
+  async function toggleProduct(arm: RackArm, productId: string) {
+    const has = arm.product_ids.includes(productId);
+    if (!has && arm.product_ids.length >= MAX_PRODUCTS_PER_ARM) return;
+    const nextIds = has ? arm.product_ids.filter((p) => p !== productId) : [...arm.product_ids, productId];
+    setSavingKey(arm.arm_id);
+    const { error: err } = await supabase.from("rack_arms").update({ product_ids: nextIds }).eq("arm_id", arm.arm_id);
     setSavingKey(null);
     if (err) { setError(err.message); return; }
-    setArms((prev) => prev.map((a) => (a.arm_id === armId ? { ...a, product_id: productId || null } : a)));
+    setArms((prev) => prev.map((a) => (a.arm_id === arm.arm_id ? { ...a, product_ids: nextIds } : a)));
     onChanged();
   }
 
@@ -548,7 +552,7 @@ function AssignArmsView({ rack, onChanged }: { rack: TerminalRack; onChanged: ()
   return (
     <div style={{ display: "grid", gap: 14 }}>
       <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)" }}>
-        Which product each arm currently carries at <span style={{ color: "rgba(255,255,255,0.75)", fontWeight: 700 }}>{rack.rack_name}</span>.
+        Which product(s) each arm currently carries at <span style={{ color: "rgba(255,255,255,0.75)", fontWeight: 700 }}>{rack.rack_name}</span> — up to {MAX_PRODUCTS_PER_ARM} for blender arms.
       </div>
       {error && <div style={{ color: "#f87171", fontSize: 12 }}>{error}</div>}
       {loading && <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 13 }}>Loading…</div>}
@@ -556,31 +560,45 @@ function AssignArmsView({ rack, onChanged }: { rack: TerminalRack; onChanged: ()
       {!loading && lanes.map(([laneNum, laneArms]) => (
         <div key={laneNum} style={{ borderRadius: 10, border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)", padding: 10, display: "grid", gap: 8 }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>
-            Lane {positionLabel(laneNum, rack.lane_count, rack.lane_reversed, rack.lane_alpha)}
+            Lane {laneLabel(laneNum, rack, laneOffset)}
           </div>
-          {laneArms.map((a) => (
-            <div key={a.arm_id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-              <span style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", flexShrink: 0, width: 60 }}>
-                Arm {positionLabel(a.arm_number, rack.arm_count, rack.arm_reversed, rack.arm_alpha)}
-              </span>
-              <select
-                value={a.product_id ?? ""}
-                onChange={(e) => assign(a.arm_id, e.target.value)}
-                disabled={savingKey === a.arm_id}
-                style={{ flex: 1, padding: "6px 8px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.12)", background: "#111", color: "white", fontSize: 12 }}
-              >
-                <option value="">— Unassigned —</option>
-                {rackProducts.map((rp) => {
-                  const p = productsById[rp.product_id];
-                  return (
-                    <option key={rp.product_id} value={rp.product_id}>
-                      {p ? (p.product_name ?? p.display_name ?? "Product") : rp.product_id}
-                    </option>
-                  );
-                })}
-              </select>
-            </div>
-          ))}
+          {laneArms.map((a) => {
+            const atCap = a.product_ids.length >= MAX_PRODUCTS_PER_ARM;
+            return (
+              <div key={a.arm_id} style={{ display: "grid", gap: 6 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <span style={{ fontSize: 12, color: "rgba(255,255,255,0.5)" }}>Arm {armLabel(a.arm_number, rack)}</span>
+                  {atCap && <span style={{ fontSize: 10, color: "rgba(255,255,255,0.3)" }}>Max {MAX_PRODUCTS_PER_ARM} reached</span>}
+                </div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" as const }}>
+                  {rackProducts.map((rp) => {
+                    const p = productsById[rp.product_id];
+                    const code = (p?.button_code ?? "").trim() || "PRD";
+                    const color = (p?.hex_code ?? "").trim() || "rgba(255,255,255,0.85)";
+                    const active = a.product_ids.includes(rp.product_id);
+                    const disabled = savingKey === a.arm_id || (!active && atCap);
+                    return (
+                      <button
+                        key={rp.product_id}
+                        type="button"
+                        disabled={disabled}
+                        onClick={() => toggleProduct(a, rp.product_id)}
+                        style={{
+                          fontSize: 11, fontWeight: 800, padding: "6px 10px", borderRadius: 999, cursor: disabled ? "default" : "pointer",
+                          border: `1px solid ${active ? color : "rgba(255,255,255,0.15)"}`,
+                          background: active ? `${color}26` : "rgba(255,255,255,0.04)",
+                          color: active ? color : "rgba(255,255,255,0.5)",
+                          opacity: disabled && !active ? 0.4 : 1,
+                        }}
+                      >
+                        {code}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
         </div>
       ))}
     </div>

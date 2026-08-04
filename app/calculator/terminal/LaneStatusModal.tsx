@@ -1,27 +1,44 @@
 "use client";
 // app/calculator/terminal/LaneStatusModal.tsx
 //
-// "Lane N — Status Update" -- the per-arm STUD action. Open to every role
-// (crowdsourced by design for this first pass, per CLAUDE.md's Terminal Tier
-// spec). Each arm gets a free-text status field (null/blank = ok) rather than
-// a rigid enum -- the canned list of common values isn't fully settled yet,
-// so a couple of quick-fill chips cover the known cases without locking the
-// column down.
+// "Lane N — Status Update" -- the per-lane STUD action, open to every role.
+// Redesigned per explicit user direction (2026-08-04, working from a real
+// mockup screenshot): no text fields or quick-chip freeform notes -- just
+// toggle buttons for Lane Down (the whole lane), Arm Down (one arm,
+// whatever products are on it), and Product Out (one specific product on
+// an arm that carries more than one, e.g. a blender).
 
 import React, { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { FullscreenModal } from "@/lib/ui/FullscreenModal";
-import type { TerminalRack, RackArm, ProductLite } from "./types";
-import { positionLabel } from "./labels";
+import type { TerminalRack, RackArm, RackLane, ProductLite } from "./types";
+import { laneLabel, armLabel } from "./labels";
 
-const QUICK_STATUSES = ["Arm Down", "No Premium", "Slow Fill"];
+function ToggleChip({ label, active, color = "#ef4444", onClick }: { label: string; active: boolean; color?: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        fontSize: 12, fontWeight: 800, padding: "6px 12px", borderRadius: 999, cursor: "pointer",
+        border: `1px solid ${active ? color : "rgba(255,255,255,0.15)"}`,
+        background: active ? `${color}26` : "rgba(255,255,255,0.04)",
+        color: active ? color : "rgba(255,255,255,0.6)",
+      }}
+    >
+      {label}
+    </button>
+  );
+}
 
 export default function LaneStatusModal({
   open,
   onClose,
   rack,
+  laneOffset,
   laneNumber,
   arms,
+  laneIsDown,
   productsById,
   authUserId,
   onSaved,
@@ -29,13 +46,17 @@ export default function LaneStatusModal({
   open: boolean;
   onClose: () => void;
   rack: TerminalRack;
+  laneOffset: number;
   laneNumber: number;
   arms: RackArm[];
+  laneIsDown: boolean;
   productsById: Record<string, ProductLite>;
   authUserId: string;
   onSaved: () => void;
 }) {
-  const [drafts, setDrafts] = useState<Record<number, string>>({});
+  const [laneDownDraft, setLaneDownDraft] = useState(laneIsDown);
+  const [armDownDraft, setArmDownDraft] = useState<Record<string, boolean>>({});
+  const [outDraft, setOutDraft] = useState<Record<string, string[]>>({});
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -46,41 +67,54 @@ export default function LaneStatusModal({
 
   useEffect(() => {
     if (!open) return;
-    const next: Record<number, string> = {};
-    for (const a of laneArms) next[a.arm_number] = a.status ?? "";
-    setDrafts(next);
+    setLaneDownDraft(laneIsDown);
+    const downs: Record<string, boolean> = {};
+    const outs: Record<string, string[]> = {};
+    for (const a of laneArms) { downs[a.arm_id] = a.is_down; outs[a.arm_id] = [...a.out_product_ids]; }
+    setArmDownDraft(downs);
+    setOutDraft(outs);
     setError(null);
   }, [open, laneNumber]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function toggleProductOut(armId: string, productId: string) {
+    setOutDraft((prev) => {
+      const cur = prev[armId] ?? [];
+      const next = cur.includes(productId) ? cur.filter((p) => p !== productId) : [...cur, productId];
+      return { ...prev, [armId]: next };
+    });
+  }
 
   async function save() {
     setSaving(true);
     setError(null);
     const now = new Date().toISOString();
-    const changed = laneArms.filter((a) => (drafts[a.arm_number] ?? "") !== (a.status ?? ""));
-    for (const a of changed) {
-      const value = (drafts[a.arm_number] ?? "").trim();
-      const { error: err } = await supabase
-        .from("rack_arms")
-        .update({ status: value || null, status_updated_at: now, status_updated_by: authUserId || null })
-        .eq("arm_id", a.arm_id);
-      if (err) {
-        setError(err.message);
-        setSaving(false);
-        return;
-      }
+
+    const { error: laneErr } = await supabase.from("rack_lanes").upsert(
+      { rack_id: rack.rack_id, lane_number: laneNumber, is_down: laneDownDraft, updated_at: now, updated_by: authUserId || null },
+      { onConflict: "rack_id,lane_number" }
+    );
+    if (laneErr) { setError(laneErr.message); setSaving(false); return; }
+
+    for (const a of laneArms) {
+      const nextDown = armDownDraft[a.arm_id] ?? a.is_down;
+      const nextOut = outDraft[a.arm_id] ?? a.out_product_ids;
+      const changed = nextDown !== a.is_down || JSON.stringify([...nextOut].sort()) !== JSON.stringify([...a.out_product_ids].sort());
+      if (!changed) continue;
+      const { error: armErr } = await supabase.from("rack_arms").update({
+        is_down: nextDown, out_product_ids: nextOut, status_updated_at: now, status_updated_by: authUserId || null,
+      }).eq("arm_id", a.arm_id);
+      if (armErr) { setError(armErr.message); setSaving(false); return; }
     }
+
     setSaving(false);
     onSaved();
     onClose();
   }
 
-  const armLabel = (armNumber: number) => positionLabel(armNumber, rack.arm_count, rack.arm_reversed, rack.arm_alpha);
-  const laneLabel = positionLabel(laneNumber, rack.lane_count, rack.lane_reversed, rack.lane_alpha);
-
   return (
     <FullscreenModal
       open={open}
-      title={`Lane ${laneLabel} — Status Update`}
+      title={`Lane ${laneLabel(laneNumber, rack, laneOffset)} — Status Update`}
       onClose={onClose}
       footer={
         <button
@@ -93,59 +127,36 @@ export default function LaneStatusModal({
         </button>
       }
     >
-      <div style={{ display: "grid", gap: 10 }}>
+      <div style={{ display: "grid", gap: 14 }}>
         {error && <div style={{ color: "#f87171", fontSize: 12 }}>{error}</div>}
-        {laneArms.map((a) => {
-          const product = a.product_id ? productsById[a.product_id] : null;
-          const value = drafts[a.arm_number] ?? "";
-          return (
-            <div key={a.arm_id} style={{ borderRadius: 10, border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)", padding: 10, display: "grid", gap: 8 }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <span style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>Arm {armLabel(a.arm_number)}</span>
-                <span style={{ fontSize: 12, color: "rgba(255,255,255,0.45)" }}>
-                  {product ? (product.product_name ?? product.display_name ?? "Product") : "Unassigned"}
-                </span>
-              </div>
-              <input
-                type="text"
-                value={value}
-                onChange={(e) => setDrafts((prev) => ({ ...prev, [a.arm_number]: e.target.value }))}
-                placeholder="— Arm Down"
-                style={{
-                  width: "100%", boxSizing: "border-box" as const, padding: "8px 10px", borderRadius: 6,
-                  border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.03)",
-                  color: "white", fontSize: 13,
-                }}
-              />
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" as const }}>
-                {QUICK_STATUSES.map((s) => (
-                  <button
-                    key={s}
-                    type="button"
-                    onClick={() => setDrafts((prev) => ({ ...prev, [a.arm_number]: s }))}
-                    style={{
-                      fontSize: 11, fontWeight: 700, padding: "4px 8px", borderRadius: 999,
-                      border: "1px solid rgba(255,255,255,0.15)",
-                      background: value === s ? "rgba(239,68,68,0.18)" : "rgba(255,255,255,0.04)",
-                      color: value === s ? "#f87171" : "rgba(255,255,255,0.6)", cursor: "pointer",
-                    }}
-                  >
-                    {s}
-                  </button>
-                ))}
-                {value && (
-                  <button
-                    type="button"
-                    onClick={() => setDrafts((prev) => ({ ...prev, [a.arm_number]: "" }))}
-                    style={{ fontSize: 11, fontWeight: 700, padding: "4px 8px", borderRadius: 999, border: "1px solid rgba(255,255,255,0.10)", background: "transparent", color: "rgba(255,255,255,0.35)", cursor: "pointer" }}
-                  >
-                    Clear
-                  </button>
-                )}
-              </div>
+
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderRadius: 10, border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)", padding: 12 }}>
+          <span style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>Whole lane</span>
+          <ToggleChip label="Lane Down" active={laneDownDraft} onClick={() => setLaneDownDraft((v) => !v)} />
+        </div>
+
+        {laneArms.map((a) => (
+          <div key={a.arm_id} style={{ borderRadius: 10, border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)", padding: 10, display: "grid", gap: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>Arm {armLabel(a.arm_number, rack)}</span>
+              <ToggleChip label="Arm Down" active={armDownDraft[a.arm_id] ?? a.is_down} onClick={() => setArmDownDraft((prev) => ({ ...prev, [a.arm_id]: !(prev[a.arm_id] ?? a.is_down) }))} />
             </div>
-          );
-        })}
+            {a.product_ids.length === 0 ? (
+              <div style={{ fontSize: 12, color: "rgba(255,255,255,0.3)" }}>Unassigned</div>
+            ) : (
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" as const }}>
+                {a.product_ids.map((pid) => {
+                  const p = productsById[pid];
+                  const name = p ? (p.product_name ?? p.display_name ?? "Product") : pid;
+                  const active = (outDraft[a.arm_id] ?? a.out_product_ids).includes(pid);
+                  return (
+                    <ToggleChip key={pid} label={`${name} Out`} active={active} onClick={() => toggleProductOut(a.arm_id, pid)} />
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        ))}
       </div>
     </FullscreenModal>
   );
