@@ -12,6 +12,14 @@
 // Four internal views rather than four stacked modals -- simpler than
 // juggling overlapping FullscreenModal instances for what's really just
 // content-swapping within one sheet.
+//
+// 2026-08-05 rework (per a real mockup + written spec): "Assign Arm
+// Products" is no longer its own top-level rack button/view -- product
+// assignment moved inline into the Lane/Arm Layout flow itself (expand a
+// lane card -> "Lane N -- Arm / Products"). Lane/arm layout editing also
+// gained bulk tools (add/remove lane count, alphabetical/numerical
+// relabel, reverse order) on top of the existing per-row manual rename --
+// see LayoutView's own header comment for the full reasoning.
 
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
@@ -19,7 +27,7 @@ import { FullscreenModal } from "@/lib/ui/FullscreenModal";
 import type { TerminalRack, RackLane, RackArm, RackProductStatusRow, ProductLite } from "./types";
 import { displayLabel } from "./labels";
 
-type View = "racks" | "layout" | "products" | "assign";
+type View = "racks" | "layout" | "products" | "laneArms";
 const MAX_PRODUCTS_PER_ARM = 3;
 
 const GROUPS: { label: string; test: (name: string) => boolean }[] = [
@@ -33,6 +41,19 @@ const GROUPS: { label: string; test: (name: string) => boolean }[] = [
 function groupFor(name: string): string {
   for (const g of GROUPS) if (g.test(name)) return g.label;
   return "Other / Off-Spec";
+}
+
+// 0-indexed -> A, B, ... Z, AA, AB... (won't realistically be needed past
+// single letters for lane/arm counts, but doesn't break if it is).
+function letterFor(index: number): string {
+  let n = index + 1;
+  let s = "";
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    s = String.fromCharCode(65 + rem) + s;
+    n = Math.floor((n - 1) / 26);
+  }
+  return s;
 }
 
 // Tap-to-select-all (mobile-friendly replace, not edit-in-place -- same
@@ -71,6 +92,8 @@ export default function EditTerminalModal({
   const [view, setView] = useState<View>("racks");
   const [racks, setRacks] = useState<TerminalRack[]>([]);
   const [selectedRackId, setSelectedRackId] = useState<string>("");
+  const [selectedLaneNumber, setSelectedLaneNumber] = useState<number | null>(null);
+  const [selectedLaneLabel, setSelectedLaneLabel] = useState<string>("");
   const [newRackName, setNewRackName] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -154,15 +177,19 @@ export default function EditTerminalModal({
     onChanged();
   }
 
-  const titleFor: Record<View, string> = {
-    racks: "Edit Terminal", layout: "Lane / Arm Layout", products: "Rack Product List", assign: "Assign Arm Products",
-  };
+  const title = view === "laneArms"
+    ? `Lane ${selectedLaneLabel} — Arm / Products`
+    : ({ racks: "Edit Terminal", layout: "Lane / Arm Layout", products: "Rack Product List" } as Record<string, string>)[view];
 
   return (
     <FullscreenModal
       open={open}
-      title={titleFor[view]}
-      onClose={() => { if (view === "racks") onClose(); else setView("racks"); }}
+      title={title}
+      onClose={() => {
+        if (view === "racks") onClose();
+        else if (view === "laneArms") setView("layout");
+        else setView("racks");
+      }}
       footer={view === "racks" ? undefined : null}
     >
       {view === "racks" && (
@@ -177,7 +204,6 @@ export default function EditTerminalModal({
           saving={saving}
           onEditLayout={(id) => { setSelectedRackId(id); setView("layout"); }}
           onEditProducts={(id) => { setSelectedRackId(id); setView("products"); }}
-          onAssignArms={(id) => { setSelectedRackId(id); setView("assign"); }}
           onRenamed={loadRacks}
           onDeleteRack={deleteRack}
           renewalDays={renewalDays}
@@ -186,7 +212,15 @@ export default function EditTerminalModal({
       )}
 
       {view === "layout" && selectedRack && (
-        <LayoutView rack={selectedRack} onChanged={onChanged} />
+        <LayoutView
+          rack={selectedRack}
+          onChanged={onChanged}
+          onExpandLane={(laneNumber, laneLabel) => {
+            setSelectedLaneNumber(laneNumber);
+            setSelectedLaneLabel(laneLabel);
+            setView("laneArms");
+          }}
+        />
       )}
 
       {view === "products" && selectedRack && (
@@ -196,8 +230,12 @@ export default function EditTerminalModal({
         />
       )}
 
-      {view === "assign" && selectedRack && (
-        <AssignArmsView rack={selectedRack} onChanged={onChanged} />
+      {view === "laneArms" && selectedRack && selectedLaneNumber != null && (
+        <LaneArmProductsView
+          rack={selectedRack}
+          laneNumber={selectedLaneNumber}
+          onChanged={onChanged}
+        />
       )}
     </FullscreenModal>
   );
@@ -205,7 +243,7 @@ export default function EditTerminalModal({
 
 function RacksView({
   terminalName, racks, loading, error, newRackName, setNewRackName, onAddRack, saving,
-  onEditLayout, onEditProducts, onAssignArms, onRenamed, onDeleteRack,
+  onEditLayout, onEditProducts, onRenamed, onDeleteRack,
   renewalDays, onSaveRenewalDays,
 }: {
   terminalName?: string;
@@ -218,7 +256,6 @@ function RacksView({
   saving: boolean;
   onEditLayout: (rackId: string) => void;
   onEditProducts: (rackId: string) => void;
-  onAssignArms: (rackId: string) => void;
   onRenamed: () => void;
   onDeleteRack: (rackId: string) => void;
   renewalDays: number | null;
@@ -318,13 +355,6 @@ function RacksView({
               Edit Lane/Arm Layout
             </button>
           </div>
-          <button
-            type="button"
-            onClick={() => onAssignArms(r.rack_id)}
-            style={{ width: "100%", fontSize: 12, fontWeight: 700, padding: "8px 10px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.04)", color: "#fff", cursor: "pointer" }}
-          >
-            Assign Arm Products
-          </button>
 
           {confirmDeleteId === r.rack_id ? (
             <div style={{ borderRadius: 8, border: "1px solid rgba(239,68,68,0.3)", background: "rgba(239,68,68,0.08)", padding: 10, display: "grid", gap: 8 }}>
@@ -375,12 +405,43 @@ function RacksView({
   );
 }
 
-// Live-editing grid: every add/remove/rename saves immediately, no
-// separate "Save Layout" step. Replaces the old count+reversed model --
-// lanes can have different numbers of arms now, and every label is
-// directly typed by the admin (tap to select-all, retype, done), not
-// computed from a numbering scheme.
-function LayoutView({ rack, onChanged }: { rack: TerminalRack; onChanged: () => void }) {
+// ── Lane/Arm Layout ─────────────────────────────────────────────────────────
+//
+// 2026-08-05 rework, per a real mockup + written spec. Every lane/arm still
+// carries a real, freely-editable text label (unchanged since the 2026-08-04
+// explicit-labels migration) -- what's new here is a set of BULK actions on
+// top of that, so an admin doesn't have to retype every lane/arm by hand to
+// match how a facility's signage actually runs:
+//   - Add/remove lanes from the end (+/- at the top, replacing the old
+//     bottom "+ Add Lane" button -- removal now targets the highest
+//     lane_number, there's no per-row delete anymore, matching the mockup).
+//   - Alphabetical/Numerical: relabels EVERY lane right now to a fresh
+//     sequential letter or number series, in current top-to-bottom
+//     (lane_number ascending) order. The button always shows the OPPOSITE
+//     of the detected current mode ("ABC"/Alphabetical when numeric or
+//     custom-labeled, "123"/Numerical once already exactly alphabetized) --
+//     it describes what tapping it will DO, not the current state.
+//   - Reverse Order: reverses whatever label sequence currently exists
+//     across the lanes, top-to-bottom. Deliberately generic (just swaps
+//     label CONTENT across the same physical rows, never reassigns
+//     lane_number itself) so it's well-defined for numeric, alphabetic, or
+//     custom text alike, and product/arm assignments never move.
+//   - Per-lane: a live arm-count field (type a number, arms are added/
+//     removed from the end to match) and a per-lane reverse-arm-order
+//     toggle -- same generic reverse, scoped to that lane's own arms.
+//     Real-world reasoning from the user: a driver can load the wrong
+//     compartment if the arm order here doesn't match which way the
+//     physical arms actually run at the terminal.
+//   - Expanding a lane card (chevron) now opens product assignment inline
+//     (LaneArmProductsView below) -- "Assign Arm Products" is no longer a
+//     separate top-level rack button.
+function LayoutView({
+  rack, onChanged, onExpandLane,
+}: {
+  rack: TerminalRack;
+  onChanged: () => void;
+  onExpandLane: (laneNumber: number, laneLabel: string) => void;
+}) {
   const [lanes, setLanes] = useState<RackLane[]>([]);
   const [arms, setArms] = useState<RackArm[]>([]);
   const [loading, setLoading] = useState(false);
@@ -402,7 +463,14 @@ function LayoutView({ rack, onChanged }: { rack: TerminalRack; onChanged: () => 
 
   useEffect(() => { load(); }, [rack.rack_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function addLane() {
+  const sortedLanes = useMemo(() => [...lanes].sort((a, b) => a.lane_number - b.lane_number), [lanes]);
+
+  const isAlphabetized = useMemo(() => {
+    if (sortedLanes.length === 0) return false;
+    return sortedLanes.every((l, i) => displayLabel(l.label, l.lane_number) === letterFor(i));
+  }, [sortedLanes]);
+
+  async function addLaneAtEnd() {
     setBusy(true);
     setError(null);
     const nextNum = lanes.length ? Math.max(...lanes.map((l) => l.lane_number)) + 1 : 1;
@@ -415,7 +483,7 @@ function LayoutView({ rack, onChanged }: { rack: TerminalRack; onChanged: () => 
     onChanged();
   }
 
-  async function removeLane(laneNumber: number) {
+  async function removeLaneByNumber(laneNumber: number) {
     setBusy(true);
     setError(null);
     await supabase.from("rack_arms").delete().eq("rack_id", rack.rack_id).eq("lane_number", laneNumber);
@@ -426,94 +494,206 @@ function LayoutView({ rack, onChanged }: { rack: TerminalRack; onChanged: () => 
     onChanged();
   }
 
+  async function removeLastLane() {
+    if (sortedLanes.length === 0) return;
+    await removeLaneByNumber(sortedLanes[sortedLanes.length - 1].lane_number);
+  }
+
   async function renameLane(laneNumber: number, label: string) {
     await supabase.from("rack_lanes").update({ label }).eq("rack_id", rack.rack_id).eq("lane_number", laneNumber);
     setLanes((prev) => prev.map((l) => (l.lane_number === laneNumber ? { ...l, label } : l)));
     onChanged();
   }
 
-  async function addArm(laneNumber: number) {
+  async function toggleLaneLabelMode() {
+    if (sortedLanes.length === 0) return;
     setBusy(true);
     setError(null);
-    const laneArms = arms.filter((a) => a.lane_number === laneNumber);
-    const nextNum = laneArms.length ? Math.max(...laneArms.map((a) => a.arm_number)) + 1 : 1;
-    const { error: err } = await supabase.from("rack_arms").insert({
-      rack_id: rack.rack_id, lane_number: laneNumber, arm_number: nextNum, label: String(laneArms.length + 1),
-    });
+    const results = await Promise.all(sortedLanes.map((l, i) => {
+      const label = isAlphabetized ? String(i + 1) : letterFor(i);
+      return supabase.from("rack_lanes").update({ label }).eq("rack_id", rack.rack_id).eq("lane_number", l.lane_number);
+    }));
     setBusy(false);
+    const err = results.find((r) => r.error)?.error;
     if (err) { setError(err.message); return; }
     await load();
     onChanged();
   }
 
-  async function removeArm(armId: string) {
+  async function reverseLaneOrder() {
+    if (sortedLanes.length < 2) return;
     setBusy(true);
     setError(null);
-    const { error: err } = await supabase.from("rack_arms").delete().eq("arm_id", armId);
+    const labels = sortedLanes.map((l) => displayLabel(l.label, l.lane_number));
+    const reversed = [...labels].reverse();
+    const results = await Promise.all(sortedLanes.map((l, i) =>
+      supabase.from("rack_lanes").update({ label: reversed[i] }).eq("rack_id", rack.rack_id).eq("lane_number", l.lane_number)
+    ));
     setBusy(false);
+    const err = results.find((r) => r.error)?.error;
     if (err) { setError(err.message); return; }
     await load();
     onChanged();
   }
 
-  async function renameArm(armId: string, label: string) {
-    await supabase.from("rack_arms").update({ label }).eq("arm_id", armId);
-    setArms((prev) => prev.map((a) => (a.arm_id === armId ? { ...a, label } : a)));
+  async function setArmCount(laneNumber: number, newCount: number) {
+    const laneArms = arms.filter((a) => a.lane_number === laneNumber).sort((a, b) => a.arm_number - b.arm_number);
+    if (newCount === laneArms.length) return;
+    setBusy(true);
+    setError(null);
+    if (newCount > laneArms.length) {
+      const toAdd = [];
+      for (let i = laneArms.length; i < newCount; i++) {
+        toAdd.push({ rack_id: rack.rack_id, lane_number: laneNumber, arm_number: i + 1, label: String(i + 1) });
+      }
+      const { error: err } = await supabase.from("rack_arms").insert(toAdd);
+      setBusy(false);
+      if (err) { setError(err.message); return; }
+    } else {
+      const toRemove = laneArms.slice(newCount);
+      const { error: err } = await supabase.from("rack_arms").delete().in("arm_id", toRemove.map((a) => a.arm_id));
+      setBusy(false);
+      if (err) { setError(err.message); return; }
+    }
+    await load();
     onChanged();
   }
+
+  async function reverseArmOrder(laneNumber: number) {
+    const laneArms = arms.filter((a) => a.lane_number === laneNumber).sort((a, b) => a.arm_number - b.arm_number);
+    if (laneArms.length < 2) return;
+    setBusy(true);
+    setError(null);
+    const labels = laneArms.map((a) => displayLabel(a.label, a.arm_number));
+    const reversed = [...labels].reverse();
+    const results = await Promise.all(laneArms.map((a, i) =>
+      supabase.from("rack_arms").update({ label: reversed[i] }).eq("arm_id", a.arm_id)
+    ));
+    setBusy(false);
+    const err = results.find((r) => r.error)?.error;
+    if (err) { setError(err.message); return; }
+    await load();
+    onChanged();
+  }
+
+  const iconBtnStyle: React.CSSProperties = {
+    width: 32, height: 32, borderRadius: 8, border: "1px solid rgba(255,255,255,0.15)",
+    background: "rgba(255,255,255,0.05)", color: "#fff", fontSize: 16, fontWeight: 800,
+    cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+  };
 
   return (
-    <div style={{ display: "grid", gap: 14 }}>
-      <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", lineHeight: 1.5 }}>
-        Each lane can have a different number of arms. Tap any label to rename it — the number shown is just a starting suggestion, type whatever the facility actually uses.
-      </div>
+    <div style={{ display: "grid", gap: 16 }}>
       {error && <div style={{ color: "#f87171", fontSize: 12 }}>{error}</div>}
       {loading && <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 13 }}>Loading…</div>}
 
-      {!loading && lanes.map((lane) => {
-        const laneArms = arms.filter((a) => a.lane_number === lane.lane_number).sort((a, b) => a.arm_number - b.arm_number);
-        return (
-          <div key={lane.lane_number} style={{ borderRadius: 10, border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)", padding: 10, display: "grid", gap: 8 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", flexShrink: 0 }}>Lane</span>
-              <LabelInput value={displayLabel(lane.label, lane.lane_number)} onSave={(v) => renameLane(lane.lane_number, v)} />
-              <button
-                type="button" onClick={() => removeLane(lane.lane_number)} disabled={busy}
-                style={{ marginLeft: "auto", fontSize: 18, lineHeight: 1, color: "#f87171", background: "none", border: "none", cursor: "pointer", padding: "0 6px" }}
-                aria-label="Remove lane"
-              >
-                ×
-              </button>
-            </div>
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" as const, alignItems: "center" }}>
-              {laneArms.map((a) => (
-                <div key={a.arm_id} style={{ display: "flex", alignItems: "center", gap: 2, borderRadius: 6, border: "1px solid rgba(255,255,255,0.12)", padding: "2px 2px 2px 6px" }}>
-                  <LabelInput small value={displayLabel(a.label, a.arm_number)} onSave={(v) => renameArm(a.arm_id, v)} />
-                  <button
-                    type="button" onClick={() => removeArm(a.arm_id)} disabled={busy}
-                    style={{ fontSize: 14, color: "#f87171", background: "none", border: "none", cursor: "pointer", padding: "2px 6px" }}
-                    aria-label="Remove arm"
-                  >
-                    ×
-                  </button>
-                </div>
-              ))}
-              <button
-                type="button" onClick={() => addArm(lane.lane_number)} disabled={busy}
-                style={{ fontSize: 12, fontWeight: 800, color: "#4ade80", background: "rgba(74,222,128,0.10)", border: "1px solid rgba(74,222,128,0.3)", borderRadius: 6, padding: "5px 10px", cursor: "pointer" }}
-              >
-                + Arm
-              </button>
-            </div>
+      <div style={{ display: "grid", gap: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button type="button" onClick={removeLastLane} disabled={busy || lanes.length === 0} style={{ ...iconBtnStyle, opacity: busy || lanes.length === 0 ? 0.4 : 1 }} aria-label="Remove last lane">−</button>
+            <button type="button" onClick={addLaneAtEnd} disabled={busy} style={{ ...iconBtnStyle, opacity: busy ? 0.4 : 1 }} aria-label="Add lane">+</button>
           </div>
-        );
-      })}
+          <span style={{ fontSize: 13, color: "rgba(255,255,255,0.6)" }}>Add or Remove Lanes</span>
+        </div>
 
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <button
+            type="button" onClick={toggleLaneLabelMode} disabled={busy || lanes.length === 0}
+            style={{ ...iconBtnStyle, width: 48, fontSize: 12, opacity: busy || lanes.length === 0 ? 0.4 : 1 }}
+          >
+            {isAlphabetized ? "123" : "ABC"}
+          </button>
+          <span style={{ fontSize: 13, color: "rgba(255,255,255,0.6)" }}>{isAlphabetized ? "Numerical" : "Alphabetical"}</span>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <button
+            type="button" onClick={reverseLaneOrder} disabled={busy || lanes.length < 2}
+            style={{ ...iconBtnStyle, opacity: busy || lanes.length < 2 ? 0.4 : 1 }} aria-label="Reverse lane order"
+          >
+            ⇅
+          </button>
+          <span style={{ fontSize: 13, color: "rgba(255,255,255,0.6)" }}>Reverse Order</span>
+        </div>
+      </div>
+
+      <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>
+        Expand cards to select products for each lane.
+      </div>
+
+      <div style={{ display: "grid", gap: 8 }}>
+        {!loading && sortedLanes.map((lane) => {
+          const laneArms = arms.filter((a) => a.lane_number === lane.lane_number).sort((a, b) => a.arm_number - b.arm_number);
+          return (
+            <LaneRow
+              key={lane.lane_number}
+              lane={lane}
+              laneArms={laneArms}
+              busy={busy}
+              onRenameLane={(v) => renameLane(lane.lane_number, v)}
+              onSetArmCount={(n) => setArmCount(lane.lane_number, n)}
+              onReverseArms={() => reverseArmOrder(lane.lane_number)}
+              onExpand={() => onExpandLane(lane.lane_number, displayLabel(lane.label, lane.lane_number))}
+            />
+          );
+        })}
+        {!loading && lanes.length === 0 && (
+          <div style={{ color: "rgba(255,255,255,0.35)", fontSize: 13 }}>No lanes yet — tap + above to add one.</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function LaneRow({
+  lane, laneArms, busy, onRenameLane, onSetArmCount, onReverseArms, onExpand,
+}: {
+  lane: RackLane;
+  laneArms: RackArm[];
+  busy: boolean;
+  onRenameLane: (v: string) => void;
+  onSetArmCount: (n: number) => void;
+  onReverseArms: () => void;
+  onExpand: () => void;
+}) {
+  const [countDraft, setCountDraft] = useState(String(laneArms.length));
+  useEffect(() => { setCountDraft(String(laneArms.length)); }, [laneArms.length]);
+
+  function commitCount() {
+    const n = parseInt(countDraft, 10);
+    if (Number.isFinite(n) && n >= 0 && n !== laneArms.length) onSetArmCount(n);
+    else setCountDraft(String(laneArms.length));
+  }
+
+  return (
+    <div style={{ borderRadius: 10, border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)", padding: "10px 12px", display: "flex", alignItems: "center", gap: 10 }}>
+      <LabelInput small value={displayLabel(lane.label, lane.lane_number)} onSave={onRenameLane} />
+      <span style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", flexShrink: 0 }}>Arms</span>
+      <input
+        type="text" inputMode="numeric" value={countDraft}
+        onChange={(e) => setCountDraft(e.target.value.replace(/[^0-9]/g, ""))}
+        onFocus={(e) => e.currentTarget.select()}
+        onBlur={commitCount}
+        disabled={busy}
+        style={{
+          width: 40, padding: "6px 4px", borderRadius: 6, textAlign: "center" as const,
+          border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.05)", color: "#fff",
+          fontSize: 14, fontWeight: 800, boxSizing: "border-box" as const,
+        }}
+      />
       <button
-        type="button" onClick={addLane} disabled={busy}
-        style={{ width: "100%", padding: "12px", borderRadius: 12, border: "1px solid rgba(255,255,255,0.15)", background: "#111", color: "#fff", fontWeight: 700, cursor: "pointer", opacity: busy ? 0.6 : 1 }}
+        type="button" onClick={onReverseArms} disabled={busy || laneArms.length < 2}
+        title="Reverse arm order"
+        style={{ fontSize: 16, color: "rgba(255,255,255,0.6)", background: "none", border: "none", cursor: "pointer", padding: "4px 6px", opacity: laneArms.length < 2 ? 0.35 : 1 }}
       >
-        + Add Lane
+        ⇅
+      </button>
+      <button
+        type="button" onClick={onExpand}
+        style={{ fontSize: 20, color: "rgba(255,255,255,0.4)", background: "none", border: "none", cursor: "pointer", padding: "0 2px", marginLeft: "auto" }}
+        aria-label="Expand lane"
+      >
+        ›
       </button>
     </div>
   );
@@ -626,31 +806,34 @@ function ProductsView({ rack, onChanged }: { rack: TerminalRack; onChanged: () =
   );
 }
 
-// Assigns up to MAX_PRODUCTS_PER_ARM products to each physical arm --
-// some arms are blenders and carry more than one product at once (per
-// explicit user direction + mockup). Multi-select toggle chips, not a
-// single dropdown.
-function AssignArmsView({ rack, onChanged }: { rack: TerminalRack; onChanged: () => void }) {
-  const [lanes, setLanes] = useState<RackLane[]>([]);
+// ── Lane N — Arm / Products (replaces the old standalone "Assign Arm
+// Products" rack-wide view -- now scoped to one lane at a time, reached by
+// expanding that lane's card in LayoutView) ─────────────────────────────────
+//
+// "+" opens a picker modal scoped to this rack's own active product list
+// (not the full catalog), styled like the catalog (grouped, colored dot,
+// code) per explicit spec. "−" removes the RIGHTMOST assigned product
+// first, then the next, clearing one at a time from the right -- matches
+// "clear the arm one at a time" from the right, per explicit user spec.
+function LaneArmProductsView({ rack, laneNumber, onChanged }: { rack: TerminalRack; laneNumber: number; onChanged: () => void }) {
   const [arms, setArms] = useState<RackArm[]>([]);
   const [rackProducts, setRackProducts] = useState<RackProductStatusRow[]>([]);
   const [productsById, setProductsById] = useState<Record<string, ProductLite>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [savingKey, setSavingKey] = useState<string | null>(null);
+  const [savingArmId, setSavingArmId] = useState<string | null>(null);
+  const [pickerArmId, setPickerArmId] = useState<string | null>(null);
 
   async function load() {
     setLoading(true);
     setError(null);
-    const [{ data: laneRows, error: laneErr }, { data: armRows, error: armErr }, { data: prodRows, error: prodErr }, { data: allProducts }] = await Promise.all([
-      supabase.from("rack_lanes").select("*").eq("rack_id", rack.rack_id),
-      supabase.from("rack_arms").select("*").eq("rack_id", rack.rack_id),
+    const [{ data: armRows, error: armErr }, { data: prodRows, error: prodErr }, { data: allProducts }] = await Promise.all([
+      supabase.from("rack_arms").select("*").eq("rack_id", rack.rack_id).eq("lane_number", laneNumber),
       supabase.from("rack_product_status").select("*").eq("rack_id", rack.rack_id).eq("active", true),
       supabase.from("products").select("product_id, product_name, display_name, description, button_code, hex_code, is_dyed"),
     ]);
-    if (laneErr || armErr || prodErr) { setError(laneErr?.message ?? armErr?.message ?? prodErr?.message ?? "Failed to load."); setLoading(false); return; }
-    setLanes(((laneRows ?? []) as RackLane[]).sort((a, b) => a.lane_number - b.lane_number));
-    setArms(((armRows ?? []) as RackArm[]).sort((a, b) => a.lane_number - b.lane_number || a.arm_number - b.arm_number));
+    if (armErr || prodErr) { setError(armErr?.message ?? prodErr?.message ?? "Failed to load."); setLoading(false); return; }
+    setArms(((armRows ?? []) as RackArm[]).sort((a, b) => a.arm_number - b.arm_number));
     setRackProducts((prodRows ?? []) as RackProductStatusRow[]);
     const map: Record<string, ProductLite> = {};
     for (const p of (allProducts ?? []) as ProductLite[]) map[p.product_id] = p;
@@ -658,84 +841,174 @@ function AssignArmsView({ rack, onChanged }: { rack: TerminalRack; onChanged: ()
     setLoading(false);
   }
 
-  useEffect(() => { load(); }, [rack.rack_id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); }, [rack.rack_id, laneNumber]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function toggleProduct(arm: RackArm, productId: string) {
-    const has = arm.product_ids.includes(productId);
-    if (!has && arm.product_ids.length >= MAX_PRODUCTS_PER_ARM) return;
-    const nextIds = has ? arm.product_ids.filter((p) => p !== productId) : [...arm.product_ids, productId];
-    setSavingKey(arm.arm_id);
-    const { error: err } = await supabase.from("rack_arms").update({ product_ids: nextIds }).eq("arm_id", arm.arm_id);
-    setSavingKey(null);
+  async function addProduct(armId: string, productId: string) {
+    const arm = arms.find((a) => a.arm_id === armId);
+    if (!arm) return;
+    if (arm.product_ids.includes(productId) || arm.product_ids.length >= MAX_PRODUCTS_PER_ARM) return;
+    const nextIds = [...arm.product_ids, productId];
+    setSavingArmId(armId);
+    const { error: err } = await supabase.from("rack_arms").update({ product_ids: nextIds }).eq("arm_id", armId);
+    setSavingArmId(null);
     if (err) { setError(err.message); return; }
-    setArms((prev) => prev.map((a) => (a.arm_id === arm.arm_id ? { ...a, product_ids: nextIds } : a)));
+    setArms((prev) => prev.map((a) => (a.arm_id === armId ? { ...a, product_ids: nextIds } : a)));
+    onChanged();
+    setPickerArmId(null);
+  }
+
+  async function removeLastProduct(armId: string) {
+    const arm = arms.find((a) => a.arm_id === armId);
+    if (!arm || arm.product_ids.length === 0) return;
+    const nextIds = arm.product_ids.slice(0, -1);
+    setSavingArmId(armId);
+    const { error: err } = await supabase.from("rack_arms").update({ product_ids: nextIds }).eq("arm_id", armId);
+    setSavingArmId(null);
+    if (err) { setError(err.message); return; }
+    setArms((prev) => prev.map((a) => (a.arm_id === armId ? { ...a, product_ids: nextIds } : a)));
     onChanged();
   }
+
+  const pickerArm = arms.find((a) => a.arm_id === pickerArmId) ?? null;
 
   if (rackProducts.length === 0 && !loading) {
     return (
       <div style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", textAlign: "center" as const, padding: "24px 0" }}>
-        Add products to this rack's product list first (Edit Product List), then come back here to assign them to specific arms.
+        Add products to this rack's product list first (Edit Product List), then come back here to assign them to arms.
       </div>
     );
   }
 
   return (
-    <div style={{ display: "grid", gap: 14 }}>
-      <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)" }}>
-        Which product(s) each arm currently carries at <span style={{ color: "rgba(255,255,255,0.75)", fontWeight: 700 }}>{rack.rack_name}</span> — up to {MAX_PRODUCTS_PER_ARM} for blender arms.
-      </div>
+    <div style={{ display: "grid", gap: 10 }}>
       {error && <div style={{ color: "#f87171", fontSize: 12 }}>{error}</div>}
       {loading && <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 13 }}>Loading…</div>}
 
-      {!loading && lanes.map((lane) => {
-        const laneArms = arms.filter((a) => a.lane_number === lane.lane_number);
+      {!loading && arms.length === 0 && (
+        <div style={{ color: "rgba(255,255,255,0.35)", fontSize: 13 }}>No arms configured for this lane yet.</div>
+      )}
+
+      {!loading && arms.map((a) => {
+        const atCap = a.product_ids.length >= MAX_PRODUCTS_PER_ARM;
+        const saving = savingArmId === a.arm_id;
         return (
-          <div key={lane.lane_number} style={{ borderRadius: 10, border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)", padding: 10, display: "grid", gap: 8 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>
-              Lane {displayLabel(lane.label, lane.lane_number)}
+          <div key={a.arm_id} style={{ display: "flex", alignItems: "center", gap: 10, borderRadius: 10, border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)", padding: "10px 12px" }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: "#fff", flexShrink: 0 }}>Arm {displayLabel(a.label, a.arm_number)} —</span>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" as const, flex: 1 }}>
+              {a.product_ids.map((pid) => {
+                const p = productsById[pid];
+                const code = (p?.button_code ?? "").trim() || "PRD";
+                const color = (p?.hex_code ?? "").trim() || "rgba(255,255,255,0.85)";
+                return (
+                  <span key={pid} style={{ fontSize: 12, fontWeight: 800, padding: "4px 9px", borderRadius: 999, border: `1px solid ${color}`, background: `${color}26`, color }}>
+                    {code}
+                  </span>
+                );
+              })}
             </div>
-            {laneArms.length === 0 && <div style={{ fontSize: 12, color: "rgba(255,255,255,0.3)" }}>No arms configured.</div>}
-            {laneArms.map((a) => {
-              const atCap = a.product_ids.length >= MAX_PRODUCTS_PER_ARM;
-              return (
-                <div key={a.arm_id} style={{ display: "grid", gap: 6 }}>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                    <span style={{ fontSize: 12, color: "rgba(255,255,255,0.5)" }}>Arm {displayLabel(a.label, a.arm_number)}</span>
-                    {atCap && <span style={{ fontSize: 10, color: "rgba(255,255,255,0.3)" }}>Max {MAX_PRODUCTS_PER_ARM} reached</span>}
-                  </div>
-                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" as const }}>
-                    {rackProducts.map((rp) => {
-                      const p = productsById[rp.product_id];
-                      const code = (p?.button_code ?? "").trim() || "PRD";
-                      const color = (p?.hex_code ?? "").trim() || "rgba(255,255,255,0.85)";
-                      const active = a.product_ids.includes(rp.product_id);
-                      const disabled = savingKey === a.arm_id || (!active && atCap);
-                      return (
-                        <button
-                          key={rp.product_id}
-                          type="button"
-                          disabled={disabled}
-                          onClick={() => toggleProduct(a, rp.product_id)}
-                          style={{
-                            fontSize: 11, fontWeight: 800, padding: "6px 10px", borderRadius: 999, cursor: disabled ? "default" : "pointer",
-                            border: `1px solid ${active ? color : "rgba(255,255,255,0.15)"}`,
-                            background: active ? `${color}26` : "rgba(255,255,255,0.04)",
-                            color: active ? color : "rgba(255,255,255,0.5)",
-                            opacity: disabled && !active ? 0.4 : 1,
-                          }}
-                        >
-                          {code}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })}
+            <button
+              type="button" disabled={saving || atCap} onClick={() => setPickerArmId(a.arm_id)}
+              style={{ fontSize: 16, fontWeight: 800, color: "#4ade80", background: "rgba(74,222,128,0.10)", border: "1px solid rgba(74,222,128,0.3)", borderRadius: 6, width: 30, height: 30, flexShrink: 0, cursor: atCap ? "default" : "pointer", opacity: atCap ? 0.35 : 1 }}
+              aria-label="Add product"
+            >
+              +
+            </button>
+            <button
+              type="button" disabled={saving || a.product_ids.length === 0} onClick={() => removeLastProduct(a.arm_id)}
+              style={{ fontSize: 16, fontWeight: 800, color: "#f87171", background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.25)", borderRadius: 6, width: 30, height: 30, flexShrink: 0, cursor: a.product_ids.length === 0 ? "default" : "pointer", opacity: a.product_ids.length === 0 ? 0.35 : 1 }}
+              aria-label="Remove rightmost product"
+            >
+              −
+            </button>
           </div>
         );
       })}
+
+      {pickerArm && (
+        <ArmProductPickerModal
+          open={!!pickerArm}
+          rackProducts={rackProducts}
+          productsById={productsById}
+          excludeIds={pickerArm.product_ids}
+          onPick={(productId) => addProduct(pickerArm.arm_id, productId)}
+          onClose={() => setPickerArmId(null)}
+        />
+      )}
     </div>
+  );
+}
+
+// Product picker for one arm -- scoped to this rack's own active product
+// list (not the full catalog), grouped/styled the same way ProductsView
+// renders the full catalog, per explicit spec ("display exactly like the
+// full catalog does just limited to what is actually available").
+function ArmProductPickerModal({
+  open, rackProducts, productsById, excludeIds, onPick, onClose,
+}: {
+  open: boolean;
+  rackProducts: RackProductStatusRow[];
+  productsById: Record<string, ProductLite>;
+  excludeIds: string[];
+  onPick: (productId: string) => void;
+  onClose: () => void;
+}) {
+  const [search, setSearch] = useState("");
+
+  const grouped = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const available = rackProducts
+      .filter((rp) => !excludeIds.includes(rp.product_id))
+      .map((rp) => productsById[rp.product_id])
+      .filter((p): p is ProductLite => !!p)
+      .filter((p) => !q || [p.product_name, p.display_name, p.button_code].some((v) => (v ?? "").toLowerCase().includes(q)));
+    const byGroup: Record<string, ProductLite[]> = {};
+    for (const p of available) {
+      const g = groupFor(p.product_name ?? "");
+      (byGroup[g] ??= []).push(p);
+    }
+    const order = [...GROUPS.map((g) => g.label), "Other / Off-Spec"];
+    return order.filter((g) => byGroup[g]?.length).map((g) => ({ label: g, products: byGroup[g] }));
+  }, [rackProducts, productsById, excludeIds, search]);
+
+  return (
+    <FullscreenModal open={open} title="Add Product to Arm" onClose={onClose} footer={null}>
+      <div style={{ display: "grid", gap: 12 }}>
+        <input
+          type="text" value={search} onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search products…"
+          style={{ width: "100%", boxSizing: "border-box" as const, padding: "10px 12px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.03)", color: "white", fontSize: 13 }}
+        />
+
+        {grouped.length === 0 && (
+          <div style={{ fontSize: 13, color: "rgba(255,255,255,0.35)", textAlign: "center" as const, padding: "24px 0" }}>
+            No more products available to add.
+          </div>
+        )}
+
+        {grouped.map(({ label, products }) => (
+          <div key={label} style={{ display: "grid", gap: 6 }}>
+            <div style={{ fontSize: 11, fontWeight: 800, color: "rgba(255,255,255,0.35)", textTransform: "uppercase" as const, letterSpacing: 0.6, marginTop: 4 }}>{label}</div>
+            {products.map((p) => {
+              const btnCode = ((p.button_code ?? "").trim() || "PRD").toUpperCase();
+              const btnColor = (p.hex_code ?? "").trim() || "rgba(255,255,255,0.85)";
+              const name = (p.product_name ?? p.display_name ?? "").trim() || "Product";
+              return (
+                <button
+                  key={p.product_id} type="button" onClick={() => onPick(p.product_id)}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 12, padding: "10px 12px", borderRadius: 6,
+                    border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.02)",
+                    cursor: "pointer", width: "100%", boxSizing: "border-box" as const,
+                  }}
+                >
+                  <span style={{ width: 8, height: 8, borderRadius: "50%", background: btnColor, flexShrink: 0 }} />
+                  <span style={{ flex: 1, textAlign: "left" as const, fontWeight: 700, fontSize: 14, color: "white" }}>{name} <span style={{ fontSize: 11, color: btnColor }}>{btnCode}</span></span>
+                </button>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+    </FullscreenModal>
   );
 }

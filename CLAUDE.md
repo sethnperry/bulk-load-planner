@@ -1552,6 +1552,82 @@ method (which the browser itself turns into a proper `focusout`), and the
 write round-tripped correctly. No test data left behind — the terminal is
 back at its real value (90) post-verification.
 
+### Edit Terminal rework: bulk lane/arm tools + inline product assignment (shipped 2026-08-05)
+
+Per a real mockup + written spec: "Assign Arm Products" is no longer a
+separate top-level rack button — product assignment moved inline into the
+Lane/Arm Layout flow (expand a lane card → "Lane N — Arm / Products"), and
+Lane/Arm Layout itself gained bulk relabel/reorder tools on top of the
+existing per-row manual rename from the 2026-08-04 explicit-labels rework
+(that rework's own `rack_lanes.label`/`rack_arms.label` columns are
+unchanged — this is new UI on the same schema, no migration needed).
+
+**Design calls made, not directly in the spec text (documented here since
+they weren't asked, just reasoned through against the mockup)**:
+- Both "Alphabetical/Numerical" and "Reverse Order" are **bulk one-shot
+  actions**, not persisted view modes — tapping them immediately rewrites
+  every lane's (or, for arm-reverse, one lane's arms') `label` text in the
+  DB, in current top-to-bottom (`lane_number`/`arm_number` ascending) order.
+  Nothing about *which physical row holds which arms/products* ever moves —
+  only the label text visible on that row changes. This is why reversing
+  or relabeling never disturbs product assignments.
+- "Reverse Order" is deliberately **generic**: it takes whatever label
+  sequence currently exists (numeric, alphabetic, or custom text) and
+  reverses that array across the same rows, rather than only working for a
+  clean sequential series. Same operation for lanes (rack-wide) and arms
+  (scoped to one lane, via the per-lane reverse icon).
+- The "ABC"/"123" toggle's displayed state is **inferred from current
+  data** (does the top-to-bottom label sequence already exactly match
+  A,B,C...?) rather than tracked as separate persisted state — simpler,
+  and self-corrects if labels are edited by hand in between. A reversed
+  alphabetic sequence (E,D,C,B,A) won't match this ascending check, so the
+  button reverts to offering "ABC" again rather than "123" — a known,
+  accepted simplification, not a bug.
+- Per-lane arm **count** is now a direct numeric field (type a number,
+  arms are added/removed from the end to match) instead of individual
+  "+ Arm"/"× arm" controls — replacing the old inline arm-chip row
+  entirely. There is no more per-arm manual rename UI in this screen (the
+  old small `LabelInput` per arm chip) — matching the mockup, which shows
+  arm labels as plain text in the expanded product view, not an editable
+  box. Existing custom arm labels still display via `displayLabel` and are
+  still reachable indirectly through count-change + reverse; a lane's own
+  label chip **did** keep its manual rename input (`LabelInput`), since
+  the mockup doesn't clearly preclude it and there was no reason to
+  remove a working capability the spec didn't ask to cut.
+- There is **no more per-lane delete button** — matching the mockup's lane
+  row (no visible delete icon) — removal is now only via the top-level "−"
+  (removes the highest `lane_number`, i.e. the last one), symmetric with
+  "+" adding a new one at the end.
+- The arm-product picker modal (opened by "+" on an arm) excludes only
+  that **same arm's own** already-assigned products, not products used
+  elsewhere in the lane — a product can legitimately sit on more than one
+  arm at once (matches the existing "up to 3 products per arm" blender
+  model; nothing in the spec said one-arm-exclusive).
+
+**Live-verified end-to-end** against the real "Global South" terminal's
+North Rack (careful to resolve the correct rack first — there are two
+racks named "North Rack" across different terminals in this DB, Marathon/
+Tampa and Global South/Fort Lauderdale; picked the wrong one on a first,
+unfiltered query and caught it before drawing any conclusions from it):
+tapped "ABC" — all 6 lanes relabeled A–F in order, arm counts stayed
+attached to their original rows; tapped "Reverse Order" — labels flipped
+end-for-end (F,E,D,C,B,A) with per-row arm counts unchanged, confirming
+label content moved, not the underlying rows; edited one lane's arm-count
+field from 7 to 3 — the 4 highest-numbered arm rows were deleted, kept
+arm1/arm2's existing state; expanded that lane — "Lane F — Arm / Products"
+rendered with 3 arm rows; tapped "+" on an empty arm — picker modal opened
+scoped to only this rack's 2 active products (D2, DYED), grouped under
+"DIESEL" exactly like the full catalog's own grouping; added D2 to it;
+tapped "−" on the other arm (which had [D2, DYED]) — removed DYED (the
+rightmost) first, leaving just D2, matching the "clear from the right"
+spec exactly. Confirmed all of the above directly via Postgres query
+against the correct rack_id, then manually restored every value back to
+its real pre-test state (lane labels back to 1–6, arm count back to 7,
+product assignments back to their original arm1=[D2,DYED]/arm2=[] shape)
+since this is the persistent demo/QA rack other work in this session
+already depends on, not throwaway data. `tsc --noEmit` clean throughout;
+no console errors on a fresh (non-buffered) tab.
+
 ### Cards tab: full look-and-edit parity for dispatch/admin (shipped 2026-08-04)
 
 Per explicit user direction: "all the cards should look identical for every
