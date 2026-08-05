@@ -16,6 +16,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
+import { startSetupSession } from "@/lib/setupSession";
 import { useCalculatorShell } from "../CalculatorShellContext";
 import DriverPicker from "../components/DriverPicker";
 import { cardStateFor } from "../cards/cardTheme";
@@ -67,7 +68,8 @@ function SectionCard({ title, children }: { title: string; children: React.React
 
 export default function DispatchPage() {
   const shell = useCalculatorShell();
-  const { selectedDriverId, setSelectedDriverId, companyId, effectiveUserId } = shell;
+  const { selectedDriverId, setSelectedDriverId, companyId, effectiveUserId, authUserId } = shell;
+  const canUseAppAs = shell.role === "admin" || shell.isSuperAdmin;
 
   const [identity, setIdentity] = useState<DriverIdentity | null>(null);
   const [schedule, setSchedule] = useState<{ days: number[]; start: string; end: string }>({ days: [], start: "", end: "" });
@@ -207,6 +209,43 @@ export default function DispatchPage() {
           ‹ Change Driver
         </button>
       </div>
+
+      {/* "Back strip" -- admin/super-admin only (dispatchers never get in a
+          truck). Starts a real full-app setup session (same mechanism as
+          /admin's "Set up planner for X"), not just this tab's own
+          contextual card/notes view -- lets the admin use the whole app
+          (Planner, Terminal, everything) as this driver. returnTo points
+          back here so "← Return to Dispatch" lands where they actually
+          started, not /admin. */}
+      {canUseAppAs && !loading && identity && (
+        <button
+          type="button"
+          onClick={() => {
+            startSetupSession({
+              targetUserId: selectedDriverId,
+              targetDisplayName: identity.display_name,
+              adminUserId: authUserId,
+              returnTo: "/calculator/dispatch",
+            });
+            // Hard navigation, not router.push -- the admin is already
+            // inside the /calculator layout, so CalculatorShellProvider is
+            // already mounted and only ever reads sessionStorage once on
+            // mount. A client-side push wouldn't remount it, so the new
+            // setup session would silently never take effect (confirmed
+            // live: content stayed the admin's own equipment/terminal data
+            // after a router.push here). Matches JoinFleetView.tsx's own
+            // same-class fix for the identical problem.
+            window.location.href = "/calculator";
+          }}
+          style={{
+            width: "100%", textAlign: "left" as const, padding: "12px 14px", borderRadius: 10, marginBottom: 14,
+            border: "1px solid rgba(251,146,60,0.35)", background: "rgba(251,146,60,0.10)",
+            color: "#fb923c", fontSize: 13, fontWeight: 800, cursor: "pointer",
+          }}
+        >
+          Use app as {identity.display_name} →
+        </button>
+      )}
 
       {loading && <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 13 }}>Loading…</div>}
 

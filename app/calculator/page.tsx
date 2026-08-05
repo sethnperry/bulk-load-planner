@@ -222,26 +222,33 @@ export default function CalculatorPage() {
   const { authUserId, setupSession, effectiveUserId, equipment, location, terminals, expirations } = shell;
   const router = useRouter();
 
-  // Dispatch/admin's real home is the Dispatch tab, not this one -- but
-  // whatever actually lands the app on bare /calculator (e.g. a login
-  // redirect that doesn't know about roles) doesn't know that. Previously
-  // this showed up as a real bug: the tab bar's "Dispatch" slot would
-  // highlight itself (it used to share an id with Planner) while this
-  // page's Planner content rendered underneath -- tapping away and back
-  // "fixed" it only because that was a real navigation to /calculator/
-  // dispatch. Redirecting once per session on first landing here fixes the
-  // actual mismatch instead of just the symptom; gated on `role` being
-  // resolved (not null) so driver/lead never get caught in a flash-redirect
-  // while role is still loading, and only fires once so tapping the
-  // Planner tab later (a deliberate, real visit) is never bounced away.
+  // Dispatch's real home is the Dispatch tab, not this one -- but whatever
+  // actually lands the app on bare /calculator (e.g. a login redirect that
+  // doesn't know about roles) doesn't know that. Admin/super-admin are
+  // deliberately excluded here per explicit user direction (2026-08-04):
+  // "the only role that should default to the dispatch tab on open is the
+  // dispatch role. all other roles should open to the planner." Admin's
+  // route into the Dispatch tab's driver-scoped view is the Dispatch tab
+  // itself (a permanent, always-available tab, not a default landing);
+  // this redirect previously also fired for admin/super-admin and was the
+  // actual cause of a real reported bug ("twitches back to dispatch" when
+  // tapping Planner) -- if this page's own JS chunk got re-evaluated after
+  // a route away and back (e.g. under memory pressure on mobile), the
+  // module-level hasCheckedDefaultLanding flag reset, so the "one-time"
+  // redirect silently refired on what the admin experienced as a deliberate
+  // Planner visit. Scoping this to dispatch-only doesn't fix that
+  // re-evaluation risk in the abstract, but it does mean the one role that
+  // can hit it (dispatch) has no Planner tab to be bounced away from in the
+  // first place -- the whole bug class no longer has a visible symptom for
+  // any role that experiences it.
   useEffect(() => {
     if (hasCheckedDefaultLanding) return;
     if (shell.role == null) return;
     hasCheckedDefaultLanding = true;
-    if (shell.role === "dispatch" || shell.role === "admin" || shell.isSuperAdmin) {
+    if (shell.role === "dispatch") {
       router.replace("/calculator/dispatch");
     }
-  }, [shell.role, shell.isSuperAdmin, router]);
+  }, [shell.role, router]);
 
   // ── Card data (card number + PIN + private note, per terminal, per user) ──
   // Owned in CalculatorShellContext now -- the new Cards tab route needs the
@@ -1180,9 +1187,20 @@ const lastProductInfoById = useMemo(() => {
             <div style={{ fontSize: 14, fontWeight: 700, color: "rgba(255,255,255,0.90)", marginTop: 1 }}>{setupSession.targetDisplayName}</div>
           </div>
           <button type="button"
-            onClick={() => { clearSetupSession(); router.push("/admin"); }}
+            onClick={() => {
+              clearSetupSession();
+              // Hard navigation -- when returnTo stays inside the
+              // /calculator layout (e.g. "/calculator/dispatch"),
+              // CalculatorShellProvider never unmounts on a router.push, so
+              // it never re-reads sessionStorage and the just-cleared
+              // session would silently stick (confirmed live: the "Setting
+              // up planner for" banner stayed visible after this click).
+              // Same fix as the Dispatch tab's own "Use app as X" entry
+              // point, applied symmetrically to the exit.
+              window.location.href = setupSession.returnTo ?? "/admin";
+            }}
             style={{ fontSize: 12, fontWeight: 700, padding: "6px 12px", borderRadius: 8, border: "1px solid rgba(251,146,60,0.40)", background: "rgba(251,146,60,0.15)", color: "#fb923c", cursor: "pointer", whiteSpace: "nowrap" as const }}>
-            ← Return to Admin
+            ← Return to {setupSession.returnTo === "/calculator/dispatch" ? "Dispatch" : "Admin"}
           </button>
         </div>
       )}

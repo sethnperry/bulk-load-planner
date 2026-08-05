@@ -935,6 +935,81 @@ now-superseded version of `labels.ts` — confirmed via `grep` that no
 current file imports anything but `displayLabel`; this is the known
 `read_console_messages`-buffers-forever behavior, not a live regression.)
 
+### Default-landing redirect removed for admin; real full-app impersonation added (2026-08-04, later same day)
+
+User reported the Planner tab still didn't stick for admin — tapping it
+"twitches back" to Dispatch, even with a driver selected. **Root cause**:
+the one-time landing redirect above (`hasCheckedDefaultLanding`) also fired
+for admin/super-admin, not just dispatch. The module-level flag is supposed
+to make it fire only once per session, but if this page's own JS chunk gets
+re-evaluated after navigating away and back (plausible on mobile under
+memory pressure, though not confirmed as the exact mechanism here), the
+flag resets and the "one-time" redirect silently refires on what the admin
+experiences as a deliberate Planner visit.
+
+**Fix, per explicit user direction**: "the only role that should default to
+the dispatch tab on open is the dispatch role. all other roles should open
+to the planner. the Admin roles just get a backstrip button in the
+dispatch. Tap that allows them to use the whole app as if they are the
+person selected."
+
+- `app/calculator/page.tsx`: the redirect condition narrowed from
+  `role === "dispatch" || role === "admin" || isSuperAdmin` to just
+  `role === "dispatch"`. This doesn't fix the theoretical re-evaluation risk
+  in the abstract, but it does mean the only role that can hit it
+  (dispatch) has no Planner tab to be bounced away from in the first place
+  — the bug class has no visible symptom for any role that can actually
+  reach it now.
+- `app/calculator/dispatch/page.tsx`: new "Use app as {driver} →" button
+  (admin/super-admin only — `canUseAppAs = role === "admin" ||
+  isSuperAdmin`; dispatchers never get in a truck), shown once a driver is
+  selected and their identity has loaded. This is a different, bigger
+  capability than the same-day Cards-tab parity work above — that was a
+  *contextual* view (dispatch/admin looking at a driver's cards/notes while
+  staying themselves); this is *real* full-app impersonation, reusing the
+  existing `setupSession` mechanism (`lib/setupSession.ts`, the same one
+  `/admin`'s "Set up planner for X" button already used) so the admin
+  becomes that driver everywhere — Planner, Terminal, Cards, actually
+  loading a truck, all of it — not just a Cards-tab-scoped partial view.
+  `SetupSession` gained an optional `returnTo` field (defaults to `/admin`
+  when omitted, preserving the original `/admin`-entry behavior unchanged)
+  so the Planner's existing "← Return to Admin" banner can correctly read
+  "← Return to Dispatch" and go back to where this admin actually started,
+  not a page they never visited.
+
+**A real bug found and fixed twice in a row while verifying this** (same
+root cause, hit on both the entry and exit path): `startSetupSession()`/
+`clearSetupSession()` only touch `sessionStorage` — `CalculatorShellContext`'s
+`setupSession` React state is read from `sessionStorage` exactly once, in a
+mount-only `useEffect`. The original `/admin` → "Set up planner for X" flow
+never hit this because `/admin` sits *outside* the `/calculator` layout, so
+`router.push("/calculator")` always mounts `CalculatorShellProvider` fresh.
+But the new Dispatch-tab entry point starts and ends *inside* the same
+`/calculator` layout — a plain `router.push` doesn't remount the provider,
+so a freshly-written (or freshly-cleared) session silently never took
+effect. Live-verified broken exactly as described (clicking "Use app as
+Kyle Tatro" left the Planner showing the *admin's own* equipment; clicking
+"← Return to Dispatch" afterward left the "Setting up planner for" banner
+still showing) before switching both the entry click and the exit click to
+`window.location.href = ...` (hard navigation, forcing the provider to
+remount and re-read `sessionStorage` either way) — same fix
+`JoinFleetView.tsx` already uses for this identical class of problem.
+
+**Live-verified end-to-end, 2026-08-04**: fresh load of bare `/calculator`
+now lands directly on Planner (no redirect at all) for the admin account.
+Selected Kyle Tatro on Dispatch, confirmed the "Use app as Kyle Tatro →"
+strip renders, clicked Planner while Kyle was selected — content stayed on
+Planner with no bounce back (the originally reported bug, now gone; waited
+several seconds to rule out a delayed re-fire). Clicked "Use app as Kyle
+Tatro →": banner now correctly reads "SETTING UP PLANNER FOR / Kyle Tatro",
+content switched to Kyle's own (empty) equipment state — not the admin's —
+confirming the session genuinely took effect this time. Clicked "← Return
+to Dispatch": URL moved to `/calculator/dispatch`, `sessionStorage` cleared,
+driver picker shown (admin's own identity, not stuck impersonating).
+Reloaded Planner directly afterward — admin's own real equipment
+(Truck·25184/Global South) rendered correctly, confirming no lingering
+impersonation state. `tsc --noEmit` clean throughout.
+
 ### Dispatch tab (new)
 Per-driver dashboard, reachable by selecting a driver (exact selection
 UI/modal not designed yet — flagged as open design work below, not blocking

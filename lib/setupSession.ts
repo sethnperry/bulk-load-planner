@@ -10,6 +10,12 @@ export type SetupSession = {
   targetUserId: string;
   targetDisplayName: string;
   adminUserId: string;
+  // Where "← Return to Admin" should navigate back to when exiting this
+  // session -- defaults to "/admin" (the original /admin-page entry point)
+  // when omitted, but the Dispatch tab's "Use app as {driver}" entry point
+  // sets this to "/calculator/dispatch" so exiting lands back where the
+  // admin actually started, not a page they never visited.
+  returnTo?: string;
 };
 
 export function getSetupSession(): SetupSession | null {
