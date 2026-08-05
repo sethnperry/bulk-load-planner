@@ -56,26 +56,6 @@ function letterFor(index: number): string {
   return s;
 }
 
-// Tap-to-select-all (mobile-friendly replace, not edit-in-place -- same
-// pattern as the STUD modal's API/temp fields), saves on blur.
-function LabelInput({ value, onSave, small }: { value: string; onSave: (v: string) => void; small?: boolean }) {
-  const [draft, setDraft] = useState(value);
-  useEffect(() => { setDraft(value); }, [value]);
-  return (
-    <input
-      value={draft}
-      onChange={(e) => setDraft(e.target.value)}
-      onFocus={(e) => e.currentTarget.select()}
-      onBlur={() => { const v = draft.trim(); if (v && v !== value) onSave(v); else setDraft(value); }}
-      style={{
-        width: small ? 36 : 56, padding: small ? "4px 4px" : "6px 8px", borderRadius: 6, textAlign: "center" as const,
-        border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.05)", color: "#fff",
-        fontSize: small ? 12 : 13, fontWeight: 800, boxSizing: "border-box" as const,
-      }}
-    />
-  );
-}
-
 export default function EditTerminalModal({
   open,
   onClose,
@@ -499,12 +479,6 @@ function LayoutView({
     await removeLaneByNumber(sortedLanes[sortedLanes.length - 1].lane_number);
   }
 
-  async function renameLane(laneNumber: number, label: string) {
-    await supabase.from("rack_lanes").update({ label }).eq("rack_id", rack.rack_id).eq("lane_number", laneNumber);
-    setLanes((prev) => prev.map((l) => (l.lane_number === laneNumber ? { ...l, label } : l)));
-    onChanged();
-  }
-
   async function toggleLaneLabelMode() {
     if (sortedLanes.length === 0) return;
     setBusy(true);
@@ -630,7 +604,6 @@ function LayoutView({
               lane={lane}
               laneArms={laneArms}
               busy={busy}
-              onRenameLane={(v) => renameLane(lane.lane_number, v)}
               onSetArmCount={(n) => setArmCount(lane.lane_number, n)}
               onReverseArms={() => reverseArmOrder(lane.lane_number)}
               onExpand={() => onExpandLane(lane.lane_number, displayLabel(lane.label, lane.lane_number))}
@@ -646,12 +619,11 @@ function LayoutView({
 }
 
 function LaneRow({
-  lane, laneArms, busy, onRenameLane, onSetArmCount, onReverseArms, onExpand,
+  lane, laneArms, busy, onSetArmCount, onReverseArms, onExpand,
 }: {
   lane: RackLane;
   laneArms: RackArm[];
   busy: boolean;
-  onRenameLane: (v: string) => void;
   onSetArmCount: (n: number) => void;
   onReverseArms: () => void;
   onExpand: () => void;
@@ -667,7 +639,9 @@ function LaneRow({
 
   return (
     <div style={{ borderRadius: 10, border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)", padding: "10px 12px", display: "flex", alignItems: "center", gap: 10 }}>
-      <LabelInput small value={displayLabel(lane.label, lane.lane_number)} onSave={onRenameLane} />
+      <span style={{ fontSize: 15, fontWeight: 800, color: "#fff", minWidth: 20, textAlign: "center" as const, flexShrink: 0 }}>
+        {displayLabel(lane.label, lane.lane_number)}
+      </span>
       <span style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", flexShrink: 0 }}>Arms</span>
       <input
         type="text" inputMode="numeric" value={countDraft}

@@ -1590,10 +1590,15 @@ they weren't asked, just reasoned through against the mockup)**:
   old small `LabelInput` per arm chip) — matching the mockup, which shows
   arm labels as plain text in the expanded product view, not an editable
   box. Existing custom arm labels still display via `displayLabel` and are
-  still reachable indirectly through count-change + reverse; a lane's own
-  label chip **did** keep its manual rename input (`LabelInput`), since
-  the mockup doesn't clearly preclude it and there was no reason to
-  remove a working capability the spec didn't ask to cut.
+  still reachable indirectly through count-change + reverse. ~~A lane's
+  own label chip did keep its manual rename input (`LabelInput`)~~ —
+  **reversed same day**: explicit follow-up feedback, "the only in cell
+  editing is for the number of arms" — the lane chip looked editable
+  (boxed, tap-to-select-all styling) when it shouldn't have implied that;
+  removed `LabelInput` and per-lane `renameLane` entirely, now a plain
+  `<span>` like arm labels already were. Lane text is now only ever set by
+  the bulk Alphabetical/Numerical/Reverse tools above, never hand-typed
+  per row — consistent with there being no per-arm rename either.
 - There is **no more per-lane delete button** — matching the mockup's lane
   row (no visible delete icon) — removal is now only via the top-level "−"
   (removes the highest `lane_number`, i.e. the last one), symmetric with
