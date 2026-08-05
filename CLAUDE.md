@@ -1633,6 +1633,23 @@ since this is the persistent demo/QA rack other work in this session
 already depends on, not throwaway data. `tsc --noEmit` clean throughout;
 no console errors on a fresh (non-buffered) tab.
 
+**Follow-up same day**: the per-lane "Reverse arm order" icon (on the lane
+card itself, in the Lane/Arm Layout list) was invisible in practice —
+nothing on that card actually displays arm order, so tapping it looked
+like a no-op even though it was writing correctly. Moved to inside "Lane
+N — Arm / Products" instead (top of that screen, same `iconBtnStyle` box +
+"Reverse Order" label as the lane-level control, per explicit consistency
+request), where the arm rows visibly re-label top-to-bottom right after
+tapping it — the same generic reverse-whatever-sequence-exists logic,
+just relocated somewhere the effect is actually observable. `reverseArmOrder`
+moved from `LayoutView` (where it operated across all of a rack's lanes by
+filtering to one) into `LaneArmProductsView` itself (already lane-scoped,
+so no filtering needed — `arms` there already means "this lane's arms").
+Live-verified: reversed a 7-arm lane with D2/DYED on arm 1 — instantly
+showed "Arm 7 — D2 DYED" at the top counting down to "Arm 1" at the
+bottom; reversed again to confirm it flips back cleanly. Restored to
+original order afterward (same demo rack).
+
 ### Cards tab: full look-and-edit parity for dispatch/admin (shipped 2026-08-04)
 
 Per explicit user direction: "all the cards should look identical for every

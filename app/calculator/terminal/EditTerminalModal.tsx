@@ -56,6 +56,15 @@ function letterFor(index: number): string {
   return s;
 }
 
+// Shared by LayoutView's lane-level bulk controls and LaneArmProductsView's
+// arm-level Reverse Order control -- same icon-box look for both, per
+// explicit consistency direction.
+const iconBtnStyle: React.CSSProperties = {
+  width: 32, height: 32, borderRadius: 8, border: "1px solid rgba(255,255,255,0.15)",
+  background: "rgba(255,255,255,0.05)", color: "#fff", fontSize: 16, fontWeight: 800,
+  cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+};
+
 export default function EditTerminalModal({
   open,
   onClose,
@@ -533,29 +542,6 @@ function LayoutView({
     onChanged();
   }
 
-  async function reverseArmOrder(laneNumber: number) {
-    const laneArms = arms.filter((a) => a.lane_number === laneNumber).sort((a, b) => a.arm_number - b.arm_number);
-    if (laneArms.length < 2) return;
-    setBusy(true);
-    setError(null);
-    const labels = laneArms.map((a) => displayLabel(a.label, a.arm_number));
-    const reversed = [...labels].reverse();
-    const results = await Promise.all(laneArms.map((a, i) =>
-      supabase.from("rack_arms").update({ label: reversed[i] }).eq("arm_id", a.arm_id)
-    ));
-    setBusy(false);
-    const err = results.find((r) => r.error)?.error;
-    if (err) { setError(err.message); return; }
-    await load();
-    onChanged();
-  }
-
-  const iconBtnStyle: React.CSSProperties = {
-    width: 32, height: 32, borderRadius: 8, border: "1px solid rgba(255,255,255,0.15)",
-    background: "rgba(255,255,255,0.05)", color: "#fff", fontSize: 16, fontWeight: 800,
-    cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-  };
-
   return (
     <div style={{ display: "grid", gap: 16 }}>
       {error && <div style={{ color: "#f87171", fontSize: 12 }}>{error}</div>}
@@ -605,7 +591,6 @@ function LayoutView({
               laneArms={laneArms}
               busy={busy}
               onSetArmCount={(n) => setArmCount(lane.lane_number, n)}
-              onReverseArms={() => reverseArmOrder(lane.lane_number)}
               onExpand={() => onExpandLane(lane.lane_number, displayLabel(lane.label, lane.lane_number))}
             />
           );
@@ -619,13 +604,12 @@ function LayoutView({
 }
 
 function LaneRow({
-  lane, laneArms, busy, onSetArmCount, onReverseArms, onExpand,
+  lane, laneArms, busy, onSetArmCount, onExpand,
 }: {
   lane: RackLane;
   laneArms: RackArm[];
   busy: boolean;
   onSetArmCount: (n: number) => void;
-  onReverseArms: () => void;
   onExpand: () => void;
 }) {
   const [countDraft, setCountDraft] = useState(String(laneArms.length));
@@ -655,13 +639,6 @@ function LaneRow({
           fontSize: 14, fontWeight: 800, boxSizing: "border-box" as const,
         }}
       />
-      <button
-        type="button" onClick={onReverseArms} disabled={busy || laneArms.length < 2}
-        title="Reverse arm order"
-        style={{ fontSize: 16, color: "rgba(255,255,255,0.6)", background: "none", border: "none", cursor: "pointer", padding: "4px 6px", opacity: laneArms.length < 2 ? 0.35 : 1 }}
-      >
-        ⇅
-      </button>
       <button
         type="button" onClick={onExpand}
         style={{ fontSize: 20, color: "rgba(255,255,255,0.4)", background: "none", border: "none", cursor: "pointer", padding: "0 2px", marginLeft: "auto" }}
@@ -797,6 +774,7 @@ function LaneArmProductsView({ rack, laneNumber, onChanged }: { rack: TerminalRa
   const [error, setError] = useState<string | null>(null);
   const [savingArmId, setSavingArmId] = useState<string | null>(null);
   const [pickerArmId, setPickerArmId] = useState<string | null>(null);
+  const [reversing, setReversing] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -843,6 +821,31 @@ function LaneArmProductsView({ rack, laneNumber, onChanged }: { rack: TerminalRa
     onChanged();
   }
 
+  // Moved here from the lane-card list (2026-08-05 follow-up) -- reversing
+  // arm order was invisible on the card itself (nothing there shows arm
+  // order at all), so tapping it looked like it did nothing. Here, the arm
+  // rows visibly re-label top-to-bottom, so the effect is actually
+  // observable. Same generic "reverse whatever label sequence currently
+  // exists" behavior as the lane-level Reverse Order, scoped to just this
+  // lane's arms (this view is already lane-scoped, so `arms` here IS "this
+  // lane's arms" -- no filtering needed).
+  async function reverseArmOrder() {
+    const sorted = [...arms].sort((a, b) => a.arm_number - b.arm_number);
+    if (sorted.length < 2) return;
+    setReversing(true);
+    setError(null);
+    const labels = sorted.map((a) => displayLabel(a.label, a.arm_number));
+    const reversed = [...labels].reverse();
+    const results = await Promise.all(sorted.map((a, i) =>
+      supabase.from("rack_arms").update({ label: reversed[i] }).eq("arm_id", a.arm_id)
+    ));
+    setReversing(false);
+    const err = results.find((r) => r.error)?.error;
+    if (err) { setError(err.message); return; }
+    await load();
+    onChanged();
+  }
+
   const pickerArm = arms.find((a) => a.arm_id === pickerArmId) ?? null;
 
   if (rackProducts.length === 0 && !loading) {
@@ -855,6 +858,16 @@ function LaneArmProductsView({ rack, laneNumber, onChanged }: { rack: TerminalRa
 
   return (
     <div style={{ display: "grid", gap: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <button
+          type="button" onClick={reverseArmOrder} disabled={reversing || arms.length < 2}
+          style={{ ...iconBtnStyle, opacity: reversing || arms.length < 2 ? 0.4 : 1 }} aria-label="Reverse arm order"
+        >
+          ⇅
+        </button>
+        <span style={{ fontSize: 13, color: "rgba(255,255,255,0.6)" }}>Reverse Order</span>
+      </div>
+
       {error && <div style={{ color: "#f87171", fontSize: 12 }}>{error}</div>}
       {loading && <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 13 }}>Loading…</div>}
 
