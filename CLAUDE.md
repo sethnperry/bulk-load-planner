@@ -1909,21 +1909,25 @@ but don't assume that stays true if someone wires it in later.)
    above) and was never updated after that shipped. Left as a struck-through
    record rather than deleted, so a future pass doesn't waste time
    rediscovering the same thing.
-7. ~~**Presets rework.**~~ — **shipped 2026-08-06.** Scope changed from the
-   original spec during a live clarifying pass with the user (see #8 below
-   too — both items landed together, not sequenced, since the "equipment
-   settings" destination turned out to already exist rather than needing a
-   new gear-icon modal):
-   - Tap a **filled** preset slot now opens an action sheet (`PresetActionSheet`,
-     new `app/calculator/components/PresetActionSheet.tsx`) — "Load {summary}"
-     / "Edit Preset" / "Clear Preset", with a confirm step in front of the
-     two destructive ones ("Save current configuration as Preset B? This
-     replaces what's currently saved there (ULSD Diesel #2).") — no more
-     silent overwrite on tap. Tapping an **empty** slot still saves straight
-     through (nothing to protect). `PresetDial.tsx`'s tap handler now calls
-     a new `onTapFilled` callback instead of `onLoad` directly for filled
-     slots; hold-to-clear/hold-to-save (a deliberate, non-accidental gesture)
-     is unchanged.
+7. ~~**Presets rework.**~~ — **shipped 2026-08-06, tap behavior reversed
+   2026-08-04 (following session).** Scope changed from the original spec
+   during a live clarifying pass with the user (see #8 below too — both
+   items landed together, not sequenced, since the "equipment settings"
+   destination turned out to already exist rather than needing a new
+   gear-icon modal):
+   - ~~Tap a **filled** preset slot now opens an action sheet...~~ —
+     **reversed.** After using it in real full-app-impersonation testing,
+     explicit feedback: "this window still pops up when we change presets,
+     can we get rid of it?" A plain tap on a filled slot now **loads it
+     immediately** again (`PresetDial.tsx`'s `onLoad` prop, calling
+     `planSlots.loadFromSlot` directly, same as before this rework
+     originally shipped) — no confirmation popup for the common
+     "switch between presets" gesture. `PresetActionSheet.tsx` (Load/Edit/
+     Clear) is **not removed** — it moved to **long-press** on a filled
+     slot instead (`onOpenActions` prop), so Edit/Clear are still reachable,
+     just out of the way of a plain tap. Tapping an **empty** slot is
+     unchanged, still saves straight through (nothing to protect either
+     way). Long-press on an empty slot still saves too (unchanged).
    - Presets (slots 1-5, the driver-facing A-E letters) are now **terminal-
      independent** — `usePlanSlots.ts`'s `planStoreKey` gives them a
      user-only key (no terminal component) instead of the old per-terminal

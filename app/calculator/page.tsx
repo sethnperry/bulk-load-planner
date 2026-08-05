@@ -1219,9 +1219,13 @@ const lastProductInfoById = useMemo(() => {
           slots={planSlots.PLAN_SLOTS}
           slotHas={planSlots.slotHas}
           disabled={!location.selectedTerminalId}
-          onTapFilled={(n) => setPresetSheetSlot(n)}
+          onLoad={(n) => {
+            planSlots.loadFromSlot(n);
+            setCaptureBaselineNext(true);
+            setCheckAvailabilityNext(true);
+          }}
+          onOpenActions={(n) => setPresetSheetSlot(n)}
           onSave={(n) => { planSlots.saveToSlot(n); setBaselineOverrides(overridesSnapshot(compPlan, cgSlider)); }}
-          onClear={planSlots.clearSlot}
           onTourAdvance={tourAdvanceIfTarget}
           onActiveChange={setActiveSlotLetter}
         />

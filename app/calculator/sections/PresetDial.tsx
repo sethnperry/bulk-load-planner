@@ -4,27 +4,31 @@
 // Preset letter dial (A-E) -- same centered-dial carousel pattern as the
 // header tab bar / Cards city selector (scroll-snap, tap-to-center), sitting
 // directly under the Planner/Cards/Vault tab bar per the design handoff.
-// Tapping an empty slot still saves straight through (nothing to lose);
-// tapping a FILLED slot opens page.tsx's action sheet (Load/Edit/Clear)
-// instead of loading immediately, so a stray tap can't silently blow away
-// the working plan. Hold-to-clear/hold-to-save remain a direct legacy
-// gesture. Scrolling to (re)center deliberately does NOT itself trigger any
-// action -- it just previews which letter is centered, so swiping past a
-// slot can't accidentally trigger anything either.
+// Tap always acts immediately: an empty slot saves, a filled slot loads --
+// no confirmation popup, per explicit user feedback after using the
+// original tap-opens-a-sheet design in practice ("this window still pops
+// up when we change presets, can we get rid of it?" -- 2026-08-04, directly
+// reversing the 2026-08-06 rework's tap behavior). Management actions
+// (Edit/Clear) move to long-press on a filled slot, which opens page.tsx's
+// action sheet -- still there, just no longer in the way of the common
+// "switch presets" gesture. Long-press on an empty slot still saves
+// directly (nothing to protect). Scrolling to (re)center deliberately does
+// NOT itself trigger any action -- it just previews which letter is
+// centered, so swiping past a slot can't accidentally trigger anything.
 
 import React, { useEffect, useRef, useState } from "react";
 
 export default function PresetDial({
-  slots, slotHas, disabled, onTapFilled, onSave, onClear, onTourAdvance, onActiveChange,
+  slots, slotHas, disabled, onLoad, onOpenActions, onSave, onTourAdvance, onActiveChange,
 }: {
   slots: readonly number[];
   slotHas: Record<number, boolean>;
   disabled: boolean;
-  // Filled slot tapped -- opens an action sheet (Load / Edit / Clear) rather
-  // than loading (and silently overwriting the working plan) immediately.
-  onTapFilled: (n: number) => void;
+  // Tapping a filled slot loads it immediately.
+  onLoad: (n: number) => void;
+  // Long-pressing a filled slot opens the management action sheet (Edit/Clear).
+  onOpenActions: (n: number) => void;
   onSave: (n: number) => void;
-  onClear: (n: number) => void;
   onTourAdvance?: (id: string) => void;
   onActiveChange?: (n: number) => void;
 }) {
@@ -92,7 +96,7 @@ export default function PresetDial({
             didLongPress = false;
             pressTimer = setTimeout(() => {
               didLongPress = true;
-              if (has) onClear(n);
+              if (has) onOpenActions(n);
               else { onSave(n); onTourAdvance?.("tour-plan-slots"); }
             }, 600);
           };
@@ -103,11 +107,10 @@ export default function PresetDial({
             if (disabled || didLongPress) return;
             setActive(n);
             centerSlot(n, true);
-            // A filled slot opens the action sheet (Load / Edit / Clear)
-            // instead of loading immediately -- no more silently blowing
-            // away the working plan on a stray tap. An empty slot has
-            // nothing to protect, so it still saves straight through.
-            if (has) onTapFilled(n);
+            // A filled slot loads immediately; an empty slot saves --
+            // both act on a plain tap. Management actions (Edit/Clear) live
+            // behind the long-press instead, see onPressStart above.
+            if (has) onLoad(n);
             else { onSave(n); onTourAdvance?.("tour-plan-slots"); }
           };
 
@@ -125,7 +128,7 @@ export default function PresetDial({
                   border: "none", background: "transparent", padding: "3px 4px",
                   cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.4 : 1,
                 }}
-                title={disabled ? "Select a terminal first" : has ? "Tap for options" : "Tap to save"}
+                title={disabled ? "Select a terminal first" : has ? "Tap to load, hold for options" : "Tap to save"}
               >
                 <span style={{
                   font: isActive ? "600 15px Outfit" : "500 12px Outfit",
