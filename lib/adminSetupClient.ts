@@ -111,6 +111,18 @@ export async function claimCombo(targetUserId: string, comboId: string) {
   return setupFetch("claim_combo", targetUserId, { comboId });
 }
 
+export async function coupleCombo(
+  targetUserId: string,
+  truckId: string,
+  trailerId: string,
+  opts?: { tareLbs?: number; targetWeight?: number; bufferLbs?: number; force?: boolean }
+) {
+  return setupFetch<{ data: { combo_id: string; tare_lbs: number; created: boolean } }>(
+    "couple_combo", targetUserId,
+    { truckId, trailerId, ...opts }
+  );
+}
+
 export async function slipSeatCombo(targetUserId: string, comboId: string) {
   return setupFetch("slip_seat_combo", targetUserId, { comboId });
 }

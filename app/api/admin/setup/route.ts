@@ -19,6 +19,7 @@
 //   set_card_data           → upsert user_terminal_cards
 //   get_company_id          → { companyId }
 //   claim_combo             → calls claim_combo(p_combo_id, p_user_id)
+//   couple_combo            → calls couple_combo(p_truck_id, p_trailer_id, p_user_id, ...)
 //   slip_seat_combo         → calls slip_seat_combo(p_combo_id, p_user_id)
 //   get_carded              → calls get_carded(p_terminal_id, p_carded_on, p_user_id)
 
@@ -258,6 +259,21 @@ export async function POST(req: NextRequest) {
         const { data, error } = await serviceSupabase.rpc("claim_combo", {
           p_combo_id: comboId,
           p_user_id:  targetUserId,
+        });
+        if (error) throw error;
+        return NextResponse.json({ data });
+      }
+
+      case "couple_combo": {
+        const { truckId, trailerId, tareLbs, targetWeight, bufferLbs, force } = body;
+        const { data, error } = await serviceSupabase.rpc("couple_combo", {
+          p_truck_id: truckId,
+          p_trailer_id: trailerId,
+          p_user_id: targetUserId,
+          p_tare_lbs: tareLbs ?? null,
+          p_target_weight: targetWeight ?? null,
+          p_buffer_lbs: bufferLbs ?? null,
+          p_force: force ?? false,
         });
         if (error) throw error;
         return NextResponse.json({ data });

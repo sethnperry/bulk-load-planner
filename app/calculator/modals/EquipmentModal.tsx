@@ -1499,6 +1499,7 @@ export default function EquipmentModal({
         selectedComboId={selectedComboId}
         onSelectComboId={onSelectComboId}
         onRefreshCombos={onRefreshCombos}
+        setupSession={setupSession}
       />
     );
   }

@@ -1010,6 +1010,78 @@ Reloaded Planner directly afterward — admin's own real equipment
 (Truck·25184/Global South) rendered correctly, confirming no lingering
 impersonation state. `tsc --noEmit` clean throughout.
 
+### Equipment selection broken under full-app impersonation (fixed same day)
+
+User's very next real-world use of the new "Use app as {driver}" feature
+hit two problems: presets appearing lost under their own identity, and
+being completely unable to select equipment while impersonating.
+
+**Presets**: checked live via direct Postgres query before assuming
+anything was actually wrong — `user_plan_slots` for the admin's own
+`authUserId`, all five preset slots (`__universal__` scope), all had real,
+non-empty `compPlan` data with recent `updated_at` timestamps. Server-side
+data was never lost. This points to a local device cache/sync display
+issue (same general fragility as the earlier-documented preset-loss
+incident this session, root-caused then to local-cache-vs-server
+staleness) rather than a new regression from today's changes — not
+independently root-caused further this pass; flagged, not fixed, since the
+underlying data is confirmed safe and a hard refresh should resolve the
+display.
+
+**Equipment selection — real bug, found and fixed.** Root cause: this
+company (the persistent demo/QA company used all session) is flagged
+`companies.is_solo = true` despite having multiple real members — an
+already-documented quirk (`is_solo` reflects how a company was *created*,
+not its current member count; see the solo→fleet join flow notes above).
+`EquipmentModal.tsx` routes any `is_solo` company into `SoloEquipmentModal.tsx`
+instead of its own fleet UI — and `SoloEquipmentModal.tsx` had **zero
+setupSession-awareness**: it didn't even accept the prop, and called
+`couple_combo` directly via the browser's own live session regardless of
+who was being impersonated. Confirmed live via `pg_get_functiondef`:
+`couple_combo` only ever had a single overload, hardcoded to `auth.uid()`
+throughout — unlike `claim_combo`, which already had a service-role
+`(p_combo_id, p_user_id)` overload for exactly this class of problem, added
+back when the original Dispatch-tab work was built. So tapping a truck/
+trailer while impersonating Kyle actually claimed the combo under the
+*admin's own* account — `useEquipment.ts`'s setup-mode `selectedComboId`
+derivation (only shows combos `claimed_by` the target user) then
+immediately reverted the selection back to empty, which is what read as
+"won't let me select equipment."
+
+Fixed by adding a matching service-role overload,
+`couple_combo(p_truck_id, p_trailer_id, p_user_id, ...)` — a verbatim copy
+of the existing function with every `auth.uid()` replaced by `p_user_id`,
+migration `20260815020000_couple_combo_service_role.sql` (applied) — plus
+the same plumbing pattern `claim_combo` already established: a new
+`couple_combo` case in `/api/admin/setup/route.ts`, a `coupleCombo()`
+helper in `lib/adminSetupClient.ts`, and `SoloEquipmentModal.tsx` gained a
+`setupSession` prop (now actually threaded through from
+`EquipmentModal.tsx`, which already received it but never passed it down —
+also part of the bug) with `resolvePair()` branching to the service-role
+proxy when impersonating. `confirmRemove` (delete_truck/delete_trailer)
+was checked and left alone — those RPCs already enforce admin-only via the
+*real* `auth.uid()` internally, which is correctly the actual admin during
+impersonation, and the action is company-wide equipment deletion, not
+user-specific, so no setupSession branch was needed there.
+
+**Live-verified end-to-end**: impersonated Kyle Tatro (zero prior
+equipment), opened Select Equipment, tapped a truck+trailer never paired
+before — got the same "New Pairing, enter tare weight" prompt a real
+driver would see (proving the call reached the real RPC rather than
+silently failing), entered a tare weight, and the Planner correctly showed
+"Truck · 22049 / Trailer · 3151" with a real compartment grid. Confirmed
+via direct Postgres query that `equipment_combos.claimed_by` was genuinely
+Kyle's user ID, not the admin's. This test's pairing force-decoupled the
+admin's own real truck/trailer (25184/3151) as a side effect of the
+existing `p_force: true` behavior (a real driver re-selecting their own
+equipment mid-session is the normal case this flag exists for) — restored
+immediately after by returning to the admin's own identity and
+re-selecting 25184/3151 through the same picker, which correctly found
+the prior tare-weight history and re-coupled with no new prompt. Confirmed
+clean afterward via direct query: admin's original combo active again,
+Kyle's test combo left with no active claim. `tsc --noEmit` clean
+throughout.
+
 ### Dispatch tab (new)
 Per-driver dashboard, reachable by selecting a driver (exact selection
 UI/modal not designed yet — flagged as open design work below, not blocking

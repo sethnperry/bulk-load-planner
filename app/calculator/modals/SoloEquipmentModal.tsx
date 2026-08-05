@@ -22,6 +22,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
+import type { SetupSession } from "@/lib/setupSession";
 import { FullscreenModal } from "@/lib/ui/FullscreenModal";
 import { CustomSelect } from "@/lib/ui/CustomSelect";
 import ScaleTicketModal from "./ScaleTicketModal";
@@ -68,6 +69,11 @@ type Props = {
   selectedComboId: string;
   onSelectComboId: (id: string) => void;
   onRefreshCombos: () => void;
+  // Full-app admin impersonation ("Use app as {driver}", 2026-08-04) --
+  // when set, couple_combo must claim equipment for setupSession.targetUserId
+  // via the service-role /api/admin/setup proxy, not the real admin's own
+  // browser session (which has no way to act as anyone but auth.uid()).
+  setupSession?: SetupSession | null;
 };
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
@@ -570,6 +576,7 @@ function computeWashLines(truckWashedAt: string | null, trailerWashedAt: string 
 
 export default function SoloEquipmentModal({
   open, onClose, authUserId, companyId, selectedComboId, onSelectComboId, onRefreshCombos,
+  setupSession,
 }: Props) {
   const [trucks, setTrucks] = useState<TruckRow[]>([]);
   const [trailers, setTrailers] = useState<TrailerRow[]>([]);
@@ -727,27 +734,52 @@ export default function SoloEquipmentModal({
     setBusy(true);
     setError(null);
     try {
-      const { data, error: rpcErr } = await supabase.rpc("couple_combo", {
-        p_truck_id: truckId,
-        p_trailer_id: trailerId,
-        p_tare_lbs: tareLbs ?? null,
-        // Lets re-selecting equipment here decouple+recouple in one step,
-        // instead of rejecting with "already coupled" -- this screen's whole
-        // point is trivial swapping. Fleet's Browse-Fleet-and-Couple flow
-        // still defaults to p_force=false (unaffected).
-        p_force: true,
-      });
-      if (rpcErr) {
-        // No prior history for this exact pair -- needs a one-time tare
-        // weight, same as fleet's "New Pairing" step. Prompt for it instead
-        // of just surfacing the raw error.
-        if (!tareLbs && /provide a tare weight/i.test(rpcErr.message ?? "")) {
-          setNewTareTarget({ truckId, trailerId });
-          return;
+      let comboId: string;
+      if (setupSession) {
+        // Full-app impersonation -- must couple on the TARGET driver's
+        // behalf via the service-role proxy, not this browser's own
+        // session (which only has RLS/RPC standing to act as auth.uid(),
+        // the real admin). Confirmed live: without this branch, the combo
+        // got claimed under the admin's own account, and
+        // useEquipment.ts's setup-mode selectedComboId derivation (only
+        // shows combos claimed_by the target user) silently reverted the
+        // selection back to empty right after.
+        const { coupleCombo } = await import("@/lib/adminSetupClient");
+        try {
+          const res = await coupleCombo(setupSession.targetUserId, truckId, trailerId, {
+            tareLbs, force: true,
+          });
+          comboId = String(res?.data?.combo_id ?? "");
+        } catch (e: any) {
+          if (!tareLbs && /provide a tare weight/i.test(e?.message ?? "")) {
+            setNewTareTarget({ truckId, trailerId });
+            return;
+          }
+          throw e;
         }
-        throw rpcErr;
+      } else {
+        const { data, error: rpcErr } = await supabase.rpc("couple_combo", {
+          p_truck_id: truckId,
+          p_trailer_id: trailerId,
+          p_tare_lbs: tareLbs ?? null,
+          // Lets re-selecting equipment here decouple+recouple in one step,
+          // instead of rejecting with "already coupled" -- this screen's whole
+          // point is trivial swapping. Fleet's Browse-Fleet-and-Couple flow
+          // still defaults to p_force=false (unaffected).
+          p_force: true,
+        });
+        if (rpcErr) {
+          // No prior history for this exact pair -- needs a one-time tare
+          // weight, same as fleet's "New Pairing" step. Prompt for it instead
+          // of just surfacing the raw error.
+          if (!tareLbs && /provide a tare weight/i.test(rpcErr.message ?? "")) {
+            setNewTareTarget({ truckId, trailerId });
+            return;
+          }
+          throw rpcErr;
+        }
+        comboId = String((data as any)?.combo_id ?? "");
       }
-      const comboId = String((data as any)?.combo_id ?? "");
       if (!comboId) throw new Error("No combo_id returned.");
       onSelectComboId(comboId);
       await Promise.all([loadEquipment(), onRefreshCombos()]);
