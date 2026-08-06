@@ -49,8 +49,8 @@ import PresetActionSheet from "./components/PresetActionSheet";
 import DriverTrainingModal from "./components/DriverTrainingModal";
 
 // ── Modals ─────────────────────────────────────────────────────────────────────
-import LocationModal from "./modals/LocationModal";
-import MyTerminalsModal from "./modals/MyTerminalsModal";
+// LocationModal/MyTerminalsModal now mount once in ShellChrome
+// (CalculatorLayoutClient.tsx) -- see the render-site comment further down.
 import TerminalCatalogModal from "./modals/TerminalCatalogModal";
 import LoadingModal from "./modals/LoadingModal";
 import ProductTempModal from "./modals/ProductTempModal";
@@ -62,7 +62,7 @@ import { styles } from "./ui/styles";
 // ── Utils ──────────────────────────────────────────────────────────────────────
 import { addDaysISO_, daysUntilISO_, formatMDYWithCountdown_, isPastISO_ } from "./utils/dates";
 import { themeFill, themeTextOnFill } from "./theme";
-import { normCity, normState } from "./utils/normalize";
+import { normState } from "./utils/normalize";
 import { cgSliderToBias, bestLbsPerGallon, planForGallons, CG_NEUTRAL } from "./utils/planMath";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -270,13 +270,22 @@ export default function CalculatorPage() {
   // the header (layout.tsx) needs to trigger the same Equipment/Expirations/
   // Terminals sheets this page renders (ExpirationModal's "resolve" links
   // open Terminals, so it has to be a shared boolean, not local to either).
-  const { equipOpen, setEquipOpen, termOpen, setTermOpen } = shell;
-  const [locOpen, setLocOpen] = useState(false);
+  // locOpen/statePickerOpen/expandedTerminalId and the city-star/stateOptions/
+  // cities derived values also live in shell now (see CalculatorShellContext) --
+  // the Terminal tab's own identity header opens the same LocationModal/
+  // MyTerminalsModal instances (now mounted once in ShellChrome), so this
+  // page and that one can't each carry an independent copy without risking
+  // the two drifting out of sync.
+  const {
+    equipOpen, setEquipOpen, termOpen, setTermOpen,
+    locOpen, setLocOpen, statePickerOpen, setStatePickerOpen,
+    expandedTerminalId, setExpandedTerminalId,
+    isCityStarred, toggleCityStar,
+    stateOptions, selectedStateLabel, selectedStateName, cities, topCities, allCities,
+  } = shell;
   const [catalogOpen, setCatalogOpen] = useState(false);
   const [catalogExpandedId, setCatalogExpandedId] = useState<string | null>(null);
   const [catalogEditingDateId, setCatalogEditingDateId] = useState<string | null>(null);
-  const [expandedTerminalId, setExpandedTerminalId] = useState<string | null>(null);
-  const [statePickerOpen, setStatePickerOpen] = useState(false);
   const [compModalOpen, setCompModalOpen] = useState(false);
   const [compModalComp, setCompModalComp] = useState<number | null>(null);
   const [tempDialOpen, setTempDialOpen] = useState(false);
@@ -982,7 +991,7 @@ export default function CalculatorPage() {
   // Also shared via context (see above) -- myTerminalIdSet, terminalFilters,
   // expirations all come from `shell` now.
   const { myTerminalIdSet, terminalFilters } = shell;
-  const { terminalsFiltered, catalogTerminalsInCity } = terminalFilters;
+  const { catalogTerminalsInCity } = terminalFilters;
 
   // Fetch terminal access dates for city terminals
   useEffect(() => {
@@ -1068,77 +1077,11 @@ const lastProductInfoById = useMemo(() => {
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [plannedProductIds, productNameById, productHexCodeById, productTempF, tempF]);
 
-  // ── City starring ──────────────────────────────────────────────────────────
-  const CITY_STARS_KEY_PREFIX = "protankr_city_stars_v1::";
-  const [starredCitySet, setStarredCitySet] = useState<Set<string>>(new Set());
-
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(`${CITY_STARS_KEY_PREFIX}${authUserId || "anon"}`);
-      const parsed = raw ? JSON.parse(raw) : [];
-      setStarredCitySet(new Set(Array.isArray(parsed) ? parsed.filter((x) => typeof x === "string") : []));
-    } catch { setStarredCitySet(new Set()); }
-  }, [authUserId]);
-
-  const cityKey = (state: string, city: string) => `${normState(state)}||${normCity(city)}`;
-  const isCityStarred = (state: string, city: string) => starredCitySet.has(cityKey(state, city));
-  const toggleCityStar = (state: string, city: string) => {
-    const key = cityKey(state, city);
-    setStarredCitySet((prev) => {
-      const next = new Set(prev);
-      next.has(key) ? next.delete(key) : next.add(key);
-      try { localStorage.setItem(`${CITY_STARS_KEY_PREFIX}${authUserId || "anon"}`, JSON.stringify(Array.from(next))); } catch {}
-      return next;
-    });
-  };
-
-  // ── Location option lists ──────────────────────────────────────────────────
-  const stateOptions = useMemo(() => {
-    if (location.statesCatalog.length > 0) {
-      return location.statesCatalog.map((r) => ({ code: normState(r.state_code), name: String(r.state_name || "").trim() })).filter((r) => r.code);
-    }
-    const codes = Array.from(new Set(terminals.terminalCatalog.map((t) => normState(t.state ?? "")))).filter(Boolean);
-    return codes.map((code) => ({ code, name: code }));
-  }, [location.statesCatalog, terminals.terminalCatalog]);
-
-  const stateNameByCode = useMemo(() => {
-    const m = new Map<string, string>();
-    stateOptions.forEach((s) => m.set(s.code, s.name || s.code));
-    return m;
-  }, [stateOptions]);
-
-  const selectedStateLabel = useMemo(() => {
-    if (!location.selectedState) return "";
-    const code = normState(location.selectedState);
-    return `${code} — ${stateNameByCode.get(code) || code}`;
-  }, [location.selectedState, stateNameByCode]);
-
-  const selectedStateName = useMemo(() => {
-    if (!location.selectedState) return "";
-    const code = normState(location.selectedState);
-    return stateNameByCode.get(code) || code;
-  }, [location.selectedState, stateNameByCode]);
-
-  const cities = useMemo(() => {
-    const st = normState(location.selectedState);
-    return Array.from(new Set(
-      location.citiesCatalog.filter((c) => normState(c.state_code ?? "") === st && c.active !== false)
-        .map((c) => normCity(c.city_name ?? ""))
-    )).filter(Boolean).sort();
-  }, [location.citiesCatalog, location.selectedState]);
-
-  const topCities = useMemo(() => {
-    if (!location.selectedState || cities.length === 0) return [];
-    const st = normState(location.selectedState);
-    return cities.filter((c) => starredCitySet.has(cityKey(st, c))).sort();
-  }, [location.selectedState, cities, starredCitySet]);
-
-  const allCities = useMemo(() => {
-    if (!location.selectedState) return cities;
-    const st = normState(location.selectedState);
-    return cities.filter((c) => !starredCitySet.has(cityKey(st, c)));
-  }, [location.selectedState, cities, starredCitySet]);
-
+  // City starring, stateOptions/selectedStateLabel/selectedStateName/cities/
+  // topCities/allCities all live in shell now (see the destructure above) --
+  // TerminalCatalogModal below is Planner-only dead code (never opened, see
+  // this file's own git history) so its starBtnClass stays local; nothing
+  // else here needs a second copy of the picker-list logic.
   const starBtnClass = (active: boolean) =>
     ["h-8 w-8 flex items-center justify-center rounded-lg border transition",
       active ? "border-yellow-400/40 text-yellow-300 hover:bg-yellow-400/10"
@@ -1683,51 +1626,9 @@ const lastProductInfoById = useMemo(() => {
         TempDial={TempDial}
       />
 
-      <LocationModal
-        open={locOpen} onClose={() => setLocOpen(false)}
-        selectedState={location.selectedState}
-        selectedStateLabel={selectedStateLabel}
-        selectedStateName={selectedStateName}
-        statesError={location.statesError}
-        statesLoading={location.statesLoading}
-        statePickerOpen={statePickerOpen}
-        setStatePickerOpen={setStatePickerOpen}
-        stateOptions={stateOptions}
-        setSelectedState={location.setSelectedState}
-        selectedCity={location.selectedCity}
-        citiesLoading={location.citiesLoading}
-        citiesError={location.citiesError}
-        cities={cities}
-        topCities={topCities}
-        allCities={allCities}
-        setSelectedCity={location.setSelectedCity}
-        normState={normState}
-        toggleCityStar={toggleCityStar}
-        isCityStarred={isCityStarred}
-        setLocOpen={setLocOpen}
-      />
-
-      <MyTerminalsModal
-        open={termOpen} onClose={() => setTermOpen(false)}
-        selectedState={location.selectedState}
-        selectedCity={location.selectedCity}
-        termError={terminals.termError}
-        terminalsFiltered={terminalsFiltered}
-        selectedTerminalId={location.selectedTerminalId}
-        expandedTerminalId={expandedTerminalId}
-        setExpandedTerminalId={setExpandedTerminalId}
-        addDaysISO_={addDaysISO_}
-        isPastISO_={isPastISO_}
-        formatMDYWithCountdown_={formatMDYWithCountdown_}
-        accessDateByTerminalId={terminals.accessDateByTerminalId}
-        setAccessDateForTerminal_={terminals.setAccessDateForTerminal}
-        cardDataByTerminalId={cardDataByTerminalId}
-        myTerminalIds={myTerminalIdSet}
-        setMyTerminalIds={() => {}}
-        setSelectedTerminalId={location.setSelectedTerminalId}
-        setTermOpen={setTermOpen}
-        onChangeLocation={() => { setTermOpen(false); setLocOpen(true); }}
-      />
+      {/* LocationModal/MyTerminalsModal now mount once in ShellChrome (see
+          CalculatorLayoutClient.tsx) -- shared with the Terminal tab's own
+          identity header, both reading/writing the one shell.location. */}
 
       <TerminalCatalogModal
         open={catalogOpen}

@@ -17,25 +17,23 @@
 // identity; only the render order is reversed.
 //
 // Layered down/out visual logic (confirmed against the actual mockup
-// screenshot): an arm renders fully "down" (red circle-slash over the
-// whole column) when either it's explicitly flagged down, or every
-// product currently on it is out (whether flagged out on this specific
-// arm, or out rack-wide via the bottom STUD button). A single out product
-// on a multi-product arm that still has another valid product just gets a
-// strikethrough on that one product; the arm itself stays normal.
+// screenshot): an arm renders fully "down" (a red horizontal line struck
+// through the whole product stack, 2026-08-06 -- see below) when either
+// it's explicitly flagged down, or every product currently on it is out
+// (whether flagged out on this specific arm, or out rack-wide via the
+// bottom STUD button). A single out product on a multi-product arm that
+// still has another valid product just gets a strikethrough on that one
+// product; the arm itself stays normal.
+//
+// 2026-08-06: lane-down changed from a solid red left cell to just the
+// lane number/letter text turning red, and arm-down changed from a red
+// circle-slash icon to a single red horizontal line through the whole
+// arm's product stack -- both per explicit user direction, matching a
+// flatter/less-alarming visual language than the original mockup's icon.
 
 import React from "react";
 import type { RackArm, RackLane, RackProductStatusRow, ProductLite } from "./types";
 import { displayLabel } from "./labels";
-
-function NoSymbol() {
-  return (
-    <svg viewBox="0 0 24 24" width="100%" height="100%" style={{ position: "absolute", inset: 0 }}>
-      <circle cx="12" cy="12" r="10" fill="none" stroke="#ef4444" strokeWidth="2" />
-      <line x1="5" y1="19" x2="19" y2="5" stroke="#ef4444" strokeWidth="2" />
-    </svg>
-  );
-}
 
 export default function RackLaneGrid({
   lanes,
@@ -94,8 +92,8 @@ export default function RackLaneGrid({
           >
             <div style={{
               flexShrink: 0, width: 36, display: "flex", alignItems: "center", justifyContent: "center",
-              background: lane.is_down ? "#ef4444" : "rgba(255,255,255,0.08)",
-              color: "#fff", fontSize: 15, fontWeight: 800, alignSelf: "stretch",
+              background: "rgba(255,255,255,0.08)",
+              color: lane.is_down ? "#ef4444" : "#fff", fontSize: 15, fontWeight: 800, alignSelf: "stretch",
             }}>
               {displayLabel(lane.label, lane.lane_number)}
             </div>
@@ -127,7 +125,7 @@ export default function RackLaneGrid({
                       );
                     })}
                     {down && pids.length > 0 && (
-                      <div style={{ position: "absolute", inset: -4 }}><NoSymbol /></div>
+                      <div style={{ position: "absolute", left: -4, right: -4, top: "50%", height: 2, background: "#ef4444", transform: "translateY(-1px)" }} />
                     )}
                   </div>
                 );

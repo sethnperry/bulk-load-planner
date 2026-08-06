@@ -18,9 +18,16 @@ type Props = {
   activeId: string;
   onChange: (id: string) => void;
   accentColor?: string;
+  // Smaller footprint + a small dot under the active tab instead of relying
+  // on font-weight/color alone -- opt-in (default false/false) so existing
+  // consumers (Lead/Dispatch/Admin subtabs) render exactly as before.
+  compact?: boolean;
+  showActiveDot?: boolean;
 };
 
-export default function CenteredSubTabs({ tabs, activeId, onChange, accentColor = "#67e8f9" }: Props) {
+export default function CenteredSubTabs({
+  tabs, activeId, onChange, accentColor = "#67e8f9", compact = false, showActiveDot = false,
+}: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const suppressScrollNavRef = useRef(false);
   const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -75,15 +82,24 @@ export default function CenteredSubTabs({ tabs, activeId, onChange, accentColor 
           <div
             key={t.id}
             onClick={() => { if (t.id !== activeId) onChange(t.id); else centerTab(t.id, true); }}
-            style={{ flex: "0 0 120px", scrollSnapAlign: "center", display: "flex", justifyContent: "center", cursor: "pointer" }}
+            style={{ flex: compact ? "0 0 84px" : "0 0 120px", scrollSnapAlign: "center", display: "flex", justifyContent: "center", cursor: "pointer" }}
           >
             <div style={{
-              padding: "10px 2px",
-              font: isActive ? "600 15px Outfit" : "400 14px Outfit",
+              padding: compact ? "6px 2px" : "10px 2px",
+              display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
+              font: isActive
+                ? (compact ? "600 13px Outfit" : "600 15px Outfit")
+                : (compact ? "400 12px Outfit" : "400 14px Outfit"),
               color: isActive ? accentColor : "rgba(255,255,255,0.4)",
               transition: "all 150ms ease",
             }}>
-              {t.label}
+              <span>{t.label}</span>
+              {showActiveDot && (
+                <span style={{
+                  width: 4, height: 4, borderRadius: "50%",
+                  background: isActive ? accentColor : "transparent",
+                }} />
+              )}
             </div>
           </div>
         );

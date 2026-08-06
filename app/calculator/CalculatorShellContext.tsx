@@ -31,6 +31,7 @@ import { useTerminalFilters } from "./hooks/useTerminalFilters";
 import { useDemoWatchdog } from "./hooks/useDemoWatchdog";
 import { useTheme } from "./hooks/useTheme";
 import { addDaysISO_ } from "./utils/dates";
+import { normCity, normState } from "./utils/normalize";
 import type { TerminalRow, TerminalCatalogRow } from "./types";
 import { isRole, type Role } from "@/lib/ui/driver/role";
 
@@ -53,6 +54,26 @@ type ShellValue = {
   setExpModalOpen: (v: boolean) => void;
   termOpen: boolean;
   setTermOpen: (v: boolean) => void;
+  // Location picker (state -> city) -- termOpen (above) already covers "pick
+  // a terminal within the current city"; this is the step before it. Shared
+  // (not local to page.tsx) so any tab can open the SAME LocationModal/
+  // MyTerminalsModal instances (mounted once in ShellChrome, see that file)
+  // and have the change reflect everywhere else that reads shell.location --
+  // e.g. the Terminal tab's clickable terminal/city header.
+  locOpen: boolean;
+  setLocOpen: (v: boolean) => void;
+  statePickerOpen: boolean;
+  setStatePickerOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  expandedTerminalId: string | null;
+  setExpandedTerminalId: (id: string | null) => void;
+  isCityStarred: (state: string, city: string) => boolean;
+  toggleCityStar: (state: string, city: string) => void;
+  stateOptions: { code: string; name?: string | null }[];
+  selectedStateLabel: string;
+  selectedStateName: string;
+  cities: string[];
+  topCities: string[];
+  allCities: string[];
   cardDataByTerminalId: Record<string, CardData>;
   setCardDataForTerminal_: (terminalId: string, data: CardData) => Promise<void>;
   theme: ReturnType<typeof useTheme>;
@@ -139,6 +160,83 @@ export function CalculatorShellProvider({ children }: { children: React.ReactNod
   const [equipOpen, setEquipOpen] = useState(false);
   const [expModalOpen, setExpModalOpen] = useState(false);
   const [termOpen, setTermOpen] = useState(false);
+  const [locOpen, setLocOpen] = useState(false);
+  const [statePickerOpen, setStatePickerOpen] = useState(false);
+  const [expandedTerminalId, setExpandedTerminalId] = useState<string | null>(null);
+
+  // ── City starring (favorites shown at the top of LocationModal's city
+  // list) -- moved here from page.tsx so the Terminal tab's own header can
+  // open the SAME picker without a second, independently-drifting copy of
+  // this logic (see this file's own header comment on why hoisting hooks
+  // one level, not duplicating them, is the rule here).
+  const CITY_STARS_KEY_PREFIX = "protankr_city_stars_v1::";
+  const [starredCitySet, setStarredCitySet] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(`${CITY_STARS_KEY_PREFIX}${authUserId || "anon"}`);
+      const parsed = raw ? JSON.parse(raw) : [];
+      setStarredCitySet(new Set(Array.isArray(parsed) ? parsed.filter((x) => typeof x === "string") : []));
+    } catch { setStarredCitySet(new Set()); }
+  }, [authUserId]);
+
+  const cityKey = (state: string, city: string) => `${normState(state)}||${normCity(city)}`;
+  const isCityStarred = (state: string, city: string) => starredCitySet.has(cityKey(state, city));
+  const toggleCityStar = (state: string, city: string) => {
+    const key = cityKey(state, city);
+    setStarredCitySet((prev) => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      try { localStorage.setItem(`${CITY_STARS_KEY_PREFIX}${authUserId || "anon"}`, JSON.stringify(Array.from(next))); } catch {}
+      return next;
+    });
+  };
+
+  const stateOptions = useMemo(() => {
+    if (location.statesCatalog.length > 0) {
+      return location.statesCatalog.map((r) => ({ code: normState(r.state_code), name: String(r.state_name || "").trim() })).filter((r) => r.code);
+    }
+    const codes = Array.from(new Set(terminals.terminalCatalog.map((t: any) => normState(t.state ?? "")))).filter(Boolean);
+    return codes.map((code) => ({ code, name: code }));
+  }, [location.statesCatalog, terminals.terminalCatalog]);
+
+  const stateNameByCode = useMemo(() => {
+    const m = new Map<string, string>();
+    stateOptions.forEach((s) => m.set(s.code, s.name || s.code));
+    return m;
+  }, [stateOptions]);
+
+  const selectedStateLabel = useMemo(() => {
+    if (!location.selectedState) return "";
+    const code = normState(location.selectedState);
+    return `${code} — ${stateNameByCode.get(code) || code}`;
+  }, [location.selectedState, stateNameByCode]);
+
+  const selectedStateName = useMemo(() => {
+    if (!location.selectedState) return "";
+    const code = normState(location.selectedState);
+    return stateNameByCode.get(code) || code;
+  }, [location.selectedState, stateNameByCode]);
+
+  const cities = useMemo(() => {
+    const st = normState(location.selectedState);
+    return Array.from(new Set(
+      location.citiesCatalog.filter((c) => normState(c.state_code ?? "") === st && c.active !== false)
+        .map((c) => normCity(c.city_name ?? ""))
+    )).filter(Boolean).sort();
+  }, [location.citiesCatalog, location.selectedState]);
+
+  const topCities = useMemo(() => {
+    if (!location.selectedState || cities.length === 0) return [];
+    const st = normState(location.selectedState);
+    return cities.filter((c) => starredCitySet.has(cityKey(st, c))).sort();
+  }, [location.selectedState, cities, starredCitySet]);
+
+  const allCities = useMemo(() => {
+    if (!location.selectedState) return cities;
+    const st = normState(location.selectedState);
+    return cities.filter((c) => !starredCitySet.has(cityKey(st, c)));
+  }, [location.selectedState, cities, starredCitySet]);
 
   // ── Role (drives the Lead/Dispatch/Admin tab shown left of Planner) ──────
   // Same query shape as NavMenu.tsx's own role fetch, but scoped to
@@ -242,6 +340,10 @@ export function CalculatorShellProvider({ children }: { children: React.ReactNod
     myTerminalIdSet, terminalFilters,
     equipOpen, setEquipOpen, expModalOpen, setExpModalOpen,
     termOpen, setTermOpen,
+    locOpen, setLocOpen, statePickerOpen, setStatePickerOpen,
+    expandedTerminalId, setExpandedTerminalId,
+    isCityStarred, toggleCityStar,
+    stateOptions, selectedStateLabel, selectedStateName, cities, topCities, allCities,
     cardDataByTerminalId, setCardDataForTerminal_,
     theme,
     role, companyId, isSuperAdmin,

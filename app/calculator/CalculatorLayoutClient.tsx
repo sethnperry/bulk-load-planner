@@ -24,8 +24,11 @@ import NavMenu from "@/lib/ui/NavMenu";
 import EquipmentModal from "./modals/EquipmentModal";
 import ExpirationModal from "./modals/ExpirationModal";
 import SettingsModal from "./modals/SettingsModal";
+import LocationModal from "./modals/LocationModal";
+import MyTerminalsModal from "./modals/MyTerminalsModal";
 import { CalculatorShellProvider, useCalculatorShell } from "./CalculatorShellContext";
 import { addDaysISO_, isPastISO_, formatMDYWithCountdown_ } from "./utils/dates";
+import { normState } from "./utils/normalize";
 import {
   themeFill, themeHeaderGradient, themeIconStroke, themeTabActive, themeTabInactive,
   themeUnderlineTrack, themeUnderlineActive,
@@ -269,6 +272,57 @@ function ShellChrome({ children }: { children: React.ReactNode }) {
       <SettingsModal
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
+      />
+
+      {/* Location/Terminal picker -- shared single instance (same reasoning
+          as EquipmentModal above): the Planner's "Select Location" card and
+          the Terminal tab's identity header both open THIS modal pair, both
+          read/write the one shared shell.location, so picking a city/
+          terminal from either tab is instantly reflected in the other. */}
+      <LocationModal
+        open={shell.locOpen} onClose={() => shell.setLocOpen(false)}
+        selectedState={shell.location.selectedState}
+        selectedStateLabel={shell.selectedStateLabel}
+        selectedStateName={shell.selectedStateName}
+        statesError={shell.location.statesError}
+        statesLoading={shell.location.statesLoading}
+        statePickerOpen={shell.statePickerOpen}
+        setStatePickerOpen={shell.setStatePickerOpen}
+        stateOptions={shell.stateOptions}
+        setSelectedState={shell.location.setSelectedState}
+        selectedCity={shell.location.selectedCity}
+        citiesLoading={shell.location.citiesLoading}
+        citiesError={shell.location.citiesError}
+        cities={shell.cities}
+        topCities={shell.topCities}
+        allCities={shell.allCities}
+        setSelectedCity={shell.location.setSelectedCity}
+        normState={normState}
+        toggleCityStar={shell.toggleCityStar}
+        isCityStarred={shell.isCityStarred}
+        setLocOpen={shell.setLocOpen}
+      />
+
+      <MyTerminalsModal
+        open={shell.termOpen} onClose={() => shell.setTermOpen(false)}
+        selectedState={shell.location.selectedState}
+        selectedCity={shell.location.selectedCity}
+        termError={shell.terminals.termError}
+        terminalsFiltered={shell.terminalFilters.terminalsFiltered}
+        selectedTerminalId={shell.location.selectedTerminalId}
+        expandedTerminalId={shell.expandedTerminalId}
+        setExpandedTerminalId={shell.setExpandedTerminalId}
+        addDaysISO_={addDaysISO_}
+        isPastISO_={isPastISO_}
+        formatMDYWithCountdown_={formatMDYWithCountdown_}
+        accessDateByTerminalId={shell.terminals.accessDateByTerminalId}
+        setAccessDateForTerminal_={shell.terminals.setAccessDateForTerminal}
+        cardDataByTerminalId={shell.cardDataByTerminalId}
+        myTerminalIds={shell.myTerminalIdSet}
+        setMyTerminalIds={() => {}}
+        setSelectedTerminalId={shell.location.setSelectedTerminalId}
+        setTermOpen={shell.setTermOpen}
+        onChangeLocation={() => { shell.setTermOpen(false); shell.setLocOpen(true); }}
       />
 
       <style jsx global>{`

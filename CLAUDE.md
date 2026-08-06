@@ -1700,6 +1700,74 @@ stays fully visible and right-aligned. `tsc --noEmit` clean; no console
 errors; reverted the synthetic long-name DOM edit (an in-page-only test,
 never touched real data) by simply reloading.
 
+### Terminal tab: clickable location header, compact sub-tabs, flatter down/out styling (2026-08-06)
+
+Four small follow-ups against the main Terminal tab (`app/calculator/terminal/page.tsx`,
+`RackLaneGrid.tsx`), per explicit request:
+
+- **Clickable terminal/city header, shared with the Planner.** Rather than
+  building a second copy of the Location/Terminal picker for this tab (risking
+  the same "two independently-drifting copies" class of bug this project has
+  hit before -- see `CustomSelect.tsx`'s own header comment), `LocationModal`/
+  `MyTerminalsModal` were hoisted out of `page.tsx` (Planner) into `ShellChrome`
+  (`CalculatorLayoutClient.tsx`), the same place `EquipmentModal`/
+  `ExpirationModal` already live as single shared instances. Everything those
+  two modals needed that wasn't already shared (`locOpen`/`statePickerOpen`/
+  `expandedTerminalId` open-state, city-star favorites +
+  `stateOptions`/`selectedStateLabel`/`selectedStateName`/`cities`/
+  `topCities`/`allCities`) moved into `CalculatorShellContext.tsx` too --
+  `shell.location` was already the one shared `useLocation()` instance, so
+  this was "finish the hoist," not a new architecture. The Terminal tab's new
+  header (`{terminal name in white} {city, state in gray}`, just under the
+  rack sub-tabs) is a plain button calling `shell.setTermOpen(true)` (or
+  `shell.setLocOpen(true)` if no location is set yet, mirroring the Planner's
+  own step logic) -- tapping it opens the literal same `MyTerminalsModal`
+  instance the Planner's own "Select Terminal" card opens, so picking a
+  different terminal from either tab updates both immediately (no separate
+  sync mechanism needed, since both read/write the one `shell.location`).
+  Non-interactive (plain text, no button) when viewing a driver's
+  auto-inferred terminal in dispatch/admin context -- tapping it there would
+  silently change the *viewer's* own location, not the driver's, which isn't
+  what "same modal" should mean in that context. `TerminalCatalogModal`
+  (confirmed dead code -- never opened anywhere in the current Planner flow,
+  `catalogOpen` is set to `true` nowhere) was left exactly where it was,
+  Planner-only, not worth resurrecting into the shared move.
+- **Compact sub-tabs + active-rack dot.** `CenteredSubTabs.tsx` gained two
+  opt-in props, `compact` and `showActiveDot` (both default `false`, so the
+  Lead/Dispatch/Admin shelved-route consumers render unchanged) -- smaller
+  flex-basis/font-size, plus a small dot rendered under the active tab's
+  label instead of relying on color/weight alone. Terminal tab's rack picker
+  passes both.
+- **Lane-down: text color, not a solid fill.** `RackLaneGrid.tsx`'s lane
+  number/letter cell no longer fills its whole background red when
+  `lane.is_down` -- the cell background stays the normal
+  `rgba(255,255,255,0.08)`, only the label text itself turns red.
+- **Arm-down: a red horizontal line, not a circle-slash icon.** The old
+  `NoSymbol` SVG (a red circle with a diagonal slash, one per fully-down arm)
+  is gone. A fully-down arm (`isArmDown()` -- explicitly flagged, or every
+  product on it out) now renders a single red horizontal line straight
+  through its whole product stack instead. Untouched: a single out product
+  on an otherwise-fine multi-product arm still just gets its own
+  strikethrough in its own color, arm stays normal -- that per-product logic
+  never changed.
+
+**Live-verified** against the real Global South terminal: header renders
+"Global South" (white) / "Fort Lauderdale, FL" (gray) under the rack
+sub-tabs; tapping it opens the same My Terminals list the Planner's own
+location card opens (confirmed by opening it from both tabs). Sub-tabs
+render smaller with a white dot under North Rack. Toggled a real arm's
+"ARM" (down) flag via the Lane Status modal and confirmed live: the red
+horizontal line renders across that arm's full D2/DYED stack (screenshot-
+confirmed), reverted immediately after. Lane 6's own down-state (pre-
+existing test data) confirmed the number "6" renders in red text on the
+unchanged gray cell background, not a red fill. `tsc --noEmit` clean
+throughout the refactor. One batch of "defined multiple times" console
+errors surfaced mid-pass in the dev tab -- confirmed via a fresh hard
+reload (page rendered correctly, no `nextjs-portal` error dialog present
+afterward) and a direct `grep` of the file (no duplicate declarations
+exist on disk) that this was the dev server's own documented hot-reload
+staleness, not a real regression.
+
 ### Continue Numbering From (cross-rack lane continuation) + terminal/rack tag (2026-08-06)
 
 Two small additions to `LayoutView` (Lane/Arm Layout), per explicit

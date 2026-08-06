@@ -147,9 +147,43 @@ export default function TerminalPage() {
 
       {!loading && racks.length > 0 && activeRack && (
         <>
-          <div style={{ marginBottom: 14 }}>
-            <CenteredSubTabs tabs={subTabs} activeId={activeRackId} onChange={setActiveRackId} accentColor="#ffffff" />
+          <div style={{ marginBottom: 10 }}>
+            <CenteredSubTabs
+              tabs={subTabs} activeId={activeRackId} onChange={setActiveRackId}
+              accentColor="#ffffff" compact showActiveDot
+            />
           </div>
+
+          {/* Terminal identity -- clickable, opens the SAME Location/Terminal
+              picker the Planner uses (LocationModal/MyTerminalsModal, now
+              mounted once in ShellChrome, shared via shell.location) --
+              picking a different terminal here updates the Planner too, and
+              vice versa. Non-interactive while viewing a driver's inferred
+              terminal in dispatch/admin context, since tapping it would
+              silently change the VIEWER's own location, not the driver's. */}
+          {(() => {
+            const cityState = [terminal?.city, terminal?.state].filter(Boolean).join(", ");
+            const label = (
+              <>
+                <span style={{ fontSize: 14, fontWeight: 800, color: "#fff" }}>{terminal?.terminal_name ?? "Terminal"}</span>
+                {cityState && <span style={{ fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,0.45)" }}> {cityState}</span>}
+              </>
+            );
+            return isDispatchContext ? (
+              <div style={{ marginBottom: 14 }}>{label}</div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  if (shell.location.selectedState && shell.location.selectedCity) shell.setTermOpen(true);
+                  else shell.setLocOpen(true);
+                }}
+                style={{ display: "block", textAlign: "left" as const, background: "none", border: "none", padding: 0, marginBottom: 14, cursor: "pointer" }}
+              >
+                {label}
+              </button>
+            );
+          })()}
 
           <div style={{ marginBottom: 18 }}>
             <div style={{ fontSize: 15, fontWeight: 800, color: "#fff", marginBottom: 10 }}>{activeRack.rack_name} Lane Map</div>
