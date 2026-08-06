@@ -8,6 +8,14 @@
 // Tapping a card opens that lane's Status Update modal -- open to every
 // role.
 //
+// Arm 1 always renders on the RIGHT, the highest-numbered arm on the LEFT
+// (2026-08-06, per explicit user direction, replacing an earlier
+// manual-relabel "reverse order" tool that turned out not to be what was
+// actually needed -- the real ask was purely visual: match how these are
+// physically laid out at a real rack, not renumber anything). Arm data
+// itself is untouched -- arm_number stays a plain, permanent 1..N physical
+// identity; only the render order is reversed.
+//
 // Layered down/out visual logic (confirmed against the actual mockup
 // screenshot): an arm renders fully "down" (red circle-slash over the
 // whole column) when either it's explicitly flagged down, or every
@@ -48,7 +56,9 @@ export default function RackLaneGrid({
       if (!m.has(a.lane_number)) m.set(a.lane_number, []);
       m.get(a.lane_number)!.push(a);
     }
-    for (const list of m.values()) list.sort((a, b) => a.arm_number - b.arm_number);
+    // Descending -- arm 1 renders last (rightmost), highest arm_number
+    // renders first (leftmost). See file header comment.
+    for (const list of m.values()) list.sort((a, b) => b.arm_number - a.arm_number);
     return m;
   }, [arms]);
 

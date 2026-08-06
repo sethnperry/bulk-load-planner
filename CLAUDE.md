@@ -1633,22 +1633,42 @@ since this is the persistent demo/QA rack other work in this session
 already depends on, not throwaway data. `tsc --noEmit` clean throughout;
 no console errors on a fresh (non-buffered) tab.
 
-**Follow-up same day**: the per-lane "Reverse arm order" icon (on the lane
-card itself, in the Lane/Arm Layout list) was invisible in practice —
-nothing on that card actually displays arm order, so tapping it looked
-like a no-op even though it was writing correctly. Moved to inside "Lane
-N — Arm / Products" instead (top of that screen, same `iconBtnStyle` box +
-"Reverse Order" label as the lane-level control, per explicit consistency
-request), where the arm rows visibly re-label top-to-bottom right after
-tapping it — the same generic reverse-whatever-sequence-exists logic,
-just relocated somewhere the effect is actually observable. `reverseArmOrder`
-moved from `LayoutView` (where it operated across all of a rack's lanes by
-filtering to one) into `LaneArmProductsView` itself (already lane-scoped,
-so no filtering needed — `arms` there already means "this lane's arms").
-Live-verified: reversed a 7-arm lane with D2/DYED on arm 1 — instantly
-showed "Arm 7 — D2 DYED" at the top counting down to "Arm 1" at the
-bottom; reversed again to confirm it flips back cleanly. Restored to
-original order afterward (same demo rack).
+~~**Follow-up same day**: the per-lane "Reverse arm order" icon...~~ —
+**superseded 2026-08-06, see below.** Moving the relabel tool into "Lane
+N — Arm / Products" (so the effect was at least visible) turned out to
+still not be what was actually needed — per explicit follow-up, the real
+problem was never the arm *labels* at all.
+
+### Arm order fixed at the display layer instead of via relabeling (2026-08-06)
+
+Root feedback: "the reverse arm order isn't quite what I was hoping for...
+in the main terminal card where we tap to STUD, the visual representation
+of where arm 1 is matters. arm 1 is always on the right and the last arm
+is always on the left." The whole relabel-based "reverse arm order" tool
+(both its original per-lane-card location and its just-shipped relocation
+into "Lane N — Arm / Products") was the wrong fix for the actual problem —
+the Lane Map card was always rendering arm 1 leftmost, and no amount of
+relabeling changes which physical column a product renders in.
+
+**Fixed for real** in `RackLaneGrid.tsx` (the actual Lane Map card, "the
+main terminal card where we tap to STUD") — `armsByLane`'s per-lane sort
+flipped from ascending to **descending** `arm_number`, so arm 1 always
+renders last (rightmost) and the highest-numbered arm always renders first
+(leftmost), matching how real racks are physically laid out. `arm_number`/
+`label` are untouched — this is a pure render-order change, nothing in the
+data model moved. The "reverse arm order" relabel tool (button, state,
+handler) was removed entirely from `LaneArmProductsView` — arm labels stay
+a plain, permanent `1..N` sequence with no reverse tool needed for them at
+all, since the actual ask was always about display, not data.
+
+**Live-verified**: set Global South North Rack's lane 1 to D2-only on arm 1
+and DYED-only on arm 7 (6 empty arms between), confirmed via the DOM that
+render order is now DYED, then 5 blanks, then D2 — DYED (arm 7, highest)
+on the left, D2 (arm 1) on the right, exactly as described — and via a
+screenshot for a full visual check. Restored the demo rack back to its
+real arm1=[D2,DYED]/arm7=[] shape afterward and confirmed the same card
+still renders correctly (both products now rightmost, since arm 1 holds
+both). `tsc --noEmit` clean; no console errors.
 
 ### Cards tab: full look-and-edit parity for dispatch/admin (shipped 2026-08-04)
 

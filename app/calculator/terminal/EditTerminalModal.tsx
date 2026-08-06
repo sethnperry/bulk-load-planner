@@ -56,9 +56,8 @@ function letterFor(index: number): string {
   return s;
 }
 
-// Shared by LayoutView's lane-level bulk controls and LaneArmProductsView's
-// arm-level Reverse Order control -- same icon-box look for both, per
-// explicit consistency direction.
+// Used by LayoutView's lane-level bulk controls (Add/Remove Lanes,
+// Alphabetical/Numerical, Reverse Order).
 const iconBtnStyle: React.CSSProperties = {
   width: 32, height: 32, borderRadius: 8, border: "1px solid rgba(255,255,255,0.15)",
   background: "rgba(255,255,255,0.05)", color: "#fff", fontSize: 16, fontWeight: 800,
@@ -416,14 +415,19 @@ function RacksView({
 //     lane_number itself) so it's well-defined for numeric, alphabetic, or
 //     custom text alike, and product/arm assignments never move.
 //   - Per-lane: a live arm-count field (type a number, arms are added/
-//     removed from the end to match) and a per-lane reverse-arm-order
-//     toggle -- same generic reverse, scoped to that lane's own arms.
-//     Real-world reasoning from the user: a driver can load the wrong
-//     compartment if the arm order here doesn't match which way the
-//     physical arms actually run at the terminal.
+//     removed from the end to match).
 //   - Expanding a lane card (chevron) now opens product assignment inline
 //     (LaneArmProductsView below) -- "Assign Arm Products" is no longer a
 //     separate top-level rack button.
+//
+// A per-lane "reverse arm order" relabel tool briefly existed here (and
+// then moved into LaneArmProductsView) but was removed entirely 2026-08-06
+// -- per explicit user direction, the real problem was never the arm
+// *labels*, it was that RackLaneGrid.tsx's Lane Map card always rendered
+// arm 1 on the left. Real racks put arm 1 on the right. Fixed at the
+// actual display layer instead (RackLaneGrid.tsx now renders each lane's
+// arms in descending arm_number order) -- arm_number/label stay a plain,
+// permanent 1..N sequence, never relabeled for this.
 function LayoutView({
   rack, onChanged, onExpandLane,
 }: {
@@ -774,7 +778,6 @@ function LaneArmProductsView({ rack, laneNumber, onChanged }: { rack: TerminalRa
   const [error, setError] = useState<string | null>(null);
   const [savingArmId, setSavingArmId] = useState<string | null>(null);
   const [pickerArmId, setPickerArmId] = useState<string | null>(null);
-  const [reversing, setReversing] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -821,31 +824,6 @@ function LaneArmProductsView({ rack, laneNumber, onChanged }: { rack: TerminalRa
     onChanged();
   }
 
-  // Moved here from the lane-card list (2026-08-05 follow-up) -- reversing
-  // arm order was invisible on the card itself (nothing there shows arm
-  // order at all), so tapping it looked like it did nothing. Here, the arm
-  // rows visibly re-label top-to-bottom, so the effect is actually
-  // observable. Same generic "reverse whatever label sequence currently
-  // exists" behavior as the lane-level Reverse Order, scoped to just this
-  // lane's arms (this view is already lane-scoped, so `arms` here IS "this
-  // lane's arms" -- no filtering needed).
-  async function reverseArmOrder() {
-    const sorted = [...arms].sort((a, b) => a.arm_number - b.arm_number);
-    if (sorted.length < 2) return;
-    setReversing(true);
-    setError(null);
-    const labels = sorted.map((a) => displayLabel(a.label, a.arm_number));
-    const reversed = [...labels].reverse();
-    const results = await Promise.all(sorted.map((a, i) =>
-      supabase.from("rack_arms").update({ label: reversed[i] }).eq("arm_id", a.arm_id)
-    ));
-    setReversing(false);
-    const err = results.find((r) => r.error)?.error;
-    if (err) { setError(err.message); return; }
-    await load();
-    onChanged();
-  }
-
   const pickerArm = arms.find((a) => a.arm_id === pickerArmId) ?? null;
 
   if (rackProducts.length === 0 && !loading) {
@@ -858,16 +836,6 @@ function LaneArmProductsView({ rack, laneNumber, onChanged }: { rack: TerminalRa
 
   return (
     <div style={{ display: "grid", gap: 10 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <button
-          type="button" onClick={reverseArmOrder} disabled={reversing || arms.length < 2}
-          style={{ ...iconBtnStyle, opacity: reversing || arms.length < 2 ? 0.4 : 1 }} aria-label="Reverse arm order"
-        >
-          ⇅
-        </button>
-        <span style={{ fontSize: 13, color: "rgba(255,255,255,0.6)" }}>Reverse Order</span>
-      </div>
-
       {error && <div style={{ color: "#f87171", fontSize: 12 }}>{error}</div>}
       {loading && <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 13 }}>Loading…</div>}
 
