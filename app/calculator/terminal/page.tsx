@@ -174,16 +174,13 @@ export default function TerminalPage() {
                 const code = (p?.button_code ?? "").trim();
                 const color = (p?.hex_code ?? "").trim() || "rgba(255,255,255,0.7)";
                 return (
-                  <div key={rp.product_id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 12, gap: 12, opacity: rp.is_out ? 0.5 : 1 }}>
-                    <span style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0 }}>
+                  <div key={rp.product_id} style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 12, opacity: rp.is_out ? 0.5 : 1, minWidth: 0 }}>
+                    <span style={{ display: "flex", alignItems: "baseline", gap: 8, flex: 1, minWidth: 0, overflow: "hidden" }}>
                       <span style={{ width: 8, height: 8, borderRadius: "50%", background: color, flexShrink: 0 }} />
-                      <span style={{ color, fontWeight: 800 }}>{code}</span>
-                      <span style={{ color: "#fff", fontWeight: 600, textDecoration: rp.is_out ? "line-through" : "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
+                      <span style={{ color, fontWeight: 800, flexShrink: 0 }}>{code}</span>
+                      <span style={{ color: "#fff", fontWeight: 400, fontSize: 11, textDecoration: rp.is_out ? "line-through" : "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const, minWidth: 0 }}>
                         {name}
                       </span>
-                      {p?.description && (
-                        <span style={{ color: "rgba(255,255,255,0.3)", fontSize: 11, whiteSpace: "nowrap" as const }}>({p.description})</span>
-                      )}
                     </span>
                     <span style={{ display: "flex", gap: 16, flexShrink: 0, color: "rgba(255,255,255,0.4)" }}>
                       <span style={{ minWidth: 52, textAlign: "right" as const }}>{rp.last_api != null ? `API ${rp.last_api}` : "API —"}</span>

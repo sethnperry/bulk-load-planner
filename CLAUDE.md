@@ -1670,6 +1670,36 @@ real arm1=[D2,DYED]/arm7=[] shape afterward and confirmed the same card
 still renders correctly (both products now rightmost, since arm 1 holds
 both). `tsc --noEmit` clean; no console errors.
 
+### Product List row: dropped parenthetical description, fixed a real overflow bug (2026-08-06)
+
+Per explicit feedback: drop the `products.description` parenthetical
+("(Ultra Low Sulfur Diesel #2)") from `app/calculator/terminal/page.tsx`'s
+rack Product List row entirely; make the product name itself thinner --
+same size/weight the parenthetical text used to have (`fontWeight: 400`,
+`fontSize: 11`, still white) -- and guarantee API/temp never gets pushed
+off-screen by a long name, with the name truncating instead if space runs
+short.
+
+**A real, separate overflow bug found and fixed while implementing
+this** (not just the parenthetical's fault): even after removing the
+parenthetical and giving the name `overflow: hidden` / `textOverflow:
+ellipsis` / `minWidth: 0`, a synthetic long-name test still overflowed the
+row past the viewport (confirmed via `getBoundingClientRect()` before
+assuming the fix worked — row measured 573px wide inside a 404px viewport).
+Root cause: each product row `<div>` is a grid item (its parent uses
+`display: "grid"`), and grid items default to `min-width: auto`, which
+sizes them to their content's max-content width regardless of any
+`overflow: hidden` set *inside* them — the inner truncation styles were
+correct but powerless because the outer grid item itself refused to
+shrink below the long text's natural width. Fixed by adding `minWidth: 0`
+to the row `<div>` itself (the actual grid item), not just its children --
+the classic min-width:auto-on-grid/flex-items gotcha. Re-tested the same
+synthetic long name afterward: row now measures 380px (within the 404px
+viewport), name visibly truncates with an ellipsis, "API 50.6 / 75.6°F"
+stays fully visible and right-aligned. `tsc --noEmit` clean; no console
+errors; reverted the synthetic long-name DOM edit (an in-page-only test,
+never touched real data) by simply reloading.
+
 ### Cards tab: full look-and-edit parity for dispatch/admin (shipped 2026-08-04)
 
 Per explicit user direction: "all the cards should look identical for every
