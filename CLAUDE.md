@@ -1700,6 +1700,59 @@ stays fully visible and right-aligned. `tsc --noEmit` clean; no console
 errors; reverted the synthetic long-name DOM edit (an in-page-only test,
 never touched real data) by simply reloading.
 
+### Tab order swap + tab-switching "glitch" fix (2026-08-06)
+
+Two small follow-ups, per explicit request:
+
+- **Tab order**: Terminal and Dispatch swapped places in
+  `CalculatorLayoutClient.tsx`'s `tabsFor()` so Terminal sits directly next
+  to Planner (order is now Dispatch, Terminal, Planner, Cards, Vault for
+  admin/super-admin; Dispatch, Terminal, Cards, Vault for dispatch role,
+  which has no Planner tab regardless). Driver/lead order (Terminal,
+  Planner, Cards, Vault -- no Dispatch tab at all) is unaffected.
+- **"Dark mode flashes white then corrects" on tab switch** -- user's own
+  diagnosis was exactly right, and pointed at two real, separate bugs, both
+  in `CalculatorLayoutClient.tsx`/`hooks/useTheme.ts`, not something
+  imagined:
+  1. `useTheme.ts`'s `darkMode`/`accentColor` used to start at hardcoded
+     defaults (`false`/`null`) and only get corrected once `authUserId`
+     resolved (async, from `supabase.auth.getUser()`) and its effect ran --
+     a textbook flash-of-default. Fixed by also mirroring the last-applied
+     theme under a new userId-independent `protankr_theme_v1:__device__`
+     key, read synchronously in the initial `useState` (lazy initializer) --
+     same-device return visits now start correct immediately, no async
+     wait. The per-user-keyed effect still runs afterward and corrects it
+     if a genuinely different account's saved theme differs; nothing about
+     the existing per-user persistence changed.
+  2. Header's `<meta name="theme-color">` sync effect had a cleanup
+     function that reset the tag to `"#ffffff"` -- React fires an effect's
+     cleanup before *every* re-run of that effect (i.e. on every
+     darkMode/accentColor change), not only on true unmount, so this was
+     silently doing "flash white, then set the real color" on every single
+     theme-relevant re-render, which is a strict superset of every tab
+     switch. There was nothing to actually clean up: Next's own per-route
+     metadata already reapplies whatever static `viewport.themeColor` a
+     *different* layout declares once the user genuinely navigates away
+     from `/calculator` (handled declaratively, not by this component) --
+     removed the reset-in-cleanup entirely.
+  Also added, defensively: a `transition: "background 200ms ease"` on the
+  header's own gradient div (so any future legitimate theme change fades
+  instead of snapping), and `router.prefetch()` for every tab's href in
+  `TabBar` on mount, so `router.push` on tap is served from the already-
+  fetched RSC payload instead of a fresh network round trip -- addresses
+  the "speed the transition" half of the request, separate from the
+  flash-of-white fix.
+
+**Live-verified**: installed a `MutationObserver` on the real
+`<meta name="theme-color">` tag with dark mode + a custom accent enabled,
+then clicked through every tab (Terminal → Cards → Vault → Dispatch →
+Planner) -- zero mutations recorded (stayed at the correct `#2a2a2c`
+graphite value the entire time; previously, before this fix, this exact
+sequence would have fired a white-then-graphite pair on every single
+click via the cleanup bug above). Confirmed via a fresh hard reload too
+(cold load, not just a warm client nav) that the meta tag is correct
+(`#2a2a2c`) immediately, no flash window at all. `tsc --noEmit` clean.
+
 ### Terminal tab: clickable location header, compact sub-tabs, flatter down/out styling (2026-08-06)
 
 Four small follow-ups against the main Terminal tab (`app/calculator/terminal/page.tsx`,

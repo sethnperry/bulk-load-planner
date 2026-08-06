@@ -55,8 +55,10 @@ const CARDS_TAB = { id: "cards", label: "Cards", href: "/calculator/cards" };
 const VAULT_TAB = { id: "vault", label: "Vault", href: "/calculator/vault" };
 
 function tabsFor(role: Role | null, isSuperAdmin: boolean) {
-  if (role === "dispatch") return [TERMINAL_TAB, DISPATCH_TAB, CARDS_TAB, VAULT_TAB];
-  if (role === "admin" || isSuperAdmin) return [TERMINAL_TAB, DISPATCH_TAB, PLANNER_TAB, CARDS_TAB, VAULT_TAB];
+  // Terminal and Dispatch swapped 2026-08-06 (per explicit direction) so
+  // Terminal sits next to Planner.
+  if (role === "dispatch") return [DISPATCH_TAB, TERMINAL_TAB, CARDS_TAB, VAULT_TAB];
+  if (role === "admin" || isSuperAdmin) return [DISPATCH_TAB, TERMINAL_TAB, PLANNER_TAB, CARDS_TAB, VAULT_TAB];
   return [TERMINAL_TAB, PLANNER_TAB, CARDS_TAB, VAULT_TAB]; // driver, lead, or unresolved
 }
 
@@ -97,6 +99,15 @@ function TabBar() {
 
   useEffect(() => { centerTab(active, false); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { centerTab(active, true); }, [active, tabs.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Prefetch every tab's route so router.push below is served from cache
+  // instead of waiting on a fresh RSC round trip -- this is most of what
+  // actually reads as "glitchy" switching tabs (a real network/render delay
+  // before the new route settles), separate from the theme-flash fix in
+  // useTheme.ts.
+  useEffect(() => {
+    tabs.forEach((t) => router.prefetch(t.href));
+  }, [tabs, router]);
 
   function onScroll() {
     if (suppressScrollNavRef.current) return;
@@ -197,10 +208,21 @@ function Header({ onOpenSettings }: { onOpenSettings: () => void }) {
   // browser from <meta name="theme-color">, not from any CSS on the page --
   // layout.tsx's static `viewport.themeColor` only sets its initial value,
   // so it has to be kept in sync here whenever Dark Mode/accent change.
+  //
+  // 2026-08-06: this used to reset the tag to "#ffffff" in a cleanup
+  // function, which React fires before *every* re-run of this effect (i.e.
+  // on every darkMode/accentColor change), not just on Header's true
+  // unmount -- a real, needless "flash white, then set the real color"
+  // write pattern that lines up with the reported "dark mode flashes back
+  // to white then corrects" glitch. There's nothing to clean up here: Next's
+  // own per-route metadata already re-applies whatever static
+  // `viewport.themeColor` a *different* layout declares once the user
+  // actually navigates away from /calculator entirely, so this effect only
+  // needs to keep the tag in sync while Header is mounted, never reset it
+  // itself.
   useEffect(() => {
     const meta = document.querySelector('meta[name="theme-color"]');
     if (meta) meta.setAttribute("content", themeFill(darkMode, accentColor, "#ffffff"));
-    return () => { if (meta) meta.setAttribute("content", "#ffffff"); };
   }, [darkMode, accentColor]);
 
   return (
@@ -213,6 +235,7 @@ function Header({ onOpenSettings }: { onOpenSettings: () => void }) {
       // div with its own fixed padding.
       paddingTop: "calc(env(safe-area-inset-top, 0px) + 12px)",
       background: themeHeaderGradient(darkMode, accentColor), flexShrink: 0, position: "relative", overflow: "visible",
+      transition: "background 200ms ease",
     }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 16px" }}>
         <NavMenu darkMode={darkMode} />
