@@ -24,6 +24,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { FullscreenModal } from "@/lib/ui/FullscreenModal";
+import { CustomSelect } from "@/lib/ui/CustomSelect";
 import type { TerminalRack, RackLane, RackArm, RackProductStatusRow, ProductLite } from "./types";
 import { displayLabel } from "./labels";
 
@@ -444,7 +445,13 @@ function LayoutView({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [continueFrom, setContinueFrom] = useState("");
+  // Per-sibling lane count + lowest label -- fetched once per sibling set,
+  // used only to (a) infer which sibling (if any) THIS rack's current
+  // numbering already continues from, so the dropdown shows a real
+  // selection instead of resetting to blank after every apply, and (b)
+  // exclude any sibling that already continues FROM this rack, preventing
+  // a direct two-rack circular reference (see selectableSiblings below).
+  const [siblingInfo, setSiblingInfo] = useState<Record<string, { count: number; lowestNum: number | null }>>({});
 
   async function load() {
     setLoading(true);
@@ -461,7 +468,50 @@ function LayoutView({
 
   useEffect(() => { load(); }, [rack.rack_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const siblingIdsKey = siblingRacks.map((r) => r.rack_id).join(",");
+  useEffect(() => {
+    if (siblingRacks.length === 0) { setSiblingInfo({}); return; }
+    let cancelled = false;
+    (async () => {
+      const entries = await Promise.all(siblingRacks.map(async (r) => {
+        const { data } = await supabase.from("rack_lanes").select("lane_number, label").eq("rack_id", r.rack_id);
+        const rows = ((data ?? []) as { lane_number: number; label: string | null }[]).sort((a, b) => a.lane_number - b.lane_number);
+        const lowestLabel = rows[0] ? displayLabel(rows[0].label, rows[0].lane_number) : null;
+        const lowestNum = lowestLabel != null ? parseInt(lowestLabel, 10) : NaN;
+        return [r.rack_id, { count: rows.length, lowestNum: Number.isFinite(lowestNum) ? lowestNum : null }] as const;
+      }));
+      if (!cancelled) setSiblingInfo(Object.fromEntries(entries));
+    })();
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [siblingIdsKey]);
+
   const sortedLanes = useMemo(() => [...lanes].sort((a, b) => a.lane_number - b.lane_number), [lanes]);
+
+  // Which sibling (if any) this rack's CURRENT numbering already looks like
+  // it continues from -- inferred, not stored, same spirit as
+  // isAlphabetized below. Drives the dropdown's displayed selection.
+  const matchingSiblingId = useMemo(() => {
+    if (sortedLanes.length === 0) return "";
+    const lowestLabel = displayLabel(sortedLanes[0].label, sortedLanes[0].lane_number);
+    const lowestNum = parseInt(lowestLabel, 10);
+    if (!Number.isFinite(lowestNum)) return "";
+    const match = siblingRacks.find((r) => siblingInfo[r.rack_id]?.count != null && lowestNum === siblingInfo[r.rack_id].count + 1);
+    return match?.rack_id ?? "";
+  }, [sortedLanes, siblingRacks, siblingInfo]);
+
+  // Excludes any sibling that already continues FROM this rack (its own
+  // lowest label equals this rack's current lane count + 1) -- picking it
+  // here would create an immediate two-rack circular reference, per
+  // explicit user direction.
+  const selectableSiblings = useMemo(() => {
+    const thisCount = sortedLanes.length;
+    return siblingRacks.filter((r) => {
+      const info = siblingInfo[r.rack_id];
+      if (!info || info.lowestNum == null) return true;
+      return info.lowestNum !== thisCount + 1;
+    });
+  }, [siblingRacks, siblingInfo, sortedLanes.length]);
 
   const isAlphabetized = useMemo(() => {
     if (sortedLanes.length === 0) return false;
@@ -542,21 +592,23 @@ function LayoutView({
   // own lanes 6, 7, 8...), independent of what that rack's labels actually
   // say, so it stays well-defined even if those labels were customized.
   async function applyContinueFrom(precedingRackId: string) {
+    if (!precedingRackId) return;
     const preceding = siblingRacks.find((r) => r.rack_id === precedingRackId);
-    if (!preceding || sortedLanes.length === 0) { setContinueFrom(""); return; }
+    if (!preceding || sortedLanes.length === 0) return;
     setBusy(true);
     setError(null);
+    // Fresh count, not the cached siblingInfo -- that rack could have
+    // changed since siblingInfo was last fetched.
     const { count, error: countErr } = await supabase
       .from("rack_lanes")
       .select("*", { count: "exact", head: true })
       .eq("rack_id", precedingRackId);
-    if (countErr) { setBusy(false); setError(countErr.message); setContinueFrom(""); return; }
+    if (countErr) { setBusy(false); setError(countErr.message); return; }
     const offset = count ?? 0;
     const results = await Promise.all(sortedLanes.map((l, i) =>
       supabase.from("rack_lanes").update({ label: String(offset + i + 1) }).eq("rack_id", rack.rack_id).eq("lane_number", l.lane_number)
     ));
     setBusy(false);
-    setContinueFrom("");
     const err = results.find((r) => r.error)?.error;
     if (err) { setError(err.message); return; }
     await load();
@@ -597,8 +649,8 @@ function LayoutView({
       {error && <div style={{ color: "#f87171", fontSize: 12 }}>{error}</div>}
       {loading && <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 13 }}>Loading…</div>}
 
-      <div style={{ display: "grid", gridTemplateColumns: siblingRacks.length ? "1fr auto" : "1fr", gap: 16, alignItems: "start" }}>
-        <div style={{ display: "grid", gap: 10 }}>
+      <div style={{ display: "flex", flexWrap: "wrap" as const, gap: 16, alignItems: "flex-start" }}>
+        <div style={{ display: "grid", gap: 10, flex: "1 1 220px", minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <div style={{ display: "flex", gap: 6 }}>
               <button type="button" onClick={removeLastLane} disabled={busy || lanes.length === 0} style={{ ...iconBtnStyle, opacity: busy || lanes.length === 0 ? 0.4 : 1 }} aria-label="Remove last lane">−</button>
@@ -628,26 +680,21 @@ function LayoutView({
           </div>
         </div>
 
-        {siblingRacks.length > 0 && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end", justifyContent: "center", minHeight: "100%", paddingTop: 40 }}>
-            <span style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", textAlign: "right" as const, maxWidth: 120 }}>
-              Continue numbering from
+        {selectableSiblings.length > 0 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, flexShrink: 0, minWidth: 150 }}>
+            <span style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", whiteSpace: "nowrap" as const }}>
+              Continue from
             </span>
-            <select
-              value={continueFrom}
-              onChange={(e) => { const v = e.target.value; setContinueFrom(v); if (v) applyContinueFrom(v); }}
+            <CustomSelect
+              value={matchingSiblingId}
+              onChange={(v) => applyContinueFrom(v)}
+              options={[
+                { value: "", label: "— None —" },
+                ...selectableSiblings.map((r) => ({ value: r.rack_id, label: r.rack_name })),
+              ]}
               disabled={busy || lanes.length === 0}
-              style={{
-                padding: "8px 10px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.15)",
-                background: "rgba(255,255,255,0.05)", color: "#fff", fontSize: 13, fontWeight: 700,
-                opacity: busy || lanes.length === 0 ? 0.4 : 1,
-              }}
-            >
-              <option value="">— None —</option>
-              {siblingRacks.map((r) => (
-                <option key={r.rack_id} value={r.rack_id}>{r.rack_name}</option>
-              ))}
-            </select>
+              buttonStyle={{ padding: "8px 10px", fontSize: 13, fontWeight: 700 }}
+            />
           </div>
         )}
       </div>
@@ -697,7 +744,13 @@ function LaneRow({
   }
 
   return (
-    <div style={{ borderRadius: 10, border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)", padding: "10px 12px", display: "flex", alignItems: "center", gap: 10 }}>
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onExpand}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onExpand(); } }}
+      style={{ borderRadius: 10, border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)", padding: "10px 12px", display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}
+    >
       <span style={{ fontSize: 15, fontWeight: 800, color: "#fff", minWidth: 20, textAlign: "center" as const, flexShrink: 0 }}>
         {displayLabel(lane.label, lane.lane_number)}
       </span>
@@ -707,6 +760,7 @@ function LaneRow({
         onChange={(e) => setCountDraft(e.target.value.replace(/[^0-9]/g, ""))}
         onFocus={(e) => e.currentTarget.select()}
         onBlur={commitCount}
+        onClick={(e) => e.stopPropagation()}
         disabled={busy}
         style={{
           width: 40, padding: "6px 4px", borderRadius: 6, textAlign: "center" as const,
@@ -714,13 +768,12 @@ function LaneRow({
           fontSize: 14, fontWeight: 800, boxSizing: "border-box" as const,
         }}
       />
-      <button
-        type="button" onClick={onExpand}
-        style={{ fontSize: 20, color: "rgba(255,255,255,0.4)", background: "none", border: "none", cursor: "pointer", padding: "0 2px", marginLeft: "auto" }}
-        aria-label="Expand lane"
+      <span
+        style={{ fontSize: 20, color: "rgba(255,255,255,0.4)", padding: "0 2px", marginLeft: "auto" }}
+        aria-hidden="true"
       >
         ›
-      </button>
+      </span>
     </div>
   );
 }

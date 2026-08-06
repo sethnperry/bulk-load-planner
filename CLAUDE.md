@@ -1744,6 +1744,69 @@ to already differ from what an earlier pass in this same session had
 left it at — traced that to the user's own hands-on testing between
 turns, not anything of mine to "fix" back. `tsc --noEmit` clean.
 
+**Follow-up fixes, 2026-08-06** — five more issues from a live screenshot of
+the shipped dropdown:
+- **White-on-white dropdown** — the native `<select>` was still subject to
+  the same "open option list is rendered natively by the OS/browser and
+  ignores dark theming" issue this codebase already has a shared fix for
+  (`lib/ui/CustomSelect.tsx`, built during the earlier Terminal-tab pass
+  specifically for this). Swapped the native `<select>` for `CustomSelect`
+  — no new component needed, just wasn't used here originally.
+- **Selection not sticking** — root cause: the dropdown's value was backed
+  by an ephemeral `useState` that got reset to `""` after every
+  `applyContinueFrom` call, so a correct relabel always visually "reset to
+  None" even though the DB write succeeded. Replaced with a derived
+  `matchingSiblingId` (`useMemo`, same "infer from live data" pattern
+  `isAlphabetized` already uses elsewhere in this file) — fetches each
+  sibling's own current lane count via a new `siblingInfo` effect, then
+  checks whether this rack's current lowest label equals `siblingCount +
+  1`. Self-correcting: reflects reality every render, can't drift out of
+  sync with a manual edit the way stored "last picked" state could.
+  Live-verified: North Rack (currently continuing from South Rack, labels
+  6–11) reopened this control and the dropdown showed "South Rack"
+  pre-selected, not reset to blank.
+- **Circular reference prevention** — new `selectableSiblings` (`useMemo`)
+  excludes any sibling whose own current lowest label already equals THIS
+  rack's lane count + 1 (i.e. already continues from this rack) — picking
+  it back would create a direct two-rack cycle. The whole "Continue from"
+  control (not just the option) is hidden entirely when zero siblings
+  remain selectable — live-verified: South Rack's own Lane/Arm Layout
+  (whose only sibling, North Rack, already continues from it) now shows no
+  "Continue from" control at all.
+- **Label + responsive wrap** — "Continue numbering from" shortened to
+  "Continue from" (fits one line). The controls row changed from a
+  `1fr auto` CSS grid (which pushed the dropdown off-screen on narrow
+  viewports since grid item widths don't reflow) to `display:flex,
+  flexWrap:"wrap"`, with `minWidth:0` on the left button column (the same
+  flex/grid `min-width:auto` overflow gotcha documented earlier this
+  session for the Product List row, applied here preemptively) — on a
+  narrow screen the dropdown now wraps to its own line below the lane
+  controls instead of being clipped off the right edge. Live-verified at
+  403px mobile width: dropdown renders fully on its own line, not clipped.
+
+All five live-verified together in one pass against the real Global South
+terminal (North/South Rack), `tsc --noEmit` clean, no new console errors
+(one stale 400 present in the console buffer was confirmed unrelated —
+present before this pass, consistent with this project's documented
+"console never resets for the tab's lifetime" behavior).
+
+**Lane cards now tap-anywhere-to-expand, 2026-08-06** — per explicit
+follow-up: "make each card tap-able to open from anywhere in the card
+(except the arm count cell of course)... Right now you have to tap the
+tiny arrow." `LaneRow`'s outer container gained `role="button"`,
+`tabIndex={0}`, and `onClick={onExpand}` (+ Enter/Space `onKeyDown` for
+keyboard/a11y parity); the arm-count `<input>` gained
+`onClick={(e) => e.stopPropagation()}` so tapping/focusing it to edit the
+count no longer bubbles up and triggers the expand; the trailing chevron
+lost its own `onClick`/button semantics (now a plain decorative `<span
+aria-hidden>`) since the click naturally bubbles to the card's own
+handler — kept as a visual affordance only, not a second click target.
+Live-verified: clicking anywhere on a lane card's body (label, "Arms"
+text, chevron, blank space) opens straight into "Lane N — Arm / Products";
+clicking directly into the arm-count textbox only focuses/selects it
+(confirmed via `document.activeElement`) without navigating away from the
+Lane/Arm Layout list. `tsc --noEmit` clean.
+
 ### Cards tab: full look-and-edit parity for dispatch/admin (shipped 2026-08-04)
 
 Per explicit user direction: "all the cards should look identical for every
