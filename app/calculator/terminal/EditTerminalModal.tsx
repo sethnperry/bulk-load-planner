@@ -202,6 +202,8 @@ export default function EditTerminalModal({
       {view === "layout" && selectedRack && (
         <LayoutView
           rack={selectedRack}
+          terminalName={terminalName}
+          siblingRacks={racks.filter((r) => r.rack_id !== selectedRack.rack_id)}
           onChanged={onChanged}
           onExpandLane={(laneNumber, laneLabel) => {
             setSelectedLaneNumber(laneNumber);
@@ -429,9 +431,11 @@ function RacksView({
 // arms in descending arm_number order) -- arm_number/label stay a plain,
 // permanent 1..N sequence, never relabeled for this.
 function LayoutView({
-  rack, onChanged, onExpandLane,
+  rack, terminalName, siblingRacks, onChanged, onExpandLane,
 }: {
   rack: TerminalRack;
+  terminalName?: string;
+  siblingRacks: TerminalRack[];
   onChanged: () => void;
   onExpandLane: (laneNumber: number, laneLabel: string) => void;
 }) {
@@ -440,6 +444,7 @@ function LayoutView({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [continueFrom, setContinueFrom] = useState("");
 
   async function load() {
     setLoading(true);
@@ -523,6 +528,41 @@ function LayoutView({
     onChanged();
   }
 
+  // Per explicit user direction (2026-08-06): a terminal can have 3+ racks
+  // in different physical areas, so lane numbering can't just auto-continue
+  // from "whichever rack was created first" (the old, removed
+  // computeLaneOffsets behavior) -- the admin has to be able to say
+  // explicitly which rack (if any) this one's numbering picks up after.
+  // One-shot bulk action, same category as Alphabetical/Reverse Order --
+  // not a persisted relationship, so it never silently drifts if the
+  // preceding rack's lane count changes later (matches this whole screen's
+  // "explicit, directly-editable text" philosophy from the 2026-08-04
+  // labels rework). Offset = the preceding rack's CURRENT lane count (e.g.
+  // South Rack has 5 lanes -> North Rack picking "South Rack" relabels its
+  // own lanes 6, 7, 8...), independent of what that rack's labels actually
+  // say, so it stays well-defined even if those labels were customized.
+  async function applyContinueFrom(precedingRackId: string) {
+    const preceding = siblingRacks.find((r) => r.rack_id === precedingRackId);
+    if (!preceding || sortedLanes.length === 0) { setContinueFrom(""); return; }
+    setBusy(true);
+    setError(null);
+    const { count, error: countErr } = await supabase
+      .from("rack_lanes")
+      .select("*", { count: "exact", head: true })
+      .eq("rack_id", precedingRackId);
+    if (countErr) { setBusy(false); setError(countErr.message); setContinueFrom(""); return; }
+    const offset = count ?? 0;
+    const results = await Promise.all(sortedLanes.map((l, i) =>
+      supabase.from("rack_lanes").update({ label: String(offset + i + 1) }).eq("rack_id", rack.rack_id).eq("lane_number", l.lane_number)
+    ));
+    setBusy(false);
+    setContinueFrom("");
+    const err = results.find((r) => r.error)?.error;
+    if (err) { setError(err.message); return; }
+    await load();
+    onChanged();
+  }
+
   async function setArmCount(laneNumber: number, newCount: number) {
     const laneArms = arms.filter((a) => a.lane_number === laneNumber).sort((a, b) => a.arm_number - b.arm_number);
     if (newCount === laneArms.length) return;
@@ -548,37 +588,68 @@ function LayoutView({
 
   return (
     <div style={{ display: "grid", gap: 16 }}>
+      {(terminalName || rack.rack_name) && (
+        <div style={{ fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.5)" }}>
+          {terminalName ? `${terminalName} — ${rack.rack_name}` : rack.rack_name}
+        </div>
+      )}
+
       {error && <div style={{ color: "#f87171", fontSize: 12 }}>{error}</div>}
       {loading && <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 13 }}>Loading…</div>}
 
-      <div style={{ display: "grid", gap: 10 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ display: "flex", gap: 6 }}>
-            <button type="button" onClick={removeLastLane} disabled={busy || lanes.length === 0} style={{ ...iconBtnStyle, opacity: busy || lanes.length === 0 ? 0.4 : 1 }} aria-label="Remove last lane">−</button>
-            <button type="button" onClick={addLaneAtEnd} disabled={busy} style={{ ...iconBtnStyle, opacity: busy ? 0.4 : 1 }} aria-label="Add lane">+</button>
+      <div style={{ display: "grid", gridTemplateColumns: siblingRacks.length ? "1fr auto" : "1fr", gap: 16, alignItems: "start" }}>
+        <div style={{ display: "grid", gap: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button type="button" onClick={removeLastLane} disabled={busy || lanes.length === 0} style={{ ...iconBtnStyle, opacity: busy || lanes.length === 0 ? 0.4 : 1 }} aria-label="Remove last lane">−</button>
+              <button type="button" onClick={addLaneAtEnd} disabled={busy} style={{ ...iconBtnStyle, opacity: busy ? 0.4 : 1 }} aria-label="Add lane">+</button>
+            </div>
+            <span style={{ fontSize: 13, color: "rgba(255,255,255,0.6)" }}>Add or Remove Lanes</span>
           </div>
-          <span style={{ fontSize: 13, color: "rgba(255,255,255,0.6)" }}>Add or Remove Lanes</span>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <button
+              type="button" onClick={toggleLaneLabelMode} disabled={busy || lanes.length === 0}
+              style={{ ...iconBtnStyle, width: 48, fontSize: 12, opacity: busy || lanes.length === 0 ? 0.4 : 1 }}
+            >
+              {isAlphabetized ? "123" : "ABC"}
+            </button>
+            <span style={{ fontSize: 13, color: "rgba(255,255,255,0.6)" }}>{isAlphabetized ? "Numerical" : "Alphabetical"}</span>
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <button
+              type="button" onClick={reverseLaneOrder} disabled={busy || lanes.length < 2}
+              style={{ ...iconBtnStyle, opacity: busy || lanes.length < 2 ? 0.4 : 1 }} aria-label="Reverse lane order"
+            >
+              ⇅
+            </button>
+            <span style={{ fontSize: 13, color: "rgba(255,255,255,0.6)" }}>Reverse Order</span>
+          </div>
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <button
-            type="button" onClick={toggleLaneLabelMode} disabled={busy || lanes.length === 0}
-            style={{ ...iconBtnStyle, width: 48, fontSize: 12, opacity: busy || lanes.length === 0 ? 0.4 : 1 }}
-          >
-            {isAlphabetized ? "123" : "ABC"}
-          </button>
-          <span style={{ fontSize: 13, color: "rgba(255,255,255,0.6)" }}>{isAlphabetized ? "Numerical" : "Alphabetical"}</span>
-        </div>
-
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <button
-            type="button" onClick={reverseLaneOrder} disabled={busy || lanes.length < 2}
-            style={{ ...iconBtnStyle, opacity: busy || lanes.length < 2 ? 0.4 : 1 }} aria-label="Reverse lane order"
-          >
-            ⇅
-          </button>
-          <span style={{ fontSize: 13, color: "rgba(255,255,255,0.6)" }}>Reverse Order</span>
-        </div>
+        {siblingRacks.length > 0 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end", justifyContent: "center", minHeight: "100%", paddingTop: 40 }}>
+            <span style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", textAlign: "right" as const, maxWidth: 120 }}>
+              Continue numbering from
+            </span>
+            <select
+              value={continueFrom}
+              onChange={(e) => { const v = e.target.value; setContinueFrom(v); if (v) applyContinueFrom(v); }}
+              disabled={busy || lanes.length === 0}
+              style={{
+                padding: "8px 10px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.15)",
+                background: "rgba(255,255,255,0.05)", color: "#fff", fontSize: 13, fontWeight: 700,
+                opacity: busy || lanes.length === 0 ? 0.4 : 1,
+              }}
+            >
+              <option value="">— None —</option>
+              {siblingRacks.map((r) => (
+                <option key={r.rack_id} value={r.rack_id}>{r.rack_name}</option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
 
       <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>

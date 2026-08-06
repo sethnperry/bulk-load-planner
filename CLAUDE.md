@@ -1700,6 +1700,50 @@ stays fully visible and right-aligned. `tsc --noEmit` clean; no console
 errors; reverted the synthetic long-name DOM edit (an in-page-only test,
 never touched real data) by simply reloading.
 
+### Continue Numbering From (cross-rack lane continuation) + terminal/rack tag (2026-08-06)
+
+Two small additions to `LayoutView` (Lane/Arm Layout), per explicit
+follow-up against a screenshot with the empty space next to the
+Alphabetical/Reverse Order controls circled:
+
+- **"{terminal} — {rack}" tag** above the Add/Remove Lanes control (e.g.
+  "Global South — North Rack") so it's unambiguous which rack is being
+  edited — `terminalName` is threaded down from `EditTerminalModal` (which
+  already had it as a top-level prop, just never passed it further).
+- **"Continue numbering from" dropdown**, listing every *other* rack at
+  this same terminal (`siblingRacks`, computed in `EditTerminalModal` as
+  `racks.filter(r => r.rack_id !== selectedRack.rack_id)` and passed down)
+  — picking one immediately relabels every lane on *this* rack to a fresh
+  numeric sequence continuing from the selected rack's current lane count
+  (e.g. South Rack has 5 lanes → North Rack picking "South Rack" relabels
+  its own lanes 6, 7, 8...). This replaces the old, fully-removed
+  `computeLaneOffsets` auto-continuation from the 2026-08-04 explicit-labels
+  rework (which silently chained every rack by creation order) with an
+  **explicit, one-shot bulk action** — per the user's own reasoning, "some
+  terminals may have three or more racks in different areas," so a blind
+  auto-chain isn't always correct; the admin has to say which rack (if
+  any) precedes this one. Same category as the existing Alphabetical/
+  Reverse Order tools: not a persisted relationship (so it can't silently
+  drift if the preceding rack's count changes later), offset is read fresh
+  via a `count`-only query against `rack_lanes` at the moment it's applied,
+  and the dropdown resets to "— None —" after firing rather than "sticking"
+  on the picked rack. The whole control (and its column in the layout
+  grid) only renders when the terminal actually has more than one rack.
+
+**Live-verified**: opened North Rack's Lane/Arm Layout at the real "Global
+South" terminal — tag correctly read "Global South — North Rack" and the
+dropdown correctly listed only "South Rack" (its one sibling, not itself).
+Confirmed South Rack's real lane count (5) via direct query first, then
+selected it from the dropdown — North Rack's 6 lanes correctly relabeled
+6,7,8,9,10,11 (verified via Postgres, not just the UI), dropdown reset to
+"— None —" afterward, no console errors. Restored North Rack's labels
+back to 1–6 immediately after (this session's own test artifact, not real
+data) — left South Rack and North Rack's arm/product assignments
+untouched throughout, including one arm's product state that turned out
+to already differ from what an earlier pass in this same session had
+left it at — traced that to the user's own hands-on testing between
+turns, not anything of mine to "fix" back. `tsc --noEmit` clean.
+
 ### Cards tab: full look-and-edit parity for dispatch/admin (shipped 2026-08-04)
 
 Per explicit user direction: "all the cards should look identical for every
