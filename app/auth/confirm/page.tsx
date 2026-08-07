@@ -45,7 +45,7 @@ function ConfirmInner() {
         if (session) {
           try { await supabase.rpc("provision_solo_company"); }
           catch (err) { console.warn("provision_solo_company failed (non-fatal):", err); }
-          router.replace("/calculator");
+          router.replace("/planner");
           return;
         }
         setErrMsg("No token found in this link. It may have already been used or has expired.");
@@ -69,7 +69,7 @@ function ConfirmInner() {
         console.warn("provision_solo_company failed (non-fatal):", err);
       }
 
-      router.replace("/calculator");
+      router.replace("/planner");
     }
     exchange();
     // eslint-disable-next-line react-hooks/exhaustive-deps

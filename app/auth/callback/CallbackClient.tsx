@@ -21,7 +21,7 @@ export default function CallbackClient() {
   const [error, setError] = useState<string | null>(null);
   const [phase, setPhase] = useState<"spin" | "settle">("spin");
 
-  const nextPath = useMemo(() => searchParams.get("next") ?? "/calculator", [searchParams]);
+  const nextPath = useMemo(() => searchParams.get("next") ?? "/planner", [searchParams]);
 
   useEffect(() => {
     const t = setTimeout(() => setPhase("settle"), 900);

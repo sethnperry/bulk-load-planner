@@ -1,0 +1,213 @@
+"use client";
+// app/planner/modals/ManageTerminalProductsModal.tsx
+//
+// Lets a driver add/remove products from the terminal's active product list,
+// directly from the compartment product picker. Reachable from any
+// compartment's CompartmentModal; changes are written to `terminal_products`
+// (toggling `active`, never deleting the row -- preserves last_api/last_temp_f
+// history the same way the canonical-grouping insert-if-missing path does)
+// and then propagate to every compartment's picker via the shared
+// `terminalProducts` refetch passed in as `onChanged`.
+
+import React, { useEffect, useMemo, useState } from "react";
+import { supabase } from "@/lib/supabase/client";
+import { FullscreenModal } from "@/lib/ui/FullscreenModal";
+
+type CatalogProduct = {
+  product_id: string;
+  product_name: string | null;
+  display_name: string | null;
+  description: string | null;
+  button_code: string | null;
+  hex_code: string | null;
+  is_dyed: boolean | null;
+};
+
+// No `category` column exists on `products` -- this is a client-side
+// heuristic grouping (name-pattern based) purely for readable organization
+// in this picker. Order here is the section display order.
+const GROUPS: { label: string; test: (name: string) => boolean }[] = [
+  { label: "Diesel", test: (n) => /diesel|heating oil|marine gas oil|hvo|\bkerosene\b/i.test(n) },
+  { label: "Biodiesel Blends", test: (n) => /biodiesel/i.test(n) },
+  { label: "Gasoline", test: (n) => /unleaded|recreation fuel/i.test(n) },
+  { label: "Ethanol & Flex Fuel", test: (n) => /ethanol|flex fuel|e\d{2}\b/i.test(n) },
+  { label: "Aviation & Jet", test: (n) => /aviation|jet fuel|jp-\d/i.test(n) },
+  { label: "Blendstocks & Components", test: (n) => /blendstock|alkylate|reformate|isomerate|naphtha|natural gasoline|butane|additive/i.test(n) },
+];
+function groupFor(name: string): string {
+  for (const g of GROUPS) if (g.test(name)) return g.label;
+  return "Other / Off-Spec";
+}
+
+export default function ManageTerminalProductsModal({
+  open,
+  onClose,
+  terminalId,
+  terminalName,
+  onChanged,
+}: {
+  open: boolean;
+  onClose: () => void;
+  terminalId: string;
+  terminalName?: string;
+  onChanged: () => void;
+}) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [allProducts, setAllProducts] = useState<CatalogProduct[]>([]);
+  // undefined = no terminal_products row yet; true/false = row exists with that active flag
+  const [activeMap, setActiveMap] = useState<Record<string, boolean | undefined>>({});
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+
+  useEffect(() => {
+    if (!open || !terminalId) return;
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      setError(null);
+      const [{ data: products, error: pErr }, { data: tp, error: tpErr }] = await Promise.all([
+        supabase.from("products")
+          .select("product_id, product_name, display_name, description, button_code, hex_code, is_dyed")
+          .order("product_name"),
+        supabase.from("terminal_products")
+          .select("product_id, active")
+          .eq("terminal_id", terminalId),
+      ]);
+      if (cancelled) return;
+      if (pErr || tpErr) {
+        setError(pErr?.message ?? tpErr?.message ?? "Failed to load products.");
+        setLoading(false);
+        return;
+      }
+      const map: Record<string, boolean | undefined> = {};
+      for (const row of (tp ?? []) as any[]) map[row.product_id] = row.active !== false;
+      setAllProducts((products ?? []) as CatalogProduct[]);
+      setActiveMap(map);
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [open, terminalId]);
+
+  async function toggle(productId: string) {
+    const isActive = activeMap[productId] === true;
+    const nextActive = !isActive;
+    setSavingId(productId);
+    // We only know a row "exists" if we've already seen it in activeMap with
+    // a defined value -- undefined means insert, defined means update. Never
+    // delete: matches the insert-if-missing / never-touch-on-conflict pattern
+    // used everywhere else this session so last_api/last_temp_f history for
+    // a product a terminal previously curated is never lost by a re-toggle.
+    const rowExists = activeMap[productId] !== undefined;
+    const { error: err } = rowExists
+      ? await supabase.from("terminal_products")
+          .update({ active: nextActive })
+          .eq("terminal_id", terminalId).eq("product_id", productId)
+      : await supabase.from("terminal_products")
+          .insert({ terminal_id: terminalId, product_id: productId, active: nextActive });
+    setSavingId(null);
+    if (err) { setError(err.message); return; }
+    setActiveMap((prev) => ({ ...prev, [productId]: nextActive }));
+    onChanged();
+  }
+
+  const grouped = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const filtered = q
+      ? allProducts.filter((p) =>
+          [p.product_name, p.display_name, p.button_code, p.description].some((v) => (v ?? "").toLowerCase().includes(q)))
+      : allProducts;
+    const byGroup: Record<string, CatalogProduct[]> = {};
+    for (const p of filtered) {
+      const g = groupFor(p.product_name ?? "");
+      (byGroup[g] ??= []).push(p);
+    }
+    const order = [...GROUPS.map((g) => g.label), "Other / Off-Spec"];
+    return order.filter((g) => byGroup[g]?.length).map((g) => ({ label: g, products: byGroup[g] }));
+  }, [allProducts, search]);
+
+  const rowStyle: React.CSSProperties = {
+    display: "flex", alignItems: "center", gap: 12,
+    padding: "10px 12px", borderRadius: 6,
+    border: "1px solid rgba(255,255,255,0.08)",
+    background: "rgba(255,255,255,0.02)",
+    cursor: "pointer", width: "100%", boxSizing: "border-box" as const,
+  };
+
+  return (
+    <FullscreenModal open={open} title="Terminal Products" onClose={onClose}>
+      <div style={{ display: "grid", gap: 12 }}>
+        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)" }}>
+          {terminalName ? <>Active products at <span style={{ color: "rgba(255,255,255,0.75)", fontWeight: 700 }}>{terminalName}</span>.</> : "Active products at this terminal."}
+          {" "}Tap to add or remove — changes apply to every compartment's picker immediately.
+        </div>
+
+        <input
+          type="text" value={search} onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search products…"
+          style={{
+            width: "100%", boxSizing: "border-box" as const, padding: "10px 12px", borderRadius: 6,
+            border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.03)",
+            color: "white", fontSize: 13,
+          }}
+        />
+
+        {error && <div style={{ color: "#f87171", fontSize: 12 }}>{error}</div>}
+        {loading && <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 13 }}>Loading…</div>}
+
+        {!loading && grouped.length === 0 && (
+          <div style={{ color: "rgba(255,255,255,0.35)", fontSize: 13 }}>No products found.</div>
+        )}
+
+        {!loading && grouped.map(({ label, products }) => (
+          <div key={label} style={{ display: "grid", gap: 6 }}>
+            <div style={{
+              fontSize: 11, fontWeight: 800, color: "rgba(255,255,255,0.35)",
+              textTransform: "uppercase" as const, letterSpacing: 0.6, marginTop: 4,
+            }}>
+              {label}
+            </div>
+            {products.map((p) => {
+              const isActive = activeMap[p.product_id] === true;
+              const btnCode = ((p.button_code ?? "").trim() || "PRD").toUpperCase();
+              const btnColor = (p.hex_code ?? "").trim() || "rgba(255,255,255,0.85)";
+              const name = (p.product_name ?? p.display_name ?? "").trim() || "Product";
+              const saving = savingId === p.product_id;
+              return (
+                <button
+                  key={p.product_id}
+                  type="button"
+                  disabled={saving}
+                  style={{ ...rowStyle, opacity: saving ? 0.5 : 1 }}
+                  onClick={() => toggle(p.product_id)}
+                >
+                  <span style={{ width: 8, height: 8, borderRadius: "50%", background: btnColor, flexShrink: 0 }} />
+                  <div style={{ minWidth: 0, flex: 1, overflow: "hidden", textAlign: "left" }}>
+                    <div style={{ display: "flex", alignItems: "baseline", gap: 6, overflow: "hidden" }}>
+                      <span style={{ fontWeight: 700, fontSize: 14, color: "white", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>{name}</span>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: btnColor, opacity: 0.85, flexShrink: 0, letterSpacing: 0.3 }}>{btnCode}</span>
+                      {p.is_dyed && (
+                        <span style={{
+                          fontSize: 9, fontWeight: 800, color: "#ef4444", background: "rgba(239,68,68,0.12)",
+                          borderRadius: 3, padding: "1px 4px", letterSpacing: 0.4, flexShrink: 0,
+                        }}>
+                          DYED
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <span style={{
+                    fontSize: 12, fontWeight: 800, flexShrink: 0,
+                    color: isActive ? "rgba(255,255,255,0.92)" : "rgba(255,255,255,0.30)",
+                  }}>
+                    {isActive ? "✓ Active" : "+ Add"}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+    </FullscreenModal>
+  );
+}

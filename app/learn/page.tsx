@@ -82,7 +82,7 @@ export default function LearnPage() {
             ].map(t => (
               <a
                 key={t.id}
-                href={`/calculator?tour=${t.id}`}
+                href={`/planner?tour=${t.id}`}
                 style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", borderRadius: 12, border: "1px solid rgba(103,232,249,0.20)", background: "rgba(103,232,249,0.05)", textDecoration: "none", cursor: "pointer" }}
               >
                 <div>

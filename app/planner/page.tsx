@@ -1,0 +1,1660 @@
+"use client";
+import { motion } from "framer-motion";
+import { clearSetupSession } from "@/lib/setupSession";
+import { useRouter } from "next/navigation";
+import { useTour } from "./hooks/useTour";
+import TourOverlay from "./components/TourOverlay";
+import SetupGate from "./components/SetupGate";
+import { useCalculatorShell } from "./CalculatorShellContext";
+
+/**
+ * page.tsx — CalculatorPage
+ *
+ * This file is intentionally thin: it wires hooks together and renders JSX.
+ * Business logic lives in:
+ *   hooks/useEquipment.ts   — combos, selectedComboId, persistence
+ *   hooks/useLocation.ts    — states/cities, ambient temp, persistence
+ *   hooks/useTerminals.ts   — my terminals, catalog, get_carded
+ *   hooks/usePlanSlots.ts   — plan snapshot save/load, Supabase sync
+ *   hooks/useLoadWorkflow.ts — begin_load / complete_load RPCs
+ *   hooks/usePlanRows.ts    — binary search for weight-constrained max gallons
+ *   utils/planMath.ts       — lbsPerGallonAtTemp, planForGallons, allocateWithCaps
+ *   types.ts                — all shared types
+ */
+
+
+
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { supabase } from "@/lib/supabase/client";
+
+// Module-level (not component state) so it survives this page component
+// unmounting/remounting on every route change, but still resets on a true
+// full reload -- exactly the "did we already do the once-per-session
+// landing redirect" flag needs. A ref/useState living inside the component
+// can't do this: this page genuinely remounts every time the user
+// navigates back to it, which would make a same-scope flag "fresh" again
+// on every visit, defeating the "once per session" intent below.
+let hasCheckedDefaultLanding = false;
+
+// ── Hooks ──────────────────────────────────────────────────────────────────────
+import { usePlanSlots } from "./hooks/usePlanSlots";
+import { useLoadWorkflow } from "./hooks/useLoadWorkflow";
+import { usePlanRows } from "./hooks/usePlanRows";
+import { useFuelTempPrediction } from "./hooks/useFuelTempPrediction";
+
+// ── Sections ───────────────────────────────────────────────────────────────────
+import PlannerControls from "./sections/PlannerControls";
+import PresetDial from "./sections/PresetDial";
+import PresetActionSheet from "./components/PresetActionSheet";
+import DriverTrainingModal from "./components/DriverTrainingModal";
+
+// ── Modals ─────────────────────────────────────────────────────────────────────
+// LocationModal/MyTerminalsModal now mount once in ShellChrome
+// (CalculatorLayoutClient.tsx) -- see the render-site comment further down.
+import TerminalCatalogModal from "./modals/TerminalCatalogModal";
+import LoadingModal from "./modals/LoadingModal";
+import ProductTempModal from "./modals/ProductTempModal";
+import CompartmentModal from "./modals/CompartmentModal";
+
+// ── UI ─────────────────────────────────────────────────────────────────────────
+import { styles } from "./ui/styles";
+
+// ── Utils ──────────────────────────────────────────────────────────────────────
+import { addDaysISO_, daysUntilISO_, formatMDYWithCountdown_, isPastISO_ } from "./utils/dates";
+import { themeFill, themeTextOnFill } from "./theme";
+import { normState } from "./utils/normalize";
+import { cgSliderToBias, bestLbsPerGallon, planForGallons, CG_NEUTRAL } from "./utils/planMath";
+
+// ── Types ──────────────────────────────────────────────────────────────────────
+import type { ActiveComp, CompPlanInput, CompRow, ProductRow, TerminalProductMetaRow } from "./types";
+
+
+// ─── Local UI helpers ─────────────────────────────────────────────────────────
+
+const clampNum = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+
+
+
+// TempDial component -- "moon" redesign: a glowing gradient orb with
+// scattered decorative tick marks around it (reference image supplied by
+// user), same drag-anywhere-in-the-widget sensitivity as the old ring/arc
+// version (the hit area is still the full outer box, not just the visible
+// orb, so dragging isn't harder to grab). Tapping without dragging opens a
+// centered numeric-keypad popup to type the value directly -- same pattern
+// as the compartment cap's precise-entry popup in PlannerControls.tsx.
+type TempDialProps = { value: number; min: number; max: number; step: number; onChange: (v: number) => void };
+
+const TEMP_DIAL_TICKS = Array.from({ length: 12 }, (_, i) => {
+  const angle = i * 30 + 9; // slight offset so ticks don't land exactly on the cardinal points
+  const big = i % 2 === 0;
+  const dist = big ? 116 : 108 + ((i * 37) % 9); // subtle scatter, not a perfect ring
+  const rad = (angle * Math.PI) / 180;
+  return { cx: 120 + Math.cos(rad) * dist, cy: 120 + Math.sin(rad) * dist, angle, big };
+});
+
+function TempDial({ value, min, max, step, onChange }: TempDialProps) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const [typing, setTyping] = useState(false);
+  const [typedValue, setTypedValue] = useState("");
+  const pointerDownRef = useRef<{ x: number; y: number } | null>(null);
+  const movedRef = useRef(false);
+
+  const sweepStart = -135;
+  const sweepEnd = 135;
+  const sweep = sweepEnd - sweepStart;
+
+  const angleToValue = useCallback((deg: number) => {
+    const anchorAngle = -90;
+    const degPerUnit = sweep / (max - min || 1);
+    const raw = 60 + (clampNum(deg, sweepStart, sweepEnd) - anchorAngle) / (degPerUnit || 1);
+    return clampNum(Math.round((Math.round(raw / step) * step) * 10) / 10, min, max);
+  }, [min, max, step, sweep, sweepStart, sweepEnd]);
+
+  const setFromPointer = useCallback((clientX: number, clientY: number) => {
+    const el = ref.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const dx = clientX - (r.left + r.width / 2);
+    const dy = clientY - (r.top + r.height / 2);
+    onChange(angleToValue(clampNum((Math.atan2(dy, dx) * 180) / Math.PI, sweepStart, sweepEnd)));
+  }, [angleToValue, onChange, sweepStart, sweepEnd]);
+
+  function commitTyped() {
+    const parsed = clampNum(Math.round((Number(typedValue) || 0) * 10) / 10, min, max);
+    onChange(parsed);
+    setTyping(false);
+  }
+
+  return (
+    <div
+      ref={ref}
+      style={{ width: "100%", maxWidth: 420, margin: "0 auto", aspectRatio: "1/1", position: "relative", touchAction: "none" }}
+      onPointerDown={(e) => {
+        if (typing) return;
+        (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+        pointerDownRef.current = { x: e.clientX, y: e.clientY };
+        movedRef.current = false;
+        setDragging(true);
+      }}
+      onPointerMove={(e) => {
+        if (typing || !dragging) return;
+        const start = pointerDownRef.current;
+        if (start && Math.hypot(e.clientX - start.x, e.clientY - start.y) > 6) movedRef.current = true;
+        if (movedRef.current) setFromPointer(e.clientX, e.clientY);
+      }}
+      onPointerUp={() => {
+        if (typing) return;
+        setDragging(false);
+        if (!movedRef.current) { setTypedValue(String(value)); setTyping(true); }
+      }}
+      onPointerCancel={() => setDragging(false)}
+    >
+      <svg viewBox="0 0 240 240" style={{ width: "100%", height: "100%", overflow: "visible", pointerEvents: "none" }}>
+        {TEMP_DIAL_TICKS.map((t, i) => t.big ? (
+          <rect key={i} x={t.cx - 1.5} y={t.cy - 8} width={3} height={16} rx={1.5}
+            fill="rgba(255,255,255,0.55)" transform={`rotate(${t.angle + 90} ${t.cx} ${t.cy})`} />
+        ) : (
+          <rect key={i} x={t.cx - 2} y={t.cy - 2} width={4} height={4}
+            fill="rgba(255,255,255,0.28)" transform={`rotate(45 ${t.cx} ${t.cy})`} />
+        ))}
+      </svg>
+      <div style={{ position: "absolute", top: 6, left: 0, right: 0, textAlign: "center", fontWeight: 900, fontSize: 14, color: "rgba(255,255,255,0.55)", pointerEvents: "none" }}>60°F</div>
+      <div style={{
+        position: "absolute", inset: 0, margin: "auto", width: "68%", height: "68%",
+        borderRadius: "50%", pointerEvents: "none",
+        background: "radial-gradient(circle at 34% 28%, #ffffff 0%, #f4f4f4 30%, #d9d9d9 62%, #b6b6b6 100%)",
+        boxShadow: "0 22px 48px rgba(0,0,0,0.55), inset 0 -12px 26px rgba(0,0,0,0.12)",
+        display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center",
+      }}>
+        <div style={{ fontSize: "clamp(28px, 8vw, 40px)", fontWeight: 900, letterSpacing: -0.6, color: "#181818" }}>
+          {value.toFixed(1)}°F
+        </div>
+      </div>
+
+      {/* Tap-to-type -- opens on a tap that didn't drag, anywhere in the widget */}
+      {typing && (
+        <div
+          onClick={(e) => { e.stopPropagation(); setTyping(false); }}
+          style={{ position: "fixed", inset: 0, zIndex: 500, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ width: "100%", maxWidth: 280, background: "#161616", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 6, padding: 20, display: "flex", flexDirection: "column", alignItems: "center", gap: 14 }}
+          >
+            <div style={{ fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.45)", letterSpacing: 0.4, textTransform: "uppercase" as const }}>
+              Set Temp (°F) for All Products
+            </div>
+            <input
+              type="text" inputMode="decimal" autoFocus
+              value={typedValue}
+              onChange={(e) => setTypedValue(e.target.value.replace(/[^0-9.\-]/g, ""))}
+              onKeyDown={(e) => { if (e.key === "Enter") commitTyped(); }}
+              style={{ width: "100%", textAlign: "center" as const, background: "transparent", border: "none", borderBottom: "1px solid rgba(255,255,255,0.20)", color: "#fff", fontSize: 40, fontWeight: 700, padding: "4px 0" }}
+            />
+            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)" }}>{min}° to {max}°</div>
+            <div style={{ display: "flex", gap: 10, width: "100%", marginTop: 4 }}>
+              <button type="button" onClick={() => setTyping(false)}
+                style={{ flex: 1, padding: "12px 0", borderRadius: 6, border: "1px solid rgba(255,255,255,0.15)", background: "transparent", color: "rgba(255,255,255,0.65)", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>
+                Cancel
+              </button>
+              <button type="button" onClick={commitTyped}
+                style={{ flex: 1, padding: "12px 0", borderRadius: 6, border: "none", background: "#fff", color: "#000", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
+                Set
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Component ────────────────────────────────────────────────────────────────
+
+
+export default function CalculatorPage() {
+  // ── Shared shell state (equipment/location/terminals/expirations) ──────────
+  // Owned once in CalculatorShellContext (layout.tsx) so the header's gear/
+  // bell icons and this page's own planning logic never see two
+  // independently-hydrated copies of the same selection state.
+  const shell = useCalculatorShell();
+  const { authUserId, setupSession, effectiveUserId, equipment, location, terminals, expirations } = shell;
+  const router = useRouter();
+
+  // Dispatch's real home is the Dispatch tab, not this one -- but whatever
+  // actually lands the app on bare /planner (e.g. a login redirect that
+  // doesn't know about roles) doesn't know that. Admin/super-admin are
+  // deliberately excluded here per explicit user direction (2026-08-04):
+  // "the only role that should default to the dispatch tab on open is the
+  // dispatch role. all other roles should open to the planner." Admin's
+  // route into the Dispatch tab's driver-scoped view is the Dispatch tab
+  // itself (a permanent, always-available tab, not a default landing);
+  // this redirect previously also fired for admin/super-admin and was the
+  // actual cause of a real reported bug ("twitches back to dispatch" when
+  // tapping Planner) -- if this page's own JS chunk got re-evaluated after
+  // a route away and back (e.g. under memory pressure on mobile), the
+  // module-level hasCheckedDefaultLanding flag reset, so the "one-time"
+  // redirect silently refired on what the admin experienced as a deliberate
+  // Planner visit. Scoping this to dispatch-only doesn't fix that
+  // re-evaluation risk in the abstract, but it does mean the one role that
+  // can hit it (dispatch) has no Planner tab to be bounced away from in the
+  // first place -- the whole bug class no longer has a visible symptom for
+  // any role that experiences it.
+  useEffect(() => {
+    if (hasCheckedDefaultLanding) return;
+    if (shell.role == null) return;
+    hasCheckedDefaultLanding = true;
+    if (shell.role === "dispatch") {
+      router.replace("/planner/dispatch");
+    }
+  }, [shell.role, router]);
+
+  // ── Card data (card number + PIN + private note, per terminal, per user) ──
+  // Owned in CalculatorShellContext now -- the new Cards tab route needs the
+  // same data, so it's shared rather than fetched twice (same pattern as
+  // equipment/location/terminals above).
+  const { cardDataByTerminalId, setCardDataForTerminal_ } = shell;
+
+  // Framer-motion's layoutId shared-element transitions render a differently
+  // serialized `style` attribute server-side vs. after hydration (e.g. its
+  // color values gain spaces: "rgba(255,255,255,0.45)" -> "rgba(255, 255,
+  // 255, 0.45)"), which is a real, uncorrected hydration mismatch React won't
+  // patch up. Render plain <button>s for SSR/first paint and only swap to
+  // motion.button post-mount, so hydration always diffs identical DOM.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+
+  // ── Modal open/close flags ─────────────────────────────────────────────────
+  // equipOpen/expModalOpen/termOpen live in the shared shell context now --
+  // the header (layout.tsx) needs to trigger the same Equipment/Expirations/
+  // Terminals sheets this page renders (ExpirationModal's "resolve" links
+  // open Terminals, so it has to be a shared boolean, not local to either).
+  // locOpen/statePickerOpen/expandedTerminalId and the city-star/stateOptions/
+  // cities derived values also live in shell now (see CalculatorShellContext) --
+  // the Terminal tab's own identity header opens the same LocationModal/
+  // MyTerminalsModal instances (now mounted once in ShellChrome), so this
+  // page and that one can't each carry an independent copy without risking
+  // the two drifting out of sync.
+  const {
+    equipOpen, setEquipOpen, termOpen, setTermOpen,
+    locOpen, setLocOpen, statePickerOpen, setStatePickerOpen,
+    expandedTerminalId, setExpandedTerminalId,
+    isCityStarred, toggleCityStar,
+    stateOptions, selectedStateLabel, selectedStateName, cities, topCities, allCities,
+  } = shell;
+  const [catalogOpen, setCatalogOpen] = useState(false);
+  const [catalogExpandedId, setCatalogExpandedId] = useState<string | null>(null);
+  const [catalogEditingDateId, setCatalogEditingDateId] = useState<string | null>(null);
+  const [compModalOpen, setCompModalOpen] = useState(false);
+  const [compModalComp, setCompModalComp] = useState<number | null>(null);
+  const [tempDialOpen, setTempDialOpen] = useState(false);
+
+  // ── Action row state ────────────────────────────────────────────────────────
+  // activeSlotLetter mirrors PresetDial's own (cosmetic) centered/last-tapped
+  // slot, so "Save plan {letter}" always names the right preset. selectedComp
+  // is which compartment bar was last tapped (tapping a bar now selects it
+  // instead of opening the product picker directly -- the picker only opens
+  // via the "Edit Comp N Product" action button, per the design handoff).
+  const [activeSlotLetter, setActiveSlotLetter] = useState(1);
+  const [selectedComp, setSelectedComp] = useState<number | null>(null);
+
+  // ── Feature hooks ──────────────────────────────────────────────────────────
+  // equipment/location/terminals come from the shared shell context (see above).
+
+  // Resolve timezone after both hooks exist
+  const selectedTerminalTimeZoneResolved = useMemo(() => {
+    const tid = String(location.selectedTerminalId ?? "");
+    if (!tid) return null;
+    // timezone lives in terminalCatalog (from terminals table), not in my_terminals_with_status view
+    return (terminals.terminalCatalog as any[])?.find((x) => String(x.terminal_id) === tid)?.timezone ?? null;
+  }, [location.selectedTerminalId, terminals.terminalCatalog]);
+
+  // ── Compartments ───────────────────────────────────────────────────────────
+  const [compartments, setCompartments] = useState<CompRow[]>([]);
+  const [compLoading, setCompLoading] = useState(false);
+  const [compError, setCompError] = useState<string | null>(null);
+
+  const selectedTrailerId = equipment.selectedCombo?.trailer_id ?? null;
+
+  useEffect(() => {
+    (async () => {
+      setCompError(null);
+      setCompartments([]);
+      if (!selectedTrailerId) return;
+      setCompLoading(true);
+      const { data, error } = await supabase
+        .from("trailer_compartments")
+        .select("trailer_id, comp_number, max_gallons, cap_gallons, position, active")
+        .eq("trailer_id", selectedTrailerId)
+        .order("comp_number", { ascending: true });
+      if (error) { setCompError(error.message); setCompartments([]); }
+      else { setCompartments(((data ?? []) as CompRow[]).filter((c) => c.active !== false)); }
+      setCompLoading(false);
+    })();
+  }, [selectedTrailerId]);
+
+  // ── Equipment details (truck/trailer name + make, for the Equipment info card) ──
+  const [equipmentDetails, setEquipmentDetails] = useState({ truckName: "", truckMake: "", trailerName: "", trailerMake: "" });
+  const selectedTruckId = equipment.selectedCombo?.truck_id ?? null;
+
+  useEffect(() => {
+    (async () => {
+      if (!selectedTruckId && !selectedTrailerId) {
+        setEquipmentDetails({ truckName: "", truckMake: "", trailerName: "", trailerMake: "" });
+        return;
+      }
+      const [truckRes, trailerRes] = await Promise.all([
+        selectedTruckId ? supabase.from("trucks").select("truck_name, make").eq("truck_id", selectedTruckId).maybeSingle() : Promise.resolve({ data: null }),
+        selectedTrailerId ? supabase.from("trailers").select("trailer_name, make").eq("trailer_id", selectedTrailerId).maybeSingle() : Promise.resolve({ data: null }),
+      ]);
+      setEquipmentDetails({
+        truckName: (truckRes as any)?.data?.truck_name ?? "",
+        truckMake: (truckRes as any)?.data?.make ?? "",
+        trailerName: (trailerRes as any)?.data?.trailer_name ?? "",
+        trailerMake: (trailerRes as any)?.data?.make ?? "",
+      });
+    })();
+  }, [selectedTruckId, selectedTrailerId]);
+
+  // ── Terminal products ──────────────────────────────────────────────────────
+  const [terminalProducts, setTerminalProducts] = useState<ProductRow[]>([]);
+  const [terminalProductMetaRows, setTerminalProductMetaRows] = useState<TerminalProductMetaRow[]>([]);
+
+  // Extract terminal products fetch as a named callback so it can be called post-load
+  const fetchTerminalProducts = useCallback(async () => {
+    if (!location.selectedTerminalId) { setTerminalProducts([]); return; }
+    const { data, error } = await supabase
+      .from("terminal_products")
+      .select(`active, last_api, last_api_updated_at, last_temp_f, last_loaded_at,
+        products (product_id, product_name, display_name, description, product_code, button_code, hex_code, api_60, alpha_per_f, un_number, is_dyed, canonical_product_id)`)
+      .eq("terminal_id", location.selectedTerminalId);
+    if (error) { setTerminalProducts([]); return; }
+    // Stats lookup by product_id across ALL rows at this terminal (not just
+    // active ones) -- a rack-injected-variance product (e.g. dyed diesel)
+    // pools its tracking onto the canonical product's row, which needs to
+    // be found here even if the canonical product itself isn't separately
+    // offered/active at this terminal's driver-facing list.
+    const statsByProductId: Record<string, { last_api: number | null; last_api_updated_at: string | null; last_temp_f: number | null; last_loaded_at: string | null }> = {};
+    for (const row of (data ?? []) as any[]) {
+      const pid = row.products?.product_id;
+      if (!pid) continue;
+      statsByProductId[pid] = {
+        last_api: row.last_api ?? null,
+        last_api_updated_at: row.last_api_updated_at ?? null,
+        last_temp_f: row.last_temp_f ?? null,
+        last_loaded_at: row.last_loaded_at ?? null,
+      };
+    }
+    const products = (data ?? []).filter((row: any) => row.active !== false)
+      .map((row: any) => {
+        if (!row.products) return null;
+        const own = statsByProductId[row.products.product_id];
+        const canonicalId = row.products.canonical_product_id as string | null | undefined;
+        const stats = (canonicalId && statsByProductId[canonicalId]) ? statsByProductId[canonicalId] : own;
+        return { ...row.products, ...stats };
+      })
+      .filter(Boolean);
+    setTerminalProducts(products as ProductRow[]);
+  }, [location.selectedTerminalId]);
+
+  useEffect(() => { fetchTerminalProducts(); }, [fetchTerminalProducts]);
+
+  useEffect(() => {
+    if (!location.selectedTerminalId) { setTerminalProductMetaRows([]); return; }
+    (async () => {
+      const { data, error } = await supabase
+        .from("terminal_products")
+        .select("terminal_id, product_id, last_api, last_api_updated_at, last_temp_f, last_loaded_at")
+        .eq("terminal_id", location.selectedTerminalId);
+      if (!error) setTerminalProductMetaRows((data ?? []) as any);
+    })();
+  }, [location.selectedTerminalId]);
+
+  // ── Planning inputs ────────────────────────────────────────────────────────
+  // ── Persisted plan state — survives page refresh ─────────────────────────
+  // All initialized to defaults; hydrated from localStorage in useEffect after mount
+  // (avoids SSR hydration mismatch — localStorage is client-only)
+  const [tempF, setTempFRaw] = useState<number>(60);
+
+  // Per-product planned temp -- split load (e.g. diesel + regular in the same
+  // trailer) genuinely have different temps (different tanks), so a single
+  // shared tempF was wrong the moment more than one product was in the plan.
+  // tempF is kept as the dial's own "reference" value; every existing way of
+  // moving it (drag, type-in, quick +/-, snap buttons) now also shifts every
+  // product's own temp by the same delta, applied once here so none of those
+  // call sites needed to change. Setting one product directly (tapping its
+  // row in the modal) bypasses this and only touches that product -- see
+  // setSingleProductTempF below. Deliberately NOT persisted to localStorage
+  // like tempF is -- same "always re-seeded from the live prediction, never
+  // restored from a snapshot" rule tempF itself already follows.
+  const [productTempF, setProductTempF] = useState<Record<string, number>>({});
+
+  // Kept in sync synchronously (not via a useEffect) so setTempF can always
+  // read "prev" without nesting a second setState call inside setTempFRaw's
+  // own updater. That nested-call version worked in production but silently
+  // double-applied the delta in dev: React 18 StrictMode double-invokes
+  // updater functions to catch impure ones, and an updater that calls
+  // setProductTempF as a side effect isn't pure -- both invocations actually
+  // fired the nested update, doubling the shift. Caught this live testing
+  // the split-load dial (a single +5.8° drag was landing as +11.6°).
+  const tempFRef = useRef(60);
+
+  const setTempF = useCallback((v: number | ((prev: number) => number)) => {
+    const prev = tempFRef.current;
+    const next = typeof v === "function" ? v(prev) : v;
+    const delta = Math.round((next - prev) * 10) / 10;
+    tempFRef.current = next;
+    if (delta !== 0) {
+      setProductTempF((prevProd) => {
+        if (Object.keys(prevProd).length === 0) return prevProd;
+        const out: Record<string, number> = {};
+        for (const [pid, val] of Object.entries(prevProd)) out[pid] = Math.round((val + delta) * 10) / 10;
+        return out;
+      });
+    }
+    try { localStorage.setItem("protankr_tempF_v1", String(next)); } catch {}
+    setTempFRaw(next);
+  }, []);
+
+  // Safety net for the one path that sets tempF directly (localStorage
+  // hydration on mount, below) instead of through setTempF -- keeps the ref
+  // truthful even then, so a delta computed right after mount is never based
+  // on the stale initial 60 default.
+  useEffect(() => { tempFRef.current = tempF; }, [tempF]);
+
+  const setSingleProductTempF = useCallback((productId: string, value: number) => {
+    setProductTempF((prev) => ({ ...prev, [productId]: Math.round(value * 10) / 10 }));
+  }, []);
+
+  const [cgSlider, setCgSliderRaw] = useState<number>(0.5);
+  const setCgSlider = useCallback((v: number | ((prev: number) => number)) => {
+    setCgSliderRaw(prev => {
+      const next = typeof v === "function" ? v(prev) : v;
+      try { localStorage.setItem("protankr_cgSlider_v1", String(next)); } catch {}
+      return next;
+    });
+  }, []);
+
+  // compPlan is keyed per combo+terminal so switching equipment restores the right plan
+  const compPlanKey = useMemo(() => {
+    const cid = equipment.selectedComboId ?? "";
+    const tid = location.selectedTerminalId ?? "";
+    return cid && tid ? `protankr_compPlan_v1:${cid}:${tid}` : null;
+  }, [equipment.selectedComboId, location.selectedTerminalId]);
+
+  const [compPlan, setCompPlanRaw] = useState<Record<number, CompPlanInput>>({});
+
+  const setCompPlan = useCallback((updater: any) => {
+    setCompPlanRaw((prev: Record<number, CompPlanInput>) => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      if (compPlanKey) {
+        try { localStorage.setItem(compPlanKey, JSON.stringify(next)); } catch {}
+      }
+      return next;
+    });
+  }, [compPlanKey]);
+
+  // "Save plan {letter}" is dirty-tracked against a baseline snapshot taken
+  // right after the last load/save -- it only shows when the current plan
+  // actually diverges from what's saved, and hides itself immediately after
+  // a successful save (per explicit feedback: no button when there's nothing
+  // new to save). Covers everything buildSnapshot()/saveToSlot() actually
+  // persist -- product selection + empty flag + cap override per comp, and
+  // the CG slider -- not just cap overrides, so picking a different product
+  // or sliding CG also surfaces the button.
+  const overridesSnapshot = useCallback((plan: Record<number, CompPlanInput>, cg: number) => {
+    const comps: Record<number, { productId: string; empty: boolean; capOverride: number | null }> = {};
+    for (const k of Object.keys(plan || {})) {
+      const v = (plan as any)[k] ?? {};
+      comps[Number(k)] = {
+        productId: v.productId ?? "",
+        empty: !!v.empty,
+        capOverride: v.capOverride ?? null,
+      };
+    }
+    return JSON.stringify({ comps, cg: Math.round((Number(cg) || 0) * 1000) / 1000 });
+  }, []);
+  // Lazy initializer (not a literal "{}") so the baseline matches whatever
+  // compPlan/cgSlider actually start as -- broadening the snapshot to include
+  // productId/empty/cg means a hardcoded "{}" no longer matches an empty
+  // plan's real serialized shape, which made "Save plan" appear spuriously
+  // on a completely fresh mount.
+  const [baselineOverrides, setBaselineOverrides] = useState(() => overridesSnapshot(compPlan, cgSlider));
+  const [captureBaselineNext, setCaptureBaselineNext] = useState(false);
+  // Which preset slot (1-5) the action sheet is open for, if any -- set by
+  // PresetDial's onTapFilled when a filled slot is tapped.
+  const [presetSheetSlot, setPresetSheetSlot] = useState<number | null>(null);
+
+  // Fires once compPlan has actually re-rendered post-load (loadFromSlot
+  // applies asynchronously via the hook's own setCompPlan), so the baseline
+  // reflects what was really loaded, not what was on screen before it.
+  //
+  // Re-captures on every compPlan/cgSlider change while the flag is set,
+  // and only clears it after a short quiet period (debounced, same idea as
+  // usePlanSlots' own 350ms autosave debounce) rather than immediately on
+  // the first change. usePlanSlots' automatic restores (slot-0-on-terminal-
+  // change, last-load-from-log-on-combo-claim) hit the DB first and call
+  // setCompPlan/setCgSlider only once that resolves -- consuming the flag
+  // on the very next render (the pre-restore value) meant the baseline got
+  // locked in *before* the real restore landed, so the button showed
+  // "dirty" the instant equipment/terminal was picked, before the user had
+  // touched anything.
+  useEffect(() => {
+    if (!captureBaselineNext) return;
+    setBaselineOverrides(overridesSnapshot(compPlan, cgSlider));
+    const t = setTimeout(() => setCaptureBaselineNext(false), 600);
+    return () => clearTimeout(t);
+  }, [compPlan, cgSlider, captureBaselineNext, overridesSnapshot]);
+
+  // Terminal/combo switches trigger usePlanSlots' own automatic restores
+  // (slot-0-on-terminal-change, last-load-from-log-on-combo-claim) -- those
+  // land asynchronously via that hook's own setCompPlan/setCgSlider calls,
+  // not through the explicit "Load {letter}" path. Reuse the same
+  // captureBaselineNext mechanism so the baseline is recaptured once that
+  // restore actually lands, instead of comparing against pre-restore state.
+  useEffect(() => {
+    setCaptureBaselineNext(true);
+  }, [location.selectedTerminalId, equipment.selectedComboId]);
+
+  // Hydrate tempF and cgSlider once on mount
+  useEffect(() => {
+    try {
+      const t = localStorage.getItem("protankr_tempF_v1");
+      if (t != null && Number.isFinite(Number(t))) setTempFRaw(Number(t));
+      const cg = localStorage.getItem("protankr_cgSlider_v1");
+      if (cg != null && Number.isFinite(Number(cg))) setCgSliderRaw(Number(cg));
+    } catch {}
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Ref holds the hydrated plan so compartments init doesn't overwrite it
+  const hydratedCompPlanRef = useRef<Record<number, CompPlanInput> | null>(null);
+
+  // Hydrate compPlan when combo+terminal key changes
+  useEffect(() => {
+    if (!compPlanKey) {
+      hydratedCompPlanRef.current = null;
+      setCompPlanRaw({});
+      return;
+    }
+    try {
+      const raw = localStorage.getItem(compPlanKey);
+      if (raw) {
+        const p = JSON.parse(raw);
+        if (p && typeof p === "object") {
+          hydratedCompPlanRef.current = p;
+          setCompPlanRaw(p);
+          return;
+        }
+      }
+    } catch {}
+    hydratedCompPlanRef.current = null;
+    setCompPlanRaw({});
+  }, [compPlanKey]);
+  // ── Guided tour ───────────────────────────────────────────────────────────
+  const tour = useTour({
+    stateConditions: {
+      "tour-fleet-instruction":    !!equipment.selectedComboId && !equipOpen,
+      "tour-location-instruction": !!location.selectedCity && !locOpen,
+      "tour-terminal-instruction": !!location.selectedTerminalId && !termOpen,
+    },
+  });
+
+  // Close comp modal when tour advances past the comp-instruction step
+  const prevTourStepRef = useRef<string | null>(null);
+  useEffect(() => {
+    const prev = prevTourStepRef.current;
+    const curr = tour.currentStep?.targetId ?? null;
+    if (prev === "tour-comp-instruction" && curr !== "tour-comp-instruction") {
+      setCompModalOpen(false);
+      setCompModalComp(null);
+    }
+    prevTourStepRef.current = curr;
+  }, [tour.currentStep?.targetId]);
+
+  // When tour is active and user taps highlighted element, advance
+  function tourAdvanceIfTarget(id: string) {
+    if (tour.active && tour.currentStep?.targetId === id && tour.currentStep?.waitFor === "tap") {
+      tour.advance();
+    }
+  }
+  const [productInputs, setProductInputs] = useState<Record<string, { api?: string; tempF?: number }>>({});
+
+  // Fuel temp prediction — drives temp button border color and pre-fills ProductTempModal
+  const { predictedFuelTempF, confidence: fuelTempConfidence, loading: fuelTempLoading } = useFuelTempPrediction({
+    city: location.selectedCity || null,
+    state: location.selectedState || null,
+    lat: location.locationLat ?? null,
+    lon: location.locationLon ?? null,
+    ambientNowF: location.ambientTempF ?? null,
+    terminalId: location.selectedTerminalId || null,
+  });
+
+  // Auto-apply prediction to the slider when it first arrives.
+  // userAdjustedTempRef = true means the driver has manually moved the slider.
+  // Resets whenever city/state changes so a new terminal gets a fresh auto-apply.
+  const predAppliedForRef = useRef<string>("");
+  const userAdjustedTempRef = useRef<boolean>(false);
+
+  // Mark as user-adjusted whenever tempF changes AFTER a prediction has been applied
+  const prevTempFRef = useRef<number>(tempF);
+  useEffect(() => {
+    if (Math.abs(tempF - prevTempFRef.current) > 0.1) {
+      // Only mark as user-adjusted if a prediction has already been applied
+      if (predAppliedForRef.current !== "") {
+        userAdjustedTempRef.current = true;
+      }
+    }
+    prevTempFRef.current = tempF;
+  }, [tempF]);
+
+  // Reset on city/state change
+  useEffect(() => {
+    predAppliedForRef.current = "";
+    userAdjustedTempRef.current = false;
+    prevTempFRef.current = tempF;
+  }, [location.selectedCity, location.selectedState]);
+
+  // Apply prediction to slider when it arrives — skip if user already adjusted
+  useEffect(() => {
+    if (predictedFuelTempF == null) return;
+    const key = `${location.selectedCity}|${location.selectedState}`;
+    if (predAppliedForRef.current === key) return;
+    if (userAdjustedTempRef.current) return;
+    setTempF(predictedFuelTempF);
+    predAppliedForRef.current = key;
+  }, [predictedFuelTempF, location.selectedCity, location.selectedState]);
+
+  // Initialize compPlan entries when compartments change
+  // Merges with hydratedCompPlanRef so saved products survive even if
+  // this runs in the same batch as hydration (React may see stale prev = {})
+  useEffect(() => {
+    setCompPlanRaw((prev: Record<number, CompPlanInput>) => {
+      const base = hydratedCompPlanRef.current ?? prev;
+      const next = { ...base };
+      for (const c of compartments) {
+        const n = Number(c.comp_number);
+        if (!Number.isFinite(n)) continue;
+        if (!next[n]) next[n] = { empty: false, productId: "" };
+      }
+      for (const key of Object.keys(next)) {
+        const n = Number(key);
+        if (!compartments.some((c) => Number(c.comp_number) === n)) delete next[n];
+      }
+      return next;
+    });
+  }, [compartments]);
+
+  // ── CG bias ────────────────────────────────────────────────────────────────
+  const cgBias = useMemo(() => cgSliderToBias(cgSlider), [cgSlider]);
+  const unstableLoad = cgSlider < CG_NEUTRAL;
+
+  // ── Cap helpers ────────────────────────────────────────────────────────────
+  // cap_gallons (configured in Binder's Compartments section) is the real
+  // ceiling used for load planning -- max_gallons is informational only.
+  // compPlan[n].capOverride is a temporary, per-load reduction on top of
+  // that cap (never above it), set by dragging a compartment's handle in
+  // the planner; clearing it restores the full configured cap.
+  const persistedCapForComp = useCallback((compNumber: number) => {
+    const c = compartments.find((x) => Number(x.comp_number) === compNumber);
+    if (!c) return 0;
+    const cap = c.cap_gallons != null ? Number(c.cap_gallons) : Number(c.max_gallons ?? 0);
+    return Number.isFinite(cap) ? Math.max(0, cap) : 0;
+  }, [compartments]);
+
+  const effectiveMaxGallonsForComp = useCallback((compNumber: number, persistedCap: number) => {
+    const override = compPlan[compNumber]?.capOverride;
+    if (override == null) return Math.max(0, Math.floor(persistedCap));
+    return Math.max(0, Math.floor(Math.min(Number(override), persistedCap)));
+  }, [compPlan]);
+
+  // ── lbs/gal helper ────────────────────────────────────────────────────────
+  // True if any planned compartment is using the fallback reference API (no driver-observed last_api)
+  const planUsesReferenceApi = useMemo(() => {
+    return Object.values(compPlan).some((slot) => {
+      if (!slot || slot.empty || !slot.productId) return false;
+      const p = terminalProducts.find((p) => p.product_id === slot.productId);
+      return p != null && (p.last_api == null || !Number.isFinite(Number(p.last_api)));
+    });
+  }, [compPlan, terminalProducts]);
+
+  const lbsPerGalForProductId = useCallback((productId: string): number | null => {
+    const p = terminalProducts.find((x) => x.product_id === productId);
+    if (!p || p.api_60 == null || p.alpha_per_f == null) return null;
+    // Each product uses its OWN planned temp now, not the shared dial value --
+    // a split load (e.g. diesel + regular in the same trailer) really can sit
+    // at two different temps at once, and the weight math needs to reflect
+    // that, not just the display. Falls back to the shared tempF for a
+    // product that hasn't been seeded into productTempF yet (shouldn't
+    // normally happen -- the seeding effect below keeps every planned
+    // product's entry current -- but keeps this callable safely regardless).
+    const t = productTempF[productId] ?? tempF;
+    // Use driver-observed API (last_api @ last_temp_f) when available — more accurate
+    // than the static api_60 reference. bestLbsPerGallon back-corrects to 60°F first.
+    return bestLbsPerGallon(
+      Number(p.api_60),
+      Number(p.alpha_per_f),
+      t,
+      p.last_api     != null ? Number(p.last_api)     : null,
+      p.last_temp_f  != null ? Number(p.last_temp_f)  : null,
+    );
+  }, [terminalProducts, tempF, productTempF]);
+
+  // ── Active compartments ────────────────────────────────────────────────────
+  const activeComps = useMemo<ActiveComp[]>(() => {
+    if (!selectedTrailerId || compartments.length === 0 || terminalProducts.length === 0) return [];
+    const out: ActiveComp[] = [];
+    for (const c of compartments) {
+      const compNumber = Number(c.comp_number);
+      const persistedCap = persistedCapForComp(compNumber);
+      const maxGallons = effectiveMaxGallonsForComp(compNumber, persistedCap);
+      const position = -(Number(c.position ?? 0)); // DB +position = REAR → flip to FRONT
+      if (!Number.isFinite(compNumber) || maxGallons <= 0) continue;
+      const sel = compPlan[compNumber];
+      if (!sel || sel.empty || !sel.productId) continue;
+      const lbsPerGal = lbsPerGalForProductId(sel.productId);
+      if (lbsPerGal == null || !(lbsPerGal > 0)) continue;
+      out.push({ compNumber, maxGallons, position: Number.isFinite(position) ? position : 0, productId: sel.productId, lbsPerGal });
+    }
+    out.sort((a, b) => a.position - b.position);
+    return out;
+  }, [selectedTrailerId, compartments, terminalProducts, compPlan, tempF]);
+
+  // Seed productTempF for any planned product that doesn't have an entry yet
+  // (new product just added to the plan), and drop entries for products no
+  // longer in the plan. New products seed to the CURRENT dial value (tempF)
+  // -- not the raw prediction -- so a product added after the driver has
+  // already nudged the dial away from the prediction picks up that nudge
+  // too, instead of jumping back to the un-adjusted number.
+  const plannedProductIds = useMemo(() => {
+    const s = new Set<string>();
+    for (const c of activeComps) if (c.productId) s.add(c.productId);
+    return s;
+  }, [activeComps]);
+
+  useEffect(() => {
+    setProductTempF((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const pid of plannedProductIds) {
+        if (!(pid in next)) { next[pid] = tempF; changed = true; }
+      }
+      for (const pid of Object.keys(next)) {
+        if (!plannedProductIds.has(pid)) { delete next[pid]; changed = true; }
+      }
+      return changed ? next : prev;
+    });
+  }, [plannedProductIds, tempF]);
+
+  // ── Weight limits ──────────────────────────────────────────────────────────
+  // target_weight = the gross weight the driver is trying to hit (renamed from gross_limit_lbs)
+  const targetWeight = Number((equipment.selectedCombo as any)?.target_weight ?? 0);
+  const tare = Number(equipment.selectedCombo?.tare_lbs ?? 0);
+  const allowedLbs = Math.max(0, targetWeight - tare);  // payload = target - tare
+
+  const capacityGallonsActive = useMemo(
+    () => activeComps.reduce((s, c) => s + Number(c.maxGallons || 0), 0),
+    [activeComps]
+  );
+
+  // ── Plan rows (binary search) ──────────────────────────────────────────────
+  const plannedResult = usePlanRows({ selectedTrailerId, activeComps, allowedLbs, cgBias, capacityGallonsActive, planForGallons });
+  const planRows = plannedResult.planRows;
+
+  const plannedGallonsByComp = useMemo<Record<number, number>>(() => {
+    const m: Record<number, number> = {};
+    for (const r of planRows as any[]) {
+      const n = Number(r.comp_number ?? r.compNumber ?? 0);
+      if (Number.isFinite(n)) m[n] = Number(r.planned_gallons ?? r.plannedGallons ?? 0);
+    }
+    return m;
+  }, [planRows]);
+
+  const plannedWeightLbs = useMemo(
+    () => planRows.reduce((sum, r: any) => sum + Number(r.planned_gallons ?? 0) * Number(r.lbsPerGal ?? 0), 0),
+    [planRows]
+  );
+
+  const plannedGallonsTotal = planRows.reduce((s, r) => s + r.planned_gallons, 0);
+
+
+  // ── Plan slots ─────────────────────────────────────────────────────────────
+  // Must be declared BEFORE loadWorkflow so planSlots.refreshLastLoad is defined
+  const planSlots = usePlanSlots({
+    authUserId: effectiveUserId, selectedTerminalId: location.selectedTerminalId, selectedComboId: equipment.selectedComboId,
+    tempF, compPlan, setCompPlan,
+    cgSlider, setCgSlider,
+    compartmentsLoaded: compartments.length > 0,
+  });
+
+  // ── Load workflow ──────────────────────────────────────────────────────────
+  const productNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const p of terminalProducts) { if (p.product_id) m.set(p.product_id, p.product_name ?? p.product_id); }
+    return m;
+  }, [terminalProducts]);
+
+  // Preset action sheet summary -- a preset saved at a different terminal
+  // may reference a product not sold here, which productNameById (scoped to
+  // the *current* terminal) won't resolve; surfaced honestly rather than
+  // silently dropped, since that's exactly the mismatch the LOAD-blocking
+  // flow below also has to catch.
+  const presetSheetSummary = useMemo(() => {
+    if (presetSheetSlot == null) return "";
+    const snap = planSlots.peekSlot(presetSheetSlot);
+    const plan = snap?.compPlan;
+    if (!plan) return "Empty";
+    const names = new Set<string>();
+    let hasUnavailable = false;
+    for (const v of Object.values(plan)) {
+      if (!v || v.empty || !v.productId) continue;
+      const name = productNameById.get(v.productId);
+      if (name) names.add(name); else hasUnavailable = true;
+    }
+    const parts = Array.from(names);
+    if (hasUnavailable) parts.push("unavailable product");
+    return parts.length > 0 ? parts.join(", ") : "Empty";
+  }, [presetSheetSlot, planSlots, productNameById]);
+
+  // Compartments whose planned product isn't sold at the currently selected
+  // terminal -- almost always the result of loading a preset saved at a
+  // different terminal (presets are terminal-independent, per the rework
+  // above). A live derived value (not a one-time check at load time) so it
+  // also catches a terminal switch after the fact. Feeds both the
+  // auto-resolve flow below and the LOAD button's hard block.
+  const unavailableComps = useMemo(() => {
+    const availableIds = new Set(terminalProducts.map((p) => p.product_id));
+    const result: number[] = [];
+    for (const [compStr, v] of Object.entries(compPlan)) {
+      if (!v || v.empty || !v.productId) continue;
+      if (!availableIds.has(v.productId)) result.push(Number(compStr));
+    }
+    return result.sort((a, b) => a - b);
+  }, [compPlan, terminalProducts]);
+
+  // Auto-resolve flow: right after a preset load, open the first unavailable
+  // comp's Edit Comp modal with the "Product Not Available" banner. Once
+  // that specific comp is actually fixed (no longer in unavailableComps),
+  // auto-advance to the next one. A dismiss without fixing stops the
+  // auto-advance -- the driver can still resolve manually later, or just
+  // hit LOAD and get the hard-block message below.
+  const [checkAvailabilityNext, setCheckAvailabilityNext] = useState(false);
+  const autoResolveActiveRef = useRef(false);
+  const resolvingCompRef = useRef<number | null>(null);
+  const prevCompModalOpenRef = useRef(false);
+
+  useEffect(() => {
+    if (!checkAvailabilityNext) return;
+    setCheckAvailabilityNext(false);
+    if (unavailableComps.length > 0) {
+      const first = unavailableComps[0];
+      autoResolveActiveRef.current = true;
+      resolvingCompRef.current = first;
+      setCompModalComp(first);
+      setCompModalOpen(true);
+      setSelectedComp(first);
+    }
+  }, [checkAvailabilityNext, unavailableComps]);
+
+  useEffect(() => {
+    const wasOpen = prevCompModalOpenRef.current;
+    prevCompModalOpenRef.current = compModalOpen;
+    if (!wasOpen || compModalOpen) return; // only on open -> closed
+    if (!autoResolveActiveRef.current) return;
+
+    const justClosedComp = resolvingCompRef.current;
+    const stillUnavailable = justClosedComp != null && unavailableComps.includes(justClosedComp);
+    if (stillUnavailable) {
+      // Dismissed without fixing -- stop auto-advancing.
+      autoResolveActiveRef.current = false;
+      resolvingCompRef.current = null;
+      return;
+    }
+    if (unavailableComps.length > 0) {
+      const next = unavailableComps[0];
+      resolvingCompRef.current = next;
+      setCompModalComp(next);
+      setCompModalOpen(true);
+      setSelectedComp(next);
+    } else {
+      autoResolveActiveRef.current = false;
+      resolvingCompRef.current = null;
+    }
+  }, [compModalOpen, unavailableComps]);
+
+  // ── Driver Training (lead / admin only -- admins get "the planner used by
+  // lead drivers", per explicit direction, not a toggle) ─────────────────────
+  // Single-load model -- see CLAUDE.md. traineeId just tags whatever load
+  // this session submits next; no second plan, no second load_log row.
+  const canDriverTrain = shell.role === "lead" || shell.role === "admin" || shell.isSuperAdmin;
+  const [traineeId, setTraineeId] = useState("");
+  const [traineeName, setTraineeName] = useState("");
+  const [trainingModalOpen, setTrainingModalOpen] = useState(false);
+
+  // Trainee-side mirror of the "Loading with X" banner above -- every
+  // driver (not just leads) can be a trainee, so this checks unconditionally.
+  // Deliberately simple polling, not a live subscription -- see CLAUDE.md's
+  // "two devices, one physical load" open question; this is the "try the
+  // simplest version first" cut, not a solved real-time sync problem.
+  const [trainingLeadName, setTrainingLeadName] = useState<string | null>(null);
+  useEffect(() => {
+    if (!effectiveUserId) return;
+    let cancelled = false;
+    async function check() {
+      const { data } = await supabase
+        .from("load_log").select("user_id").eq("trainee_id", effectiveUserId).eq("status", "planned")
+        .order("created_at", { ascending: false }).limit(1).maybeSingle();
+      const leadUserId = (data as any)?.user_id ?? null;
+      if (!leadUserId) { if (!cancelled) setTrainingLeadName(null); return; }
+      const { data: nameRows } = await supabase.rpc("get_display_names_full", { p_user_ids: [leadUserId] });
+      if (!cancelled) setTrainingLeadName((nameRows ?? [])[0]?.display_name ?? "your lead");
+    }
+    check();
+    const id = setInterval(check, 30000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [effectiveUserId]);
+
+  const loadWorkflow = useLoadWorkflow({
+    authUserId: effectiveUserId || null,
+    selectedComboId: equipment.selectedComboId,
+    selectedTerminalId: location.selectedTerminalId,
+    selectedState: location.selectedState,
+    selectedCity: location.selectedCity,
+    selectedCityId: location.selectedCityId,
+    tare, cgBias,
+    ambientTempF: location.ambientTempF,
+    tempF, planRows, plannedGallonsTotal, plannedWeightLbs,
+    terminalProducts, productNameById,
+    productInputs, setProductInputs,
+    onRefreshTerminalProducts: fetchTerminalProducts,
+    onRefreshTerminalAccess: terminals.refreshTerminalAccessForUser,
+    onPostLoadComplete: planSlots.refreshLastLoad,
+    predictedTempF: predictedFuelTempF,
+    trainingTraineeId: traineeId || null,
+  });
+
+  // Seed the Target/Actual/Diff summary from the last *completed* load for
+  // this combo as soon as it's available (mount, or switching equipment) --
+  // there's no "My Loads" button on this page anymore, so this is the only
+  // way that summary ever gets populated outside of a load just finished in
+  // this same session. Guarded so it never clobbers a fresher report (either
+  // one this session just produced, or one restored via My Loads).
+  useEffect(() => {
+    if (planSlots.lastLoadReport && !loadWorkflow.loadReport) {
+      loadWorkflow.setLoadReport(planSlots.lastLoadReport);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [planSlots.lastLoadReport]);
+
+
+  // ── Terminal filters / expirations ────────────────────────────────────────
+  // Also shared via context (see above) -- myTerminalIdSet, terminalFilters,
+  // expirations all come from `shell` now.
+  const { myTerminalIdSet, terminalFilters } = shell;
+  const { catalogTerminalsInCity } = terminalFilters;
+
+  // Fetch terminal access dates for city terminals
+  useEffect(() => {
+    (async () => {
+      if (!authUserId || !location.selectedState || !location.selectedCity) return;
+      const ids = catalogTerminalsInCity.map((t) => String(t.terminal_id));
+      if (ids.length === 0) return;
+      const { data, error } = await supabase
+        .from("terminal_access").select("terminal_id, carded_on")
+        .eq("user_id", effectiveUserId).in("terminal_id", ids);
+      if (error) return;
+      const map: Record<string, string> = {};
+      (data ?? []).forEach((r: any) => { if (r?.terminal_id && r?.carded_on) map[String(r.terminal_id)] = String(r.carded_on); });
+      // Note: access date map lives in useTerminals; this local fetch augments the catalog view
+    })();
+  }, [authUserId, location.selectedState, location.selectedCity, catalogTerminalsInCity]);
+
+  // ── Derived labels ─────────────────────────────────────────────────────────
+  const terminalLabel = useMemo(() => {
+    if (!location.selectedTerminalId) return undefined;
+    const t = terminals.terminals.find((t) => String(t.terminal_id) === String(location.selectedTerminalId))
+      ?? terminals.terminalCatalog.find((t) => String(t.terminal_id) === String(location.selectedTerminalId));
+    return t?.terminal_name ? String(t.terminal_name) : "Terminal";
+  }, [terminals.terminals, terminals.terminalCatalog, location.selectedTerminalId]);
+
+  const selectedTerminal = useMemo(
+    () => terminals.terminals.find((t) => String(t.terminal_id) === String(location.selectedTerminalId)) ?? null,
+    [terminals.terminals, location.selectedTerminalId]
+  );
+
+  // For display name only — also check catalog for terminals not yet visited
+  const selectedTerminalAny = useMemo(
+    () => selectedTerminal
+      ?? terminals.terminalCatalog.find((t) => String(t.terminal_id) === String(location.selectedTerminalId))
+      ?? null,
+    [selectedTerminal, terminals.terminalCatalog, location.selectedTerminalId]
+  );
+
+  const terminalDisplayISO = useMemo(() => {
+    if (!selectedTerminal) return null; // needs full TerminalRow for expiry calc
+    return terminals.terminalDisplayInfo(selectedTerminal, location.selectedTerminalId);
+  }, [selectedTerminal, terminals, location.selectedTerminalId]);
+
+  const terminalCardedText = terminalDisplayISO ? formatMDYWithCountdown_(terminalDisplayISO) : undefined;
+  const terminalCardedClass = terminalCardedText
+    ? (isPastISO_(terminalDisplayISO!) ? "text-red-500" : "text-white/50") : undefined;
+
+  // ── lastProductInfoById ────────────────────────────────────────────────────
+// IMPORTANT: derive from `terminalProducts` because that list is refreshed after LOADED.
+const lastProductInfoById = useMemo(() => {
+  const out: Record<string, { last_api: number | null; last_api_updated_at: string | null }> = {};
+  for (const p of terminalProducts) {
+    const pid = String((p as any).product_id ?? "");
+    if (!pid) continue;
+    out[pid] = {
+      last_api: (p as any).last_api ?? null,
+      last_api_updated_at: (p as any).last_api_updated_at ?? null,
+    };
+  }
+  return out;
+}, [terminalProducts]);
+
+  // ── Placard data ──────────────────────────────────────────────────────────
+
+
+  const productHexCodeById = useMemo(() => {
+    const rec: Record<string, string> = {};
+    for (const p of terminalProducts) { if (p.product_id && p.hex_code) rec[p.product_id] = String(p.hex_code); }
+    return rec;
+  }, [terminalProducts]);
+
+  // Per-product rows for the Temp modal's product list (dot + name + own
+  // temp, tap to adjust just that one) -- same shape as LoadingModal's own
+  // planned-compartments/product-groups rows, for visual continuity.
+  const tempModalProductGroups = useMemo(() => {
+    return Array.from(plannedProductIds)
+      .map((pid) => ({
+        productId: pid,
+        name: productNameById.get(pid) ?? pid,
+        hex: (productHexCodeById[pid] && productHexCodeById[pid].trim()) || "rgba(255,255,255,0.5)",
+        tempF: productTempF[pid] ?? tempF,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [plannedProductIds, productNameById, productHexCodeById, productTempF, tempF]);
+
+  // City starring, stateOptions/selectedStateLabel/selectedStateName/cities/
+  // topCities/allCities all live in shell now (see the destructure above) --
+  // TerminalCatalogModal below is Planner-only dead code (never opened, see
+  // this file's own git history) so its starBtnClass stays local; nothing
+  // else here needs a second copy of the picker-list logic.
+  const starBtnClass = (active: boolean) =>
+    ["h-8 w-8 flex items-center justify-center rounded-lg border transition",
+      active ? "border-yellow-400/40 text-yellow-300 hover:bg-yellow-400/10"
+        : "border-white/10 text-white/40 hover:bg-white/5 hover:text-white/80"].join(" ");
+
+  // ── Plan styles ────────────────────────────────────────────────────────────
+  const planStyles = useMemo(() => ({
+    ...styles,
+    smallBtn: { ...styles.smallBtn, padding: "10px 14px", minWidth: 112, borderRadius: 14, letterSpacing: "0.4px" },
+    badge: { ...styles.badge, marginRight: 10 },
+  }), []);
+
+  // ── Derived load state ─────────────────────────────────────────────────────
+  // unavailableComps is deliberately NOT folded into loadDisabled -- per
+  // spec, tapping LOAD while it's non-empty should produce an explicit
+  // "Cannot Load" message (see loadBlockedMsg below), not just a silently
+  // inert button, so a driver who ignores the compartment-bar warning still
+  // gets told exactly why.
+  const loadDisabled =
+    loadWorkflow.beginLoadBusy ||
+    !equipment.selectedComboId ||
+    !location.selectedTerminalId ||
+    !location.selectedState ||
+    !location.selectedCity ||
+    !location.selectedCityId ||
+    planRows.length === 0;
+
+  const [loadBlockedMsg, setLoadBlockedMsg] = useState<string | null>(null);
+  useEffect(() => {
+    if (unavailableComps.length === 0) setLoadBlockedMsg(null);
+  }, [unavailableComps]);
+
+  const loadLabel = loadWorkflow.beginLoadBusy ? "Loading…"
+    : loadWorkflow.loadReport ? "RELOAD"
+    : loadWorkflow.activeLoadId ? "Load started"
+    : "LOAD";
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+  return (
+    <div style={styles.page}>
+      {/* Admin setup session banner */}
+      {setupSession && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 14px", marginBottom: 8, borderRadius: 12, background: "rgba(251,146,60,0.12)", border: "1px solid rgba(251,146,60,0.30)" }}>
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 800, color: "#fb923c", letterSpacing: "0.08em", textTransform: "uppercase" as const }}>Setting up planner for</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "rgba(255,255,255,0.90)", marginTop: 1 }}>{setupSession.targetDisplayName}</div>
+          </div>
+          <button type="button"
+            onClick={() => {
+              clearSetupSession();
+              // Hard navigation -- when returnTo stays inside the
+              // /planner layout (e.g. "/planner/dispatch"),
+              // CalculatorShellProvider never unmounts on a router.push, so
+              // it never re-reads sessionStorage and the just-cleared
+              // session would silently stick (confirmed live: the "Setting
+              // up planner for" banner stayed visible after this click).
+              // Same fix as the Dispatch tab's own "Use app as X" entry
+              // point, applied symmetrically to the exit.
+              window.location.href = setupSession.returnTo ?? "/admin";
+            }}
+            style={{ fontSize: 12, fontWeight: 700, padding: "6px 12px", borderRadius: 8, border: "1px solid rgba(251,146,60,0.40)", background: "rgba(251,146,60,0.15)", color: "#fb923c", cursor: "pointer", whiteSpace: "nowrap" as const }}>
+            ← Return to {setupSession.returnTo === "/planner/dispatch" ? "Dispatch" : "Admin"}
+          </button>
+        </div>
+      )}
+
+      {trainingLeadName && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", marginBottom: 8, borderRadius: 12, background: "rgba(74,222,128,0.08)", border: "1px solid rgba(74,222,128,0.25)" }}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: "#4ade80" }}>Training with {trainingLeadName}</span>
+        </div>
+      )}
+
+      {/* Preset dial -- sits directly under the Planner/Cards/Vault tab bar,
+          per the design handoff (Preset dial is listed first in the
+          Planner tab's content, above the compartment strip). */}
+      <div id="tour-plan-slots">
+        <PresetDial
+          slots={planSlots.PLAN_SLOTS}
+          slotHas={planSlots.slotHas}
+          disabled={!location.selectedTerminalId}
+          onLoad={(n) => {
+            planSlots.loadFromSlot(n);
+            setCaptureBaselineNext(true);
+            setCheckAvailabilityNext(true);
+          }}
+          onOpenActions={(n) => setPresetSheetSlot(n)}
+          onSave={(n) => { planSlots.saveToSlot(n); setBaselineOverrides(overridesSnapshot(compPlan, cgSlider)); }}
+          onTourAdvance={tourAdvanceIfTarget}
+          onActiveChange={setActiveSlotLetter}
+        />
+      </div>
+
+      <PresetActionSheet
+        open={presetSheetSlot != null}
+        letter={presetSheetSlot != null ? String.fromCharCode(64 + presetSheetSlot) : ""}
+        summary={presetSheetSummary}
+        onLoad={() => {
+          if (presetSheetSlot != null) {
+            planSlots.loadFromSlot(presetSheetSlot);
+            setCaptureBaselineNext(true);
+            setCheckAvailabilityNext(true);
+          }
+          setPresetSheetSlot(null);
+        }}
+        onConfirmEdit={() => {
+          if (presetSheetSlot != null) {
+            planSlots.saveToSlot(presetSheetSlot);
+            setBaselineOverrides(overridesSnapshot(compPlan, cgSlider));
+          }
+          setPresetSheetSlot(null);
+        }}
+        onConfirmClear={() => {
+          if (presetSheetSlot != null) planSlots.clearSlot(presetSheetSlot);
+          setPresetSheetSlot(null);
+        }}
+        onClose={() => setPresetSheetSlot(null)}
+      />
+
+      {/* Action row -- left: "Save plan {letter}" once a temporary cap
+          override exists anywhere (a concrete "diverges from saved" signal);
+          right: "Edit Comp N Product" once a compartment bar has been
+          tapped/selected. Both above the compartment strip. */}
+      {(() => {
+        const currentOverrides = overridesSnapshot(compPlan, cgSlider);
+        const isDirty = currentOverrides !== baselineOverrides;
+        const activeLetter = String.fromCharCode(64 + activeSlotLetter);
+        if (!isDirty && selectedComp == null) return null;
+        return (
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10, minHeight: 18 }}>
+            <div>
+              {isDirty && (
+                <button type="button"
+                  onClick={() => { planSlots.saveToSlot(activeSlotLetter); setBaselineOverrides(currentOverrides); }}
+                  style={{ background: "none", border: "none", padding: 0, color: "rgba(255,255,255,0.75)", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+                  Save plan {activeLetter}
+                </button>
+              )}
+            </div>
+            <div>
+              {selectedComp != null && (
+                <button type="button"
+                  onClick={() => { setCompModalComp(selectedComp); setCompModalOpen(true); tourAdvanceIfTarget("tour-comp-area"); }}
+                  style={{ background: "none", border: "none", padding: 0, color: "rgba(255,255,255,0.75)", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+                  Edit Comp {selectedComp} Product
+                </button>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
+      <PlannerControls
+        styles={styles}
+        selectedTrailerId={selectedTrailerId}
+        compLoading={compLoading}
+        compartments={compartments}
+        compError={compError}
+        persistedCapForComp={persistedCapForComp}
+        effectiveMaxGallonsForComp={effectiveMaxGallonsForComp}
+        plannedGallonsByComp={plannedGallonsByComp}
+        compPlan={compPlan}
+        setCompPlan={setCompPlan}
+        terminalProducts={terminalProducts}
+        selectedComp={selectedComp}
+        onSelectComp={(n: number) => {
+          if (!location.selectedTerminalId) return;
+          setSelectedComp(n);
+          tourAdvanceIfTarget("tour-comp-area");
+        }}
+        onTourAdvance={tourAdvanceIfTarget}
+        selectedTerminalId={location.selectedTerminalId ?? ""}
+      />
+
+      <CompartmentModal
+        open={compModalOpen}
+        compNumber={compModalComp}
+        compartments={compartments}
+        compPlan={compPlan}
+        terminalProducts={terminalProducts}
+        styles={styles}
+        setCompPlan={setCompPlan}
+        onClose={() => { setCompModalOpen(false); setCompModalComp(null); setSelectedComp(null); }}
+        selectedTerminalId={location.selectedTerminalId ?? ""}
+        terminalName={terminalLabel}
+        onTerminalProductsChanged={fetchTerminalProducts}
+        myRole={shell.role}
+      />
+
+      {/* CG Slider — always visible */}
+      <div id="tour-cg-slider" style={{ marginTop: 8 }}>
+        {unstableLoad && (
+          <div style={{ ...styles.error, marginTop: 0, marginBottom: 10, textAlign: "center" }}>
+            ⚠️ Unstable load (rear of neutral)
+          </div>
+        )}
+        <style jsx global>{`
+          input.cgRange { -webkit-appearance: none; appearance: none; background: transparent; height: 24px; }
+          input.cgRange:focus { outline: none; }
+          input.cgRange::-webkit-slider-runnable-track { height: 4px; border-radius: 999px; background: rgba(255,255,255,0.10); border: none; }
+          input.cgRange::-webkit-slider-thumb { -webkit-appearance: none; width: 22px; height: 22px; margin-top: -9px; background: transparent; border: none; opacity: 0; }
+          input.cgRange::-moz-range-track { height: 4px; border-radius: 999px; background: rgba(255,255,255,0.10); border: none; }
+          input.cgRange::-moz-range-thumb { width: 22px; height: 22px; background: transparent; border: none; opacity: 0; }
+        `}</style>
+        <div style={{ position: "relative", width: "100%" }}>
+          <input type="range" className="cgRange" min={0} max={1} step={0.005} value={cgSlider}
+            onChange={(e) => { setCgSlider(Number(e.target.value)); tourAdvanceIfTarget("tour-cg-slider"); }}
+            style={{ width: "100%" }} disabled={!equipment.selectedCombo}
+          />
+          {/* Puck — themed fill (light gray / dark graphite / custom accent), no label, centered on the 4px track */}
+          <div aria-hidden style={{
+            position: "absolute",
+            left: `${Math.max(0, Math.min(1, cgSlider)) * 100}%`,
+            top: "50%",
+            transform: "translate(-50%, -50%)",
+            width: 22, height: 22,
+            borderRadius: "50%",
+            background: themeFill(shell.theme.darkMode, shell.theme.accentColor, "#d9d9d9"),
+            pointerEvents: "none",
+            boxShadow: "0 1px 4px rgba(0,0,0,0.4)",
+          }} />
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", padding: "0 2px", marginTop: 2 }}>
+          <span style={{ fontSize: 10, fontWeight: 500, color: "rgba(255,255,255,0.3)" }}>Rear</span>
+          <span style={{ fontSize: 10, fontWeight: 500, color: "rgba(255,255,255,0.3)" }}>Front</span>
+        </div>
+      </div>
+
+      {/* ── Info cards, Load button, Load summary ── */}
+      {(() => {
+        const { loadReport } = loadWorkflow;
+        const plannedGal = loadReport?.planned_total_gal ?? (planRows.length ? plannedGallonsTotal : null);
+        const plannedGalText = plannedGal == null ? "—" : `${Math.round(plannedGal).toLocaleString()} gal`;
+        const targetText = loadReport?.planned_gross_lbs == null ? "—" : `${Math.round(loadReport.planned_gross_lbs).toLocaleString()} lbs`;
+        const actualText = loadReport?.actual_gross_lbs == null ? "—" : `${Math.round(loadReport.actual_gross_lbs).toLocaleString()} lbs`;
+        const diff = loadReport?.diff_lbs ?? null;
+        const diffText = diff == null ? "—" : `${diff >= 0 ? "+" : ""}${Math.round(diff).toLocaleString()} lbs`;
+        const diffColor = diff == null ? "rgba(255,255,255,0.85)" : diff > 0 ? "#ef4444" : "#4ade80";
+
+        // Actual weight, colored against this combo's own target and the
+        // fixed 80,000 lb federal legal limit (same threshold LoadReportModal
+        // already uses for its "drain to 80k" line).
+        const LEGAL_GROSS_LBS = 80000;
+        const actualGross = loadReport?.actual_gross_lbs ?? null;
+        const actualColor =
+          actualGross == null || !(targetWeight > 0) ? "#fff"
+          : actualGross >= LEGAL_GROSS_LBS ? "#ef4444"
+          : actualGross >= targetWeight ? "#4ade80"
+          : "#fff";
+
+        // isOverride = user manually moved temp away from prediction after it auto-applied
+        const isOverride = userAdjustedTempRef.current && predictedFuelTempF != null && Math.abs(tempF - predictedFuelTempF) > 0.5;
+        const isHighConfidence = !isOverride && fuelTempConfidence === "high";
+        const tempPrimaryColor = isHighConfidence ? "rgba(255,255,255,0.55)" : "#fff";
+        const tempSubColor = isOverride ? "#fb923c"
+          : fuelTempConfidence === "high"   ? "#4ade80"
+          : fuelTempConfidence === "medium" ? "#eab308"
+          : fuelTempConfidence === "low"    ? "#ef4444"
+          : "rgba(255,255,255,0.35)";
+        const tempSubLabel = isOverride ? "Manual override"
+          : fuelTempConfidence === "high"   ? "High confidence"
+          : fuelTempConfidence === "medium" ? "Medium confidence"
+          : fuelTempConfidence === "low"    ? "Low confidence"
+          : "—";
+        const tempBgAlpha = fuelTempConfidence === "high" ? 0.02 : fuelTempConfidence === "medium" ? 0.045 : 0.07;
+
+        const locationLabel = location.locationLabel ?? null;
+        const locationSelected = Boolean(location.selectedCity && location.selectedState);
+        const terminalSelected = Boolean(location.selectedTerminalId);
+        const tid = location.selectedTerminalId ? String(location.selectedTerminalId) : null;
+        const cardNum = tid ? (cardDataByTerminalId[tid]?.cardNumber ?? "") : "";
+        const expiryDays = terminalDisplayISO ? daysUntilISO_(terminalDisplayISO) : null;
+        const expirationSub = expiryDays != null ? `Exp. ${expiryDays} days` : null;
+
+        const infoCard: React.CSSProperties = {
+          borderRadius: 16, border: "1px solid rgba(255,255,255,0.10)",
+          background: "rgba(255,255,255,0.03)", padding: "10px 14px",
+          // Explicit "none" -- without it, framer-motion's shared layoutId
+          // transition from SetupGate's cyan-glow CTA (boxShadow:
+          // "0 0 0 4px rgba(103,232,249,0.10)") leaves that glow as a
+          // permanent residual inline style on this button once the gate
+          // closes, since nothing here ever told it what to animate back to.
+          boxShadow: "none",
+        };
+        const chevron: React.CSSProperties = { fontSize: 16, color: "rgba(255,255,255,0.25)", flexShrink: 0 };
+
+        const hasEquipment = Boolean(equipment.selectedCombo);
+
+        return (
+          <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 10 }}>
+
+            {/* Equipment card — two-up Truck / Trailer */}
+            {(() => {
+              const equipBtnProps = {
+                type: "button" as const,
+                id: "tour-equipment-btn",
+                onClick: () => { setEquipOpen(true); tourAdvanceIfTarget("tour-equipment-btn"); },
+                style: { ...infoCard, width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, cursor: "pointer", textAlign: "left" as const },
+              };
+              const children = !hasEquipment ? (
+                <>
+                  <span style={{ fontSize: 14, fontWeight: 600, color: "rgba(255,255,255,0.35)" }}>Select Equipment</span>
+                  <span style={chevron}>›</span>
+                </>
+              ) : (
+                <>
+                  <div style={{ display: "flex", flex: 1, gap: 20, minWidth: 0 }}>
+                    <div style={{ minWidth: 0, overflow: "hidden" }}>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
+                        Truck{equipmentDetails.truckName ? ` · ${equipmentDetails.truckName}` : ""}
+                      </div>
+                      <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
+                        {equipmentDetails.truckMake || " "}
+                      </div>
+                    </div>
+                    <div style={{ minWidth: 0, overflow: "hidden" }}>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
+                        Trailer{equipmentDetails.trailerName ? ` · ${equipmentDetails.trailerName}` : ""}
+                      </div>
+                      <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
+                        {equipmentDetails.trailerMake || " "}
+                      </div>
+                    </div>
+                  </div>
+                  <span style={chevron}>›</span>
+                </>
+              );
+              return mounted ? (
+                <motion.button {...equipBtnProps} layoutId="setup-equipment-btn">{children}</motion.button>
+              ) : (
+                <button {...equipBtnProps}>{children}</button>
+              );
+            })()}
+
+            {/* Location / Terminal card — one undivided button, same shape as
+                Equipment/Temp/Load. Steps through Location -> Terminal; once
+                a location is set the button always opens the terminal picker
+                (re-opening Location itself happens from a "Change" link
+                inside that picker, not a second tap zone here). */}
+            {(() => {
+              const step: "location" | "terminal" = locationSelected ? "terminal" : "location";
+              const locTermBtnProps = {
+                type: "button" as const,
+                id: step === "location" ? "tour-location-btn" : "tour-terminal-btn",
+                onClick: () => {
+                  if (step === "location") { setLocOpen(true); tourAdvanceIfTarget("tour-location-btn"); }
+                  else { setTermOpen(true); tourAdvanceIfTarget("tour-terminal-btn"); }
+                },
+                style: { ...infoCard, width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, cursor: "pointer", textAlign: "left" as const },
+              };
+              const children = step === "location" ? (
+                <>
+                  <span style={{ fontSize: 14, fontWeight: 600, color: "rgba(255,255,255,0.35)" }}>Select Location</span>
+                  <span style={chevron}>›</span>
+                </>
+              ) : (
+                <>
+                  <div style={{ display: "flex", flex: 1, gap: 20, minWidth: 0 }}>
+                    <div style={{ minWidth: 0, overflow: "hidden" }}>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
+                        {locationLabel ?? "—"}
+                      </div>
+                      <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
+                        {cardNum ? `Card # ${cardNum}` : " "}
+                      </div>
+                    </div>
+                    <div style={{ minWidth: 0, overflow: "hidden" }}>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: terminalSelected ? "#fff" : "rgba(255,255,255,0.35)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
+                        {terminalSelected ? (terminalLabel ?? "Terminal") : "Select terminal"}
+                      </div>
+                      <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
+                        {expirationSub ?? " "}
+                      </div>
+                    </div>
+                  </div>
+                  <span style={chevron}>›</span>
+                </>
+              );
+              return mounted ? (
+                <motion.button {...locTermBtnProps} layoutId={step === "location" ? "setup-location-btn" : "setup-terminal-btn"}>{children}</motion.button>
+              ) : (
+                <button {...locTermBtnProps}>{children}</button>
+              );
+            })()}
+
+            {/* Temp confidence card */}
+            <button type="button" onClick={() => setTempDialOpen(true)}
+              style={{
+                borderRadius: 16, border: "1px solid rgba(255,255,255,0.08)",
+                background: `rgba(255,255,255,${tempBgAlpha})`, padding: "10px 14px", width: "100%",
+                textAlign: "left" as const, cursor: "pointer",
+                display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
+              }}
+            >
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: tempPrimaryColor }}>
+                  {Math.round(tempF)}°F predicted product temp
+                </div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: tempSubColor, marginTop: 2 }}>{tempSubLabel}</div>
+              </div>
+              <span style={chevron}>›</span>
+            </button>
+
+            {/* Load button */}
+            <button type="button"
+              onClick={() => {
+                if (unavailableComps.length > 0) {
+                  setLoadBlockedMsg(`Cannot Load, all planned products are not available at ${terminalLabel || "this terminal"}`);
+                  return;
+                }
+                loadWorkflow.beginLoadToSupabase();
+              }}
+              disabled={loadDisabled}
+              style={{
+                borderRadius: 6, border: "none", background: themeFill(shell.theme.darkMode, shell.theme.accentColor), padding: "10px 14px", width: "100%",
+                cursor: loadDisabled ? "not-allowed" : "pointer", opacity: loadDisabled ? 0.5 : 1,
+                textAlign: "center" as const,
+              }}
+            >
+              <span style={{ fontSize: 16, fontWeight: 700, color: themeTextOnFill(shell.theme.darkMode), letterSpacing: 0.3 }}>{loadLabel}</span>
+            </button>
+
+            {loadBlockedMsg && (
+              <div style={{ ...styles.error, textAlign: "center" as const }}>{loadBlockedMsg}</div>
+            )}
+
+            {canDriverTrain && (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                <button
+                  type="button"
+                  onClick={() => setTrainingModalOpen(true)}
+                  style={{ background: "none", border: "none", color: "rgba(255,255,255,0.5)", fontSize: 13, fontWeight: 700, cursor: "pointer", padding: 0 }}
+                >
+                  Driver Training
+                </button>
+                {traineeName && (
+                  <span style={{ fontSize: 13, color: "#4ade80", fontWeight: 600 }}>
+                    Loading with {traineeName}
+                    <button
+                      type="button"
+                      onClick={() => { setTraineeId(""); setTraineeName(""); }}
+                      style={{ background: "none", border: "none", color: "rgba(255,255,255,0.3)", fontSize: 12, cursor: "pointer", marginLeft: 6, padding: 0 }}
+                    >
+                      ✕
+                    </button>
+                  </span>
+                )}
+              </div>
+            )}
+
+            {/* Load summary */}
+            <div style={{ borderRadius: 16, background: "rgba(255,255,255,0.03)", padding: "10px 14px" }}>
+              <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8 }}>
+                <div style={{ fontSize: 20, fontWeight: 700, color: "#fff" }}>{plannedGalText}</div>
+                <div style={{ fontSize: 20, fontWeight: 700, color: actualColor, textAlign: "right" as const }}>{actualText}</div>
+              </div>
+              <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 4 }}>
+                <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", textAlign: "right" as const }}>
+                  Target {targetText} · <span style={{ color: diffColor, fontWeight: 600 }}>Diff {diffText}</span>
+                </div>
+              </div>
+              {planUsesReferenceApi && planRows.length > 0 && (
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#fb923c", marginTop: 4 }}>⚠ using ref API</div>
+              )}
+              {loadReport?.recovered_points != null && loadReport.recovered_points > 0 && (
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#4ade80", marginTop: 6 }}>
+                  🎉 You earned {loadReport.recovered_points.toFixed(1)} points on this load
+                </div>
+              )}
+            </div>
+
+            {/* Footnote */}
+            <div style={{ fontSize: 10, color: "rgba(255,255,255,0.32)", textAlign: "center" as const, lineHeight: 1.4 }}>
+              Product API & temp confirm automatically after this load — sharpens the number for the next driver at this terminal.
+            </div>
+
+          </div>
+        );
+      })()}
+
+
+      {/* ── Guided tour overlay ── */}
+      <TourOverlay tour={tour} />
+      <SetupGate
+        comboSelected={!!equipment.selectedComboId}
+        locationSelected={!!(location.selectedState && location.selectedCity)}
+        terminalSelected={!!location.selectedTerminalId}
+        equipmentLabel={equipment.equipmentLabel}
+        locationLabel={location.locationLabel}
+        terminalLabel={terminalLabel}
+        onOpenEquipment={() => setEquipOpen(true)}
+        onOpenLocation={() => setLocOpen(true)}
+        onOpenTerminal={() => setTermOpen(true)}
+      />
+      {/* Tour anchor elements for state-wait steps */}
+      <div id="tour-location-instruction" style={{ display: "none" }} />
+      <div id="tour-terminal-instruction" style={{ display: "none" }} />
+      <div id="tour-comp-instruction" style={{ display: "none" }} />
+      <div id="tour-fleet-instruction" style={{ display: "none" }} />
+
+      {/* ── Modals ── */}
+      <DriverTrainingModal
+        open={trainingModalOpen}
+        onClose={() => setTrainingModalOpen(false)}
+        companyId={shell.companyId}
+        excludeUserId={effectiveUserId}
+        onPick={(id, name) => { setTraineeId(id); setTraineeName(name); }}
+      />
+      <LoadingModal
+        open={loadWorkflow.loadingOpen} onClose={loadWorkflow.cancelActiveLoad}
+        styles={styles}
+        planRows={planRows as any[]}
+        productNameById={productNameById}
+        productHexCodeById={productHexCodeById}
+        productInputs={productInputs}
+        terminalTimeZone={selectedTerminalTimeZoneResolved}
+        lastProductInfoById={lastProductInfoById}
+        setProductApi={(productId, api) => setProductInputs((prev) => ({ ...prev, [productId]: { ...(prev[productId] ?? {}), api } }))}
+        setProductTemp={(productId, tempF) => setProductInputs((prev) => ({ ...prev, [productId]: { ...(prev[productId] ?? {}), tempF } }))}
+        onLoaded={loadWorkflow.onLoadedFromLoadingModal}
+        loadedDisabled={loadWorkflow.completeBusy}
+        loadedLabel={loadWorkflow.completeBusy ? "Saving…" : "LOADED"}
+      />
+
+      <ProductTempModal
+        open={tempDialOpen}
+        onClose={() => setTempDialOpen(false)}
+        styles={styles}
+        selectedCity={location.selectedCity}
+        selectedState={location.selectedState}
+        selectedTerminalId={location.selectedTerminalId}
+        locationLat={location.locationLat}
+        locationLon={location.locationLon}
+        ambientTempLoading={location.ambientTempLoading}
+        ambientTempF={location.ambientTempF}
+        tempF={tempF}
+        setTempF={setTempF}
+        productGroups={tempModalProductGroups}
+        onSetProductTemp={setSingleProductTempF}
+        predictedFuelTempF={predictedFuelTempF}
+        fuelTempConfidence={fuelTempConfidence}
+        fuelTempLoading={fuelTempLoading}
+        TempDial={TempDial}
+      />
+
+      {/* LocationModal/MyTerminalsModal now mount once in ShellChrome (see
+          CalculatorLayoutClient.tsx) -- shared with the Terminal tab's own
+          identity header, both reading/writing the one shell.location. */}
+
+      <TerminalCatalogModal
+        open={catalogOpen}
+        onClose={() => { setCatalogOpen(false); setTermOpen(true); }}
+        selectedState={location.selectedState}
+        selectedCity={location.selectedCity}
+        termError={terminals.termError}
+        catalogError={terminals.catalogError}
+        catalogTerminalsInCity={catalogTerminalsInCity}
+        myTerminalIds={myTerminalIdSet}
+        setMyTerminalIds={() => {}}
+        catalogExpandedId={catalogExpandedId}
+        setCatalogExpandedId={setCatalogExpandedId}
+        catalogEditingDateId={catalogEditingDateId}
+        setCatalogEditingDateId={setCatalogEditingDateId}
+        accessDateByTerminalId={terminals.accessDateByTerminalId}
+        setAccessDateForTerminal_={terminals.setAccessDateForTerminal}
+        isoToday_={(tz) => { const p = new Intl.DateTimeFormat("en-CA", { timeZone: tz || "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date()); return `${p.find(x=>x.type==="year")?.value}-${p.find(x=>x.type==="month")?.value}-${p.find(x=>x.type==="day")?.value}`; }}
+        toggleTerminalStar={terminals.toggleTerminalStar}
+        starBtnClass={starBtnClass}
+        addDaysISO_={addDaysISO_}
+        isPastISO_={isPastISO_}
+        formatMDYWithCountdown_={formatMDYWithCountdown_}
+        setCatalogOpen={setCatalogOpen}
+        setTermOpen={setTermOpen}
+      />
+    </div>
+  );
+}

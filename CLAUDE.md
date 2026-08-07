@@ -842,6 +842,82 @@ undo. Worth a real check once a second (non-admin) test member exists.
   problem (off-spec fuel → conservative loading → lost gallons), not vague
   taglines.
 
+#### Shipped 2026-08-07: `/calculator` → `/planner` rename + auth gate
+
+Scoped to the route and copy only, per explicit user direction picking
+this as the starting slice of the website rework (marketing landing page
+and the other new routes are separate, not-yet-started pieces). UI copy
+already said "Planner" everywhere (tab bar, NavMenu's "Back to Planner",
+admin's "Set up planner →") -- a repo-wide grep for user-facing
+`"Calculator"` text turned up nothing, so this pass was purely the URL
+path. Internal identifiers (`CalculatorShellContext`, `CalculatorLayoutClient`,
+`useCalculatorShell`, the shelved `app/planner/admin/page.tsx`'s
+`CalculatorAdminPage`) were deliberately left unrenamed -- "route + UI
+copy" reads as explicitly scoping out internal file/symbol names, and
+renaming those too would touch dozens of files for zero user-visible
+benefit.
+
+`git mv app/calculator app/planner` (had to stop the dev server first --
+`git mv` failed with a Windows file-lock "Permission denied" while
+Turbopack's watcher held the directory open). Then every `"/calculator...”`
+string literal (~16 files: tab hrefs in `CalculatorLayoutClient.tsx`/
+`CardsSubTabs.tsx`, every `router.push`/`router.replace`/
+`window.location.href` redirect target, `NavMenu.tsx`'s active-tab path
+checks, `lib/authz.ts`/`lib/setupSession.ts`) and every `@/app/calculator/...`
+import alias (6 files outside the moved directory, e.g.
+`lib/ui/driver/EquipmentDetails.tsx`'s import of the new
+`ServiceTypeManager.tsx`) → `/planner` / `@/app/planner/...`. One
+functional miss from the first sed pass: `app/learn/page.tsx`'s guided-
+tour link used a template literal (`` `/calculator?tour=${t.id}` ``), which
+a plain `"/calculator` string-literal grep doesn't match -- caught on a
+follow-up full-text sweep before it could ship broken. Also swept every
+moved file's own stale `// app/calculator/...` header-comment path (~30
+files, cosmetic only, no functional risk) for accuracy.
+
+**Auth gate -- real architecture finding, not just a route swap.** First
+attempt added `await getSessionUserOrRedirect()` (the existing
+cookie-based `lib/authz.ts` helper, also used by `requireSuperAdmin`/
+`requireMembershipOrJoin`) directly in `app/planner/layout.tsx` as a
+server component. Live-tested and it redirected an **already-authenticated**
+session straight to `/login` -- traced to `lib/supabase/client.ts`: the
+browser Supabase client uses plain `createClient` from `@supabase/supabase-js`
+with `storage: window.localStorage`, not `@supabase/ssr`'s cookie-syncing
+`createBrowserClient`. Sessions never get written to a cookie at all, so
+`next/headers`'s `cookies()` (what `createSupabaseServer()` reads) can
+never see a session regardless of whether the browser is logged in --
+confirmed `requireSuperAdmin`/`requireMembershipOrJoin`/
+`getSessionUserOrRedirect` were **called from literally nowhere in the app
+before this pass** (this repo's own prior note flagged `requireMembershipOrJoin`
+as "dead code... don't assume that stays true if someone wires it in
+later" -- wiring it in is exactly what surfaced this). `/admin` and every
+other auth-gated screen in this app enforces auth client-side (its own
+`supabase.auth.getUser()` check), which is why they all work fine despite
+this gap.
+
+Reverted the server-side gate; the real fix lives in
+`CalculatorShellContext.tsx`'s existing mount-time `supabase.auth.getUser()`
+effect -- if no user comes back, `router.replace("/login")`. Matches how
+the rest of the app already does this, no architecture change. **Properly
+fixing this** (migrating `lib/supabase/client.ts` to `createBrowserClient`
+so server-side gates work everywhere) is a real, worthwhile follow-up --
+`requireSuperAdmin`/`requireMembershipOrJoin` are both silently inert
+right now -- but it's a foundational change touching the one Supabase
+client every authenticated call in the app goes through, well outside a
+route-rename's scope. Flagged here, not fixed.
+
+**Live-verified**: unauthenticated `/planner` → `/login` (via the new
+client-side gate); authenticated bare `/` → `/planner` → real Planner
+content; all five tabs (Terminal/Dispatch/Planner/Cards/Vault) resolve
+under `/planner/*` with real data (Terminal's rack map, Dispatch's driver
+picker, Cards' city-grouped terminal list, Vault); NavMenu's Reports link
+→ `/planner/reports` renders the full Reports hub; `/admin`'s "Set up
+planner for X" (Kyle Tatro) → lands on `/planner` with the "Setting up
+planner for Kyle Tatro" banner and his own (empty) equipment state, not
+the admin's; "← Return to Admin" clears the setup session
+(`sessionStorage` confirmed empty after) and hard-navigates back to
+`/admin`. `tsc --noEmit` clean throughout; no new console errors beyond
+routine dev-server HMR websocket noise from the mid-task server restart.
+
 ### Open questions (Fleet spec)
 - Tie-break rule if a split load has two compartments with exactly equal
   gallons of different products.
@@ -2451,6 +2527,28 @@ database — don't trust the migrations folder alone.** Ask the user to run
 queries against `information_schema.columns`, `pg_policies`, `pg_proc` /
 `pg_get_functiondef`, and `terminal_temp_bias` (or check with Supabase MCP/CLI if
 available) rather than assuming the repo's migration file is current.
+
+**Server-side auth checks don't work anywhere in this app today, and it's not
+obvious from reading the code.** `lib/supabase/client.ts` (the one browser
+Supabase client every authenticated call in the app goes through) persists
+sessions to `window.localStorage` only, via plain `createClient` from
+`@supabase/supabase-js` — not `@supabase/ssr`'s cookie-syncing
+`createBrowserClient`. `lib/authz.ts`'s server-side helpers
+(`getSessionUserOrRedirect`, `requireSuperAdmin`, `requireMembershipOrJoin`)
+read the session via `next/headers`'s `cookies()`, which is never populated,
+so they can't see a real session **regardless of whether the browser is
+actually logged in** — confirmed live 2026-08-07 (see "Website / landing
+page rework" → "Shipped 2026-08-07" below): adding one of these to a server
+component layout redirected an already-authenticated session straight to
+`/login`. This is also why none of the three were called from anywhere in
+the app before that pass — every existing auth-gated screen (`/admin`, the
+Planner) enforces auth client-side (`supabase.auth.getUser()` in a
+`useEffect`, redirecting via `router` if empty), which does work, since the
+browser client has the session in memory/localStorage regardless of cookies.
+**If you're tempted to reach for `lib/authz.ts`'s server-side helpers, they
+won't work until `lib/supabase/client.ts` is migrated to
+`createBrowserClient` — a foundational change, not something to casually
+bundle into an unrelated task.**
 
 ## Key existing infrastructure (already built, don't rebuild)
 

@@ -52,7 +52,7 @@ export function isSuperAdminEmail(email?: string | null) {
 /**
  * DB-truth super-admin check.
  * Requires you inserted the user into public.super_admins.
- * If not super-admin, sends them back to /calculator.
+ * If not super-admin, sends them back to /planner.
  */
 export async function requireSuperAdmin() {
   const { supabase, user } = await getSessionUserOrRedirect();
@@ -64,7 +64,7 @@ export async function requireSuperAdmin() {
     .maybeSingle();
 
   if (error) throw error;
-  if (!data) redirect("/calculator");
+  if (!data) redirect("/planner");
 
   return { supabase, user };
 }

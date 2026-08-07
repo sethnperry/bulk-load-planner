@@ -7,7 +7,7 @@ import { supabase } from "@/lib/supabase/client";
 import ComboEditModal from "@/lib/ui/driver/ComboEditModal";
 import { TruckCard, TrailerCard, TruckModal, TrailerModal } from "@/lib/ui/driver/EquipmentDetails";
 import type { Truck, Trailer, OtherPermit, Compartment } from "@/lib/ui/driver/EquipmentDetails";
-import DecoupleModal from "@/app/calculator/modals/DecoupleModal";
+import DecoupleModal from "@/app/planner/modals/DecoupleModal";
 import NavMenu from "@/lib/ui/NavMenu";
 
 import { T, css, fmtDate, expiryColor, daysUntil } from "@/lib/ui/driver/tokens";
@@ -1263,7 +1263,7 @@ export default function AdminPage() {
       targetDisplayName: member.display_name ?? member.email ?? member.user_id,
       adminUserId: currentUserId,
     });
-    router.push("/calculator");
+    router.push("/planner");
   }
 
   if (loading) return <div style={{ ...css.page, display: "flex", alignItems: "center", justifyContent: "center", opacity: 0.6 }}>Loading…</div>;

@@ -23,8 +23,8 @@
 
 import React, { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
-import { cardStateFor, type CardState } from "@/app/calculator/cards/cardTheme";
-import { formatMDYWithCountdown_ } from "@/app/calculator/utils/dates";
+import { cardStateFor, type CardState } from "@/app/planner/cards/cardTheme";
+import { formatMDYWithCountdown_ } from "@/app/planner/utils/dates";
 
 // Same override FleetCardsModal.tsx uses -- cardTheme.ts's EXP_COLOR is
 // calibrated for the light/pearl Cards-tab background; "valid" there reads

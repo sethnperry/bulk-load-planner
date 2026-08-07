@@ -41,7 +41,7 @@ export default function RootLayout({
       <head>
         {/* theme-color itself comes from the `viewport` export below (Next's
             Metadata API) rather than a hardcoded tag here -- nested layouts
-            (e.g. app/calculator/layout.tsx) override it per-route, and a
+            (e.g. app/planner/layout.tsx) override it per-route, and a
             static tag here would coexist with that override ambiguously. */}
         <meta name="color-scheme" content="dark" />
       </head>

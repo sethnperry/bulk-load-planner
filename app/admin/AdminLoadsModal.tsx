@@ -4,8 +4,8 @@
 // Fetches data internally so the admin page doesn't need new state.
 
 import React, { useEffect, useState } from "react";
-import MyLoadsModal from "@/app/calculator/modals/MyLoadsModal";
-import { useLoadHistory } from "@/app/calculator/hooks/useLoadHistory";
+import MyLoadsModal from "@/app/planner/modals/MyLoadsModal";
+import { useLoadHistory } from "@/app/planner/hooks/useLoadHistory";
 import { supabase } from "@/lib/supabase/client";
 
 type Props = {

@@ -155,7 +155,7 @@ export default function SuperAdminPage() {
         </div>
         <button
           type="button"
-          onClick={() => router.push("/calculator")}
+          onClick={() => router.push("/planner")}
           style={{ padding: "8px 14px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.14)", background: "rgba(255,255,255,0.06)", color: "#fff", cursor: "pointer" }}
         >
           Back to Planner

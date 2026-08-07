@@ -16,7 +16,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
-import { lbsPerGallonAtTemp } from "@/app/calculator/utils/planMath";
+import { lbsPerGallonAtTemp } from "@/app/planner/utils/planMath";
 
 type ProductRow = {
   product_id: string;

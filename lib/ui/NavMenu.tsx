@@ -26,7 +26,7 @@ export default function NavMenu({ darkMode }: { darkMode?: boolean } = {}) {
   const [switching,   setSwitching]   = useState(false);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
 
-  const isPlanner = pathname === "/" || pathname === "/calculator" || Boolean(pathname?.startsWith("/calculator/"));
+  const isPlanner = pathname === "/" || pathname === "/planner" || Boolean(pathname?.startsWith("/planner/"));
   // The Planner's own dark-mode toggle only lightens its hamburger icon when
   // the header is actually in light mode -- every other page (Profile/Admin/
   // etc.) already has a dark background regardless of this setting, so they
@@ -34,7 +34,7 @@ export default function NavMenu({ darkMode }: { darkMode?: boolean } = {}) {
   const isPlannerLight = isPlanner && !darkMode;
   const isAdmin_  = pathname === "/admin";
   const isSuperAdmin_ = pathname === "/superadmin";
-  const isReports_ = pathname === "/calculator/reports";
+  const isReports_ = pathname === "/planner/reports";
   const isAdmin   = myRole === "admin" || myRole === "lead" || myRole === "dispatch";
 
   useEffect(() => {
@@ -196,10 +196,10 @@ export default function NavMenu({ darkMode }: { darkMode?: boolean } = {}) {
           {/* Nav links */}
           <div style={{ padding: "8px 6px" }}>
             {!isPlanner && (
-              <NavLink href="/calculator" icon="⟵" label="Back to Planner" onClick={() => setOpen(false)} />
+              <NavLink href="/planner" icon="⟵" label="Back to Planner" onClick={() => setOpen(false)} />
             )}
             {!isReports_ && (
-              <NavLink href="/calculator/reports" icon="▤" label="Reports" onClick={() => setOpen(false)} />
+              <NavLink href="/planner/reports" icon="▤" label="Reports" onClick={() => setOpen(false)} />
             )}
             {isAdmin && !isAdmin_ && (
               <NavLink href="/admin" icon="⚙" label="Company Admin" onClick={() => setOpen(false)} />

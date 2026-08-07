@@ -10,7 +10,7 @@ import {
   TRUCK_CATEGORIES, TRAILER_CATEGORIES,
   type EquipmentType, type AttachmentGroup,
 } from "@/lib/ui/driver/DocHub";
-import { type ServiceType, fetchServiceTypes, SimpleServiceModal } from "@/app/calculator/modals/ServiceTypeManager";
+import { type ServiceType, fetchServiceTypes, SimpleServiceModal } from "@/app/planner/modals/ServiceTypeManager";
 
 // Types
 // ─────────────────────────────────────────────────────────────

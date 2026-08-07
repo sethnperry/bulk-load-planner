@@ -13,8 +13,8 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
-import { cardStateFor, type CardState } from "@/app/calculator/cards/cardTheme";
-import { formatMDYWithCountdown_, addDaysISO_ } from "@/app/calculator/utils/dates";
+import { cardStateFor, type CardState } from "@/app/planner/cards/cardTheme";
+import { formatMDYWithCountdown_, addDaysISO_ } from "@/app/planner/utils/dates";
 
 // cardTheme.ts's EXP_COLOR is calibrated for the light/pearl card-wallet
 // background (Cards tab) -- "valid" there is near-black text, which would
