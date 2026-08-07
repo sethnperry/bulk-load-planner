@@ -1700,6 +1700,87 @@ stays fully visible and right-aligned. `tsc --noEmit` clean; no console
 errors; reverted the synthetic long-name DOM edit (an in-page-only test,
 never touched real data) by simply reloading.
 
+### Dispatch tab rework: city-grouped cards, Badges + Credentials sections, Equipment moved up (2026-08-07)
+
+Per explicit request against `app/calculator/dispatch/page.tsx`:
+
+- **Terminal Cards grouped by city** -- `cardsByCity` (`useMemo`) buckets
+  `filteredCards` by `city` (falling back to a "No City" bucket, sorted
+  last so real cities always lead), rendered as a city subheading per
+  group. Search still filters across name/city/state first, city grouping
+  happens on whatever survives the filter.
+- **Same color scheme everywhere on this page** -- already had a
+  dark-background `DARK_EXP_COLOR` override of `cardTheme.ts`'s
+  `cardStateFor` (expiring within 7 days = amber, expired = red, expired
+  7+ days = gray/"inactive", no date = gray/"not_set"); this pass reuses
+  the exact same `cardStateFor`/`DARK_EXP_COLOR` pair for every new
+  expiration line added (Badges, Credentials, and the new per-permit
+  Equipment lines) via one shared `ExpirationLine` component, instead of
+  each section growing its own copy.
+- **New Badges section** (`driver_port_ids` -- port_name/category/
+  expiration_date), directly under Terminal Cards. **New Credentials
+  section** (License/Medical/TWIC -- `driver_licenses`/
+  `driver_medical_cards`/`driver_twic_cards`, `expiration_date` only)
+  directly under that. Both reuse the exact same admin+dispatch RLS
+  `FleetCredentialsModal.tsx` already relies on
+  (`supabase/migrations/20260806000000_dispatch_credential_visibility.sql`)
+  -- no new migration needed, this is a second consumer of an existing
+  grant, not a new one.
+- **Equipment moved above Terminal Cards**, and switched its equipment
+  source from "primary" (`user_primary_trucks`/`user_primary_trailers`) to
+  whatever the driver has **actually claimed right now**
+  (`equipment_combos` where `claimed_by = selectedDriverId`, most recent
+  `claimed_at`) -- "primary" is a separate fallback-default concept (same
+  one `useEquipment.ts`'s own header comment distinguishes), not "what
+  they're driving today"; reading it here would show stale/wrong equipment
+  for a driver who slip-seated into something else since it was set. This
+  is the same signal `useEquipment.ts` itself derives setup-mode selection
+  from (`combos.find(c => c.claimed_by === effectiveUserId)`), just read
+  from the dispatcher's side instead of the driver's own device.
+- **Equipment now lists every expiring/expired permit item**, not just
+  truck registration -- `TRUCK_PERMIT_FIELDS`/`TRAILER_PERMIT_FIELDS`
+  (module-level label configs mirroring `EquipmentDetails.tsx`'s
+  `PermitEditRow`/`TankEditRow` call sites exactly: Registration, Annual
+  Inspection, IFTA, PHMSA, Alliance, Fleet Insurance, HazMat License, Inner
+  Bridge for trucks; Trailer Registration, Annual Inspection, and all
+  seven Tank inspections for trailers), `collectExpiringPermits()` filters
+  each unit's full field set down to only `cardStateFor` "expiring"/
+  "expired" entries, sorted soonest-first.
+
+  **Deliberately reads the OLD hardcoded `trucks`/`trailers` expiration
+  columns, not the newer `equipment_permits` table** -- checked both live
+  before choosing: a direct query confirmed `equipment_permits` rows exist
+  for truck 25184 and their dates matched the old columns' values, *but*
+  `supabase/migrations/20260723000000_permit_types_binder.sql`'s own
+  header comment states the fleet-tier admin screen
+  (`EquipmentDetails.tsx`'s `TruckModal`/`TrailerModal` -- confirmed via
+  code read this session to be the actual, only edit path both solo and
+  fleet companies use) "keeps reading/writing the OLD columns" and flags
+  `equipment_permits` going silently stale as an accepted, known risk if a
+  company only ever uses that form. Rather than build Dispatch's Equipment
+  section on a table that migration's own author already flagged as able
+  to silently drift from what admins actually edit, this reads the exact
+  same columns `EquipmentDetails.tsx` writes -- guaranteed to agree with
+  what dispatch/admin see and change in the Equipment modal, no
+  independent-staleness risk.
+
+**Live-verified** against the real Gemini Motor Transport company: Seth
+Perry (real equipment/cards) shows Equipment above Terminal Cards
+("Truck · 25184 / Trailer · 3151", one expired item -- "Registration
+07-31-2026 (-7 days)" in red, correctly at the exact -7-day expired/
+inactive boundary), Terminal Cards grouped into "FORT LAUDERDALE" (7
+terminals) and "TAMPA" (7 terminals) subheadings, Badges showing two real
+port badges, Credentials showing real License/Medical/TWIC dates -- colors
+screenshot-confirmed (red for the expired item, gray for entries expired
+7+ days like ExxonMobil/TransMontaign, plain white for valid/not-yet-
+within-7-days entries like Global West's 10-days-out card). A second
+driver with zero data on file (Kyle Tatro) confirmed every section's empty
+state renders cleanly ("No equipment currently selected," "No terminal
+cards on file," "No badges on file," "Not on file" ×3 for credentials) --
+no crashes, no leaked data from the previous driver. `tsc --noEmit` clean;
+no new console errors (same pre-existing stale dev-server errors already
+documented elsewhere in this file, confirmed unrelated).
+
 ### Service type/interval editing shared across solo and fleet tiers (2026-08-07)
 
 User feedback, in order: "in the equipment modal I can't find where we set

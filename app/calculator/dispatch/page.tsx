@@ -8,11 +8,32 @@
 //
 // Pick a driver (shared via shell.selectedDriverId so the Cards tab and
 // Terminal tab agree on the same driver across tab switches), then see:
-// identity/schedule, terminal card status, equipment + registration expiry,
-// and a dispatcher-notes box. Terminal card list and equipment reuse
-// existing RLS reads (terminal_access_admin_dispatch_read,
-// user_terminal_cards_admin_dispatch_read) rather than new queries designed
-// from scratch.
+// identity/schedule, equipment + its expiring/expired permit items,
+// terminal card status (grouped by city), badges, credentials, and a
+// dispatcher-notes box. All expiration coloring throughout this page uses
+// the one shared cardStateFor rule (expiring within 7 days = amber, expired
+// = red, older/inactive = gray) so nothing on this page disagrees with
+// itself about what "soon" means.
+//
+// 2026-08-07 rework (per explicit user direction): Terminal Cards grouped
+// by city; added Badges and Credentials sections (same admin+dispatch RLS
+// FleetCredentialsModal.tsx already relies on -- driver_licenses/
+// driver_medical_cards/driver_twic_cards/driver_port_ids); Equipment moved
+// above Terminal Cards and switched from "primary" equipment
+// (user_primary_trucks/trailers) to whatever combo the driver has actually
+// claimed right now (equipment_combos.claimed_by) -- "primary" is a
+// separate, different concept (a fallback default, not "what they're in
+// today") and reading it here would show stale/wrong equipment for a
+// driver who slip-seated into something else. Equipment now also lists
+// every expiring/expired permit item across the full permit set (not just
+// truck registration) -- reads the same trucks/trailers columns
+// EquipmentDetails.tsx's TruckModal/TrailerModal actually write today, not
+// the newer equipment_permits table, which a live query confirmed tracks
+// truck permits but was never verified for trailers/newly-added fields and
+// carries its own documented "can silently go stale if the admin edit form
+// bypasses it" risk (see supabase/migrations/20260723000000_permit_types_binder.sql's
+// own header comment) -- the old columns are the one source guaranteed to
+// match what admin/dispatch actually sees and edits in the Equipment modal.
 
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
@@ -49,19 +70,75 @@ type TerminalCardRow = {
   hasCard: boolean;
 };
 
+type PermitItem = { label: string; iso: string };
+
 type EquipmentSummary = {
   truckName: string | null;
   truckMake: string | null;
-  truckRegExpiresISO: string | null;
   trailerName: string | null;
   trailerMake: string | null;
+  permitItems: PermitItem[]; // pre-filtered to expiring/expired only, soonest first
 };
+
+type BadgeRow = { id: string; port_name: string; category: string | null; expiration_date: string | null };
+
+type CredentialSummary = { licenseExp: string | null; medicalExp: string | null; twicExp: string | null };
+
+// Mirrors the exact labels/columns EquipmentDetails.tsx's TruckModal/
+// TrailerModal already use -- see that file's PermitEditRow/TankEditRow
+// call sites. Not the dynamic permit_types system (see file header comment
+// on why).
+const TRUCK_PERMIT_FIELDS: { key: string; label: string }[] = [
+  { key: "reg_expiration_date", label: "Registration" },
+  { key: "inspection_expiration_date", label: "Annual Inspection" },
+  { key: "ifta_expiration_date", label: "IFTA Permits + Decals" },
+  { key: "phmsa_expiration_date", label: "PHMSA HazMat Permit" },
+  { key: "alliance_expiration_date", label: "Alliance HazMat Permit" },
+  { key: "fleet_ins_expiration_date", label: "Fleet Insurance Cab Card" },
+  { key: "hazmat_lic_expiration_date", label: "HazMat Transportation Lic" },
+  { key: "inner_bridge_expiration_date", label: "Inner Bridge Permit" },
+];
+const TRAILER_PERMIT_FIELDS: { key: string; label: string }[] = [
+  { key: "trailer_reg_expiration_date", label: "Trailer Registration" },
+  { key: "trailer_inspection_expiration_date", label: "Annual Inspection" },
+  { key: "tank_v_expiration_date", label: "Tank V — External Visual" },
+  { key: "tank_k_expiration_date", label: "Tank K — Leakage Test" },
+  { key: "tank_l_expiration_date", label: "Tank L — Lining Inspection" },
+  { key: "tank_t_expiration_date", label: "Tank T — Thickness Test" },
+  { key: "tank_i_expiration_date", label: "Tank I — Internal Visual" },
+  { key: "tank_p_expiration_date", label: "Tank P — Pressure Test" },
+  { key: "tank_uc_expiration_date", label: "Tank UC — Upper Coupler" },
+];
+
+function collectExpiringPermits(row: Record<string, any> | null, fields: { key: string; label: string }[]): PermitItem[] {
+  if (!row) return [];
+  const out: PermitItem[] = [];
+  for (const f of fields) {
+    const iso = row[f.key] as string | null;
+    if (!iso) continue;
+    const state = cardStateFor(iso);
+    if (state === "expiring" || state === "expired") out.push({ label: f.label, iso });
+  }
+  return out.sort((a, b) => a.iso.localeCompare(b.iso));
+}
 
 function SectionCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div style={{ borderRadius: 14, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", padding: 14, marginBottom: 14 }}>
       <div style={{ fontSize: 12, fontWeight: 800, color: "rgba(255,255,255,0.4)", textTransform: "uppercase" as const, letterSpacing: 0.5, marginBottom: 10 }}>{title}</div>
       {children}
+    </div>
+  );
+}
+
+function ExpirationLine({ label, iso }: { label: string; iso: string | null }) {
+  const state = cardStateFor(iso);
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 12 }}>
+      <span style={{ color: "#fff", fontWeight: 600 }}>{label}</span>
+      <span style={{ fontWeight: 800, color: DARK_EXP_COLOR[state] }}>
+        {iso ? formatMDYWithCountdown_(iso) : "Not on file"}
+      </span>
     </div>
   );
 }
@@ -76,7 +153,9 @@ export default function DispatchPage() {
   const [scheduleSaving, setScheduleSaving] = useState(false);
   const [cards, setCards] = useState<TerminalCardRow[]>([]);
   const [cardSearch, setCardSearch] = useState("");
-  const [equipment, setEquipment] = useState<EquipmentSummary>({ truckName: null, truckMake: null, truckRegExpiresISO: null, trailerName: null, trailerMake: null });
+  const [equipment, setEquipment] = useState<EquipmentSummary>({ truckName: null, truckMake: null, trailerName: null, trailerMake: null, permitItems: [] });
+  const [badges, setBadges] = useState<BadgeRow[]>([]);
+  const [credentials, setCredentials] = useState<CredentialSummary>({ licenseExp: null, medicalExp: null, twicExp: null });
   const [notes, setNotes] = useState("");
   const [notesSaving, setNotesSaving] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -87,14 +166,25 @@ export default function DispatchPage() {
     (async () => {
       setLoading(true);
 
-      const [{ data: nameRows }, { data: schedRow }, { data: notesRow }, { data: accessRows }, { data: cardRows }, { data: primaryTruck }, { data: primaryTrailer }] = await Promise.all([
+      const [
+        { data: nameRows }, { data: schedRow }, { data: notesRow },
+        { data: accessRows }, { data: cardRows },
+        { data: claimedCombos },
+        { data: badgeRows },
+        { data: licRows }, { data: medRows }, { data: twicRows },
+      ] = await Promise.all([
         supabase.rpc("get_display_names_full", { p_user_ids: [selectedDriverId] }),
         supabase.from("driver_schedules").select("days_of_week, shift_start_local, shift_end_local").eq("user_id", selectedDriverId).maybeSingle(),
         supabase.from("dispatcher_notes").select("note").eq("user_id", selectedDriverId).maybeSingle(),
         supabase.from("terminal_access").select("terminal_id, carded_on").eq("user_id", selectedDriverId),
         supabase.from("user_terminal_cards").select("terminal_id").eq("user_id", selectedDriverId),
-        supabase.from("user_primary_trucks").select("truck_id").eq("user_id", selectedDriverId).maybeSingle(),
-        supabase.from("user_primary_trailers").select("trailer_id").eq("user_id", selectedDriverId).maybeSingle(),
+        // Whatever combo the driver actually has claimed right now -- not
+        // "primary" (a separate fallback-default concept, see file header).
+        supabase.from("equipment_combos").select("truck_id, trailer_id, claimed_at").eq("claimed_by", selectedDriverId).neq("active", false).order("claimed_at", { ascending: false }).limit(1),
+        supabase.from("driver_port_ids").select("id, port_name, category, expiration_date").eq("user_id", selectedDriverId).order("expiration_date", { ascending: true, nullsFirst: false }),
+        supabase.from("driver_licenses").select("expiration_date").eq("user_id", selectedDriverId).maybeSingle(),
+        supabase.from("driver_medical_cards").select("expiration_date").eq("user_id", selectedDriverId).maybeSingle(),
+        supabase.from("driver_twic_cards").select("expiration_date").eq("user_id", selectedDriverId).maybeSingle(),
       ]);
       if (cancelled) return;
 
@@ -138,18 +228,36 @@ export default function DispatchPage() {
       }).sort((a, b) => a.terminal_name.localeCompare(b.terminal_name));
       setCards(rows);
 
-      const truckId = (primaryTruck as any)?.truck_id ?? null;
-      const trailerId = (primaryTrailer as any)?.trailer_id ?? null;
+      const claimed = ((claimedCombos ?? [])[0] as any) ?? null;
+      const truckId = claimed?.truck_id ?? null;
+      const trailerId = claimed?.trailer_id ?? null;
       const [truckRes, trailerRes] = await Promise.all([
-        truckId ? supabase.from("trucks").select("truck_name, make, reg_expiration_date").eq("truck_id", truckId).maybeSingle() : Promise.resolve({ data: null }),
-        trailerId ? supabase.from("trailers").select("trailer_name, make").eq("trailer_id", trailerId).maybeSingle() : Promise.resolve({ data: null }),
+        truckId
+          ? supabase.from("trucks").select(["truck_name", "make", ...TRUCK_PERMIT_FIELDS.map((f) => f.key)].join(", ")).eq("truck_id", truckId).maybeSingle()
+          : Promise.resolve({ data: null }),
+        trailerId
+          ? supabase.from("trailers").select(["trailer_name", "make", ...TRAILER_PERMIT_FIELDS.map((f) => f.key)].join(", ")).eq("trailer_id", trailerId).maybeSingle()
+          : Promise.resolve({ data: null }),
       ]);
+      const truckRow = (truckRes as any)?.data ?? null;
+      const trailerRow = (trailerRes as any)?.data ?? null;
+      const permitItems = [
+        ...collectExpiringPermits(truckRow, TRUCK_PERMIT_FIELDS),
+        ...collectExpiringPermits(trailerRow, TRAILER_PERMIT_FIELDS),
+      ].sort((a, b) => a.iso.localeCompare(b.iso));
       setEquipment({
-        truckName: (truckRes as any)?.data?.truck_name ?? null,
-        truckMake: (truckRes as any)?.data?.make ?? null,
-        truckRegExpiresISO: (truckRes as any)?.data?.reg_expiration_date ?? null,
-        trailerName: (trailerRes as any)?.data?.trailer_name ?? null,
-        trailerMake: (trailerRes as any)?.data?.make ?? null,
+        truckName: truckRow?.truck_name ?? null,
+        truckMake: truckRow?.make ?? null,
+        trailerName: trailerRow?.trailer_name ?? null,
+        trailerMake: trailerRow?.make ?? null,
+        permitItems,
+      });
+
+      setBadges((badgeRows ?? []) as BadgeRow[]);
+      setCredentials({
+        licenseExp: (licRows as any)?.expiration_date ?? null,
+        medicalExp: (medRows as any)?.expiration_date ?? null,
+        twicExp: (twicRows as any)?.expiration_date ?? null,
       });
 
       setLoading(false);
@@ -192,6 +300,21 @@ export default function DispatchPage() {
     if (!q) return cards;
     return cards.filter((c) => `${c.terminal_name} ${c.city ?? ""} ${c.state ?? ""}`.toLowerCase().includes(q));
   }, [cards, cardSearch]);
+
+  // Group by city -- "No City" bucket sorts last so real cities always lead.
+  const cardsByCity = useMemo(() => {
+    const groups = new Map<string, TerminalCardRow[]>();
+    for (const c of filteredCards) {
+      const city = c.city?.trim() || "No City";
+      if (!groups.has(city)) groups.set(city, []);
+      groups.get(city)!.push(c);
+    }
+    return Array.from(groups.entries()).sort(([a], [b]) => {
+      if (a === "No City") return 1;
+      if (b === "No City") return -1;
+      return a.localeCompare(b);
+    });
+  }, [filteredCards]);
 
   if (!selectedDriverId) {
     return (
@@ -293,28 +416,6 @@ export default function DispatchPage() {
             </div>
           </SectionCard>
 
-          <SectionCard title="Terminal Cards">
-            <input
-              type="text" value={cardSearch} onChange={(e) => setCardSearch(e.target.value)}
-              placeholder="All Terminals — search…"
-              style={{ width: "100%", boxSizing: "border-box" as const, padding: "8px 10px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.03)", color: "white", fontSize: 13, marginBottom: 10 }}
-            />
-            {filteredCards.length === 0 && <div style={{ fontSize: 12, color: "rgba(255,255,255,0.3)" }}>No terminal cards on file.</div>}
-            <div style={{ display: "grid", gap: 6 }}>
-              {filteredCards.map((c) => {
-                const state = cardStateFor(c.expiresISO);
-                return (
-                  <div key={c.terminal_id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 12 }}>
-                    <span style={{ color: "#fff", fontWeight: 600 }}>{c.terminal_name}</span>
-                    <span style={{ fontWeight: 800, color: DARK_EXP_COLOR[state] }}>
-                      {c.expiresISO ? formatMDYWithCountdown_(c.expiresISO) : c.hasCard ? "No visit on file" : "Not Carded"}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          </SectionCard>
-
           <SectionCard title="Equipment">
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
               <span style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>
@@ -328,17 +429,66 @@ export default function DispatchPage() {
               </span>
               <span style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>{equipment.trailerMake ?? ""}</span>
             </div>
-            {equipment.truckName && (
-              <div style={{ fontSize: 12, marginTop: 6 }}>
-                <span style={{ color: "rgba(255,255,255,0.4)" }}>Registration · </span>
-                <span style={{ fontWeight: 800, color: DARK_EXP_COLOR[cardStateFor(equipment.truckRegExpiresISO)] }}>
-                  {equipment.truckRegExpiresISO ? formatMDYWithCountdown_(equipment.truckRegExpiresISO) : "Not on file"}
-                </span>
+            {!equipment.truckName && !equipment.trailerName && (
+              <div style={{ fontSize: 12, color: "rgba(255,255,255,0.3)" }}>No equipment currently selected.</div>
+            )}
+            {(equipment.truckName || equipment.trailerName) && (
+              <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid rgba(255,255,255,0.08)", display: "grid", gap: 6 }}>
+                {equipment.permitItems.length === 0 ? (
+                  <div style={{ fontSize: 12, color: "rgba(255,255,255,0.3)" }}>Nothing expiring soon.</div>
+                ) : (
+                  equipment.permitItems.map((p) => <ExpirationLine key={p.label} label={p.label} iso={p.iso} />)
+                )}
               </div>
             )}
-            {!equipment.truckName && !equipment.trailerName && (
-              <div style={{ fontSize: 12, color: "rgba(255,255,255,0.3)" }}>No primary equipment set.</div>
-            )}
+          </SectionCard>
+
+          <SectionCard title="Terminal Cards">
+            <input
+              type="text" value={cardSearch} onChange={(e) => setCardSearch(e.target.value)}
+              placeholder="All Terminals — search…"
+              style={{ width: "100%", boxSizing: "border-box" as const, padding: "8px 10px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.03)", color: "white", fontSize: 13, marginBottom: 10 }}
+            />
+            {cardsByCity.length === 0 && <div style={{ fontSize: 12, color: "rgba(255,255,255,0.3)" }}>No terminal cards on file.</div>}
+            <div style={{ display: "grid", gap: 14 }}>
+              {cardsByCity.map(([city, cityCards]) => (
+                <div key={city}>
+                  <div style={{ fontSize: 11, fontWeight: 800, color: "rgba(255,255,255,0.35)", textTransform: "uppercase" as const, letterSpacing: 0.5, marginBottom: 6 }}>
+                    {city}
+                  </div>
+                  <div style={{ display: "grid", gap: 6 }}>
+                    {cityCards.map((c) => (
+                      <ExpirationLine
+                        key={c.terminal_id}
+                        label={c.terminal_name}
+                        iso={c.expiresISO}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </SectionCard>
+
+          <SectionCard title="Badges">
+            {badges.length === 0 && <div style={{ fontSize: 12, color: "rgba(255,255,255,0.3)" }}>No badges on file.</div>}
+            <div style={{ display: "grid", gap: 6 }}>
+              {badges.map((b) => (
+                <ExpirationLine
+                  key={b.id}
+                  label={b.category ? `${b.port_name} (${b.category})` : b.port_name}
+                  iso={b.expiration_date}
+                />
+              ))}
+            </div>
+          </SectionCard>
+
+          <SectionCard title="Credentials">
+            <div style={{ display: "grid", gap: 6 }}>
+              <ExpirationLine label="License" iso={credentials.licenseExp} />
+              <ExpirationLine label="Medical" iso={credentials.medicalExp} />
+              <ExpirationLine label="TWIC" iso={credentials.twicExp} />
+            </div>
           </SectionCard>
 
           <SectionCard title="Notes">
