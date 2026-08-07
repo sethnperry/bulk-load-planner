@@ -11,9 +11,10 @@
 // identity/schedule, equipment + its expiring/expired permit items,
 // terminal card status (grouped by city), badges, credentials, and a
 // dispatcher-notes box. All expiration coloring throughout this page uses
-// the one shared cardStateFor rule (expiring within 7 days = amber, expired
-// = red, older/inactive = gray) so nothing on this page disagrees with
-// itself about what "soon" means.
+// one local expStateFor rule (expiring within 7 days = amber, ANY past
+// date = red, no date on file = gray -- see that function's own comment
+// for why this isn't cardTheme.ts's shared cardStateFor) so nothing on
+// this page disagrees with itself about what "soon" or "overdue" means.
 //
 // 2026-08-07 rework (per explicit user direction): Terminal Cards grouped
 // by city; added Badges and Credentials sections (same admin+dispatch RLS
@@ -40,15 +41,32 @@ import { supabase } from "@/lib/supabase/client";
 import { startSetupSession } from "@/lib/setupSession";
 import { useCalculatorShell } from "../CalculatorShellContext";
 import DriverPicker from "../components/DriverPicker";
-import { cardStateFor } from "../cards/cardTheme";
-import { addDaysISO_, formatMDYWithCountdown_ } from "../utils/dates";
+import { addDaysISO_, daysUntilISO_, formatMDYWithCountdown_ } from "../utils/dates";
 
-const DARK_EXP_COLOR: Record<string, string> = {
+// This page deliberately does NOT use cardTheme.ts's shared cardStateFor --
+// that function fades anything expired more than 7 days ago from "expired"
+// (red) to a separate "inactive" state (gray), which doesn't match what was
+// actually asked for here ("expired cards should show date in red" has no
+// day-limit; only "expiring" was scoped to "the next 7 days"). Under the
+// shared function, a permit 8+ days overdue would silently render gray
+// instead of red -- worse, collectExpiringPermits() below would drop it
+// from the Equipment list entirely, since its filter only ever looked for
+// "expiring"/"expired", never "inactive". This 3-state version has no such
+// cliff: anything in the past is "expired," full stop.
+type ExpState = "not_set" | "valid" | "expiring" | "expired";
+function expStateFor(iso: string | null | undefined): ExpState {
+  if (!iso) return "not_set";
+  const days = daysUntilISO_(iso);
+  if (days === null) return "not_set";
+  if (days < 0) return "expired";
+  if (days <= 7) return "expiring";
+  return "valid";
+}
+const DARK_EXP_COLOR: Record<ExpState, string> = {
   not_set: "rgba(255,255,255,0.35)",
   valid: "rgba(255,255,255,0.85)",
   expiring: "#f59e0b",
   expired: "#ef4444",
-  inactive: "rgba(255,255,255,0.35)",
 };
 
 const DAY_LABELS = ["S", "M", "T", "W", "T", "F", "S"]; // Sun..Sat, matches the mockup's day-icon row
@@ -110,14 +128,18 @@ const TRAILER_PERMIT_FIELDS: { key: string; label: string }[] = [
   { key: "tank_uc_expiration_date", label: "Tank UC — Upper Coupler" },
 ];
 
-function collectExpiringPermits(row: Record<string, any> | null, fields: { key: string; label: string }[]): PermitItem[] {
+// unitLabel ("Truck 25184" / "Trailer 3151") is baked directly into each
+// item's label -- per explicit request, dispatch couldn't tell which unit
+// a bare "Registration" line belonged to when a driver has both a truck
+// and trailer with their own permit sets.
+function collectExpiringPermits(unitLabel: string, row: Record<string, any> | null, fields: { key: string; label: string }[]): PermitItem[] {
   if (!row) return [];
   const out: PermitItem[] = [];
   for (const f of fields) {
     const iso = row[f.key] as string | null;
     if (!iso) continue;
-    const state = cardStateFor(iso);
-    if (state === "expiring" || state === "expired") out.push({ label: f.label, iso });
+    const state = expStateFor(iso);
+    if (state === "expiring" || state === "expired") out.push({ label: `${unitLabel} — ${f.label}`, iso });
   }
   return out.sort((a, b) => a.iso.localeCompare(b.iso));
 }
@@ -132,7 +154,7 @@ function SectionCard({ title, children }: { title: string; children: React.React
 }
 
 function ExpirationLine({ label, iso }: { label: string; iso: string | null }) {
-  const state = cardStateFor(iso);
+  const state = expStateFor(iso);
   return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 12 }}>
       <span style={{ color: "#fff", fontWeight: 600 }}>{label}</span>
@@ -242,8 +264,8 @@ export default function DispatchPage() {
       const truckRow = (truckRes as any)?.data ?? null;
       const trailerRow = (trailerRes as any)?.data ?? null;
       const permitItems = [
-        ...collectExpiringPermits(truckRow, TRUCK_PERMIT_FIELDS),
-        ...collectExpiringPermits(trailerRow, TRAILER_PERMIT_FIELDS),
+        ...collectExpiringPermits(truckRow?.truck_name ? `Truck ${truckRow.truck_name}` : "Truck", truckRow, TRUCK_PERMIT_FIELDS),
+        ...collectExpiringPermits(trailerRow?.trailer_name ? `Trailer ${trailerRow.trailer_name}` : "Trailer", trailerRow, TRAILER_PERMIT_FIELDS),
       ].sort((a, b) => a.iso.localeCompare(b.iso));
       setEquipment({
         truckName: truckRow?.truck_name ?? null,

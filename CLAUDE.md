@@ -1700,6 +1700,66 @@ stays fully visible and right-aligned. `tsc --noEmit` clean; no console
 errors; reverted the synthetic long-name DOM edit (an in-page-only test,
 never touched real data) by simply reloading.
 
+### Dispatch tab follow-up: real color bug fixed, explicit unit labels (2026-08-07, later same day)
+
+Two real bugs reported after live use, both traced to the same root cause:
+"the equipment section... showing registration expired 7 days ago, this is
+incorrect... we also don't know which equipment it is for" and "the
+terminal expirations are not showing proper colors."
+
+**Investigated before assuming anything was wrong** (this repo's own
+"verify live" rule): confirmed via a direct query that truck 25184's
+`reg_expiration_date` genuinely is `2026-07-31` in the database (matches
+what `/admin`'s own Edit Truck form shows), confirmed the claimed-combo
+lookup was picking the right (only) combo `claimed_by` that driver, and
+confirmed via `get_display_names_full` that combo's owner really is Seth
+Perry -- so "-7 days" was arithmetically and data-wise correct; the
+Equipment date itself was never wrong.
+
+**The real bug**: this page's original color logic reused `cardTheme.ts`'s
+shared `cardStateFor`, which fades anything expired more than 7 days ago
+from "expired" (red) into a separate "inactive" state (gray) -- a
+deliberate design in that shared function ("expired 7+ days mutes the
+whole card," per its own comment), built for the Cards tab's own UX. But
+the explicit ask here only ever put a day-limit on "expiring" ("expiring
+in the next 7 days") -- "expired cards should show date in red" has no
+day-limit at all. Under the shared function, ExxonMobil (-46 days) and
+TransMontaign (-236 days) were both silently rendering gray instead of
+red, exactly matching "not showing proper colors." Worse, this same
+mismatch meant `collectExpiringPermits()`'s filter (which only ever
+matched `cardStateFor`'s "expiring"/"expired" states, never "inactive")
+would have silently dropped any permit more than 7 days overdue from the
+Equipment list entirely, once the underlying date crossed that threshold.
+
+Fixed with a local, page-only `expStateFor` (3 states: `expired` = any
+`days < 0` with no cutoff, `expiring` = 0-7 days out, `valid`/`not_set`
+otherwise) and a matching `DARK_EXP_COLOR` map, used everywhere on this
+page instead of the shared `cardStateFor` -- deliberately NOT changed in
+`cardTheme.ts` itself, since that function's 7-day decay is real, existing
+behavior the Cards tab/`FleetCardsModal`/`FleetCredentialsModal` all still
+rely on and weren't asked to change.
+
+**Explicit unit labels**: `collectExpiringPermits()` now takes a
+`unitLabel` ("Truck 25184" / "Trailer 3151", falling back to the bare
+"Truck"/"Trailer" word if the unit somehow has no name) and bakes it
+directly into each item's label ("Truck 25184 — Registration") instead of
+the bare permit name alone -- directly answers "we don't know which
+equipment it is for."
+
+**Live-verified**: read every expiration line's actual computed CSS
+`color` via `getComputedStyle` (not just screenshot judgment) before and
+after the fix -- ExxonMobil/TransMontaign flipped from
+`rgba(255,255,255,0.35)` (gray) to `rgb(239,68,68)` (red); the Equipment
+line now reads "Truck 25184 — Registration" and stayed correctly red
+(`-7` days was already `< 0` either way, so this item's color was never
+actually wrong -- only its missing unit label was). Confirmed again after
+a hard reload. `tsc --noEmit` clean. Two stale console errors
+(`SimpleServiceModal is not defined`, `cardStateFor is not defined`)
+surfaced mid-pass and were ruled out the same way prior stale-HMR errors
+in this doc were: `tsc` clean, a `grep` confirming no live reference
+remains, and the actual page rendering and computing correct values
+immediately after, both before and after a hard reload.
+
 ### Dispatch tab rework: city-grouped cards, Badges + Credentials sections, Equipment moved up (2026-08-07)
 
 Per explicit request against `app/calculator/dispatch/page.tsx`:
