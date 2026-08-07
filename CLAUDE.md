@@ -1760,6 +1760,49 @@ in this doc were: `tsc` clean, a `grep` confirming no live reference
 remains, and the actual page rendering and computing correct values
 immediately after, both before and after a hard reload.
 
+### Dispatch tab follow-up #2: Equipment now reads equipment_permits, not the old columns (2026-08-07, same day)
+
+User report: "still showing registration expired in dispatch but good in
+the equipment modal." This **corrects** a conclusion from the
+immediately-preceding note above -- that note's live check confirmed the
+old `trucks.reg_expiration_date` column really was `2026-07-31` and called
+the Equipment date "never wrong," but that was only checking internal
+consistency (does the display match its own data source), not whether that
+data source was still the right one to read.
+
+A follow-up query against `equipment_permits` (the dynamic system the
+Binder screen actually manages, joined to `permit_types`) found truck
+25184's real, current "Registration" row at **2027-07-31** -- a full year
+past the old column's stale `2026-07-31`. Someone renewed this permit
+through the Binder at some point, which only ever writes to
+`equipment_permits`; nothing writes that back to the old `trucks` column,
+so the two silently diverged and Dispatch (reading the old column, per the
+original design decision earlier this same day) kept showing an
+expired date that had actually been fixed a year ago.
+
+This directly reverses that earlier decision's own reasoning. The original
+choice worried `equipment_permits` might be the stale one (per that
+migration's own documented risk); live data showed the opposite is true in
+practice for this real company -- the OLD columns are what's actually
+abandoned, because the Binder (the tool people actually use to renew
+permits) was migrated to the new system and the admin's plain date-input
+form was not. `app/calculator/dispatch/page.tsx`'s Equipment section now
+queries `equipment_permits` (`.eq("truck_id", ...)` / `.eq("trailer_id",
+...)`, joined to `permit_types(name)`) instead of the hardcoded
+`TRUCK_PERMIT_FIELDS`/`TRAILER_PERMIT_FIELDS` column lists, which are
+removed entirely. This also means Dispatch now agrees with
+`useExpirations.ts` (the header bell badge), which already read
+`equipment_permits` -- previously the two could disagree about the same
+truck's same permit.
+
+**Live-verified**: truck 25184's Equipment section now shows "Nothing
+expiring soon" (correctly reflecting the real 2027-07-31 date) instead of
+the stale "Truck 25184 — Registration, 07-31-2026 (-7 days)" in red.
+Kyle Tatro's empty-equipment case re-checked and still renders cleanly (no
+crash from the new `equipment_permits` queries when `truckId`/`trailerId`
+are both null). `tsc --noEmit` clean; no new console errors beyond the
+same already-documented stale-HMR ones.
+
 ### Dispatch tab rework: city-grouped cards, Badges + Credentials sections, Equipment moved up (2026-08-07)
 
 Per explicit request against `app/calculator/dispatch/page.tsx`:

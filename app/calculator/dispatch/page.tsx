@@ -25,16 +25,23 @@
 // claimed right now (equipment_combos.claimed_by) -- "primary" is a
 // separate, different concept (a fallback default, not "what they're in
 // today") and reading it here would show stale/wrong equipment for a
-// driver who slip-seated into something else. Equipment now also lists
-// every expiring/expired permit item across the full permit set (not just
-// truck registration) -- reads the same trucks/trailers columns
-// EquipmentDetails.tsx's TruckModal/TrailerModal actually write today, not
-// the newer equipment_permits table, which a live query confirmed tracks
-// truck permits but was never verified for trailers/newly-added fields and
-// carries its own documented "can silently go stale if the admin edit form
-// bypasses it" risk (see supabase/migrations/20260723000000_permit_types_binder.sql's
-// own header comment) -- the old columns are the one source guaranteed to
-// match what admin/dispatch actually sees and edits in the Equipment modal.
+// driver who slip-seated into something else.
+//
+// Equipment's expiring-permit list reads `equipment_permits` (joined to
+// permit_types(name)) -- the dynamic system the Binder screen manages --
+// not the old hardcoded trucks/trailers columns (reg_expiration_date etc.)
+// this originally used. That first attempt assumed the old columns were
+// the safer, more-current source (per this repo's own documented "the
+// admin edit form still writes the old columns, equipment_permits can go
+// stale" risk), but a live report ("dispatch shows Registration expired,
+// the equipment modal shows it's fine") proved the opposite for this real
+// company: a direct query found equipment_permits' Registration row for
+// truck 25184 at 2027-07-31, a full year past the old column's untouched
+// 2026-07-31 -- someone renewed it through the Binder, which only ever
+// wrote to equipment_permits, so the old column silently never caught up.
+// equipment_permits is also what useExpirations.ts (the header bell badge)
+// already reads, so this now agrees with that too instead of disagreeing
+// with two different "current" equipment views at once.
 
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
@@ -102,44 +109,21 @@ type BadgeRow = { id: string; port_name: string; category: string | null; expira
 
 type CredentialSummary = { licenseExp: string | null; medicalExp: string | null; twicExp: string | null };
 
-// Mirrors the exact labels/columns EquipmentDetails.tsx's TruckModal/
-// TrailerModal already use -- see that file's PermitEditRow/TankEditRow
-// call sites. Not the dynamic permit_types system (see file header comment
-// on why).
-const TRUCK_PERMIT_FIELDS: { key: string; label: string }[] = [
-  { key: "reg_expiration_date", label: "Registration" },
-  { key: "inspection_expiration_date", label: "Annual Inspection" },
-  { key: "ifta_expiration_date", label: "IFTA Permits + Decals" },
-  { key: "phmsa_expiration_date", label: "PHMSA HazMat Permit" },
-  { key: "alliance_expiration_date", label: "Alliance HazMat Permit" },
-  { key: "fleet_ins_expiration_date", label: "Fleet Insurance Cab Card" },
-  { key: "hazmat_lic_expiration_date", label: "HazMat Transportation Lic" },
-  { key: "inner_bridge_expiration_date", label: "Inner Bridge Permit" },
-];
-const TRAILER_PERMIT_FIELDS: { key: string; label: string }[] = [
-  { key: "trailer_reg_expiration_date", label: "Trailer Registration" },
-  { key: "trailer_inspection_expiration_date", label: "Annual Inspection" },
-  { key: "tank_v_expiration_date", label: "Tank V — External Visual" },
-  { key: "tank_k_expiration_date", label: "Tank K — Leakage Test" },
-  { key: "tank_l_expiration_date", label: "Tank L — Lining Inspection" },
-  { key: "tank_t_expiration_date", label: "Tank T — Thickness Test" },
-  { key: "tank_i_expiration_date", label: "Tank I — Internal Visual" },
-  { key: "tank_p_expiration_date", label: "Tank P — Pressure Test" },
-  { key: "tank_uc_expiration_date", label: "Tank UC — Upper Coupler" },
-];
+type EquipmentPermitRow = { expiration_date: string | null; permit_types: { name: string } | null };
 
 // unitLabel ("Truck 25184" / "Trailer 3151") is baked directly into each
 // item's label -- per explicit request, dispatch couldn't tell which unit
 // a bare "Registration" line belonged to when a driver has both a truck
 // and trailer with their own permit sets.
-function collectExpiringPermits(unitLabel: string, row: Record<string, any> | null, fields: { key: string; label: string }[]): PermitItem[] {
-  if (!row) return [];
+function collectExpiringPermits(unitLabel: string, rows: EquipmentPermitRow[]): PermitItem[] {
   const out: PermitItem[] = [];
-  for (const f of fields) {
-    const iso = row[f.key] as string | null;
+  for (const r of rows) {
+    const iso = r.expiration_date;
     if (!iso) continue;
     const state = expStateFor(iso);
-    if (state === "expiring" || state === "expired") out.push({ label: `${unitLabel} — ${f.label}`, iso });
+    if (state === "expiring" || state === "expired") {
+      out.push({ label: `${unitLabel} — ${r.permit_types?.name ?? "Permit"}`, iso });
+    }
   }
   return out.sort((a, b) => a.iso.localeCompare(b.iso));
 }
@@ -253,19 +237,21 @@ export default function DispatchPage() {
       const claimed = ((claimedCombos ?? [])[0] as any) ?? null;
       const truckId = claimed?.truck_id ?? null;
       const trailerId = claimed?.trailer_id ?? null;
-      const [truckRes, trailerRes] = await Promise.all([
+      const [truckRes, trailerRes, truckPermitsRes, trailerPermitsRes] = await Promise.all([
+        truckId ? supabase.from("trucks").select("truck_name, make").eq("truck_id", truckId).maybeSingle() : Promise.resolve({ data: null }),
+        trailerId ? supabase.from("trailers").select("trailer_name, make").eq("trailer_id", trailerId).maybeSingle() : Promise.resolve({ data: null }),
         truckId
-          ? supabase.from("trucks").select(["truck_name", "make", ...TRUCK_PERMIT_FIELDS.map((f) => f.key)].join(", ")).eq("truck_id", truckId).maybeSingle()
-          : Promise.resolve({ data: null }),
+          ? supabase.from("equipment_permits").select("expiration_date, permit_types(name)").eq("truck_id", truckId)
+          : Promise.resolve({ data: [] }),
         trailerId
-          ? supabase.from("trailers").select(["trailer_name", "make", ...TRAILER_PERMIT_FIELDS.map((f) => f.key)].join(", ")).eq("trailer_id", trailerId).maybeSingle()
-          : Promise.resolve({ data: null }),
+          ? supabase.from("equipment_permits").select("expiration_date, permit_types(name)").eq("trailer_id", trailerId)
+          : Promise.resolve({ data: [] }),
       ]);
       const truckRow = (truckRes as any)?.data ?? null;
       const trailerRow = (trailerRes as any)?.data ?? null;
       const permitItems = [
-        ...collectExpiringPermits(truckRow?.truck_name ? `Truck ${truckRow.truck_name}` : "Truck", truckRow, TRUCK_PERMIT_FIELDS),
-        ...collectExpiringPermits(trailerRow?.trailer_name ? `Trailer ${trailerRow.trailer_name}` : "Trailer", trailerRow, TRAILER_PERMIT_FIELDS),
+        ...collectExpiringPermits(truckRow?.truck_name ? `Truck ${truckRow.truck_name}` : "Truck", ((truckPermitsRes as any)?.data ?? []) as EquipmentPermitRow[]),
+        ...collectExpiringPermits(trailerRow?.trailer_name ? `Trailer ${trailerRow.trailer_name}` : "Trailer", ((trailerPermitsRes as any)?.data ?? []) as EquipmentPermitRow[]),
       ].sort((a, b) => a.iso.localeCompare(b.iso));
       setEquipment({
         truckName: truckRow?.truck_name ?? null,
