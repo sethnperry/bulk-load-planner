@@ -10,6 +10,7 @@ import {
   TRUCK_CATEGORIES, TRAILER_CATEGORIES,
   type EquipmentType, type AttachmentGroup,
 } from "@/lib/ui/driver/DocHub";
+import { type ServiceType, fetchServiceTypes, SimpleServiceModal } from "@/app/calculator/modals/ServiceTypeManager";
 
 // Types
 // ─────────────────────────────────────────────────────────────
@@ -716,6 +717,55 @@ type SensitiveData = {
 
 const emptySensitive: SensitiveData = { purchase_price: "", purchase_date: "", lease_terms: "", insurance_claims: "" };
 
+// Log a service record / manage service types (name + interval) for this
+// unit -- previously only reachable via the solo-tier equipment picker
+// (SoloEquipmentModal.tsx), so a fleet (non-solo) company had no way at all
+// to create a service type or set its interval. Added here 2026-08-07 per
+// explicit user direction, reusing the exact same SimpleServiceModal both
+// tiers now share (see ServiceTypeManager.tsx). Deliberately NOT gated by
+// myRole/canEditRestricted -- unlike the identity/permit fields on this
+// modal, service type management has never been role-restricted in the
+// solo flow this came from, and the user explicitly asked that stay true
+// here too ("everyone should be able to edit").
+function ServiceSection({ unitKind, unitId, unitName, companyId }: {
+  unitKind: "truck" | "trailer"; unitId: string; unitName: string; companyId: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [authUserId, setAuthUserId] = useState<string | null>(null);
+  const [serviceTypes, setServiceTypes] = useState<ServiceType[]>([]);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => setAuthUserId(data.user?.id ?? null));
+  }, []);
+
+  async function reloadTypes() {
+    setServiceTypes(await fetchServiceTypes(companyId));
+  }
+  useEffect(() => { if (companyId) reloadTypes(); }, [companyId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <div style={{ marginTop: 10, marginBottom: 10 }}>
+      <button type="button" onClick={() => setOpen(true)}
+        style={{ ...css.btn("subtle"), fontSize: 11, width: "100%", textAlign: "left" as const }}>
+        Log Service / Manage Service Types
+      </button>
+      <SimpleServiceModal
+        open={open}
+        onClose={() => setOpen(false)}
+        companyId={companyId}
+        authUserId={authUserId}
+        truckId={unitKind === "truck" ? unitId : null}
+        trailerId={unitKind === "trailer" ? unitId : null}
+        truckName={unitKind === "truck" ? unitName : null}
+        trailerName={unitKind === "trailer" ? unitName : null}
+        serviceTypes={serviceTypes}
+        onTypesChanged={reloadTypes}
+        onSaved={() => {}}
+      />
+    </div>
+  );
+}
+
 function SensitiveInfoSection({ unitKind, unitId, companyId }: { unitKind: "truck" | "trailer"; unitId: string; companyId: string }) {
   const [open, setOpen] = useState(false);
   const [data, setData] = useState<SensitiveData>(emptySensitive);
@@ -1002,6 +1052,10 @@ function TruckModal({ truck, companyId, onClose, onDone, myRole }: {
         <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3} disabled={!canEditRestricted}
           style={{ ...css.input, width: "100%", fontSize: 12, resize: "vertical" as const, ...(canEditRestricted ? {} : { opacity: 0.55, cursor: "not-allowed" as const }) }} />
       </Field>
+
+      {!isNew && (
+        <ServiceSection unitKind="truck" unitId={truck!.truck_id} unitName={name || truck!.truck_name} companyId={companyId} />
+      )}
 
       {!isNew && myRole === "admin" && (
         <SensitiveInfoSection unitKind="truck" unitId={truck!.truck_id} companyId={companyId} />
@@ -1302,6 +1356,10 @@ function TrailerModal({ trailer, companyId, onClose, onDone, myRole }: {
         <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3} disabled={!canEditRestricted}
           style={{ ...css.input, width: "100%", fontSize: 12, resize: "vertical" as const, ...(canEditRestricted ? {} : { opacity: 0.55, cursor: "not-allowed" as const }) }} />
       </Field>
+
+      {!isNew && (
+        <ServiceSection unitKind="trailer" unitId={trailer!.trailer_id} unitName={name || trailer!.trailer_name} companyId={companyId} />
+      )}
 
       {!isNew && myRole === "admin" && (
         <SensitiveInfoSection unitKind="trailer" unitId={trailer!.trailer_id} companyId={companyId} />

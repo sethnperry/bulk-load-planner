@@ -1700,6 +1700,103 @@ stays fully visible and right-aligned. `tsc --noEmit` clean; no console
 errors; reverted the synthetic long-name DOM edit (an in-page-only test,
 never touched real data) by simply reloading.
 
+### Service type/interval editing shared across solo and fleet tiers (2026-08-07)
+
+User feedback, in order: "in the equipment modal I can't find where we set
+service intervals" (answered live -- it's the "−" edit affordance on each
+option in the Type dropdown inside the Service modal, only reachable from
+`SoloEquipmentModal.tsx`'s Service button, since that's where the whole
+feature was originally built), then, on their own real company ("Gemini" --
+confirmed via a direct `companies` query, `is_solo = true`): "can we make it
+the same for all? I think everyone should be able to edit," plus a second,
+independent ask: the equipment picker's report-section "next service due"
+line should show the soonest due of ANY logged type, not just whichever
+type happened to be logged most recently.
+
+**Root cause of the "make it the same for all" gap**: `ServiceTypeEditorModal`/
+`ServiceTypeSelect`/`SimpleServiceModal` (create a service type, set its
+interval, log a service against it) only ever existed inline inside
+`SoloEquipmentModal.tsx`. Confirmed via a repo-wide grep of every
+`service_types`/`service_records` write: literally the only insert/update
+path in the whole app. The fleet-tier equipment editor
+(`lib/ui/driver/EquipmentDetails.tsx`'s `TruckModal`/`TrailerModal`, used by
+both `/admin`'s Equipment section and non-solo companies' Planner "Select
+Equipment" sheet) had no service UI at all -- `RecordHistoryModal.tsx`
+(Reports hub's "Service History") only ever reads/edits existing rows, never
+creates one. So a fleet (non-solo) company had zero way to log a first
+service or configure an interval, regardless of role.
+
+**Fix**: extracted `ServiceType`, `ServiceTypeEditorModal`, `ServiceTypeSelect`,
+`SimpleServiceModal`, and a `fetchServiceTypes()` helper into a new shared
+file, `app/calculator/modals/ServiceTypeManager.tsx` -- same reasoning
+`lib/ui/CustomSelect.tsx`'s own header comment already gives for why this
+kind of thing gets pulled out instead of copy-pasted per-tier ("duplicating
+this per-file is how the bug crept back in once already"). `SoloEquipmentModal.tsx`
+now imports from there instead of defining its own copies (one real bug
+caught in the extraction: `ServiceTypeSelect`'s dropdown button had been
+using the plain `inputStyle`, not the chevron-icon `selectStyle` variant the
+original used -- fixed before it shipped, not after).
+
+Added a new `ServiceSection` component directly in `EquipmentDetails.tsx`,
+wired into both `TruckModal` and `TrailerModal` (`!isNew` only -- needs a
+real unit id) as a "Log Service / Manage Service Types" button opening the
+same `SimpleServiceModal`. **Deliberately not gated by `canEditRestricted`**
+(the admin/dispatch/lead-only gate every other restricted field on this
+modal uses) -- per explicit user direction ("everyone should be able to
+edit"), matching the solo flow's own precedent, which was never role-gated
+either.
+
+**Report-section "next due" fix** (`SoloEquipmentModal.tsx`'s
+`computeUnitServiceDue`): previously picked whichever service type had the
+most recently LOGGED record for that unit (by date, then `created_at` to
+break same-day ties) and showed that type's own due state -- which could
+surface a type due months away while a different type logged earlier was
+actually due imminently. Rewritten to compute a due candidate for every
+type with at least one record (`duration` → real due date; `miles`/`hours`
+→ absolute due reading) and pick the soonest **within its own kind** --
+comparing raw due-mileage or due-hours across types for the SAME unit is
+still valid without live odometer/engine-hour telemetry (this app doesn't
+track either), since it's the one monotonically increasing counter for that
+unit ticking toward each threshold; a due DATE and a due READING aren't the
+same unit of "soon" though, so when both exist for a unit, `duration` wins
+as the more universally actionable of the two. Types with no computable due
+(`interval_kind: "none"`, or a `miles`/`hours` type missing its reading)
+only get shown as a last-resort fallback (most-recently-logged, same as the
+old behavior), and only when nothing else on that unit has a real due
+candidate at all.
+
+**Live-verified against the real "Gemini Motor Transport" company** (not a
+demo/test company -- confirmed `is_solo = true` via direct query, which is
+why the Planner's "Select Equipment" still routes through `SoloEquipmentModal`
+for it today):
+- Fleet path: `/admin` → Equipment → Edit truck 25184 → "Log Service /
+  Manage Service Types" now present and working -- opened the Type dropdown
+  (existing "Dry"/"Wet" types with their edit affordances + "+ New type"
+  rendered correctly), opened "Edit Service Type" for "Dry" (Miles / 65000 /
+  Truck only), closed without changes.
+- Solo path regression check: same truck (25184) via the Planner's Select
+  Equipment sheet -- Service modal still opens and behaves identically to
+  before the extraction.
+- Next-due fix: truck 25184 has both a Dry record (due at 291,086 mi) and a
+  Wet record (due at 326,442 mi, and the one more recently logged). Report
+  line now reads "Truck · Dry / Due at 291,086 mi" -- the lower (sooner) of
+  the two -- where it previously read "Truck · Wet / Due at 326,442 mi"
+  purely because Wet was logged more recently. Confirmed both before and
+  after a hard reload (not just a warm client nav).
+
+`tsc --noEmit` clean throughout. One console error surfaced mid-pass and
+persisted across a hard page reload -- `ReferenceError: SimpleServiceModal
+is not defined` -- initially concerning since it survived a reload, but
+ruled out as a real regression: `tsc --noEmit` stayed clean the whole time,
+a direct `grep` confirmed no stale reference exists in any source file, and
+the exact flow the error name implies would break (opening the Service
+modal) was exercised successfully multiple times, in both the solo and
+fleet paths, both before and after the reload, with the modal rendering its
+full form every time -- consistent with this project's own documented
+Turbopack/dev-server HMR staleness category (see "Dev-server stale-content
+trap" earlier in this doc), not a genuine break. Worth a real dev-server
+restart to fully clear if it resurfaces.
+
 ### Tab order swap + tab-switching "glitch" fix (2026-08-06)
 
 Two small follow-ups, per explicit request:
