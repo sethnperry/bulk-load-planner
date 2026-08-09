@@ -148,8 +148,11 @@ export default function PlannerControls(props: any) {
                     }}
                   >
                     {/* Comp number above, with a reset control when a temporary
-                        override is active */}
-                    <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 4 }}>
+                        override is active. marginBottom is 8 (not 4) so the
+                        cap dimmer's dashed boundary -- which sits flush at the
+                        bar's top edge when a compartment's cap is at/near its
+                        full max -- never visually touches this label. */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 8 }}>
                       <div style={{
                         fontSize: "clamp(11px, 2.4vw, 13px)", fontWeight: 700,
                         color: hasOverride ? "#ffb020" : "rgba(255,255,255,0.45)",
@@ -230,7 +233,10 @@ export default function PlannerControls(props: any) {
                         onClick={(e) => e.stopPropagation()}
                         style={{
                           position: "absolute", left: "50%", transform: "translate(-50%,-50%)",
-                          top: `${capLineTopPct}%`, width: 36, height: 14,
+                          // Clamped to at least 7px (half the handle's own height) so a
+                          // cap at/near 100% never pushes the handle above the bar's top
+                          // edge into the comp-number label sitting just above it.
+                          top: `max(7px, ${capLineTopPct}%)`, width: 36, height: 14,
                           display: "flex", alignItems: "center", justifyContent: "center",
                           cursor: "ns-resize", touchAction: "none", zIndex: 3,
                         }}

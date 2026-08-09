@@ -32,16 +32,13 @@
 // the current CSS recreation's convenience.
 
 import Link from "next/link";
-import { useState } from "react";
 
 type CardTone = "light" | "dark";
-type TabKey = "terminal" | "planner" | "cards";
 type CardSpec = {
   eyebrow: string;
   title: string;
   body: string;
   tone: CardTone;
-  tab: TabKey;
   style: React.CSSProperties;
 };
 
@@ -51,7 +48,6 @@ const LEFT_CARDS: { top: CardSpec; bottom: [CardSpec, CardSpec] } = {
     title: "Custom load plans on tap",
     body: "Set it once for the way you load. Whether it's a single product or a split load. One compartment or five. The plan adapts to you.",
     tone: "light",
-    tab: "planner",
     style: { marginTop: 14, top: 38, height: 50 },
   },
   bottom: [
@@ -60,7 +56,6 @@ const LEFT_CARDS: { top: CardSpec; bottom: [CardSpec, CardSpec] } = {
       title: "Slip seat with ease",
       body: "Drivers share visibility of primary equipment as well as spares to keep track of equipment needs like service history.",
       tone: "dark",
-      tab: "planner",
       style: { marginTop: 100, top: -40 },
     },
     {
@@ -68,7 +63,6 @@ const LEFT_CARDS: { top: CardSpec; bottom: [CardSpec, CardSpec] } = {
       title: "Density math made easy",
       body: "Load dynamically for product density changes. Let the model predict the temp or manually override with a known temp for precision.",
       tone: "light",
-      tab: "planner",
       style: { marginTop: 8 },
     },
   ],
@@ -80,7 +74,6 @@ const RIGHT_CARDS: CardSpec[] = [
     title: "Cap on the fly",
     body: "Not enough room to deliver a full compartment. Slide the handle down to dial it in while the others compensate.",
     tone: "dark",
-    tab: "planner",
     style: { marginTop: 52 },
   },
   {
@@ -88,7 +81,6 @@ const RIGHT_CARDS: CardSpec[] = [
     title: "Swap Equipment",
     body: "This truck with that trailer? Doesn't matter we track the tare weight for each combination with a quick tap to switch it up.",
     tone: "light",
-    tab: "planner",
     style: { marginTop: 40 },
   },
   {
@@ -96,14 +88,13 @@ const RIGHT_CARDS: CardSpec[] = [
     title: "Renewal Tracking",
     body: "Access cards are updated automagically, helping avoid the last minute price exception to prevent a lapse.",
     tone: "light",
-    tab: "cards",
     style: { marginTop: 32 },
   },
 ];
 
-function Card({ c, active }: { c: CardSpec; active: boolean }) {
+function Card({ c }: { c: CardSpec }) {
   return (
-    <div className={`card card-${c.tone}${active ? "" : " card-dim"}`} style={c.style}>
+    <div className={`card card-${c.tone}`} style={c.style}>
       <span className="dot" />
       <p className="eyebrow">{c.eyebrow}</p>
       <p className="title">{c.title}</p>
@@ -112,13 +103,10 @@ function Card({ c, active }: { c: CardSpec; active: boolean }) {
   );
 }
 
-const TAB_BAR: { label: string; tab: TabKey | null }[] = [
-  { label: "Dispatch", tab: null },
-  { label: "Terminal", tab: "terminal" },
-  { label: "Planner", tab: "planner" },
-  { label: "Cards", tab: "cards" },
-  { label: "Vault", tab: null },
-];
+// Bump whenever public/app-screens/planner.jpg is re-captured -- the bare
+// path alone lets browsers keep serving a stale cached copy of the old
+// screenshot indefinitely (same URL every time, no cache-buster).
+const PLANNER_SCREEN_VERSION = "20260808d-realmockup";
 
 const LOGO_PATH =
   "m -50.568768,-33.479618 c -0.379508,0 -0.747403,0.04834 -1.09766,0.139414 -0.241358,0.06276 -0.287389,0.279561 -0.110962,0.455988 l 2.762871,2.762871 a 1.1791924,1.1791924 22.5 0 0 0.833814,0.345377 h 4.240473 3.803385 4.844666 c 0.320197,0 0.577742,0.257545 0.577742,0.577742 0,0.320197 -0.257545,0.578259 -0.577742,0.578259 h -4.844666 -3.259536 a 0.54384869,0.54384869 135 0 0 -0.543849,0.543849 v 3.02906 0.19637 10.722212 a 0.21369808,0.21369808 22.501943 0 0 0.364795,0.151117 l 3.05794,-3.057525 a 1.2994077,1.2994077 112.50194 0 0 0.38065,-0.918882 v -3.289907 -3.607015 h 4.877222 c 2.390258,0 4.314982,-1.924207 4.314982,-4.314465 0,-2.390258 -1.924724,-4.314465 -4.314982,-4.314465 h -4.877222 -3.803385 z";
@@ -153,25 +141,18 @@ const TRUCK_PATHS = [
   "m 543.80998,139.78475 c 0.28409,-2.39755 0.20952,-6.27441 0.33434,-8.21035 0.0605,-0.93851 0.0586,-2.06367 0.0605,-3.23701 -0.41837,0.14675 -0.99692,0.62897 -1.25936,2.12855 -0.39763,2.27221 -0.17279,6.87952 0.86455,9.31881 z",
 ];
 
-const SCREEN_SRC: Record<TabKey, string> = {
-  terminal: "/app-screens/terminal.jpg",
-  planner: "/app-screens/planner.jpg",
-  cards: "/app-screens/cards.jpg",
-};
-
-function PhoneScreen({ tab }: { tab: TabKey }) {
+function PhoneScreen() {
   return (
     <div className="phone">
       <div className="notch" />
       <div className="screen">
-        {/* eslint-disable-next-line @next/next/no-img-element -- real captured
-            screenshots of the live app, swapped by tab; not a Next/Image
-            candidate since these are static marketing assets, not content
+        {/* eslint-disable-next-line @next/next/no-img-element -- a real
+            captured screenshot of the live Planner screen; not a Next/Image
+            candidate since this is a static marketing asset, not content
             that benefits from remote optimization. */}
         <img
-          key={tab}
-          src={SCREEN_SRC[tab]}
-          alt={`ProTankr ${tab} screen`}
+          src={`/app-screens/planner.png?v=${PLANNER_SCREEN_VERSION}`}
+          alt="ProTankr planner screen"
           className="screen-img"
         />
       </div>
@@ -180,8 +161,6 @@ function PhoneScreen({ tab }: { tab: TabKey }) {
 }
 
 export default function Home() {
-  const [tab, setTab] = useState<TabKey>("planner");
-
   return (
     <div className="page">
       <header className="header">
@@ -209,20 +188,20 @@ export default function Home() {
       <section className="grid-section">
         <div className="feature-grid">
           <div className="col col-left">
-            <Card c={LEFT_CARDS.top} active={LEFT_CARDS.top.tab === tab} />
+            <Card c={LEFT_CARDS.top} />
             <p className="label label-easy">Easy.</p>
-            <Card c={LEFT_CARDS.bottom[0]} active={LEFT_CARDS.bottom[0].tab === tab} />
-            <Card c={LEFT_CARDS.bottom[1]} active={LEFT_CARDS.bottom[1].tab === tab} />
+            <Card c={LEFT_CARDS.bottom[0]} />
+            <Card c={LEFT_CARDS.bottom[1]} />
           </div>
 
           <div className="col col-center">
-            <PhoneScreen tab={tab} />
+            <PhoneScreen />
           </div>
 
           <div className="col col-right">
             <p className="label label-quick">Quick.</p>
             {RIGHT_CARDS.map((c) => (
-              <Card c={c} active={c.tab === tab} key={c.eyebrow} />
+              <Card c={c} key={c.eyebrow} />
             ))}
             <p className="label label-accurate">Accurate.</p>
           </div>
@@ -256,20 +235,6 @@ export default function Home() {
             ))}
           </g>
         </svg>
-
-        <div className="tabbar">
-          {TAB_BAR.map((t) => (
-            <span
-              key={t.label}
-              className={
-                t.tab === tab ? "tab-active" : t.tab ? "tab-clickable" : undefined
-              }
-              onClick={t.tab ? () => setTab(t.tab as TabKey) : undefined}
-            >
-              {t.label}
-            </span>
-          ))}
-        </div>
       </section>
 
       <style jsx global>{`
@@ -320,11 +285,9 @@ export default function Home() {
           border-radius: 12px;
           padding: 10px 12px;
           position: relative;
-          transition: opacity 200ms ease, filter 200ms ease, transform 200ms ease;
         }
         .card-light { background: #ececec; color: #111; }
         .card-dark { background: #3a3a3a; color: #fff; }
-        .card-dim { opacity: 0.35; filter: grayscale(0.4); transform: scale(0.98); }
         .card .dot { position: absolute; top: 12px; right: 12px; width: 5px; height: 5px; border-radius: 50%; }
         .card-light .dot { background: rgba(0,0,0,0.3); }
         .card-dark .dot { background: rgba(255,255,255,0.4); }
@@ -377,21 +340,6 @@ export default function Home() {
         }
         .manifesto p { margin: 0; }
 
-        .tabbar {
-          position: relative;
-          max-width: 900px;
-          margin: 6px auto 0;
-          background: #0b0b0b;
-          border-radius: 8px;
-          padding: 5px 14px;
-          display: flex;
-          justify-content: space-between;
-        }
-        .tabbar span { font: 500 10px var(--font); color: rgba(255,255,255,0.4); }
-        .tabbar span.tab-active { font: 700 12px var(--font); color: #fff; }
-        .tabbar span.tab-clickable { cursor: pointer; }
-        .tabbar span.tab-clickable:hover { color: rgba(255,255,255,0.75); }
-
         @media (max-width: 980px) {
           .header { padding: 20px 24px 0; }
           .nav-row { flex-wrap: wrap; row-gap: 12px; }
@@ -409,7 +357,6 @@ export default function Home() {
           .phone { width: min(362px, 86vw); }
           .truck-mark { display: none; }
           .manifesto { margin-top: 40px; }
-          .tabbar { flex-wrap: wrap; gap: 12px 20px; justify-content: center; }
         }
       `}</style>
     </div>

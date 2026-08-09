@@ -1312,11 +1312,40 @@ const lastProductInfoById = useMemo(() => {
       {/* ── Info cards, Load button, Load summary ── */}
       {(() => {
         const { loadReport } = loadWorkflow;
-        const plannedGal = loadReport?.planned_total_gal ?? (planRows.length ? plannedGallonsTotal : null);
+
+        // The summary card shows the last COMPLETED load's numbers as soon as
+        // one is available (see the lastLoadReport seed effect above) -- but
+        // the moment the live plan diverges from that snapshot (different
+        // preset, product swap, cap change, etc.), it needs to track the
+        // *live* plan instead of continuing to show stale gal/lbs from
+        // before the change. Comparing planned gallons (rounded to the
+        // nearest half-gallon, so this doesn't flip on floating-point noise)
+        // is enough to detect "has this plan changed since that report was
+        // captured" without needing extra state to track a "dirty" flag.
+        const reportMatchesLivePlan =
+          loadReport?.planned_total_gal != null &&
+          Math.abs(loadReport.planned_total_gal - plannedGallonsTotal) < 0.5;
+        const showLivePlanSummary = !reportMatchesLivePlan && planRows.length > 0;
+
+        const plannedGal = showLivePlanSummary
+          ? plannedGallonsTotal
+          : (loadReport?.planned_total_gal ?? (planRows.length ? plannedGallonsTotal : null));
         const plannedGalText = plannedGal == null ? "—" : `${Math.round(plannedGal).toLocaleString()} gal`;
-        const targetText = loadReport?.planned_gross_lbs == null ? "—" : `${Math.round(loadReport.planned_gross_lbs).toLocaleString()} lbs`;
-        const actualText = loadReport?.actual_gross_lbs == null ? "—" : `${Math.round(loadReport.actual_gross_lbs).toLocaleString()} lbs`;
-        const diff = loadReport?.diff_lbs ?? null;
+        const targetText = showLivePlanSummary
+          ? (targetWeight > 0 ? `${Math.round(targetWeight).toLocaleString()} lbs` : "—")
+          : (loadReport?.planned_gross_lbs == null ? "—" : `${Math.round(loadReport.planned_gross_lbs).toLocaleString()} lbs`);
+        // Pre-load there's no real scale "actual" yet -- this shows the live
+        // predicted GROSS weight (product + tare, matching planned_gross_lbs/
+        // actual_gross_lbs' own units -- plannedWeightLbs by itself is just
+        // product weight, net of the truck+trailer's own tare) for the
+        // current plan in that slot instead.
+        const plannedGrossLbs = plannedWeightLbs + tare;
+        const actualText = showLivePlanSummary
+          ? `${Math.round(plannedGrossLbs).toLocaleString()} lbs`
+          : (loadReport?.actual_gross_lbs == null ? "—" : `${Math.round(loadReport.actual_gross_lbs).toLocaleString()} lbs`);
+        const diff = showLivePlanSummary
+          ? (targetWeight > 0 ? plannedGrossLbs - targetWeight : null)
+          : (loadReport?.diff_lbs ?? null);
         const diffText = diff == null ? "—" : `${diff >= 0 ? "+" : ""}${Math.round(diff).toLocaleString()} lbs`;
         const diffColor = diff == null ? "rgba(255,255,255,0.85)" : diff > 0 ? "#ef4444" : "#4ade80";
 
@@ -1324,7 +1353,7 @@ const lastProductInfoById = useMemo(() => {
         // fixed 80,000 lb federal legal limit (same threshold LoadReportModal
         // already uses for its "drain to 80k" line).
         const LEGAL_GROSS_LBS = 80000;
-        const actualGross = loadReport?.actual_gross_lbs ?? null;
+        const actualGross = showLivePlanSummary ? plannedGrossLbs : (loadReport?.actual_gross_lbs ?? null);
         const actualColor =
           actualGross == null || !(targetWeight > 0) ? "#fff"
           : actualGross >= LEGAL_GROSS_LBS ? "#ef4444"
@@ -1497,10 +1526,10 @@ const lastProductInfoById = useMemo(() => {
               style={{
                 borderRadius: 6, border: "none", background: themeFill(shell.theme.darkMode, shell.theme.accentColor), padding: "10px 14px", width: "100%",
                 cursor: loadDisabled ? "not-allowed" : "pointer", opacity: loadDisabled ? 0.5 : 1,
-                textAlign: "center" as const,
+                display: "flex", alignItems: "center", justifyContent: "center",
               }}
             >
-              <span style={{ fontSize: 16, fontWeight: 700, color: themeTextOnFill(shell.theme.darkMode), letterSpacing: 0.3 }}>{loadLabel}</span>
+              <span style={{ fontSize: 16, fontWeight: 700, lineHeight: 1, color: themeTextOnFill(shell.theme.darkMode), letterSpacing: 0.3 }}>{loadLabel}</span>
             </button>
 
             {loadBlockedMsg && (
@@ -1545,7 +1574,7 @@ const lastProductInfoById = useMemo(() => {
               {planUsesReferenceApi && planRows.length > 0 && (
                 <div style={{ fontSize: 10, fontWeight: 700, color: "#fb923c", marginTop: 4 }}>⚠ using ref API</div>
               )}
-              {loadReport?.recovered_points != null && loadReport.recovered_points > 0 && (
+              {!showLivePlanSummary && loadReport?.recovered_points != null && loadReport.recovered_points > 0 && (
                 <div style={{ fontSize: 12, fontWeight: 700, color: "#4ade80", marginTop: 6 }}>
                   🎉 You earned {loadReport.recovered_points.toFixed(1)} points on this load
                 </div>
