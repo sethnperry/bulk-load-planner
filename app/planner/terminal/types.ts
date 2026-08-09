@@ -49,4 +49,11 @@ export type ProductLite = {
   button_code: string | null;
   hex_code: string | null;
   is_dyed: boolean | null;
+  // When set, this product's API/temp tracking pools onto the canonical
+  // product's terminal_products row instead of its own (rack-injected
+  // variance like dye -- same tank, same feed). Mirrors ActiveComp's own
+  // canonical_product_id in app/planner/types.ts; needed here so
+  // RackProductStatusModal's STUD write-through pools the same way
+  // useLoadWorkflow.ts's real-load write already does.
+  canonical_product_id: string | null;
 };

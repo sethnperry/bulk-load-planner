@@ -1309,7 +1309,65 @@ permission gate on *reading or submitting* a status update):
    existing fuel-temp-bias system** (`terminal_temp_bias` /
    `update_terminal_temp_bias`) — same underlying data, new write path.
    Needs its own design pass to fit the existing bucketing (hour-of-day/
-   month) — not just "add a row somewhere."
+   month) — not just "add a row somewhere." **Resolved 2026-08-08, see
+   "Rack-level STUD now writes through to terminal_products" below** — the
+   temp-bias feed itself was already wired at launch; what was still
+   missing was `terminal_products` itself.
+
+#### Rack-level STUD now writes through to terminal_products (2026-08-08)
+
+Found live, not reported as a bug report — while capturing real app
+screenshots for the marketing landing page (see "Website / landing page
+rework" below), the Terminal tab's own rack-level Product List kept
+showing blank `API —` / `—°F` placeholders for a real, actively-used
+terminal (Marathon, Tampa) even though the Planner's temp prediction for
+that same terminal was clearly working (real predicted temp, real
+`terminal_temp_bias` buckets). User's own diagnosis, confirmed live before
+touching anything: **`rack_product_status`** (the table the rack Product
+List actually reads) and **`terminal_products`** (the older, per-terminal
+table the Planner's prediction pipeline and `useLoadWorkflow.ts` actually
+read/write) are two separate tables that were never connected — the rack
+feature launched with its own fresh table rather than reading or writing
+the one already in use. Confirmed via direct query: of 28 total
+`rack_product_status` rows across the whole live DB, 27 were null; North
+Rack and South Rack at Marathon both had **zero** real readings on either
+rack, even though `terminal_products` had real, recent data for the same
+terminal (D2 36.8 API / 89.5°F, updated 2026-07-24, etc.) — so nothing was
+"lost," the new table had just never been fed from the old one.
+
+User's ask, and the actual fix: rack-level STUD submissions should be a
+second way of updating the *same* shared "last known" value the Planner
+already uses — global across every company, same as `terminals` itself —
+not a parallel, rack-siloed side table. `RackProductStatusModal.tsx`'s
+`save()` now does a `terminal_products` update-then-insert-if-missing
+(same pattern `useLoadWorkflow.ts` already uses after a real load
+completes: `last_api`, `last_temp_f`, `last_api_updated_at`,
+`last_loaded_at`, `last_updated_by_load_id: null` since there's no load,
+`updated_at`), including the same canonical-product pooling a dyed-diesel
+STUD update needs (a variant pools onto its canonical product's
+`terminal_products` row instead of forking its own) — `ProductLite` gained
+`canonical_product_id`, sourced from the `products` table the same way
+`ActiveComp` already does in `app/planner/types.ts`. Deliberately gated on
+*both* API and temp being supplied together (same gate the existing
+temp-bias call already used) so a partial STUD entry can never blank out a
+previously-good value in the other column. `rack_product_status` itself is
+untouched — still the thing the rack UI reads for display, just no longer
+the only thing a STUD submission writes to.
+
+**Live-verified 2026-08-08**: submitted a real STUD entry (51.2 API /
+78.3°F) for ULSD Diesel #2 on Marathon's North Rack, then queried both
+tables directly — `rack_product_status` and `terminal_products` both show
+the new values under the same timestamp cluster, and the Terminal tab's
+Product List immediately reflected it (previously blank `API —` row now
+reads `API 51.2` / `78.3°F`). `tsc --noEmit` clean.
+
+**Not done, flagged not guessed**: no backfill migration was run to seed
+existing empty `rack_product_status` rows from `terminal_products`'
+already-real values — the write-through fix means new STUD submissions
+self-heal this going forward, but the ~26 remaining null rows across other
+terminals stay null until either a real STUD submission or a real load
+happens there. A one-time backfill was discussed but not run pending a
+decision on scope (one terminal vs. every terminal in the live DB).
 
 Crowdsourcing model is explicitly a v1/experiment — "we'll see how
 crowdsourcing terminal statuses go." Long-term intent is terminal operators

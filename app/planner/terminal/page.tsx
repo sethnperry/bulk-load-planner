@@ -107,7 +107,7 @@ export default function TerminalPage() {
   useEffect(() => {
     (async () => {
       const { data } = await supabase.from("products")
-        .select("product_id, product_name, display_name, description, button_code, hex_code, is_dyed");
+        .select("product_id, product_name, display_name, description, button_code, hex_code, is_dyed, canonical_product_id");
       const map: Record<string, ProductLite> = {};
       for (const p of (data ?? []) as ProductLite[]) map[p.product_id] = p;
       setProductsById(map);

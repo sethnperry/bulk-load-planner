@@ -86,6 +86,50 @@ export default function RackProductStatusModal({
       return;
     }
 
+    // Write through to terminal_products -- the same table useLoadWorkflow.ts
+    // updates after a real load completes -- so a STUD submission and an
+    // actual load are two ways of updating one shared "last known" value,
+    // not two parallel data stores. Same canonical-product pooling as that
+    // path: a rack-injected variant (e.g. dyed diesel) pools onto its
+    // canonical product's row instead of forking its own. Only fires when
+    // both API and temp are supplied together, same gate as the temp-bias
+    // call below, so a partial STUD (say, API only) never blanks out a
+    // previously-good value in the other column.
+    if (apiNum != null && tempNum != null) {
+      const canonicalProductId = product?.canonical_product_id || productId;
+      const nowIso = new Date().toISOString();
+      const { data: updated, error: tpUpdateErr } = await supabase
+        .from("terminal_products")
+        .update({
+          last_api: apiNum,
+          last_temp_f: tempNum,
+          last_api_updated_at: nowIso,
+          last_loaded_at: nowIso,
+          last_updated_by_load_id: null,
+          updated_at: nowIso,
+        })
+        .eq("terminal_id", rack.terminal_id)
+        .eq("product_id", canonicalProductId)
+        .select("terminal_id");
+
+      if (tpUpdateErr) {
+        console.warn("terminal_products update failed (non-fatal):", tpUpdateErr);
+      } else if (!updated || updated.length === 0) {
+        const { error: tpInsertErr } = await supabase.from("terminal_products").insert({
+          terminal_id: rack.terminal_id,
+          product_id: canonicalProductId,
+          last_api: apiNum,
+          last_temp_f: tempNum,
+          last_api_updated_at: nowIso,
+          last_loaded_at: nowIso,
+          last_updated_by_load_id: null,
+          updated_at: nowIso,
+          active: false,
+        });
+        if (tpInsertErr) console.warn("terminal_products insert failed (non-fatal):", tpInsertErr);
+      }
+    }
+
     // Feed the existing temp-bias system, same pattern as useLoadWorkflow.ts.
     if (apiNum != null && tempNum != null && terminalCity && terminalState) {
       try {
@@ -194,7 +238,7 @@ export default function RackProductStatusModal({
           </div>
         </div>
         <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", lineHeight: 1.5 }}>
-          API and temp are optional — supplying both feeds this terminal's fuel-temp prediction the same way completing a real load does.
+          API and temp are optional — supplying both updates this product's known reading for the whole terminal, visible to any driver in any company, the same way completing a real load does.
         </div>
 
         <button
