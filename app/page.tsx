@@ -32,13 +32,16 @@
 // the current CSS recreation's convenience.
 
 import Link from "next/link";
+import { useState } from "react";
 
 type CardTone = "light" | "dark";
+type TabKey = "terminal" | "planner" | "cards";
 type CardSpec = {
   eyebrow: string;
   title: string;
   body: string;
   tone: CardTone;
+  tab: TabKey;
   style: React.CSSProperties;
 };
 
@@ -48,7 +51,8 @@ const LEFT_CARDS: { top: CardSpec; bottom: [CardSpec, CardSpec] } = {
     title: "Custom load plans on tap",
     body: "Set it once for the way you load. Whether it's a single product or a split load. One compartment or five. The plan adapts to you.",
     tone: "light",
-    style: { marginTop: 26, top: 72, height: 74 },
+    tab: "planner",
+    style: { marginTop: 14, top: 38, height: 50 },
   },
   bottom: [
     {
@@ -56,14 +60,16 @@ const LEFT_CARDS: { top: CardSpec; bottom: [CardSpec, CardSpec] } = {
       title: "Slip seat with ease",
       body: "Drivers share visibility of primary equipment as well as spares to keep track of equipment needs like service history.",
       tone: "dark",
-      style: { marginTop: 195, top: -79 },
+      tab: "planner",
+      style: { marginTop: 100, top: -40 },
     },
     {
       eyebrow: "Product Temperature",
       title: "Density math made easy",
       body: "Load dynamically for product density changes. Let the model predict the temp or manually override with a known temp for precision.",
       tone: "light",
-      style: { marginTop: 16 },
+      tab: "planner",
+      style: { marginTop: 8 },
     },
   ],
 };
@@ -74,27 +80,30 @@ const RIGHT_CARDS: CardSpec[] = [
     title: "Cap on the fly",
     body: "Not enough room to deliver a full compartment. Slide the handle down to dial it in while the others compensate.",
     tone: "dark",
-    style: { marginTop: 100 },
+    tab: "planner",
+    style: { marginTop: 52 },
   },
   {
     eyebrow: "Tare Weights",
     title: "Swap Equipment",
     body: "This truck with that trailer? Doesn't matter we track the tare weight for each combination with a quick tap to switch it up.",
     tone: "light",
-    style: { marginTop: 80 },
+    tab: "planner",
+    style: { marginTop: 40 },
   },
   {
     eyebrow: "Access Cards",
     title: "Renewal Tracking",
     body: "Access cards are updated automagically, helping avoid the last minute price exception to prevent a lapse.",
     tone: "light",
-    style: { marginTop: 65 },
+    tab: "cards",
+    style: { marginTop: 32 },
   },
 ];
 
-function Card({ c }: { c: CardSpec }) {
+function Card({ c, active }: { c: CardSpec; active: boolean }) {
   return (
-    <div className={`card card-${c.tone}`} style={c.style}>
+    <div className={`card card-${c.tone}${active ? "" : " card-dim"}`} style={c.style}>
       <span className="dot" />
       <p className="eyebrow">{c.eyebrow}</p>
       <p className="title">{c.title}</p>
@@ -103,7 +112,13 @@ function Card({ c }: { c: CardSpec }) {
   );
 }
 
-const TAB_BAR = ["Dispatch", "Terminal", "Planner", "Cards", "Vault"];
+const TAB_BAR: { label: string; tab: TabKey | null }[] = [
+  { label: "Dispatch", tab: null },
+  { label: "Terminal", tab: "terminal" },
+  { label: "Planner", tab: "planner" },
+  { label: "Cards", tab: "cards" },
+  { label: "Vault", tab: null },
+];
 
 const LOGO_PATH =
   "m -50.568768,-33.479618 c -0.379508,0 -0.747403,0.04834 -1.09766,0.139414 -0.241358,0.06276 -0.287389,0.279561 -0.110962,0.455988 l 2.762871,2.762871 a 1.1791924,1.1791924 22.5 0 0 0.833814,0.345377 h 4.240473 3.803385 4.844666 c 0.320197,0 0.577742,0.257545 0.577742,0.577742 0,0.320197 -0.257545,0.578259 -0.577742,0.578259 h -4.844666 -3.259536 a 0.54384869,0.54384869 135 0 0 -0.543849,0.543849 v 3.02906 0.19637 10.722212 a 0.21369808,0.21369808 22.501943 0 0 0.364795,0.151117 l 3.05794,-3.057525 a 1.2994077,1.2994077 112.50194 0 0 0.38065,-0.918882 v -3.289907 -3.607015 h 4.877222 c 2.390258,0 4.314982,-1.924207 4.314982,-4.314465 0,-2.390258 -1.924724,-4.314465 -4.314982,-4.314465 h -4.877222 -3.803385 z";
@@ -138,172 +153,79 @@ const TRUCK_PATHS = [
   "m 543.80998,139.78475 c 0.28409,-2.39755 0.20952,-6.27441 0.33434,-8.21035 0.0605,-0.93851 0.0586,-2.06367 0.0605,-3.23701 -0.41837,0.14675 -0.99692,0.62897 -1.25936,2.12855 -0.39763,2.27221 -0.17279,6.87952 0.86455,9.31881 z",
 ];
 
-function PhoneScreen() {
+const SCREEN_SRC: Record<TabKey, string> = {
+  terminal: "/app-screens/terminal.jpg",
+  planner: "/app-screens/planner.jpg",
+  cards: "/app-screens/cards.jpg",
+};
+
+function PhoneScreen({ tab }: { tab: TabKey }) {
   return (
     <div className="phone">
       <div className="notch" />
       <div className="screen">
-        <div className="screen-top">
-          <span className="icon-hamburger"><span /><span /><span /></span>
-          <div className="screen-top-right">
-            <span className="icon-bell">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
-                <path d="M13.73 21a2 2 0 01-3.46 0" />
-              </svg>
-              <span className="badge">2</span>
-            </span>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="3" />
-              <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 005 15a1.65 1.65 0 00-1.51-1H3.4a2 2 0 010-4h.09A1.65 1.65 0 005 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.6a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09c0 .68.39 1.3 1 1.51.6.25 1.3.12 1.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019 9c.25.6.83 1 1.51 1H21a2 2 0 010 4h-.09c-.68 0-1.26.4-1.51 1z" />
-            </svg>
-          </div>
-        </div>
-
-        <div className="screen-tabs">
-          <span>Terminal</span>
-          <span className="screen-tab-active">Planner</span>
-          <span>Cards</span>
-        </div>
-
-        <div className="screen-presets">
-          <span>C</span>
-          <span className="preset-active">
-            E
-            <i />
-          </span>
-          <span>D</span>
-        </div>
-
-        <div className="screen-comps">
-          <div className="comp-col">
-            <span className="comp-num">3</span>
-            <div className="comp-track">
-              <div className="comp-fill" style={{ height: "62%", background: "#f2ede2" }} />
-            </div>
-            <span className="comp-code" style={{ color: "#f2ede2" }}>87</span>
-            <span className="comp-gal">2,585</span>
-          </div>
-          <div className="comp-col">
-            <span className="comp-num">2</span>
-            <div className="comp-track">
-              <div className="comp-cap-dim" style={{ height: "56%" }} />
-              <div className="comp-handle" style={{ top: "44%" }} />
-              <div className="comp-fill" style={{ height: "24%", background: "#d9483d" }} />
-            </div>
-            <span className="comp-code" style={{ color: "#d9483d" }}>93</span>
-            <span className="comp-gal">1,000</span>
-          </div>
-          <div className="comp-col">
-            <span className="comp-num">1</span>
-            <div className="comp-track">
-              <div className="comp-fill" style={{ height: "78%", background: "#eab54a" }} />
-            </div>
-            <span className="comp-code" style={{ color: "#eab54a" }}>D2</span>
-            <span className="comp-gal">4,250</span>
-          </div>
-        </div>
-
-        <div className="screen-cg">
-          <span>Rear</span>
-          <div className="cg-track"><div className="cg-dot" /></div>
-          <span>Front</span>
-        </div>
-
-        <div className="screen-row">
-          <div>
-            <p className="row-main">Truck · 25184&nbsp;&nbsp;&nbsp;Trailer · 3151</p>
-            <p className="row-sub">Freightliner&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Mac</p>
-          </div>
-          <span className="chev">›</span>
-        </div>
-        <div className="screen-row">
-          <div>
-            <p className="row-main">Tampa, FL&nbsp;&nbsp;&nbsp;Buckey North</p>
-            <p className="row-sub">Card # 00095&nbsp;&nbsp;&nbsp;Exp. 271 days</p>
-          </div>
-          <span className="chev">›</span>
-        </div>
-        <div className="screen-row">
-          <div>
-            <p className="row-main">86°F predicted product temp</p>
-            <p className="row-sub row-sub-good">High confidence</p>
-          </div>
-          <span className="chev">›</span>
-        </div>
-
-        <div className="screen-reload">RELOAD</div>
-
-        <div className="screen-totals">
-          <div>
-            <p className="total-main">7,835 gal</p>
-          </div>
-          <div className="total-right">
-            <p className="total-main">79,458 lbs</p>
-            <p className="total-sub">Target 79,500 lbs&nbsp;&nbsp;Diff -42 lbs</p>
-          </div>
-        </div>
-
-        <p className="screen-foot">
-          Real API &amp; temp confirm automatically after this load — sharpens the number for the next driver…
-        </p>
+        {/* eslint-disable-next-line @next/next/no-img-element -- real captured
+            screenshots of the live app, swapped by tab; not a Next/Image
+            candidate since these are static marketing assets, not content
+            that benefits from remote optimization. */}
+        <img
+          key={tab}
+          src={SCREEN_SRC[tab]}
+          alt={`ProTankr ${tab} screen`}
+          className="screen-img"
+        />
       </div>
     </div>
   );
 }
 
 export default function Home() {
+  const [tab, setTab] = useState<TabKey>("planner");
+
   return (
     <div className="page">
       <header className="header">
         <div className="nav-row">
           <div className="brand">
-            <svg className="mark" width="24" height="22" viewBox="-53.56 -35.05 24.29 22.70" aria-hidden="true">
+            <svg className="mark" width="20" height="18" viewBox="-53.56 -35.05 24.29 22.70" aria-hidden="true">
               <path d={LOGO_PATH} fill="#ffffff" />
             </svg>
             <span className="wordmark">PROTANKR</span>
           </div>
+
+          <div className="hero-inline">
+            <span className="hero-sub">Precision Loading.</span>
+            <span className="hero-h1">Built for Bulk.</span>
+          </div>
+
           <nav className="nav-links">
             <Link href="/about">About</Link>
             <Link href="/pricing">Pricing</Link>
             <Link href="/planner">Get the App</Link>
           </nav>
         </div>
-
-        <div className="hero-row">
-          <h1>Built for Bulk.</h1>
-          <p className="hero-sub">Fuel Hauling, Precision Loading.</p>
-        </div>
       </header>
 
       <section className="grid-section">
         <div className="feature-grid">
           <div className="col col-left">
-            <Card c={LEFT_CARDS.top} />
+            <Card c={LEFT_CARDS.top} active={LEFT_CARDS.top.tab === tab} />
             <p className="label label-easy">Easy.</p>
-            <Card c={LEFT_CARDS.bottom[0]} />
-            <Card c={LEFT_CARDS.bottom[1]} />
+            <Card c={LEFT_CARDS.bottom[0]} active={LEFT_CARDS.bottom[0].tab === tab} />
+            <Card c={LEFT_CARDS.bottom[1]} active={LEFT_CARDS.bottom[1].tab === tab} />
           </div>
 
           <div className="col col-center">
-            <PhoneScreen />
+            <PhoneScreen tab={tab} />
           </div>
 
           <div className="col col-right">
             <p className="label label-quick">Quick.</p>
             {RIGHT_CARDS.map((c) => (
-              <Card c={c} key={c.eyebrow} />
+              <Card c={c} active={c.tab === tab} key={c.eyebrow} />
             ))}
             <p className="label label-accurate">Accurate.</p>
           </div>
-
-          <svg className="truck-mark" width="110" height="214" viewBox="510.14 63.00 80.25 155.95" aria-hidden="true">
-            <g fill="#111111" stroke="none">
-              {TRUCK_PATHS.map((d, i) => (
-                <path d={d} key={i} />
-              ))}
-            </g>
-          </svg>
         </div>
 
         <div className="manifesto">
@@ -327,10 +249,24 @@ export default function Home() {
           </p>
         </div>
 
+        <svg className="truck-mark" width="386" height="750" viewBox="510.14 63.00 80.25 155.95" aria-hidden="true">
+          <g fill="rgba(13,13,12,0.004)" stroke="rgba(13,13,12,0.02)" strokeWidth="0.3" strokeLinejoin="round">
+            {TRUCK_PATHS.map((d, i) => (
+              <path d={d} key={i} />
+            ))}
+          </g>
+        </svg>
+
         <div className="tabbar">
           {TAB_BAR.map((t) => (
-            <span key={t} className={t === "Planner" ? "tab-active" : undefined}>
-              {t}
+            <span
+              key={t.label}
+              className={
+                t.tab === tab ? "tab-active" : t.tab ? "tab-clickable" : undefined
+              }
+              onClick={t.tab ? () => setTab(t.tab as TabKey) : undefined}
+            >
+              {t.label}
             </span>
           ))}
         </div>
@@ -340,32 +276,35 @@ export default function Home() {
         .page {
           --ink: #0d0d0c;
           --font: var(--font-outfit), "Outfit", Helvetica, Arial, sans-serif;
+          min-height: 100dvh;
           background: #ffffff;
           color: var(--ink);
           font-family: var(--font);
+          overflow-x: hidden;
         }
 
-        .header { background: #0b0b0b; padding: 24px 48px 0; }
-        .nav-row { display: flex; align-items: center; justify-content: space-between; }
-        .brand { display: flex; align-items: center; gap: 10px; }
-        .wordmark { font: 800 20px var(--font); letter-spacing: 0.04em; color: #fff; }
-        .nav-links { display: flex; gap: 40px; }
-        .nav-links :global(a) { font: 500 16px var(--font); color: #fff; text-decoration: none; }
+        .header { background: #0b0b0b; padding: 12px 48px; }
+        .nav-row { display: flex; align-items: center; gap: 16px; }
+        .brand { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+        .wordmark { font: 800 15px var(--font); letter-spacing: 0.04em; color: #fff; }
+        .nav-links { display: flex; gap: 26px; flex-shrink: 0; margin-left: auto; }
+        .nav-links :global(a) { font: 500 13px var(--font); color: #fff; text-decoration: none; }
         .nav-links :global(a:hover) { opacity: 0.7; }
 
-        .hero-row { margin-top: 20px; padding-bottom: 70px; max-width: 460px; }
-        .hero-row h1 { font: 800 44px var(--font); color: #fff; line-height: 1.05; margin: 0; }
-        .hero-sub { margin-top: 16px; font: italic 400 22px var(--font); color: rgba(255,255,255,0.5); }
+        .hero-inline { display: flex; align-items: baseline; gap: 10px; }
+        .hero-h1 { font: 800 18px var(--font); color: #fff; }
+        .hero-sub { font: italic 400 13px var(--font); color: rgba(255,255,255,0.5); }
 
-        .grid-section { position: relative; padding: 40px 48px 60px; background: #fff; }
+        .grid-section { position: relative; z-index: 0; padding: 18px 48px 14px; background: #fff; }
 
         .feature-grid {
           position: relative;
+          z-index: 0;
           display: grid;
-          grid-template-columns: 1fr 360px 1fr;
-          gap: 24px;
+          grid-template-columns: 1fr 300px 1fr;
+          gap: 20px;
           align-items: start;
-          margin-top: -90px;
+          margin-top: -20px;
           max-width: 1400px;
           margin-left: auto;
           margin-right: auto;
@@ -373,110 +312,85 @@ export default function Home() {
         .col { display: flex; flex-direction: column; gap: 0; }
 
         .label { margin: 0; }
-        .label-easy { text-align: right; margin-top: 100px; font: 700 30px var(--font); color: #00CAFF; }
-        .label-quick { text-align: left; font: 800 34px var(--font); color: #fff; }
-        .label-accurate { text-align: left; margin-top: 118px; font: 800 32px var(--font); color: #111111; }
+        .label-easy { text-align: right; margin-top: 54px; font: 700 26px var(--font); color: #00CAFF; }
+        .label-quick { text-align: left; font: 800 30px var(--font); color: #fff; }
+        .label-accurate { text-align: left; margin-top: 64px; font: 800 28px var(--font); color: #111111; }
 
-        .card { border-radius: 14px; padding: 14px; position: relative; }
+        .card {
+          border-radius: 12px;
+          padding: 10px 12px;
+          position: relative;
+          transition: opacity 200ms ease, filter 200ms ease, transform 200ms ease;
+        }
         .card-light { background: #ececec; color: #111; }
         .card-dark { background: #3a3a3a; color: #fff; }
-        .card .dot { position: absolute; top: 16px; right: 16px; width: 6px; height: 6px; border-radius: 50%; }
+        .card-dim { opacity: 0.35; filter: grayscale(0.4); transform: scale(0.98); }
+        .card .dot { position: absolute; top: 12px; right: 12px; width: 5px; height: 5px; border-radius: 50%; }
         .card-light .dot { background: rgba(0,0,0,0.3); }
         .card-dark .dot { background: rgba(255,255,255,0.4); }
-        .card .eyebrow { font: 600 10px var(--font); letter-spacing: 0.08em; text-transform: uppercase; margin: 0; }
+        .card .eyebrow { font: 600 9px var(--font); letter-spacing: 0.08em; text-transform: uppercase; margin: 0; }
         .card-light .eyebrow { color: rgba(0,0,0,0.45); }
         .card-dark .eyebrow { color: rgba(255,255,255,0.5); }
-        .card .title { margin-top: 6px; font: 700 15px var(--font); }
+        .card .title { margin-top: 4px; font: 700 13px var(--font); }
         .card-light .title { color: #111; }
         .card-dark .title { color: #fff; }
-        .card .body { margin-top: 8px; font: 400 11px var(--font); line-height: 1.35; }
+        .card .body { margin-top: 5px; font: 400 10px var(--font); line-height: 1.3; }
         .card-light .body { color: rgba(0,0,0,0.55); }
         .card-dark .body { color: rgba(255,255,255,0.65); }
 
         .phone {
-          width: 362px;
+          width: 300px;
           background: #fbfaf7;
           border: 1px solid #e4e2d9;
-          border-radius: 45px;
-          padding: 16px 14px 22px;
-          box-shadow: 0 30px 60px rgba(0,0,0,0.25);
+          border-radius: 38px;
+          padding: 12px 11px 16px;
+          box-shadow: 0 20px 44px rgba(0,0,0,0.22);
         }
-        .notch { width: 100px; height: 24px; background: #0a0a0a; border-radius: 12px; margin: 0 auto 12px; }
-        .screen { background: #111111; border-radius: 26px; padding: 18px 16px 16px; color: #ece8de; font-family: var(--font); }
-        .screen-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
-        .icon-hamburger { display: flex; flex-direction: column; gap: 3px; }
-        .icon-hamburger span { width: 17px; height: 2px; background: #ece8de; display: block; }
-        .screen-top-right { display: flex; align-items: center; gap: 12px; color: #ece8de; }
-        .icon-bell { position: relative; display: flex; }
-        .badge {
-          position: absolute; top: -5px; right: -6px;
-          background: #d9483d; color: #fff; font-size: 8px; font-weight: 700;
-          width: 13px; height: 13px; border-radius: 50%;
-          display: flex; align-items: center; justify-content: center;
+        .notch { width: 84px; height: 18px; background: #0a0a0a; border-radius: 10px; margin: 0 auto 8px; }
+        .screen { background: #111111; border-radius: 22px; overflow: hidden; line-height: 0; }
+        .screen-img {
+          display: block;
+          width: 100%;
+          height: auto;
+          animation: fade-in 0.25s ease;
         }
-        .screen-tabs {
-          display: flex; justify-content: space-between;
-          font-size: 13px; color: rgba(236,232,222,0.4); font-weight: 600;
-          border-bottom: 1px solid rgba(255,255,255,0.08);
-          padding-bottom: 11px; margin-bottom: 14px;
+        @keyframes fade-in {
+          from { opacity: 0; }
+          to { opacity: 1; }
         }
-        .screen-tab-active { color: #fff; }
-        .screen-presets {
-          display: flex; justify-content: center; align-items: flex-end; gap: 34px;
-          font-size: 14px; color: rgba(236,232,222,0.3); font-weight: 600;
-          margin-bottom: 16px;
-        }
-        .preset-active {
-          color: #fff; font-size: 17px; font-weight: 700;
-          display: flex; flex-direction: column; align-items: center; gap: 3px;
-        }
-        .preset-active i { width: 4px; height: 4px; border-radius: 50%; background: #fff; font-style: normal; }
-        .screen-comps { display: flex; justify-content: center; gap: 14px; margin-bottom: 14px; }
-        .comp-col { display: flex; flex-direction: column; align-items: center; width: 72px; }
-        .comp-num { font-size: 12px; color: rgba(236,232,222,0.4); font-weight: 700; margin-bottom: 4px; }
-        .comp-track { width: 100%; height: 108px; background: rgba(255,255,255,0.06); position: relative; overflow: visible; }
-        .comp-fill { position: absolute; left: 0; right: 0; bottom: 0; overflow: hidden; }
-        .comp-cap-dim { position: absolute; left: 0; right: 0; top: 0; background: rgba(0,0,0,0.35); border-bottom: 1px dashed rgba(255,160,0,0.5); }
-        .comp-handle { position: absolute; left: 50%; transform: translate(-50%, -50%); width: 28px; height: 4px; border-radius: 3px; background: #ffb020; }
-        .comp-code { font-size: 14px; font-weight: 800; margin-top: 6px; }
-        .comp-gal { font-size: 12px; color: rgba(236,232,222,0.55); margin-top: 2px; }
-        .screen-cg { display: flex; align-items: center; gap: 8px; font-size: 10px; letter-spacing: 0.05em; text-transform: uppercase; color: rgba(236,232,222,0.35); margin-bottom: 14px; }
-        .cg-track { flex: 1; height: 2px; background: rgba(255,255,255,0.12); position: relative; }
-        .cg-dot { position: absolute; left: 58%; top: 50%; transform: translate(-50%, -50%); width: 13px; height: 13px; border-radius: 50%; background: #ece8de; }
-        .screen-row { display: flex; align-items: center; justify-content: space-between; border-top: 1px solid rgba(255,255,255,0.08); padding: 10px 0; }
-        .row-main { font-size: 13px; font-weight: 600; margin: 0; }
-        .row-sub { font-size: 11px; color: rgba(236,232,222,0.45); margin: 2px 0 0; }
-        .row-sub-good { color: #7bb586; }
-        .chev { color: rgba(236,232,222,0.3); font-size: 17px; }
-        .screen-reload { margin-top: 11px; background: #fff; color: #111; text-align: center; font-weight: 800; font-size: 13px; letter-spacing: 0.04em; padding: 12px 0; }
-        .screen-totals { display: flex; justify-content: space-between; align-items: baseline; margin-top: 13px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 11px; }
-        .total-main { font-size: 16px; font-weight: 800; margin: 0; font-variant-numeric: tabular-nums; }
-        .total-right { text-align: right; }
-        .total-sub { font-size: 10px; color: rgba(236,232,222,0.4); margin: 2px 0 0; }
-        .screen-foot { font-style: italic; font-size: 9.5px; color: rgba(236,232,222,0.32); margin: 11px 0 -4px; line-height: 1.4; }
 
-        .truck-mark { position: absolute; right: -4px; bottom: -40px; opacity: 0.12; }
+        .truck-mark {
+          position: absolute;
+          right: -20px;
+          bottom: 44px;
+          z-index: -1;
+          pointer-events: none;
+          filter: drop-shadow(0 14px 18px rgba(0,0,0,0.10));
+        }
 
         .manifesto {
           max-width: 1100px;
-          margin: 60px auto 0;
-          font: 400 17px var(--font);
+          margin: 22px auto 0;
+          font: 400 14px var(--font);
           color: rgba(0,0,0,0.6);
-          line-height: 1.7;
+          line-height: 1.5;
         }
         .manifesto p { margin: 0; }
 
         .tabbar {
+          position: relative;
           max-width: 900px;
-          margin: 40px auto 0;
+          margin: 6px auto 0;
           background: #0b0b0b;
-          border-radius: 16px;
-          padding: 18px 32px;
+          border-radius: 8px;
+          padding: 5px 14px;
           display: flex;
           justify-content: space-between;
         }
-        .tabbar span { font: 500 15px var(--font); color: rgba(255,255,255,0.4); }
-        .tabbar span.tab-active { font: 700 18px var(--font); color: #fff; }
+        .tabbar span { font: 500 10px var(--font); color: rgba(255,255,255,0.4); }
+        .tabbar span.tab-active { font: 700 12px var(--font); color: #fff; }
+        .tabbar span.tab-clickable { cursor: pointer; }
+        .tabbar span.tab-clickable:hover { color: rgba(255,255,255,0.75); }
 
         @media (max-width: 980px) {
           .header { padding: 20px 24px 0; }
