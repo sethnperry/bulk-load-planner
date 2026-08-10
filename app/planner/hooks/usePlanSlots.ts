@@ -75,6 +75,7 @@ export function usePlanSlots({
   const [lastLoadLines, setLastLoadLines] = useState<any[]>([]);
   const [lastLoadReport, setLastLoadReport] = useState<{
     planned_total_gal: number; planned_gross_lbs: number | null; actual_gross_lbs: number | null; diff_lbs: number | null; recovered_points: number | null;
+    completed_at: string | null; plan_slot: number | null;
   } | null>(null);
 
   // True only until the first real (signed-in) scope resolves after a fresh
@@ -271,7 +272,7 @@ export function usePlanSlots({
     // Actual/Diff summary. No fallback to "any status" on purpose.
     const { data: comboRows, error: comboErr } = await supabase
       .from("load_log")
-      .select("load_id, status, started_at, terminal_id, planned_total_gal, planned_gross_lbs, diff_lbs")
+      .select("load_id, status, started_at, completed_at, terminal_id, planned_total_gal, planned_gross_lbs, diff_lbs, plan_slot")
       .eq("combo_id", selectedComboId)
       .eq("status", "loaded")
       .order("started_at", { ascending: false })
@@ -310,6 +311,8 @@ export function usePlanSlots({
       planned_gross_lbs: plannedGross,
       actual_gross_lbs: plannedGross + diff,
       diff_lbs: diff,
+      completed_at: (resolvedRow as any).completed_at ?? null,
+      plan_slot: (resolvedRow as any).plan_slot ?? null,
     } : null;
 
     return {

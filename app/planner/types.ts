@@ -141,4 +141,11 @@ export type LoadReport = {
   // Incentive system ("Recovered Gallons") -- null when the company hasn't
   // enabled it, or calculate_load_points hasn't returned yet.
   recovered_points: number | null;
+  // When this load was completed, and which named preset (1-5, mapped to
+  // A-E) was active when it began -- lets the planner's recap card read as
+  // "Recap · Plan A · 8/10/26" instead of an ambiguous number that looks
+  // like it should track live plan edits. Both null for older loads
+  // completed before this was tracked.
+  completed_at: string | null;
+  plan_slot: number | null;
 };

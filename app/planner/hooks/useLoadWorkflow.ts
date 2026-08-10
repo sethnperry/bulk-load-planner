@@ -34,6 +34,7 @@ type Props = {
   onPostLoadComplete?: () => Promise<void>;         // re-read load_log for slot 0 / slip seat
   predictedTempF?: number | null;                  // what the predictor said at plan time
   trainingTraineeId?: string | null;                // Driver Training: tag this load for a trainee (see CLAUDE.md)
+  activeSlotLetter?: number | null;                 // which named preset (1-5 / A-E) was active when LOAD was tapped, for the recap card's "Plan X" label
 };
 
 export function useLoadWorkflow({
@@ -48,6 +49,7 @@ export function useLoadWorkflow({
   onPostLoadComplete,
   predictedTempF,
   trainingTraineeId,
+  activeSlotLetter,
 }: Props) {
   const [activeLoadId, setActiveLoadId] = useState<string | null>(null);
   const [beginLoadBusy, setBeginLoadBusy] = useState(false);
@@ -154,6 +156,14 @@ export function useLoadWorkflow({
           .then(({ error }) => { if (error) console.error("[training] failed to tag trainee_id:", error.message); });
       }
 
+      // Recap card label ("Plan A") -- plain UPDATE on the row just created,
+      // same pattern as trainee_id above. Non-fatal: a failure here only
+      // means the recap can't name a preset, never blocks the load itself.
+      if (activeSlotLetter && result.load_id) {
+        supabase.from("load_log").update({ plan_slot: activeSlotLetter }).eq("load_id", result.load_id)
+          .then(({ error }) => { if (error) console.error("[recap] failed to tag plan_slot:", error.message); });
+      }
+
       // Reset terminal access expiry — driver is actively loading, so re-card them now.
       // begin_load doesn't touch terminal_access, so we do it here.
       if (selectedTerminalId && authUserId) {
@@ -200,7 +210,7 @@ export function useLoadWorkflow({
     beginLoadBusy, selectedComboId, selectedTerminalId, selectedState, selectedCity,
     selectedCityId, planRows, plannedGallonsTotal, plannedWeightLbs,
     tare, cgBias, ambientTempF, tempF, setProductInputs, onRefreshTerminalAccess, authUserId,
-    trainingTraineeId,
+    trainingTraineeId, activeSlotLetter,
   ]);
 
   // ── Cancel (Loading modal closed before LOADED is tapped) ─────────────────
@@ -437,6 +447,8 @@ try {
         actual_gross_lbs: actualGross,
         diff_lbs: diff,
         recovered_points: recoveredPoints,
+        completed_at: res?.completed_at ?? new Date().toISOString(),
+        plan_slot: activeSlotLetter ?? null,
       });
       setLoadingOpen(false);
 
@@ -456,7 +468,8 @@ try {
       setCompleteBusy(false);
     }
   }, [activeLoadId, planRows, productInputs, productNameById, tare, plannedGallonsTotal, terminalProducts,
-      selectedTerminalId, tempF, onRefreshTerminalProducts, onRefreshTerminalAccess, onPostLoadComplete]);
+      selectedTerminalId, tempF, onRefreshTerminalProducts, onRefreshTerminalAccess, onPostLoadComplete,
+      activeSlotLetter]);
 
   return {
     activeLoadId,
