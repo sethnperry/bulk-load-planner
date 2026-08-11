@@ -99,7 +99,7 @@ const emailRedirectTo = `${siteUrl}/auth/callback?next=${encodeURIComponent("/pl
       )}
 
       <div style={{ marginTop: 14, fontSize: 12, opacity: 0.75 }}>
-        After signing in you’ll be redirected to: <code>/profile</code>
+        After signing in you’ll be redirected to: <code>/planner</code>
       </div>
     </main>
   );
