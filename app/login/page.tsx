@@ -1,13 +1,37 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
 
 export default function LoginPage() {
+  const router = useRouter();
+  // This page must never be shown to someone who's already signed in --
+  // otherwise a stale PWA start_url (or a WebAPK install that snapshotted
+  // an old manifest/session state) can trap a genuinely logged-in user
+  // into re-sending a magic link every time they open the app, even
+  // though their session was fine the whole time. getSession() (not
+  // getUser()) reads the local session with no auth-server round trip --
+  // same reasoning as the CalculatorShellContext auth gate fix.
+  const [checkingSession, setCheckingSession] = useState(true);
   const [email, setEmail] = useState("");
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase.auth.getSession();
+      if (cancelled) return;
+      if (data.session) {
+        router.replace("/planner");
+        return;
+      }
+      setCheckingSession(false);
+    })();
+    return () => { cancelled = true; };
+  }, [router]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -42,6 +66,14 @@ const emailRedirectTo = `${siteUrl}/auth/callback?next=${encodeURIComponent("/pl
     } finally {
       setSending(false);
     }
+  }
+
+  if (checkingSession) {
+    return (
+      <main style={{ maxWidth: 420, margin: "40px auto", padding: 16, color: "rgba(255,255,255,0.55)" }}>
+        Checking session…
+      </main>
+    );
   }
 
   return (
