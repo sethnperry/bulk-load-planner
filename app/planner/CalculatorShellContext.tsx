@@ -116,15 +116,48 @@ export function CalculatorShellProvider({ children }: { children: React.ReactNod
   // -- see that file's own comment for why (this app's browser Supabase
   // client persists sessions to localStorage only, which a server
   // component can't read via cookies).
+  //
+  // Uses getSession(), not getUser(). getUser() round-trips to the auth
+  // server to revalidate the current access token -- if the app was
+  // backgrounded long enough for that token to expire (JS timers freeze
+  // in the background on mobile, so the SDK's own auto-refresh doesn't
+  // fire until resume), getUser() sends the stale token, gets a 401 back,
+  // and this code was reading that as "signed out" and bouncing to
+  // /login -- even though a perfectly valid refresh token was sitting in
+  // localStorage the whole time (this is exactly the "opens to login
+  // every time" bug reported live). getSession() just reads (and lets the
+  // SDK transparently refresh) the local session, no server round trip,
+  // so it can't lose that race. This check is a UX routing gate only, not
+  // a security boundary -- RLS is what actually protects data -- so
+  // there's no reason to pay getUser()'s extra round trip here.
   useEffect(() => {
+    let cancelled = false;
+    const applySession = (session: { user: { id: string; email?: string | null } } | null) => {
+      if (cancelled) return;
+      setAuthEmail(session?.user.email ?? "");
+      setAuthUserId(session?.user.id ?? "");
+    };
+
     (async () => {
-      const { data } = await supabase.auth.getUser();
-      setAuthEmail(data.user?.email ?? "");
-      setAuthUserId(data.user?.id ?? "");
-      if (!data.user) router.replace("/login");
+      const { data } = await supabase.auth.getSession();
+      applySession(data.session);
+      if (!data.session) router.replace("/login");
     })();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      applySession(session);
+      if (event === "SIGNED_OUT") router.replace("/login");
+    });
+
     const session = getSetupSession();
     if (session) setSetupSession(session);
+
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
