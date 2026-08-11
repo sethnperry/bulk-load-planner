@@ -4,7 +4,7 @@
 // next load, cache-first for content-hashed build assets, network-first for
 // API/Supabase/auth.
 
-const CACHE_NAME = "protankr-v2"; // bump this to force-invalidate stale caches on the next deploy
+const CACHE_NAME = "protankr-v3"; // bump this to force-invalidate stale caches on the next deploy
 
 const STATIC_ASSETS = [
   "/manifest.json",
@@ -64,6 +64,29 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
+  // manifest.json is small, rarely changes, but is exactly the kind of file
+  // where "rarely" caused real pain this session -- a stale cache-first copy
+  // silently kept an old start_url alive across reinstalls, since nothing
+  // about its own URL ever changes to bust a stale cache entry the way a
+  // content-hashed build chunk's URL does. Network-first here, same as
+  // navigations, so a manifest edit takes effect on the very next load
+  // instead of waiting on this whole file's own byte-diff to trigger an SW
+  // update.
+  if (url.pathname === "/manifest.json") {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          if (response.status === 200) {
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+          }
+          return response;
+        })
+        .catch(() => caches.match(event.request))
+    );
+    return;
+  }
+
   // Content-hashed build assets never change for a given URL, so cache-first
   // is safe and fast.
   if (url.pathname.startsWith("/_next/static/")) {
@@ -82,8 +105,7 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Everything else (icons, manifest, misc images) — cache-first with
-  // network fallback.
+  // Everything else (icons, misc images) — cache-first with network fallback.
   event.respondWith(
     caches.match(event.request).then((cached) => {
       if (cached) return cached;
