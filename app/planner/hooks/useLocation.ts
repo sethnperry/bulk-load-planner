@@ -277,15 +277,25 @@ export function useLocation(authUserId: string) {
   // or fully suspend timers while a tab is backgrounded (screen locked, app
   // switched away, etc.), so a driver who leaves the Planner open in the
   // background for a while can come back to an ambient reading that's
-  // stuck hours stale, well past this 5-minute interval's intent. Forcing
-  // a refresh on visibilitychange catches that case immediately on return
-  // instead of waiting for however many missed interval ticks eventually
-  // fire (mobile OSes often suppress those entirely while backgrounded).
+  // stuck hours stale, well past this 5-minute interval's intent.
+  //
+  // visibilitychange alone turned out not to be enough either -- a "close
+  // and reopen" on mobile is very often the browser's back-forward cache
+  // (bfcache) resuming an already-alive, frozen page instead of a true
+  // reload, and visibilitychange doesn't reliably fire for that. pageshow
+  // with event.persisted===true is the actual signal for a bfcache
+  // restore; `focus` is a third, cheap-to-add net for whatever either of
+  // the other two misses. All three just call the same idempotent refresh.
   useEffect(() => {
     if (!selectedState || !selectedCity) return;
     const HEARTBEAT_MS = 5 * 60 * 1000; // 5 min
+    const MIN_REFRESH_GAP_MS = 60 * 1000; // debounce for focus/visibility firing in a burst
 
+    let lastRefreshAt = 0;
     const refresh = () => {
+      const now = Date.now();
+      if (now - lastRefreshAt < MIN_REFRESH_GAP_MS) return;
+      lastRefreshAt = now;
       const k = ambientKey(selectedState, selectedCity);
       AMBIENT_CACHE.delete(k);
       setAmbientHeartbeat((v) => v + 1);
@@ -298,9 +308,18 @@ export function useLocation(authUserId: string) {
     };
     document.addEventListener("visibilitychange", onVisible);
 
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (e.persisted) refresh();
+    };
+    window.addEventListener("pageshow", onPageShow);
+
+    window.addEventListener("focus", refresh);
+
     return () => {
       clearInterval(id);
       document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("pageshow", onPageShow);
+      window.removeEventListener("focus", refresh);
     };
   }, [selectedState, selectedCity]);
 
