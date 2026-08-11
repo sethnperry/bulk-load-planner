@@ -184,6 +184,7 @@ export function CalculatorShellProvider({ children }: { children: React.ReactNod
     terminals: terminals.terminals,
     terminalCatalog: terminals.terminalCatalog,
     addDaysISO_,
+    userId: effectiveUserId || null,
   });
 
   const myTerminalIdSet = useMemo(

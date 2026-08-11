@@ -283,12 +283,6 @@ function ShellChrome({ children }: { children: React.ReactNode }) {
         toggleDefer={shell.expirations.toggleDefer}
         onOpenEquipment={() => shell.setEquipOpen(true)}
         onOpenTerminals={() => shell.setTermOpen(true)}
-        selectedCity={shell.location.selectedCity}
-        selectedState={shell.location.selectedState}
-        allTerminalsInCity={shell.terminalFilters.catalogTerminalsInCity}
-        accessDateByTerminalId={shell.terminals.accessDateByTerminalId}
-        addDaysISO_={addDaysISO_}
-        isPastISO_={isPastISO_}
         formatMDYWithCountdown_={formatMDYWithCountdown_}
       />
 

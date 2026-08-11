@@ -7,13 +7,18 @@ import { supabase } from "@/lib/supabase/client";
 export type ExpirationItem = {
   id: string;
   label: string;
-  entityName: string;      // truck name, trailer name, or terminal name
+  entityName: string;      // truck name, trailer name, terminal name, badge name, or "License"/"Medical"/"TWIC"
   entitySubtitle: string;  // doc type for equipment, city/state for terminals
-  entityType: "truck" | "trailer" | "terminal";
+  entityType: "truck" | "trailer" | "terminal" | "badge" | "credential";
   entityId: string;
   expiresISO: string;
   daysLeft: number;
   expired: boolean;
+  // Terminal items only -- carried as structured fields (not just parsed
+  // back out of entitySubtitle) so the notification modal can group by
+  // city without re-parsing a "City, ST" display string.
+  city?: string;
+  state?: string;
 };
 
 // Truck/trailer expirations are read from the dynamic permit_types +
@@ -29,9 +34,17 @@ type PermitRow = {
   permit_types: { name: string } | null;
 };
 
-const TRUCK_WARN_DAYS    = 30;
-const TRAILER_WARN_DAYS  = 30;
-const TERMINAL_WARN_DAYS = 7;
+type BadgeRow = { id: string; port_name: string; category: string | null; expiration_date: string | null };
+
+const TRUCK_WARN_DAYS      = 30;
+const TRAILER_WARN_DAYS    = 30;
+// Terminal cards, badges, and credentials all share the same 7-day warn
+// window -- matches the Dispatch tab's own expStateFor (see
+// app/planner/dispatch/page.tsx), which this modal is organized to agree
+// with rather than inventing a second set of thresholds.
+const TERMINAL_WARN_DAYS   = 7;
+const BADGE_WARN_DAYS      = 7;
+const CREDENTIAL_WARN_DAYS = 7;
 
 const DEFER_KEY = "protankr_exp_deferred_v1";
 
@@ -64,13 +77,28 @@ export function useExpirations(opts: {
   terminals: any[];
   terminalCatalog?: any[];
   addDaysISO_: (iso: string, days: number) => string;
+  // Whoever's own badges/license/medical/TWIC to check -- effectiveUserId,
+  // so this respects admin impersonation the same way equipment/terminals
+  // already do.
+  userId: string | null;
 }) {
-  const { truckId, trailerId, truckName, trailerName, accessDateByTerminalId, terminals, terminalCatalog, addDaysISO_ } = opts;
+  const {
+    truckId, trailerId, truckName, trailerName,
+    accessDateByTerminalId, terminals, terminalCatalog, addDaysISO_,
+    userId,
+  } = opts;
 
   const [truckPermits,   setTruckPermits]   = useState<PermitRow[]>([]);
   const [trailerPermits, setTrailerPermits] = useState<PermitRow[]>([]);
   const [truckLoaded,   setTruckLoaded]   = useState(false);
   const [trailerLoaded, setTrailerLoaded] = useState(false);
+
+  const [badgeRows, setBadgeRows] = useState<BadgeRow[]>([]);
+  const [licenseExp, setLicenseExp] = useState<string | null>(null);
+  const [medicalExp, setMedicalExp] = useState<string | null>(null);
+  const [twicExp, setTwicExp] = useState<string | null>(null);
+  const [credsLoaded, setCredsLoaded] = useState(false);
+
   const [deferred,   setDeferred]   = useState<Set<string>>(() => loadDeferred());
 
   // Fetch truck permits
@@ -98,6 +126,24 @@ export function useExpirations(opts: {
       setTrailerLoaded(true);
     })();
   }, [trailerId]);
+
+  // Fetch badges + credentials
+  useEffect(() => {
+    if (!userId) { setBadgeRows([]); setLicenseExp(null); setMedicalExp(null); setTwicExp(null); setCredsLoaded(true); return; }
+    (async () => {
+      const [{ data: badgeData }, { data: licRow }, { data: medRow }, { data: twicRow }] = await Promise.all([
+        supabase.from("driver_port_ids").select("id, port_name, category, expiration_date").eq("user_id", userId),
+        supabase.from("driver_licenses").select("expiration_date").eq("user_id", userId).maybeSingle(),
+        supabase.from("driver_medical_cards").select("expiration_date").eq("user_id", userId).maybeSingle(),
+        supabase.from("driver_twic_cards").select("expiration_date").eq("user_id", userId).maybeSingle(),
+      ]);
+      setBadgeRows((badgeData ?? []) as BadgeRow[]);
+      setLicenseExp((licRow as any)?.expiration_date ?? null);
+      setMedicalExp((medRow as any)?.expiration_date ?? null);
+      setTwicExp((twicRow as any)?.expiration_date ?? null);
+      setCredsLoaded(true);
+    })();
+  }, [userId]);
 
   // Build item list
   const items = useMemo<ExpirationItem[]>(() => {
@@ -146,21 +192,46 @@ export function useExpirations(opts: {
           expiresISO,
           daysLeft: days,
           expired: days < 0,
+          city: city || undefined,
+          state: state || undefined,
         });
+      }
+    }
+
+    for (const b of badgeRows) {
+      const iso = b.expiration_date;
+      if (!iso) continue;
+      const days = daysUntil(iso);
+      if (days <= BADGE_WARN_DAYS) {
+        const name = b.category ? `${b.port_name} (${b.category})` : b.port_name;
+        out.push({ id: `badge-${b.id}`, label: name, entityName: name, entitySubtitle: "Badge", entityType: "badge", entityId: String(b.id), expiresISO: iso, daysLeft: days, expired: days < 0 });
+      }
+    }
+
+    const credentialEntries: { key: string; name: string; iso: string | null }[] = [
+      { key: "license", name: "License", iso: licenseExp },
+      { key: "medical", name: "Medical", iso: medicalExp },
+      { key: "twic", name: "TWIC", iso: twicExp },
+    ];
+    for (const c of credentialEntries) {
+      if (!c.iso) continue;
+      const days = daysUntil(c.iso);
+      if (days <= CREDENTIAL_WARN_DAYS) {
+        out.push({ id: `credential-${c.key}`, label: c.name, entityName: c.name, entitySubtitle: "Credential", entityType: "credential", entityId: c.key, expiresISO: c.iso, daysLeft: days, expired: days < 0 });
       }
     }
 
     out.sort((a, b) => a.daysLeft - b.daysLeft);
     return out;
-  }, [truckPermits, trailerPermits, truckId, trailerId, truckName, trailerName, accessDateByTerminalId, terminals, terminalCatalog, addDaysISO_]);
+  }, [truckPermits, trailerPermits, truckId, trailerId, truckName, trailerName, accessDateByTerminalId, terminals, terminalCatalog, addDaysISO_, badgeRows, licenseExp, medicalExp, twicExp]);
 
   // Auto-remove from deferred only when data is fully loaded
   // Guards against wiping deferred state during initial load before data arrives
-  // dataLoaded: truck+trailer fetched AND terminals data has arrived
+  // dataLoaded: truck+trailer+badges/credentials fetched AND terminals data has arrived
   // We check terminals.length > 0 OR accessDateByTerminalId has keys
   // to ensure we don't wipe deferred state before terminal data loads
   const terminalDataReady = Object.keys(accessDateByTerminalId).length > 0 || terminals.length > 0;
-  const dataLoaded = truckLoaded && trailerLoaded && terminalDataReady;
+  const dataLoaded = truckLoaded && trailerLoaded && credsLoaded && terminalDataReady;
 
   useEffect(() => {
     if (!dataLoaded) return;

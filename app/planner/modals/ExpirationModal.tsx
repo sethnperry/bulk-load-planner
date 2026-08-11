@@ -1,19 +1,28 @@
 "use client";
 // modals/ExpirationModal.tsx
+//
+// Rework (2026-08-11), per explicit user direction: this modal used to show
+// a full "directory" of every terminal in the currently-selected city
+// (active/expired/not-carded, all of them) underneath a separate list of
+// real alert items -- confusing, ungrouped, and scoped to only one city.
+// It now shows ONLY things that are actually expired or expiring soon
+// (equipment permits, terminal cards -- any city, not just the current
+// one -- badges, and license/medical/TWIC credentials), organized into
+// the same section groupings the Dispatch tab uses (Equipment / Terminal
+// Cards grouped by city / Badges / Credentials -- see
+// app/planner/dispatch/page.tsx), reusing this app's existing per-item
+// "-" defer/dismiss mechanism (useExpirations.ts's localStorage-backed
+// deferred set) instead of inventing a new auto-expiry age cutoff --
+// deferring already persists across reloads and needs no new schema.
+// Terminal-card cross-city scope was already true of the underlying
+// useExpirations.ts item list (accessDateByTerminalId has never been
+// city-scoped); the only thing that was actually city-limited was this
+// modal's now-removed directory section.
 
 import React, { useState } from "react";
+import { useRouter } from "next/navigation";
 import { FullscreenModal } from "@/lib/ui/FullscreenModal";
 import type { ExpirationItem } from "../hooks/useExpirations";
-
-type TerminalEntry = {
-  terminal_id: string;
-  terminal_name: string | null;
-  city?: string | null;
-  state?: string | null;
-  renewal_days?: number | null;
-  renewalDays?: number | null;
-  renewal?: number | null;
-};
 
 type Props = {
   open: boolean;
@@ -24,77 +33,8 @@ type Props = {
   toggleDefer: (id: string) => void;
   onOpenEquipment: () => void;
   onOpenTerminals: () => void;
-  selectedCity: string;
-  selectedState: string;
-  allTerminalsInCity: TerminalEntry[];
-  accessDateByTerminalId: Record<string, string | undefined>;
-  addDaysISO_: (iso: string, days: number) => string;
-  isPastISO_: (iso: string) => boolean;
   formatMDYWithCountdown_: (iso: string) => string;
 };
-
-// ── Report ────────────────────────────────────────────────────────────────────
-function buildReport(
-  activeItems: ExpirationItem[],
-  city: string, state: string,
-  cardActive:    { name: string; expires: string; daysLeft: number }[],
-  cardExpired:   { name: string; expires: string; daysLeft: number }[],
-  cardNotCarded: string[],
-): string {
-  const date = new Date().toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" });
-  const lines: string[] = [];
-
-  const trucks   = activeItems.filter(i => i.entityType === "truck");
-  const trailers = activeItems.filter(i => i.entityType === "trailer");
-  const loc      = city && state ? `${city}, ${state}` : city || state || "";
-
-  // Equipment expiration section
-  const hasEquip = trucks.length + trailers.length > 0;
-  if (hasEquip) {
-    lines.push(`Expiration Report — ${date}`, "");
-    for (const [label, group] of [["TRUCK", trucks], ["TRAILER", trailers]] as [string, ExpirationItem[]][]) {
-      if (!group.length) continue;
-      lines.push(label);
-      for (const i of group) {
-        const status = i.expired ? `expired ${Math.abs(i.daysLeft)}d ago` : `${i.daysLeft}d remaining`;
-        lines.push(`${i.label}  ${status}`);
-      }
-      lines.push("");
-    }
-  }
-
-  // Terminal cards section — all in one block
-  const hasCards = cardActive.length + cardExpired.length + cardNotCarded.length > 0;
-  if (hasCards) {
-    const termHeader = loc ? `TERMINAL CARDS — ${loc}` : "TERMINAL CARDS";
-    lines.push(termHeader, "");
-
-    if (cardActive.length > 0) {
-      lines.push("ACTIVE");
-      const maxLen = Math.max(...cardActive.map(c => c.name.length));
-      for (const c of cardActive) {
-        const flag = c.daysLeft <= 7 ? "  ◄" : "";
-        lines.push(`${c.name}${" ".repeat(Math.max(1, maxLen - c.name.length + 2))}${c.expires}  ${c.daysLeft}d${flag}`);
-      }
-      lines.push("");
-    }
-    if (cardExpired.length > 0) {
-      lines.push("EXPIRED");
-      const maxLen = Math.max(...cardExpired.map(c => c.name.length));
-      for (const c of cardExpired) {
-        lines.push(`${c.name}${" ".repeat(Math.max(1, maxLen - c.name.length + 2))}${c.expires}  ${Math.abs(c.daysLeft)}d ago`);
-      }
-      lines.push("");
-    }
-    if (cardNotCarded.length > 0) {
-      lines.push("NOT CARDED");
-      for (const n of cardNotCarded) lines.push(n);
-      lines.push("");
-    }
-  }
-
-  return lines.join("\n").trimEnd();
-}
 
 // ── Shared styles ─────────────────────────────────────────────────────────────
 const BTN: React.CSSProperties = {
@@ -114,8 +54,8 @@ function SectionLabel({ left, right }: { left: string; right?: string }) {
   );
 }
 
-// ── Unified card — used for all entity types ──────────────────────────────────
-function ExpirationCard({ label, statusText, expired, urgent, deferred, onTap, onToggleDefer, hideDefer = false }: {
+// ── Unified card — used for every entity type ─────────────────────────────────
+function ExpirationCard({ label, statusText, expired, urgent, deferred, onTap, onToggleDefer }: {
   label: string;
   statusText: string;
   expired: boolean;
@@ -123,7 +63,6 @@ function ExpirationCard({ label, statusText, expired, urgent, deferred, onTap, o
   deferred: boolean;
   onTap: () => void;
   onToggleDefer: () => void;
-  hideDefer?: boolean;
 }) {
   const border = deferred
     ? "1px solid rgba(255,255,255,0.05)"
@@ -153,71 +92,147 @@ function ExpirationCard({ label, statusText, expired, urgent, deferred, onTap, o
 
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderRadius: 6, border, background: bg }}>
-      {/* Label — tappable */}
       <div
         role="button" tabIndex={0}
         onClick={onTap}
         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onTap(); } }}
         style={{ flex: 1, minWidth: 0, cursor: "pointer" }}
       >
-        <div style={{ fontSize: 13, fontWeight: 700, color: nameColor }}>{label}</div>
+        <div style={{ fontSize: 13, fontWeight: 700, color: nameColor, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>{label}</div>
       </div>
 
-      {/* Status */}
       <div style={{ fontSize: 12, fontWeight: deferred ? 600 : 700, color: statusColor, whiteSpace: "nowrap" as const, flexShrink: 0 }}>
         {statusText}
       </div>
 
-      {/* Defer toggle — hidden for directory-only cards */}
-      {!hideDefer && (
-        <button
-          type="button"
-          onClick={(e) => { e.stopPropagation(); onToggleDefer(); }}
-          title={deferred ? "Restore alert" : "Defer alert"}
-          style={{ background: "none", border: "none", cursor: "pointer", padding: "2px 4px", fontSize: 13, color: "rgba(255,255,255,0.18)", flexShrink: 0, lineHeight: 1 }}
-          aria-label={deferred ? "Restore" : "Defer"}
-        >
-          {deferred ? "↩" : "—"}
-        </button>
-      )}
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); onToggleDefer(); }}
+        title={deferred ? "Restore alert" : "Dismiss alert"}
+        style={{ background: "none", border: "none", cursor: "pointer", padding: "2px 4px", fontSize: 13, color: "rgba(255,255,255,0.18)", flexShrink: 0, lineHeight: 1 }}
+        aria-label={deferred ? "Restore" : "Dismiss"}
+      >
+        {deferred ? "↩" : "—"}
+      </button>
     </div>
   );
+}
+
+// A section of active-then-deferred cards for an arbitrary item list. Used
+// for Equipment/Badges/Credentials (flat) and once per city for Terminal
+// Cards. Renders nothing if there's genuinely nothing to show.
+function ExpGroup({
+  active, deferred, tapAction, toggleDefer, labelFor, formatMDYWithCountdown_,
+}: {
+  active: ExpirationItem[];
+  deferred: ExpirationItem[];
+  tapAction: (item: ExpirationItem) => void;
+  toggleDefer: (id: string) => void;
+  labelFor: (item: ExpirationItem) => string;
+  formatMDYWithCountdown_: (iso: string) => string;
+}) {
+  if (active.length === 0 && deferred.length === 0) return null;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+      {active.map((item) => (
+        <ExpirationCard
+          key={item.id}
+          label={labelFor(item)}
+          statusText={`${item.expired ? "⛔" : "⚠"} ${formatMDYWithCountdown_(item.expiresISO)}`}
+          expired={item.expired} urgent={!item.expired} deferred={false}
+          onTap={() => tapAction(item)}
+          onToggleDefer={() => toggleDefer(item.id)}
+        />
+      ))}
+      {deferred.length > 0 && active.length > 0 && (
+        <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", marginTop: 2, marginBottom: 2 }} />
+      )}
+      {deferred.map((item) => (
+        <ExpirationCard
+          key={item.id}
+          label={labelFor(item)}
+          statusText={formatMDYWithCountdown_(item.expiresISO)}
+          expired={false} urgent={false} deferred={true}
+          onTap={() => tapAction(item)}
+          onToggleDefer={() => toggleDefer(item.id)}
+        />
+      ))}
+    </div>
+  );
+}
+
+function equipmentLabel(item: ExpirationItem): string {
+  const kind = item.entityType === "truck" ? "Truck" : "Trailer";
+  return `${kind} ${item.entityName} — ${item.label}`;
+}
+
+// ── Report ────────────────────────────────────────────────────────────────────
+// Mirrors the modal's own section grouping exactly -- Equipment, Terminal
+// Cards grouped by city, Badges, Credentials -- built only from active
+// (non-dismissed) items, same scope as what the modal itself shows front
+// and center.
+function buildReport(activeItems: ExpirationItem[], formatMDYWithCountdown_: (iso: string) => string): string {
+  const date = new Date().toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" });
+  const lines: string[] = [`Expiration Report — ${date}`, ""];
+  let any = false;
+
+  const equipment = activeItems.filter((i) => i.entityType === "truck" || i.entityType === "trailer");
+  if (equipment.length > 0) {
+    any = true;
+    lines.push("EQUIPMENT");
+    for (const i of equipment) lines.push(`${equipmentLabel(i)}  ${formatMDYWithCountdown_(i.expiresISO)}`);
+    lines.push("");
+  }
+
+  const terminals = activeItems.filter((i) => i.entityType === "terminal");
+  if (terminals.length > 0) {
+    any = true;
+    lines.push("TERMINAL CARDS");
+    const byCity = new Map<string, ExpirationItem[]>();
+    for (const i of terminals) {
+      const city = i.city && i.state ? `${i.city}, ${i.state}` : i.city || i.state || "Other";
+      if (!byCity.has(city)) byCity.set(city, []);
+      byCity.get(city)!.push(i);
+    }
+    const cities = Array.from(byCity.entries()).sort(([a], [b]) => (a === "Other" ? 1 : b === "Other" ? -1 : a.localeCompare(b)));
+    for (const [city, cityItems] of cities) {
+      lines.push(city.toUpperCase());
+      for (const i of cityItems) lines.push(`${i.entityName}  ${formatMDYWithCountdown_(i.expiresISO)}`);
+    }
+    lines.push("");
+  }
+
+  const badges = activeItems.filter((i) => i.entityType === "badge");
+  if (badges.length > 0) {
+    any = true;
+    lines.push("BADGES");
+    for (const i of badges) lines.push(`${i.entityName}  ${formatMDYWithCountdown_(i.expiresISO)}`);
+    lines.push("");
+  }
+
+  const credentials = activeItems.filter((i) => i.entityType === "credential");
+  if (credentials.length > 0) {
+    any = true;
+    lines.push("CREDENTIALS");
+    for (const i of credentials) lines.push(`${i.entityName}  ${formatMDYWithCountdown_(i.expiresISO)}`);
+    lines.push("");
+  }
+
+  if (!any) lines.push("Nothing expired or expiring soon.");
+
+  return lines.join("\n").trimEnd();
 }
 
 // ── Modal ─────────────────────────────────────────────────────────────────────
 export default function ExpirationModal({
   open, onClose, items, activeItems, deferredItems, toggleDefer,
-  onOpenEquipment, onOpenTerminals,
-  selectedCity, selectedState, allTerminalsInCity,
-  accessDateByTerminalId, addDaysISO_, isPastISO_, formatMDYWithCountdown_,
+  onOpenEquipment, onOpenTerminals, formatMDYWithCountdown_,
 }: Props) {
+  const router = useRouter();
   const [copied, setCopied] = useState(false);
   const [shareError, setShareError] = useState("");
 
-  // ── Build terminal card data ──────────────────────────────────────────────
-  type CardEntry = { name: string; expires: string; expiresISO: string; daysLeft: number };
-  const cardActive: CardEntry[] = [];
-  const cardExpired: CardEntry[] = [];
-  const cardNotCarded: string[] = [];
-
-  for (const t of allTerminalsInCity) {
-    const tid     = String(t.terminal_id);
-    const name    = t.terminal_name ?? `Terminal ${tid}`;
-    const lastISO = accessDateByTerminalId[tid];
-    if (!lastISO) { cardNotCarded.push(name); continue; }
-    const renewalDays = Number(t.renewal_days ?? t.renewalDays ?? t.renewal ?? 90) || 90;
-    const expiresISO  = addDaysISO_(lastISO, renewalDays);
-    const today = new Date(); today.setHours(0, 0, 0, 0);
-    const daysLeft = Math.round((new Date(expiresISO + "T00:00:00").getTime() - today.getTime()) / 86400000);
-    const expiresText = formatMDYWithCountdown_(expiresISO).split(" (")[0];
-    const entry: CardEntry = { name, expires: expiresText, expiresISO, daysLeft };
-    isPastISO_(expiresISO) ? cardExpired.push(entry) : cardActive.push(entry);
-  }
-  cardActive.sort((a, b) => a.daysLeft - b.daysLeft);
-  cardExpired.sort((a, b) => a.daysLeft - b.daysLeft);
-  cardNotCarded.sort();
-
-  const report = buildReport(activeItems, selectedCity, selectedState, cardActive, cardExpired, cardNotCarded);
+  const report = buildReport(activeItems, formatMDYWithCountdown_);
 
   const handleCopy = async () => {
     try { await navigator.clipboard.writeText(report); setCopied(true); setTimeout(() => setCopied(false), 2000); }
@@ -229,170 +244,103 @@ export default function ExpirationModal({
     else { window.open(`mailto:?subject=${encodeURIComponent("Expiration Report")}&body=${encodeURIComponent(report)}`); }
   };
 
-  const tapAction = (item: ExpirationItem) => { onClose(); item.entityType === "terminal" ? onOpenTerminals() : onOpenEquipment(); };
+  const tapAction = (item: ExpirationItem) => {
+    onClose();
+    if (item.entityType === "terminal") onOpenTerminals();
+    else if (item.entityType === "badge") router.push("/planner/cards/badges");
+    else if (item.entityType === "credential") router.push("/planner/cards/credentials");
+    else onOpenEquipment();
+  };
 
-  const locLabel = selectedCity && selectedState ? `In ${selectedCity}, ${selectedState}` : selectedCity ? `In ${selectedCity}` : "";
-  const activeTrucks    = activeItems.filter(i => i.entityType === "truck");
-  const activeTrailers  = activeItems.filter(i => i.entityType === "trailer");
-  const allTrucks   = items.filter(i => i.entityType === "truck");
-  const allTrailers = items.filter(i => i.entityType === "trailer");
-  const truckNames   = [...new Set(allTrucks.map(i => i.entityName))].join(", ");
-  const trailerNames = [...new Set(allTrailers.map(i => i.entityName))].join(", ");
-  const hasCards = cardActive.length + cardExpired.length + cardNotCarded.length > 0;
+  const activeEquipment   = activeItems.filter((i) => i.entityType === "truck" || i.entityType === "trailer");
+  const deferredEquipment = deferredItems.filter((i) => i.entityType === "truck" || i.entityType === "trailer");
 
-  // Render a list of ExpirationItems as unified cards
-  const renderExpCards = (expItems: ExpirationItem[], isDeferred = false) =>
-    expItems.map(item => (
-      <ExpirationCard
-        key={item.id}
-        label={item.entityType === "terminal" ? item.entityName : item.label}
-        statusText={
-          isDeferred
-            ? (item.expired ? `Expired ${Math.abs(item.daysLeft)}d ago` : `${item.daysLeft}d left`)
-            : item.expired
-              ? `⛔ Expired ${Math.abs(item.daysLeft)}d ago`
-              : `⚠ ${item.daysLeft}d left`
-        }
-        expired={item.expired}
-        urgent={!item.expired}
-        deferred={isDeferred}
-        onTap={() => tapAction(item)}
-        onToggleDefer={() => toggleDefer(item.id)}
-      />
-    ));
+  const activeTerminals   = activeItems.filter((i) => i.entityType === "terminal");
+  const deferredTerminals = deferredItems.filter((i) => i.entityType === "terminal");
+
+  const activeBadges   = activeItems.filter((i) => i.entityType === "badge");
+  const deferredBadges = deferredItems.filter((i) => i.entityType === "badge");
+
+  const activeCredentials   = activeItems.filter((i) => i.entityType === "credential");
+  const deferredCredentials = deferredItems.filter((i) => i.entityType === "credential");
+
+  // Terminal cards grouped by city -- "Other" bucket sorts last, same
+  // convention as the Dispatch tab's own cardsByCity ("No City" there).
+  const terminalCities = (() => {
+    const byCity = new Map<string, { active: ExpirationItem[]; deferred: ExpirationItem[] }>();
+    const bucketFor = (i: ExpirationItem) => (i.city && i.state ? `${i.city}, ${i.state}` : i.city || i.state || "Other");
+    for (const i of activeTerminals) {
+      const city = bucketFor(i);
+      if (!byCity.has(city)) byCity.set(city, { active: [], deferred: [] });
+      byCity.get(city)!.active.push(i);
+    }
+    for (const i of deferredTerminals) {
+      const city = bucketFor(i);
+      if (!byCity.has(city)) byCity.set(city, { active: [], deferred: [] });
+      byCity.get(city)!.deferred.push(i);
+    }
+    return Array.from(byCity.entries()).sort(([a], [b]) => (a === "Other" ? 1 : b === "Other" ? -1 : a.localeCompare(b)));
+  })();
 
   return (
     <FullscreenModal open={open} title="Expirations" onClose={onClose}>
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
 
-        {/* ── Truck docs ── */}
-        {(() => {
-          const deferredTrucks = deferredItems.filter(i => i.entityType === "truck");
-          if (activeTrucks.length === 0 && deferredTrucks.length === 0) return null;
-          return (
-            <div>
-              <SectionLabel left="Truck Documents" right={truckNames ? `For ${truckNames}` : undefined} />
-              <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-                {renderExpCards(activeTrucks)}
-                {deferredTrucks.length > 0 && activeTrucks.length > 0 && (
-                  <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", marginTop: 2, marginBottom: 2 }} />
-                )}
-                {renderExpCards(deferredTrucks, true)}
-              </div>
-            </div>
-          );
-        })()}
+        {(activeEquipment.length > 0 || deferredEquipment.length > 0) && (
+          <div>
+            <SectionLabel left="Equipment" />
+            <ExpGroup
+              active={activeEquipment} deferred={deferredEquipment}
+              tapAction={tapAction} toggleDefer={toggleDefer}
+              labelFor={equipmentLabel} formatMDYWithCountdown_={formatMDYWithCountdown_}
+            />
+          </div>
+        )}
 
-        {/* ── Trailer docs ── */}
-        {(() => {
-          const deferredTrailers = deferredItems.filter(i => i.entityType === "trailer");
-          if (activeTrailers.length === 0 && deferredTrailers.length === 0) return null;
-          return (
-            <div>
-              <SectionLabel left="Trailer Documents" right={trailerNames ? `For ${trailerNames}` : undefined} />
-              <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-                {renderExpCards(activeTrailers)}
-                {deferredTrailers.length > 0 && activeTrailers.length > 0 && (
-                  <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", marginTop: 2, marginBottom: 2 }} />
-                )}
-                {renderExpCards(deferredTrailers, true)}
-              </div>
-            </div>
-          );
-        })()}
-
-        {/* ── Terminal Cards — directory + deferred alert items merged at bottom ── */}
-        {(() => {
-          const deferredTerminals = deferredItems.filter(i => i.entityType === "terminal");
-          const activeTerminalAlerts = activeItems.filter(i => i.entityType === "terminal");
-          const showSection = hasCards || deferredTerminals.length > 0 || activeTerminalAlerts.length > 0;
-          if (!showSection) return null;
-          // Exclude alert items and deferred items from directory to avoid duplication
-          const alertAndDeferredIds = new Set([
-            ...activeTerminalAlerts.map(i => i.entityId),
-            ...deferredTerminals.map(i => i.entityId),
-          ]);
-          const dirExpired = cardExpired.filter(c => {
-            // match by name since CardEntry has no ID — find terminal in allTerminalsInCity
-            return !alertAndDeferredIds.has(String(allTerminalsInCity.find(t => t.terminal_name === c.name)?.terminal_id ?? ""));
-          });
-          const dirActive = cardActive.filter(c => {
-            return !alertAndDeferredIds.has(String(allTerminalsInCity.find(t => t.terminal_name === c.name)?.terminal_id ?? ""));
-          });
-          const hasActiveOrExpired = dirExpired.length + dirActive.length > 0;
-          const hasBottom = cardNotCarded.length > 0 || deferredTerminals.length > 0;
-          return (
-            <div>
-              <SectionLabel left="Terminal Cards" right={locLabel || undefined} />
-              <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-
-                {/* Active terminal ExpirationItem alerts — HAS defer toggle */}
-                {activeTerminalAlerts.map(item => (
-                  <ExpirationCard key={item.id}
-                    label={item.entityName}
-                    statusText={item.expired ? `⛔ Expired ${Math.abs(item.daysLeft)}d ago` : `⚠ ${item.daysLeft}d left`}
-                    expired={item.expired} urgent={!item.expired} deferred={false}
-                    onTap={() => tapAction(item)}
-                    onToggleDefer={() => toggleDefer(item.id)}
-                    hideDefer={false}
-                  />
-                ))}
-
-                {/* Expired directory cards — no defer toggle, these are directory entries */}
-                {dirExpired.map(c => (
-                  <ExpirationCard key={`exp-${c.name}`}
-                    label={c.name}
-                    statusText={`⛔ ${c.expires} · ${Math.abs(c.daysLeft)}d ago`}
-                    expired={true} urgent={false} deferred={false}
-                    onTap={() => { onClose(); onOpenTerminals(); }}
-                    onToggleDefer={() => {}}
-                    hideDefer={true}
-                  />
-                ))}
-
-                {/* Active directory cards — no defer toggle */}
-                {dirActive.map(c => (
-                  <ExpirationCard key={`act-${c.name}`}
-                    label={c.name}
-                    statusText={c.daysLeft <= 7 ? `⚠ ${c.expires} · ${c.daysLeft}d` : `${c.expires} · ${c.daysLeft}d`}
-                    expired={false} urgent={c.daysLeft <= 7} deferred={false}
-                    onTap={() => { onClose(); onOpenTerminals(); }}
-                    onToggleDefer={() => {}}
-                    hideDefer={true}
-                  />
-                ))}
-
-                {/* Divider before bottom section */}
-                {hasBottom && hasActiveOrExpired && (
-                  <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", marginTop: 2, marginBottom: 2 }} />
-                )}
-
-                {/* Deferred terminal ExpirationItems — HAS defer toggle (↩ to restore) */}
-                {deferredTerminals.map(item => (
-                  <ExpirationCard key={item.id}
-                    label={item.entityName}
-                    statusText={item.expired ? `Expired ${Math.abs(item.daysLeft)}d ago` : `${item.daysLeft}d left`}
-                    expired={false} urgent={false} deferred={true}
-                    onTap={() => tapAction(item)}
-                    onToggleDefer={() => toggleDefer(item.id)}
-                    hideDefer={false}
-                  />
-                ))}
-
-                {/* Not carded — ghost, no date, no toggle */}
-                {cardNotCarded.map(name => (
-                  <div key={`nc-${name}`} style={{ padding: "8px 10px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.05)", background: "rgba(255,255,255,0.02)" }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,0.25)" }}>{name}</div>
+        {terminalCities.length > 0 && (
+          <div>
+            <SectionLabel left="Terminal Cards" />
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {terminalCities.map(([city, group]) => (
+                <div key={city}>
+                  <div style={{ fontSize: 11, fontWeight: 800, color: "rgba(255,255,255,0.35)", textTransform: "uppercase" as const, letterSpacing: 0.5, marginBottom: 6 }}>
+                    {city}
                   </div>
-                ))}
-
-              </div>
+                  <ExpGroup
+                    active={group.active} deferred={group.deferred}
+                    tapAction={tapAction} toggleDefer={toggleDefer}
+                    labelFor={(item) => item.entityName} formatMDYWithCountdown_={formatMDYWithCountdown_}
+                  />
+                </div>
+              ))}
             </div>
-          );
-        })()}
+          </div>
+        )}
 
-        {items.length === 0 && !hasCards && (
-          <div style={{ fontSize: 13, color: "rgba(255,255,255,0.40)" }}>Nothing to show.</div>
+        {(activeBadges.length > 0 || deferredBadges.length > 0) && (
+          <div>
+            <SectionLabel left="Badges" />
+            <ExpGroup
+              active={activeBadges} deferred={deferredBadges}
+              tapAction={tapAction} toggleDefer={toggleDefer}
+              labelFor={(item) => item.entityName} formatMDYWithCountdown_={formatMDYWithCountdown_}
+            />
+          </div>
+        )}
+
+        {(activeCredentials.length > 0 || deferredCredentials.length > 0) && (
+          <div>
+            <SectionLabel left="Credentials" />
+            <ExpGroup
+              active={activeCredentials} deferred={deferredCredentials}
+              tapAction={tapAction} toggleDefer={toggleDefer}
+              labelFor={(item) => item.entityName} formatMDYWithCountdown_={formatMDYWithCountdown_}
+            />
+          </div>
+        )}
+
+        {items.length === 0 && (
+          <div style={{ fontSize: 13, color: "rgba(255,255,255,0.40)" }}>Nothing expired or expiring soon.</div>
         )}
 
         {/* ── Share ── */}
