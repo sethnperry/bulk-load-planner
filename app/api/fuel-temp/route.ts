@@ -266,6 +266,7 @@ export async function POST(req: Request) {
       biasApplied: result.biasApplied,
       biasSampleCount: result.biasSampleCount,
       historyPoints: history.length,
+      serverNow: new Date(nowTs * 1000).toISOString(),
     });
   } catch (e: any) {
     console.error("[fuel-temp]", e?.message);

@@ -646,6 +646,7 @@ export default function CalculatorPage() {
   const {
     predictedFuelTempF, confidence: fuelTempConfidence, loading: fuelTempLoading,
     ambientNowF: fuelTempAmbientF,
+    debugLastPayload: fuelTempDebugPayload, debugLastResponse: fuelTempDebugResponse,
   } = useFuelTempPrediction({
     city: location.selectedCity || null,
     state: location.selectedState || null,
@@ -1675,6 +1676,8 @@ const lastProductInfoById = useMemo(() => {
         locationLon={location.locationLon}
         ambientTempLoading={fuelTempLoading && fuelTempAmbientF == null}
         ambientTempF={fuelTempAmbientF}
+        debugLastPayload={fuelTempDebugPayload}
+        debugLastResponse={fuelTempDebugResponse}
         tempF={tempF}
         setTempF={setTempF}
         productGroups={tempModalProductGroups}

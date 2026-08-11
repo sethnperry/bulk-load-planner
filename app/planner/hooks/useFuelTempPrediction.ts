@@ -26,6 +26,13 @@ type Output = {
   lon: number | null;
 
   usedCache: boolean | null;
+
+  // TEMPORARY (2026-08-11): surfaces exactly what this hook sent/received,
+  // so a real device reporting a wrong ambient value can be diagnosed via a
+  // screenshot instead of guessing -- remove once the ambient-staleness
+  // investigation is closed out.
+  debugLastPayload: any;
+  debugLastResponse: any;
 };
 
 function isFiniteNumber(v: any): v is number {
@@ -45,6 +52,8 @@ export function useFuelTempPrediction(input: Input): Output {
   const [latResolved, setLatResolved] = useState<number | null>(null);
   const [lonResolved, setLonResolved] = useState<number | null>(null);
   const [usedCache, setUsedCache] = useState<boolean | null>(null);
+  const [debugLastPayload, setDebugLastPayload] = useState<any>(null);
+  const [debugLastResponse, setDebugLastResponse] = useState<any>(null);
 
   const lastCallAtRef = useRef<number>(0);
   const lastSigRef = useRef<string>("");
@@ -111,6 +120,8 @@ export function useFuelTempPrediction(input: Input): Output {
         if (isFiniteNumber(ambientNowF)) payload.ambientNowF = ambientNowF;
         if (terminalId) payload.terminalId = terminalId;
 
+        setDebugLastPayload({ ...payload, sentAt: new Date().toISOString() });
+
         const res = await fetch("/api/fuel-temp", {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -119,6 +130,12 @@ export function useFuelTempPrediction(input: Input): Output {
         });
 
         const json = await res.json();
+        setDebugLastResponse({
+          ...json,
+          receivedAt: new Date().toISOString(),
+          vercelId: res.headers.get("x-vercel-id"),
+          vercelCache: res.headers.get("x-vercel-cache"),
+        });
         if (!res.ok) throw new Error(json?.error ?? "Fuel temp prediction failed.");
 
         if (cancelled) return;
@@ -159,5 +176,7 @@ export function useFuelTempPrediction(input: Input): Output {
     lat: latResolved ?? (isFiniteNumber(lat) ? lat : null),
     lon: lonResolved ?? (isFiniteNumber(lon) ? lon : null),
     usedCache,
+    debugLastPayload,
+    debugLastResponse,
   };
 }

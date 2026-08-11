@@ -247,6 +247,9 @@ export default function ProductTempModal(props: {
   fuelTempConfidence?: FuelTempConfidence | null;
   fuelTempLoading?: boolean;
   TempDial: React.ComponentType<TempDialProps>;
+  // TEMPORARY (2026-08-11): see useFuelTempPrediction.ts's own debug fields.
+  debugLastPayload?: any;
+  debugLastResponse?: any;
 }) {
   const {
     open, onClose, styles,
@@ -257,6 +260,8 @@ export default function ProductTempModal(props: {
     predictedFuelTempF = null,
     fuelTempConfidence = null,
     fuelTempLoading = false,
+    debugLastPayload = null,
+    debugLastResponse = null,
   } = props;
 
   const router = useRouter();
@@ -278,6 +283,19 @@ export default function ProductTempModal(props: {
             {ambientTempLoading ? "Loading…" : ambientTempF == null ? "—" : `${Math.round(ambientTempF)}°F ambient`}
           </span>
         </div>
+
+        {(debugLastPayload || debugLastResponse) && (
+          <div style={{
+            borderRadius: 6, border: "1px dashed rgba(251,191,36,0.4)",
+            background: "rgba(251,191,36,0.06)", padding: "10px 12px",
+            fontFamily: "monospace", fontSize: 10, color: "rgba(255,255,255,0.75)",
+            whiteSpace: "pre-wrap" as const, wordBreak: "break-all" as const,
+          }}>
+            <div style={{ color: "#fbbf24", fontWeight: 700, marginBottom: 4 }}>DEBUG (temporary)</div>
+            <div>sent: {JSON.stringify(debugLastPayload)}</div>
+            <div style={{ marginTop: 4 }}>recv: {JSON.stringify(debugLastResponse)}</div>
+          </div>
+        )}
 
         <PredictionBanner
           loading={fuelTempLoading}
