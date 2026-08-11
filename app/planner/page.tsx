@@ -630,12 +630,27 @@ export default function CalculatorPage() {
   const [productInputs, setProductInputs] = useState<Record<string, { api?: string; tempF?: number }>>({});
 
   // Fuel temp prediction — drives temp button border color and pre-fills ProductTempModal
-  const { predictedFuelTempF, confidence: fuelTempConfidence, loading: fuelTempLoading } = useFuelTempPrediction({
+  //
+  // Deliberately does NOT pass location.ambientTempF as ambientNowF here --
+  // that field is its own independently-polled value (useLocation.ts's own
+  // heartbeat/cache), and route.ts trusts whatever ambientNowF a caller
+  // supplies instead of re-fetching -- so if location.ambientTempF ever
+  // went stale (e.g. its own refresh listeners didn't fire on a given
+  // device/session), that staleness would silently feed straight into the
+  // actual prediction math, not just a display label. Omitting it here
+  // means the server always resolves its own fresh ambient for this call,
+  // same as useLocation.ts's own fetch already deliberately does (see that
+  // file's "do NOT send ambientNowF" comment). The modal below now shows
+  // this hook's own resolved ambientNowF instead of location.ambientTempF,
+  // for the same reason -- one fetch, one number, can't drift apart.
+  const {
+    predictedFuelTempF, confidence: fuelTempConfidence, loading: fuelTempLoading,
+    ambientNowF: fuelTempAmbientF,
+  } = useFuelTempPrediction({
     city: location.selectedCity || null,
     state: location.selectedState || null,
     lat: location.locationLat ?? null,
     lon: location.locationLon ?? null,
-    ambientNowF: location.ambientTempF ?? null,
     terminalId: location.selectedTerminalId || null,
   });
 
@@ -1658,8 +1673,8 @@ const lastProductInfoById = useMemo(() => {
         selectedTerminalId={location.selectedTerminalId}
         locationLat={location.locationLat}
         locationLon={location.locationLon}
-        ambientTempLoading={location.ambientTempLoading}
-        ambientTempF={location.ambientTempF}
+        ambientTempLoading={fuelTempLoading && fuelTempAmbientF == null}
+        ambientTempF={fuelTempAmbientF}
         tempF={tempF}
         setTempF={setTempF}
         productGroups={tempModalProductGroups}
