@@ -10,16 +10,12 @@ import type { CityRow, StateRow } from "../types";
 
 // ─── Ambient cache (per tab) ────────────────────────────────────────────────
 
-type AmbientCacheEntry = { ts: number; tempF: number; lat?: number | null; lon?: number | null };
+type AmbientCacheEntry = { ts: number; tempF: number };
 const AMBIENT_CACHE = new Map<string, AmbientCacheEntry>();
 const AMBIENT_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 function ambientKey(state: string, city: string) {
   return `${normState(state)}|${normCity(city)}`;
-}
-
-function isFiniteNumber(v: any): v is number {
-  return typeof v === "number" && Number.isFinite(v);
 }
 
 // ─── Persistence helpers ─────────────────────────────────────────────────────
@@ -78,9 +74,6 @@ export function useLocation(authUserId: string) {
   const [ambientTempF, setAmbientTempF] = useState<number | null>(null);
   const [ambientTempLoading, setAmbientTempLoading] = useState(false);
   const [ambientHeartbeat, setAmbientHeartbeat] = useState(0);
-
-  const [locationLat, setLocationLat] = useState<number | null>(null);
-  const [locationLon, setLocationLon] = useState<number | null>(null);
 
   // Hydration refs — prevent clobber during boot/auth flip
   const skipResetRef = useRef(false);
@@ -223,8 +216,6 @@ export function useLocation(authUserId: string) {
     if (!city || !state) {
       setAmbientTempF(null);
       setAmbientTempLoading(false);
-      setLocationLat(null);
-      setLocationLon(null);
       return;
     }
 
@@ -235,8 +226,6 @@ export function useLocation(authUserId: string) {
       // Paint instantly from cache while the real fetch below runs -- not a
       // substitute for it.
       setAmbientTempF(cached!.tempF);
-      setLocationLat(cached!.lat ?? null);
-      setLocationLon(cached!.lon ?? null);
     }
 
     const ac = new AbortController();
@@ -261,20 +250,10 @@ export function useLocation(authUserId: string) {
         if (!res.ok) throw new Error(json?.error ?? "Fuel temp route failed.");
 
         const amb = Number(json?.ambientNowF);
-        const lat = json?.lat != null ? Number(json.lat) : null;
-        const lon = json?.lon != null ? Number(json.lon) : null;
 
         if (Number.isFinite(amb)) {
           setAmbientTempF(amb);
-          setLocationLat(Number.isFinite(lat) ? lat : null);
-          setLocationLon(Number.isFinite(lon) ? lon : null);
-
-          AMBIENT_CACHE.set(k, {
-            ts: Date.now(),
-            tempF: amb,
-            lat: Number.isFinite(lat) ? lat : null,
-            lon: Number.isFinite(lon) ? lon : null,
-          });
+          AMBIENT_CACHE.set(k, { ts: Date.now(), tempF: amb });
         } else {
           setAmbientTempF(null);
         }
@@ -364,8 +343,6 @@ export function useLocation(authUserId: string) {
     setSelectedTerminalId,
     selectedCityId,
     locationLabel,
-    locationLat,
-    locationLon,
     statesCatalog,
     statesLoading,
     statesError,

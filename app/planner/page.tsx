@@ -629,29 +629,22 @@ export default function CalculatorPage() {
   }
   const [productInputs, setProductInputs] = useState<Record<string, { api?: string; tempF?: number }>>({});
 
-  // Fuel temp prediction — drives temp button border color and pre-fills ProductTempModal
+  // Fuel temp prediction — drives temp button border color and pre-fills ProductTempModal.
   //
-  // Deliberately does NOT pass location.ambientTempF as ambientNowF here --
-  // that field is its own independently-polled value (useLocation.ts's own
-  // heartbeat/cache), and route.ts trusts whatever ambientNowF a caller
-  // supplies instead of re-fetching -- so if location.ambientTempF ever
-  // went stale (e.g. its own refresh listeners didn't fire on a given
-  // device/session), that staleness would silently feed straight into the
-  // actual prediction math, not just a display label. Omitting it here
-  // means the server always resolves its own fresh ambient for this call,
-  // same as useLocation.ts's own fetch already deliberately does (see that
-  // file's "do NOT send ambientNowF" comment). The modal below now shows
-  // this hook's own resolved ambientNowF instead of location.ambientTempF,
-  // for the same reason -- one fetch, one number, can't drift apart.
+  // City/state only -- the server resolves its own fresh ambient + city-level
+  // coordinates (see /api/fuel-temp), never trusting a client-supplied value.
+  // terminalId is passed through only for the per-terminal bias lookup. The
+  // modal below shows this hook's own resolved ambientNowF, not a separately
+  // polled value, so the displayed label and the predicted temp can never
+  // drift apart (see fuelTempPredictor.ts / route.ts for the fuller history
+  // of why this matters -- an earlier version of this app tracked ambient
+  // per-terminal and once had 3 terminals silently resolving to (0,0)).
   const {
     predictedFuelTempF, confidence: fuelTempConfidence, loading: fuelTempLoading,
     ambientNowF: fuelTempAmbientF,
-    debugLastPayload: fuelTempDebugPayload, debugLastResponse: fuelTempDebugResponse,
   } = useFuelTempPrediction({
     city: location.selectedCity || null,
     state: location.selectedState || null,
-    lat: location.locationLat ?? null,
-    lon: location.locationLon ?? null,
     terminalId: location.selectedTerminalId || null,
   });
 
@@ -1672,12 +1665,8 @@ const lastProductInfoById = useMemo(() => {
         selectedCity={location.selectedCity}
         selectedState={location.selectedState}
         selectedTerminalId={location.selectedTerminalId}
-        locationLat={location.locationLat}
-        locationLon={location.locationLon}
         ambientTempLoading={fuelTempLoading && fuelTempAmbientF == null}
         ambientTempF={fuelTempAmbientF}
-        debugLastPayload={fuelTempDebugPayload}
-        debugLastResponse={fuelTempDebugResponse}
         tempF={tempF}
         setTempF={setTempF}
         productGroups={tempModalProductGroups}

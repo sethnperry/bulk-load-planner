@@ -133,13 +133,10 @@ async function collectAmbientHistory(
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { city, state, lat, lon, ambientNowF, terminalId } = body as {
+    const { city, state, terminalId } = body as {
       city: string;
       state: string;
-      lat?: number;
-      lon?: number;
-      ambientNowF?: number;
-      terminalId?: string;
+      terminalId?: string; // used only for the per-terminal bias lookup below
     };
 
     if (!city || !state) {
@@ -149,42 +146,45 @@ export async function POST(req: Request) {
     const owKey = process.env.OPENWEATHER_API_KEY;
     if (!owKey) return NextResponse.json({ error: "OPENWEATHER_API_KEY not set." }, { status: 500 });
 
-    // Supabase is optional — used for ambient history, bias lookup, and terminal lat/lon
+    // Supabase is optional — used for ambient history, bias lookup, and city lat/lon
     const supabase = tryGetSupabaseAdmin();
     const cityKey = makeCityKey(city, state);
     const nowTs = Math.floor(Date.now() / 1000);
 
-    // Resolve coordinates. (0, 0) -- "Null Island", a point in the Gulf of
-    // Guinea -- is never a legitimate terminal or city location; it only
-    // ever shows up here as bad seed data (confirmed live: 3 real terminals
-    // had lat/lon literally stored as 0/0). Number.isFinite(0) is true, so
-    // without this explicit check that bad data reads as "resolved" and
-    // silently skips both the terminal-lookup and city-geocode fallbacks
-    // below, fetching real (but totally wrong) weather for the equator
-    // instead of ever raising an error or falling through to a better
-    // source.
+    // Resolve coordinates -- city-level only. Ambient temp doesn't need
+    // per-terminal precision (every terminal in a city geocodes to
+    // essentially the same point anyway -- confirmed live, the only
+    // "variance" ever seen between terminals in the same city was noise
+    // from repeated geocoding calls, a few hundred feet apart at most).
+    // Caching this once per city instead of once per terminal also removes
+    // the whole class of bug a per-terminal cache is exposed to: 3 real
+    // terminals across 2 cities were once found with lat/lon stored as
+    // literal (0,0) -- "Null Island", a point in the Gulf of Guinea --
+    // which silently resolved to real (but wrong) weather for that spot
+    // instead of ever re-geocoding. (0,0) is excluded here for the same
+    // reason, defensively, in case old terminal-level bad data patterns
+    // recur at the city level for any reason.
     const isRealCoord = (a: number | null, b: number | null): a is number =>
       Number.isFinite(a) && Number.isFinite(b) && !(a === 0 && b === 0);
 
-    let resolvedLat: number | null = Number(lat);
-    let resolvedLon: number | null = Number(lon);
-    if (!isRealCoord(resolvedLat, resolvedLon)) {
-      resolvedLat = null;
-      resolvedLon = null;
-    }
+    let resolvedLat: number | null = null;
+    let resolvedLon: number | null = null;
+    let cityId: string | null = null;
 
-    if ((resolvedLat == null || resolvedLon == null) && terminalId && supabase) {
+    if (supabase) {
       try {
-        const { data: trow } = await supabase
-          .from("terminals")
-          .select("lat, lon")
-          .eq("terminal_id", terminalId)
+        const { data: crow } = await supabase
+          .from("cities")
+          .select("city_id, lat, lon")
+          .eq("city_name", city)
+          .eq("state_code", state)
           .maybeSingle();
-        const tLat = Number((trow as any)?.lat);
-        const tLon = Number((trow as any)?.lon);
-        if (isRealCoord(tLat, tLon)) {
-          resolvedLat = tLat;
-          resolvedLon = tLon;
+        cityId = (crow as any)?.city_id ?? null;
+        const cLat = Number((crow as any)?.lat);
+        const cLon = Number((crow as any)?.lon);
+        if (isRealCoord(cLat, cLon)) {
+          resolvedLat = cLat;
+          resolvedLon = cLon;
         }
       } catch { /* non-fatal */ }
     }
@@ -199,20 +199,25 @@ export async function POST(req: Request) {
       }
       resolvedLat = geo.lat;
       resolvedLon = geo.lon;
+
+      // Cache it on the city (once, not once per terminal) so future
+      // requests for this city skip the geocode call entirely.
+      if (supabase && cityId) {
+        try {
+          await supabase.from("cities").update({ lat: resolvedLat, lon: resolvedLon }).eq("city_id", cityId);
+        } catch { /* non-fatal */ }
+      }
     }
 
     // Current conditions -- always fetched fresh (a single lightweight
-    // `current`-only call, no forecast payload to cache anymore). Needed
-    // even when the caller supplied ambientNowF directly, since the solar
-    // term still needs cloud cover.
+    // `current`-only call, no forecast payload to cache anymore).
     const current = await fetchCurrentConditions({ lat: resolvedLat, lon: resolvedLon, apiKey: owKey });
     const cloudPct = current.cloudPct;
-    const ambientUsed: number | null =
-      typeof ambientNowF === "number" && Number.isFinite(ambientNowF) ? ambientNowF : current.tempF;
+    const ambientUsed = current.tempF;
 
     if (typeof ambientUsed !== "number" || !Number.isFinite(ambientUsed)) {
       return NextResponse.json(
-        { error: "ambientNowF missing and unable to fetch from OneCall current.temp." },
+        { error: "Unable to fetch current ambient temp from OneCall." },
         { status: 502 }
       );
     }
@@ -258,19 +263,6 @@ export async function POST(req: Request) {
       biasSampleCount,
     });
 
-    // Back-fill terminal coords if missing OR stuck at the bad (0,0) seed
-    // value (non-fatal) -- self-heals any other terminal hit by the same
-    // bad-data class this request may have just worked around.
-    if (terminalId && supabase) {
-      try {
-        await supabase
-          .from("terminals")
-          .update({ lat: resolvedLat, lon: resolvedLon })
-          .eq("terminal_id", terminalId)
-          .or("lat.is.null,and(lat.eq.0,lon.eq.0)");
-      } catch { /* non-fatal */ }
-    }
-
     return NextResponse.json({
       city,
       state,
@@ -283,7 +275,6 @@ export async function POST(req: Request) {
       biasApplied: result.biasApplied,
       biasSampleCount: result.biasSampleCount,
       historyPoints: history.length,
-      serverNow: new Date(nowTs * 1000).toISOString(),
     });
   } catch (e: any) {
     console.error("[fuel-temp]", e?.message);

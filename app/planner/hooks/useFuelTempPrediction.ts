@@ -8,10 +8,7 @@ export type FuelTempConfidence = "high" | "medium" | "low";
 type Input = {
   city?: string | null;
   state?: string | null;
-  lat?: number | null;
-  lon?: number | null;
-  ambientNowF?: number | null;
-  terminalId?: string | null; // optional — used to back-fill lat/lon on terminals
+  terminalId?: string | null; // optional — used for the per-terminal bias lookup only
 };
 
 type Output = {
@@ -20,19 +17,8 @@ type Output = {
   loading: boolean;
   error: string | null;
 
-  // Resolved from the API response (so the UI can display ambient even if input ambientNowF was null)
+  // Resolved from the API response, city-level.
   ambientNowF: number | null;
-  lat: number | null;
-  lon: number | null;
-
-  usedCache: boolean | null;
-
-  // TEMPORARY (2026-08-11): surfaces exactly what this hook sent/received,
-  // so a real device reporting a wrong ambient value can be diagnosed via a
-  // screenshot instead of guessing -- remove once the ambient-staleness
-  // investigation is closed out.
-  debugLastPayload: any;
-  debugLastResponse: any;
 };
 
 function isFiniteNumber(v: any): v is number {
@@ -40,20 +26,13 @@ function isFiniteNumber(v: any): v is number {
 }
 
 export function useFuelTempPrediction(input: Input): Output {
-  const { city, state, lat, lon, ambientNowF, terminalId } = input;
+  const { city, state, terminalId } = input;
 
   const [predictedFuelTempF, setPredictedFuelTempF] = useState<number | null>(null);
   const [confidence, setConfidence] = useState<FuelTempConfidence | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  // resolved values from the backend (One Call 3.0)
   const [ambientResolvedF, setAmbientResolvedF] = useState<number | null>(null);
-  const [latResolved, setLatResolved] = useState<number | null>(null);
-  const [lonResolved, setLonResolved] = useState<number | null>(null);
-  const [usedCache, setUsedCache] = useState<boolean | null>(null);
-  const [debugLastPayload, setDebugLastPayload] = useState<any>(null);
-  const [debugLastResponse, setDebugLastResponse] = useState<any>(null);
 
   const lastCallAtRef = useRef<number>(0);
   const lastSigRef = useRef<string>("");
@@ -66,8 +45,6 @@ export function useFuelTempPrediction(input: Input): Output {
 
   useEffect(() => {
     const { c, s } = normalized;
-
-    // NEW: Only require city/state. lat/lon/ambient can be resolved server-side via /api/fuel-temp.
     const ready = !!c && !!s;
 
     if (!ready) {
@@ -75,24 +52,13 @@ export function useFuelTempPrediction(input: Input): Output {
       setConfidence(null);
       setError(null);
       setAmbientResolvedF(null);
-      setLatResolved(null);
-      setLonResolved(null);
-      setUsedCache(null);
       return;
     }
 
-    // Build a signature so we refetch when meaningful inputs change
-    // (city/state always included; lat/lon/ambient included only if valid numbers)
-    const sigParts = [
-      `city=${c.toLowerCase()}`,
-      `state=${s.toLowerCase()}`,
-      isFiniteNumber(lat) ? `lat=${lat.toFixed(5)}` : "",
-      isFiniteNumber(lon) ? `lon=${lon.toFixed(5)}` : "",
-      isFiniteNumber(ambientNowF) ? `amb=${Math.round(ambientNowF)}` : "",
-      terminalId ? `terminal=${String(terminalId)}` : "",
-    ].filter(Boolean);
-
-    const sig = sigParts.join("&");
+    // Build a signature so we refetch when meaningful inputs change.
+    const sig = [`city=${c.toLowerCase()}`, `state=${s.toLowerCase()}`, terminalId ? `terminal=${String(terminalId)}` : ""]
+      .filter(Boolean)
+      .join("&");
 
     const now = Date.now();
     const minIntervalMs = 30_000;
@@ -113,14 +79,8 @@ export function useFuelTempPrediction(input: Input): Output {
       setError(null);
 
       try {
-        // Only send fields that we actually have.
         const payload: any = { city: c, state: s };
-        if (isFiniteNumber(lat)) payload.lat = lat;
-        if (isFiniteNumber(lon)) payload.lon = lon;
-        if (isFiniteNumber(ambientNowF)) payload.ambientNowF = ambientNowF;
         if (terminalId) payload.terminalId = terminalId;
-
-        setDebugLastPayload({ ...payload, sentAt: new Date().toISOString() });
 
         const res = await fetch("/api/fuel-temp", {
           method: "POST",
@@ -130,32 +90,19 @@ export function useFuelTempPrediction(input: Input): Output {
         });
 
         const json = await res.json();
-        setDebugLastResponse({
-          ...json,
-          receivedAt: new Date().toISOString(),
-          vercelId: res.headers.get("x-vercel-id"),
-          vercelCache: res.headers.get("x-vercel-cache"),
-        });
         if (!res.ok) throw new Error(json?.error ?? "Fuel temp prediction failed.");
 
         if (cancelled) return;
 
         setPredictedFuelTempF(isFiniteNumber(json?.predictedFuelTempF) ? json.predictedFuelTempF : null);
         setConfidence((json?.confidence as FuelTempConfidence) ?? null);
-
-        // Capture resolved ambient + coords so other UI (location tile, modals) can use them.
         setAmbientResolvedF(isFiniteNumber(json?.ambientNowF) ? json.ambientNowF : null);
-        setLatResolved(isFiniteNumber(json?.lat) ? json.lat : isFiniteNumber(lat) ? lat : null);
-        setLonResolved(isFiniteNumber(json?.lon) ? json.lon : isFiniteNumber(lon) ? lon : null);
-
-        setUsedCache(typeof json?.usedCache === "boolean" ? json.usedCache : null);
       } catch (e: any) {
         if (cancelled) return;
         setError(e?.message ?? "Error");
         setPredictedFuelTempF(null);
         setConfidence(null);
         setAmbientResolvedF(null);
-        setUsedCache(null);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -165,18 +112,13 @@ export function useFuelTempPrediction(input: Input): Output {
     return () => {
       cancelled = true;
     };
-  }, [normalized, lat, lon, ambientNowF, terminalId]);
+  }, [normalized, terminalId]);
 
   return {
     predictedFuelTempF,
     confidence,
     loading,
     error,
-    ambientNowF: ambientResolvedF ?? (isFiniteNumber(ambientNowF) ? ambientNowF : null),
-    lat: latResolved ?? (isFiniteNumber(lat) ? lat : null),
-    lon: lonResolved ?? (isFiniteNumber(lon) ? lon : null),
-    usedCache,
-    debugLastPayload,
-    debugLastResponse,
+    ambientNowF: ambientResolvedF,
   };
 }
