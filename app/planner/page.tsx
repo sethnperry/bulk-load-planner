@@ -298,6 +298,15 @@ export default function CalculatorPage() {
   // via the "Edit Comp N Product" action button, per the design handoff).
   const [activeSlotLetter, setActiveSlotLetter] = useState(1);
   const [selectedComp, setSelectedComp] = useState<number | null>(null);
+  // One-shot sync target for PresetDial -- set once the last-completed
+  // load's own plan_slot resolves after mount, so the dial's highlighted
+  // letter agrees with whichever preset's plan was actually restored into
+  // the compartments (previously it always showed A regardless of which
+  // preset the restored plan came from). See the effect below and the
+  // presetDialSyncedRef guard, which stops this from ever overriding a
+  // preset the driver has since manually tapped.
+  const [presetDialSyncTo, setPresetDialSyncTo] = useState<number | null>(null);
+  const presetDialSyncedRef = useRef(false);
 
   // ── Feature hooks ──────────────────────────────────────────────────────────
   // equipment/location/terminals come from the shared shell context (see above).
@@ -984,6 +993,16 @@ export default function CalculatorPage() {
     if (planSlots.lastLoadReport && !loadWorkflow.loadReport) {
       loadWorkflow.setLoadReport(planSlots.lastLoadReport);
     }
+    // Sync the preset dial's highlighted letter to match whichever preset
+    // the just-restored plan actually came from. Guarded to fire once and
+    // only while the dial is still sitting at its untouched default, so a
+    // preset the driver has already manually tapped (in the narrow window
+    // before this DB round trip resolves) is never clobbered.
+    if (planSlots.lastLoadReport?.plan_slot && !presetDialSyncedRef.current && activeSlotLetter === 1) {
+      presetDialSyncedRef.current = true;
+      setActiveSlotLetter(planSlots.lastLoadReport.plan_slot);
+      setPresetDialSyncTo(planSlots.lastLoadReport.plan_slot);
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [planSlots.lastLoadReport]);
 
@@ -1172,6 +1191,7 @@ const lastProductInfoById = useMemo(() => {
           onSave={(n) => { planSlots.saveToSlot(n); setBaselineOverrides(overridesSnapshot(compPlan, cgSlider)); }}
           onTourAdvance={tourAdvanceIfTarget}
           onActiveChange={setActiveSlotLetter}
+          syncTo={presetDialSyncTo}
         />
       </div>
 

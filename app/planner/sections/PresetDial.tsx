@@ -19,7 +19,7 @@
 import React, { useEffect, useRef, useState } from "react";
 
 export default function PresetDial({
-  slots, slotHas, disabled, onLoad, onOpenActions, onSave, onTourAdvance, onActiveChange,
+  slots, slotHas, disabled, onLoad, onOpenActions, onSave, onTourAdvance, onActiveChange, syncTo,
 }: {
   slots: readonly number[];
   slotHas: Record<number, boolean>;
@@ -31,11 +31,20 @@ export default function PresetDial({
   onSave: (n: number) => void;
   onTourAdvance?: (id: string) => void;
   onActiveChange?: (n: number) => void;
+  // One-shot external sync -- jumps the dial to this slot once, distinct
+  // from normal tap/scroll (which manage `active` locally). Exists so the
+  // highlighted letter can be told "the plan that was just restored into
+  // the compartments actually came from preset B," e.g. right after a
+  // fresh app open restores the last completed load -- without this, the
+  // dial always defaulted to A regardless of which preset's plan had
+  // actually been loaded.
+  syncTo?: number | null;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const suppressRef = useRef(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [active, setActive] = useState<number>(slots[0] ?? 1);
+  const appliedSyncRef = useRef<number | null>(null);
 
   useEffect(() => { onActiveChange?.(active); }, [active]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -52,6 +61,15 @@ export default function PresetDial({
   };
 
   useEffect(() => { centerSlot(active, false); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (syncTo == null) return;
+    if (appliedSyncRef.current === syncTo) return;
+    appliedSyncRef.current = syncTo;
+    setActive(syncTo);
+    centerSlot(syncTo, true);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [syncTo]);
 
   function onScroll() {
     if (suppressRef.current) return;
