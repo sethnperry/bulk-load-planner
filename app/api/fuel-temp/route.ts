@@ -154,9 +154,24 @@ export async function POST(req: Request) {
     const cityKey = makeCityKey(city, state);
     const nowTs = Math.floor(Date.now() / 1000);
 
-    // Resolve coordinates
-    let resolvedLat: number | null = Number.isFinite(Number(lat)) ? Number(lat) : null;
-    let resolvedLon: number | null = Number.isFinite(Number(lon)) ? Number(lon) : null;
+    // Resolve coordinates. (0, 0) -- "Null Island", a point in the Gulf of
+    // Guinea -- is never a legitimate terminal or city location; it only
+    // ever shows up here as bad seed data (confirmed live: 3 real terminals
+    // had lat/lon literally stored as 0/0). Number.isFinite(0) is true, so
+    // without this explicit check that bad data reads as "resolved" and
+    // silently skips both the terminal-lookup and city-geocode fallbacks
+    // below, fetching real (but totally wrong) weather for the equator
+    // instead of ever raising an error or falling through to a better
+    // source.
+    const isRealCoord = (a: number | null, b: number | null): a is number =>
+      Number.isFinite(a) && Number.isFinite(b) && !(a === 0 && b === 0);
+
+    let resolvedLat: number | null = Number(lat);
+    let resolvedLon: number | null = Number(lon);
+    if (!isRealCoord(resolvedLat, resolvedLon)) {
+      resolvedLat = null;
+      resolvedLon = null;
+    }
 
     if ((resolvedLat == null || resolvedLon == null) && terminalId && supabase) {
       try {
@@ -167,7 +182,7 @@ export async function POST(req: Request) {
           .maybeSingle();
         const tLat = Number((trow as any)?.lat);
         const tLon = Number((trow as any)?.lon);
-        if (Number.isFinite(tLat) && Number.isFinite(tLon)) {
+        if (isRealCoord(tLat, tLon)) {
           resolvedLat = tLat;
           resolvedLon = tLon;
         }
@@ -243,14 +258,16 @@ export async function POST(req: Request) {
       biasSampleCount,
     });
 
-    // Back-fill terminal coords if missing (non-fatal)
+    // Back-fill terminal coords if missing OR stuck at the bad (0,0) seed
+    // value (non-fatal) -- self-heals any other terminal hit by the same
+    // bad-data class this request may have just worked around.
     if (terminalId && supabase) {
       try {
         await supabase
           .from("terminals")
           .update({ lat: resolvedLat, lon: resolvedLon })
           .eq("terminal_id", terminalId)
-          .is("lat", null);
+          .or("lat.is.null,and(lat.eq.0,lon.eq.0)");
       } catch { /* non-fatal */ }
     }
 
