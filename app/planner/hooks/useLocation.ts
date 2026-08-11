@@ -273,17 +273,35 @@ export function useLocation(authUserId: string) {
   }, [selectedState, selectedCity, selectedTerminalId, ambientHeartbeat]);
 
   // ── Heartbeat to refresh ambient periodically ─────────────────────────────
+  // setInterval alone isn't enough on mobile -- browsers routinely throttle
+  // or fully suspend timers while a tab is backgrounded (screen locked, app
+  // switched away, etc.), so a driver who leaves the Planner open in the
+  // background for a while can come back to an ambient reading that's
+  // stuck hours stale, well past this 5-minute interval's intent. Forcing
+  // a refresh on visibilitychange catches that case immediately on return
+  // instead of waiting for however many missed interval ticks eventually
+  // fire (mobile OSes often suppress those entirely while backgrounded).
   useEffect(() => {
     if (!selectedState || !selectedCity) return;
     const HEARTBEAT_MS = 5 * 60 * 1000; // 5 min
 
-    const id = setInterval(() => {
+    const refresh = () => {
       const k = ambientKey(selectedState, selectedCity);
       AMBIENT_CACHE.delete(k);
       setAmbientHeartbeat((v) => v + 1);
-    }, HEARTBEAT_MS);
+    };
 
-    return () => clearInterval(id);
+    const id = setInterval(refresh, HEARTBEAT_MS);
+
+    const onVisible = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [selectedState, selectedCity]);
 
   // ── Derived ───────────────────────────────────────────────────────────────
