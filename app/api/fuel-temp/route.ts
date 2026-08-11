@@ -1,7 +1,7 @@
 // app/api/fuel-temp/route.ts
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { predictFuelTempNow } from "@/lib/fuelTempPredictor";
+import { predictFuelTempNow, type AmbientPoint } from "@/lib/fuelTempPredictor";
 
 export const runtime = "nodejs";
 
@@ -21,8 +21,6 @@ function makeCityKey(city: string, state: string): string {
   return `${city.trim().toLowerCase().replace(/\s+/g, "_")}|${state.trim().toLowerCase()}`;
 }
 
-type HourlyPoint = { ts: number; tempF: number; windMph: number; cloudPct: number };
-
 async function geocodeCityState(args: { city: string; state: string; apiKey: string }) {
   const { city, state, apiKey } = args;
   const q = encodeURIComponent(`${city},${state},US`);
@@ -37,12 +35,16 @@ async function geocodeCityState(args: { city: string; state: string; apiKey: str
   return { lat, lon };
 }
 
-async function fetchOneCall3(args: { lat: number; lon: number; apiKey: string }) {
+// Only `current` conditions are needed now -- the model walks real past
+// readings from ambient_temp_history, not a forecast, so there's no reason
+// to pull (or cache) OneCall's hourly/daily forecast data anymore.
+async function fetchCurrentConditions(args: { lat: number; lon: number; apiKey: string }) {
   const { lat, lon, apiKey } = args;
   const url =
     `https://api.openweathermap.org/data/3.0/onecall` +
     `?lat=${encodeURIComponent(String(lat))}` +
     `&lon=${encodeURIComponent(String(lon))}` +
+    `&exclude=minutely,hourly,daily,alerts` +
     `&units=imperial` +
     `&appid=${encodeURIComponent(apiKey)}`;
 
@@ -51,28 +53,75 @@ async function fetchOneCall3(args: { lat: number; lon: number; apiKey: string })
     const text = await res.text().catch(() => "");
     throw new Error(`OpenWeather OneCall 3.0 error (${res.status}) ${text ? "- " + text.slice(0, 140) : ""}`.trim());
   }
-  return (await res.json()) as any;
+  const json: any = await res.json();
+  const tempF = Number(json?.current?.temp);
+  const cloudPct = Number(json?.current?.clouds);
+  return {
+    tempF: Number.isFinite(tempF) ? tempF : null,
+    cloudPct: Number.isFinite(cloudPct) ? cloudPct : null,
+  };
 }
 
-function pickHourlies24h(onecall: any): HourlyPoint[] {
-  const arr = Array.isArray(onecall?.hourly) ? onecall.hourly : [];
-  const sliced = arr.slice(0, 24);
+// Insert "now" into this city's rolling history, throttled so a busy
+// terminal (many drivers polling the same city) doesn't spam near-duplicate
+// rows -- only writes when the most recent stored point is stale enough to
+// be worth a new sample. Also prunes anything older than the model needs.
+const MIN_SAMPLE_INTERVAL_MIN = 20;
+const HISTORY_LOOKBACK_HOURS = 30;
 
-  return sliced
-    .map((h: any) => {
-      const ts = Number(h?.dt);
-      const tempF = Number(h?.temp);
-      const windMph = Number(h?.wind_speed);
-      const cloudPct = Number(h?.clouds);
-      if (!Number.isFinite(ts) || !Number.isFinite(tempF)) return null;
-      return {
-        ts,
-        tempF,
-        windMph: Number.isFinite(windMph) ? windMph : 0,
-        cloudPct: Number.isFinite(cloudPct) ? cloudPct : 0,
-      } satisfies HourlyPoint;
-    })
-    .filter(Boolean) as HourlyPoint[];
+async function collectAmbientHistory(
+  // Typed loosely to match how the rest of this file already treats the
+  // service-role client -- ambient_temp_history isn't in the generated
+  // Database types, and Supabase's default generic makes .insert() with a
+  // literal object a hard type error otherwise (unlike .select(), which
+  // resolves loosely enough not to complain).
+  supabase: any,
+  cityKey: string,
+  nowTs: number,
+  ambientNowF: number
+): Promise<AmbientPoint[]> {
+  const lookbackTs = nowTs - HISTORY_LOOKBACK_HOURS * 3600;
+
+  const { data: rows } = await supabase
+    .from("ambient_temp_history")
+    .select("ts, temp_f")
+    .eq("city_key", cityKey)
+    .gte("ts", new Date(lookbackTs * 1000).toISOString())
+    .order("ts", { ascending: true });
+
+  const history: AmbientPoint[] = (rows ?? []).map((r: any) => ({
+    ts: Math.floor(new Date(r.ts).getTime() / 1000),
+    tempF: Number(r.temp_f),
+  }));
+
+  const lastPoint = history[history.length - 1];
+  const staleEnough = !lastPoint || nowTs - lastPoint.ts >= MIN_SAMPLE_INTERVAL_MIN * 60;
+
+  if (staleEnough) {
+    try {
+      await supabase.from("ambient_temp_history").insert({
+        city_key: cityKey,
+        ts: new Date(nowTs * 1000).toISOString(),
+        temp_f: ambientNowF,
+      });
+      history.push({ ts: nowTs, tempF: ambientNowF });
+    } catch {
+      // Non-fatal (e.g. a near-simultaneous insert from another request
+      // racing on the same primary key) -- the prediction still works fine
+      // off whatever history was already read.
+    }
+
+    // Housekeeping, non-fatal -- keep the table from growing unbounded.
+    try {
+      await supabase
+        .from("ambient_temp_history")
+        .delete()
+        .eq("city_key", cityKey)
+        .lt("ts", new Date(lookbackTs * 1000).toISOString());
+    } catch { /* non-fatal */ }
+  }
+
+  return history;
 }
 
 export async function POST(req: Request) {
@@ -94,11 +143,10 @@ export async function POST(req: Request) {
     const owKey = process.env.OPENWEATHER_API_KEY;
     if (!owKey) return NextResponse.json({ error: "OPENWEATHER_API_KEY not set." }, { status: 500 });
 
-    // Supabase is optional — used only for caching and terminal lat/lon lookup
+    // Supabase is optional — used for ambient history, bias lookup, and terminal lat/lon
     const supabase = tryGetSupabaseAdmin();
     const cityKey = makeCityKey(city, state);
-    const nowMs = Date.now();
-    const nowTs = Math.floor(nowMs / 1000);
+    const nowTs = Math.floor(Date.now() / 1000);
 
     // Resolve coordinates
     let resolvedLat: number | null = Number.isFinite(Number(lat)) ? Number(lat) : null;
@@ -132,69 +180,14 @@ export async function POST(req: Request) {
       resolvedLon = geo.lon;
     }
 
-    // Check cache (optional — skip if supabase unavailable)
-    let hourlies: HourlyPoint[] | null = null;
-    let ambientFromWeather: number | null = null;
-    let usedCache = false;
-
-    if (supabase) {
-      try {
-        const { data: cached } = await supabase
-          .from("fuel_temp_cache")
-          .select("hourly, updated_at")
-          .eq("city_key", cityKey)
-          .maybeSingle();
-
-        const cacheAgeMin = cached?.updated_at
-          ? (nowMs - new Date(cached.updated_at).getTime()) / 60000
-          : Infinity;
-
-        if (cached?.hourly && cacheAgeMin < 25) {
-          hourlies = cached.hourly as any;
-          usedCache = true;
-        }
-      } catch { /* non-fatal — proceed without cache */ }
-    }
-
-    // Fetch fresh weather if needed
-    const needsAmbient = typeof ambientNowF !== "number";
-    const needsFreshHourlies = !hourlies;
-
-    if (needsAmbient || needsFreshHourlies) {
-      const onecall = await fetchOneCall3({ lat: resolvedLat, lon: resolvedLon, apiKey: owKey });
-
-      const curTemp = Number(onecall?.current?.temp);
-      ambientFromWeather = Number.isFinite(curTemp) ? curTemp : null;
-
-      if (!hourlies) {
-        hourlies = pickHourlies24h(onecall);
-        // Try to cache — non-fatal if it fails
-        if (supabase) {
-          try {
-            await supabase.from("fuel_temp_cache").upsert(
-              {
-                city_key: cityKey,
-                lat: resolvedLat,
-                lon: resolvedLon,
-                hourly: hourlies,
-                updated_at: new Date().toISOString(),
-              },
-              { onConflict: "city_key" }
-            );
-          } catch { /* non-fatal */ }
-          usedCache = false;
-        }
-      }
-    }
-
-    if (!hourlies || hourlies.length === 0) {
-      return NextResponse.json({ error: "No hourly weather data available." }, { status: 502 });
-    }
-
-    const ambientUsed =
-      typeof ambientNowF === "number" && Number.isFinite(ambientNowF)
-        ? ambientNowF
-        : ambientFromWeather;
+    // Current conditions -- always fetched fresh (a single lightweight
+    // `current`-only call, no forecast payload to cache anymore). Needed
+    // even when the caller supplied ambientNowF directly, since the solar
+    // term still needs cloud cover.
+    const current = await fetchCurrentConditions({ lat: resolvedLat, lon: resolvedLon, apiKey: owKey });
+    const cloudPct = current.cloudPct;
+    const ambientUsed: number | null =
+      typeof ambientNowF === "number" && Number.isFinite(ambientNowF) ? ambientNowF : current.tempF;
 
     if (typeof ambientUsed !== "number" || !Number.isFinite(ambientUsed)) {
       return NextResponse.json(
@@ -203,6 +196,13 @@ export async function POST(req: Request) {
       );
     }
 
+    // Real ambient history for this city -- the actual fix (see
+    // lib/fuelTempPredictor.ts header). Falls back to an empty array (and
+    // the predictor's own "no history yet" branch) if Supabase is unavailable.
+    const history = supabase
+      ? await collectAmbientHistory(supabase, cityKey, nowTs, ambientUsed)
+      : [];
+
     // Look up historical bias correction for this terminal + hour + month
     let biasCorrectionF = 0;
     let biasSampleCount = 0;
@@ -210,9 +210,7 @@ export async function POST(req: Request) {
       try {
         const nowDate = new Date(nowTs * 1000);
         // Bucketed to a 3-hour window (0,3,6,...,21) rather than the exact UTC hour.
-        // Exact-hour buckets fragmented samples too thinly (a 2:57pm load and a 3:03pm
-        // load never combined), so most buckets stayed under the confidence threshold
-        // indefinitely. Must match the bucketing in useLoadWorkflow.ts's write side.
+        // Must match the bucketing in useLoadWorkflow.ts's write side.
         const hourUtc = Math.floor(nowDate.getUTCHours() / 3) * 3;
         const monthOfYear = nowDate.getUTCMonth() + 1;
 
@@ -231,11 +229,10 @@ export async function POST(req: Request) {
       } catch { /* non-fatal */ }
     }
 
-    const result = predictFuelTempNow(hourlies, resolvedLat, resolvedLon, ambientUsed, nowTs, {
-      tankPreset: "large",
-      betaSun: 2.0,
-      cwWind: 0.04,
-      maxWindMultiplier: 2.5,
+    const result = predictFuelTempNow(history, ambientUsed, nowTs, resolvedLat, resolvedLon, {
+      halfLifeHours: 20,
+      maxSolarBumpF: 3,
+      cloudPct,
       biasCorrectionF,
       biasSampleCount,
     });
@@ -262,7 +259,7 @@ export async function POST(req: Request) {
       confidence: result.confidence,
       biasApplied: result.biasApplied,
       biasSampleCount: result.biasSampleCount,
-      usedCache,
+      historyPoints: history.length,
     });
   } catch (e: any) {
     console.error("[fuel-temp]", e?.message);

@@ -1,36 +1,53 @@
 // lib/fuelTempPredictor.ts
-// Physics-informed predictor: first-order lag + solar gain.
-// Above-ground, light-colored (white/light gray) tanks.
-// Outputs a "recommended product temp" estimate (no conservative bias injection).
+// Simplified physics model: a single-time-constant thermal lag against REAL
+// past ambient readings (self-collected in ambient_temp_history), plus a
+// small bounded solar allowance and the existing learned bias correction.
+//
+// Rewritten 2026-08-10 to fix a real architecture bug in the prior version:
+// that predictor simulated forward through OpenWeather's OneCall "hourly"
+// field, which is a *forecast* (current hour -> next 24-48h), not history.
+// Walking a forward-lag simulation through 24 forecast hours and returning
+// the value at the far end meant the "predicted fuel temp now" was actually
+// the simulated temp ~23 hours in the future, mislabeled as "now" -- no
+// amount of tuning the old k0/betaSun/wind knobs could fix that, since the
+// simulation was oriented backwards relative to what it was answering.
+//
+// This version walks forward through real PAST points (oldest -> now),
+// which is the only orientation that can honestly answer "what is it now."
+// It also collapses four tunable knobs (k0, betaSun, cwWind,
+// maxWindMultiplier) down to one (halfLifeHours) -- a tank's thermal lag is
+// well described by a single exponential time constant, and a single knob
+// is far easier to reason about and tune against real bias data than four
+// interacting ones. Above-ground, light-colored (white/light gray) tanks.
 
-export type HourlyWx = {
-  ts: number; // unix seconds
-  tempF: number;
-  windMph: number; // 0 if unknown
-  cloudPct: number; // 0..100
-};
+export type AmbientPoint = { ts: number; tempF: number };
 
 export type PredictorParams = {
-  tankPreset?: "small" | "medium" | "large"; // small=fast, large=slow
-  betaSun?: number; // °F per hour at peak sun, clear sky (default ~2.0)
-  cwWind?: number; // wind sensitivity multiplier per mph (default ~0.04)
-  maxWindMultiplier?: number; // default ~2.5
-  // Historical bias correction from terminal_temp_bias table
-  biasCorrectionF?: number;   // mean_error for this terminal+hour+month
-  biasSampleCount?: number;   // how many samples drove this correction
+  // How long until the tank has closed half the gap to a new ambient level.
+  // Replaces the old tankPreset/k0 system -- this app doesn't know individual
+  // tank sizes today, so one reasonable default stands in for all of them,
+  // same simplification the old code made (tankPreset was hardcoded "large"
+  // at every call site, never actually varied).
+  halfLifeHours?: number; // default 20
+  // Small, bounded daytime allowance -- capped so it can never "run away"
+  // the way the old hour-by-hour accumulated solar term theoretically could.
+  maxSolarBumpF?: number; // default 3
+  cloudPct?: number | null; // 0..100, reduces the solar bump when overcast
+  // Historical bias correction from terminal_temp_bias (unchanged from before).
+  biasCorrectionF?: number;
+  biasSampleCount?: number;
 };
 
 export type FuelTempResult = {
   predictedFuelTempF: number;
   confidence: "high" | "medium" | "low";
-  biasApplied: number;       // correction applied from historical data (°F)
-  biasSampleCount: number;   // how many observations drove this correction
+  biasApplied: number;
+  biasSampleCount: number;
   debug?: {
     seedFuelTempF: number;
-    lastSimTs: number;
-    k0: number;
-    betaSun: number;
-    rawPrediction: number;   // before bias correction
+    pointCount: number;
+    halfLifeHours: number;
+    rawPrediction: number; // before bias correction
   };
 };
 
@@ -48,32 +65,25 @@ function round1(x: number) {
 }
 
 /**
- * Solar elevation (radians) from timestamp + lat/lon.
- * Lightweight approximation to keep deps out (swap for suncalc later if you want).
+ * Solar elevation (radians) from timestamp + lat/lon. Lightweight
+ * approximation to keep deps out (swap for suncalc later if you want).
  */
 export function solarElevationRad(unixSeconds: number, latDeg: number, lonDeg: number): number {
   const date = new Date(unixSeconds * 1000);
 
-  // Julian day
   const msPerDay = 86400000;
   const jd = date.getTime() / msPerDay + 2440587.5;
   const n = jd - 2451545.0;
 
-  // Mean longitude / anomaly (deg)
   const L = (280.46 + 0.9856474 * n) % 360;
   const g = (357.528 + 0.9856003 * n) % 360;
 
-  // Ecliptic longitude (deg)
   const lambda = L + 1.915 * Math.sin(deg2rad(g)) + 0.02 * Math.sin(deg2rad(2 * g));
-
-  // Obliquity (deg)
   const epsilon = 23.439 - 0.0000004 * n;
 
-  // Declination (rad)
   const sinDec = Math.sin(deg2rad(epsilon)) * Math.sin(deg2rad(lambda));
   const dec = Math.asin(sinDec);
 
-  // Equation of time rough (minutes)
   const y = Math.tan(deg2rad(epsilon) / 2) ** 2;
   const eqTime =
     4 *
@@ -85,59 +95,61 @@ export function solarElevationRad(unixSeconds: number, latDeg: number, lonDeg: n
         1.25 * 0.0167 * 0.0167 * Math.sin(2 * deg2rad(g))
     );
 
-  // True solar time (minutes)
   const utcMinutes = date.getUTCHours() * 60 + date.getUTCMinutes() + date.getUTCSeconds() / 60;
   const trueSolarMinutes = (utcMinutes + eqTime + 4 * lonDeg) % 1440;
 
-  // Hour angle (deg)
   const hourAngleDeg = trueSolarMinutes / 4 - 180;
   const ha = deg2rad(hourAngleDeg);
 
   const lat = deg2rad(latDeg);
 
-  // Solar elevation
   const sinEl = Math.sin(lat) * Math.sin(dec) + Math.cos(lat) * Math.cos(dec) * Math.cos(ha);
   return Math.asin(clamp(sinEl, -1, 1));
 }
 
-function tankPresetToK0(preset: PredictorParams["tankPreset"]): number {
-  switch (preset) {
-    case "small":
-      return 0.08; // e.g., ~250k gal
-    case "large":
-      return 0.03; // e.g., ~3M gal
-    case "medium":
-    default:
-      return 0.05; // e.g., ~1M gal
-  }
-}
-
-function confidenceFromCloudAndWind(hourlies: HourlyWx[]) {
-  const last = hourlies[hourlies.length - 1];
-  const avgCloud = hourlies.reduce((s, h) => s + (h.cloudPct ?? 0), 0) / hourlies.length;
-  const avgWind = hourlies.reduce((s, h) => s + (h.windMph ?? 0), 0) / hourlies.length;
-
-  if (last && avgCloud < 35 && avgWind < 15) return "high";
-  if (avgCloud < 70) return "medium";
+// Confidence now reflects how much REAL history we've collected for this
+// city, not weather clarity -- data maturity is what actually gates
+// accuracy in this model (the old cloud/wind-based confidence was measuring
+// a different thing than what the model's own reliability depended on).
+function confidenceFromHistory(history: AmbientPoint[], nowTs: number): "high" | "medium" | "low" {
+  if (history.length === 0) return "low";
+  const spanHours = (nowTs - history[0].ts) / 3600;
+  if (history.length >= 8 && spanHours >= 8) return "high";
+  if (history.length >= 3) return "medium";
   return "low";
 }
 
 /**
- * Predict fuel temp "now" by:
- * 1) Simulating across hourly weather points (24–30h recommended).
- * 2) Blending toward current ambient (5-minute heartbeat) within the current hour.
+ * Predict fuel temp "now" from real past ambient readings ending at now.
+ * `history` must be real observations (self-collected), ascending by ts,
+ * NOT a forecast -- the whole point of this rewrite is that direction.
  */
 export function predictFuelTempNow(
-  hourlies: HourlyWx[],
-  latDeg: number,
-  lonDeg: number,
+  history: AmbientPoint[],
   ambientNowF: number,
   nowTs: number,
+  latDeg: number,
+  lonDeg: number,
   params: PredictorParams = {}
 ): FuelTempResult {
-  if (!hourlies || hourlies.length < 6) {
-    // Fallback: slight lag behind ambient
-    const biasF = (params.biasCorrectionF ?? 0);
+  const halfLifeHours = params.halfLifeHours ?? 20;
+  const maxSolarBumpF = params.maxSolarBumpF ?? 3;
+  const k = Math.log(2) / halfLifeHours; // per-hour decay rate toward ambient
+
+  // history may already end at "now" (the caller just inserted this exact
+  // sample before calling in) -- don't double it up with a duplicate-
+  // timestamp point, which would otherwise just contribute a harmless but
+  // sloppy zero-dt step.
+  const lastHistoryPoint = history[history.length - 1];
+  const points: AmbientPoint[] =
+    lastHistoryPoint && lastHistoryPoint.ts === nowTs
+      ? history
+      : [...history, { ts: nowTs, tempF: ambientNowF }];
+
+  if (points.length < 2) {
+    // No real history yet for this city (brand new) -- fall back to a
+    // fixed small lag rather than guessing from a single point.
+    const biasF = params.biasCorrectionF ?? 0;
     return {
       predictedFuelTempF: round1(ambientNowF - 2 + biasF),
       confidence: "low",
@@ -146,59 +158,55 @@ export function predictFuelTempNow(
     };
   }
 
-  const k0 = tankPresetToK0(params.tankPreset ?? "medium");
-  const betaSun = params.betaSun ?? 2.0;
-  const cwWind = params.cwWind ?? 0.04;
-  const maxWindMultiplier = params.maxWindMultiplier ?? 2.5;
-
-  let Tf = hourlies[0].tempF;
-  let lastSimTs = hourlies[0].ts;
-
-  for (let i = 0; i < hourlies.length; i++) {
-    const h = hourlies[i];
-    const dtHours = Math.max(0.25, (h.ts - lastSimTs) / 3600); // min 15 min
-
-    // Effective k with wind
-    const wind = Math.max(0, h.windMph ?? 0);
-    const windMult = clamp(1 + cwWind * wind, 1, maxWindMultiplier);
-    const k = clamp(k0 * windMult, 0.005, 0.25);
-
-    // Solar heating
-    const el = solarElevationRad(h.ts, latDeg, lonDeg);
-    const sunFactor = Math.max(0, Math.sin(el)); // 0..1
-    const cloud = clamp((h.cloudPct ?? 0) / 100, 0, 1);
-    const cloudFactor = 1 - cloud; // 1 clear -> 0 overcast
-    const qSunPerHour = betaSun * sunFactor * cloudFactor;
-
-    Tf = Tf + k * (h.tempF - Tf) * dtHours + qSunPerHour * dtHours;
-    lastSimTs = h.ts;
+  // Walk the lag forward through real past points, ending at "now" -- this
+  // is the actual fix (see file header): previously this walked forward
+  // through a *forecast*, ending up to 23 hours in the future.
+  let Tf = points[0].tempF;
+  for (let i = 1; i < points.length; i++) {
+    // Capped at 6h so one stale/missing sample can't cause a single huge jump.
+    const dtHours = clamp((points[i].ts - points[i - 1].ts) / 3600, 0, 6);
+    Tf = Tf + k * (points[i].tempF - Tf) * dtHours;
   }
 
-  // Within-hour refinement toward 5-min ambient heartbeat
-  const lastHourly = hourlies[hourlies.length - 1];
-  const fracHour = clamp((nowTs - lastHourly.ts) / 3600, 0, 1);
-  const kWithin = 0.35 * k0; // gentle pull
-  Tf = Tf + kWithin * (ambientNowF - Tf) * fracHour;
+  // Small, bounded daytime allowance -- a single evaluation at "now", not
+  // accumulated hour-by-hour, so it can never run away regardless of how
+  // much history is fed in.
+  const el = solarElevationRad(nowTs, latDeg, lonDeg);
+  const sunFactor = Math.max(0, Math.sin(el));
+  const cloud = clamp((params.cloudPct ?? 0) / 100, 0, 1);
+  const solarBump = maxSolarBumpF * sunFactor * (1 - cloud);
 
-  const rawPrediction = Tf;
+  const rawPrediction = Tf + solarBump;
 
-  // Apply historical bias correction, weighted by how many observations back it.
-  // Previously this was gated to zero below 3 samples — meaning any terminal/hour/month
-  // bucket with 0-2 samples got the raw uncorrected physics estimate with no learning
-  // applied at all, regardless of how far off that estimate was. A partial correction
-  // from even a single observation is better than none, so we now ramp continuously
-  // from sample 1 (tanh(1/4) ≈ 0.24 weight) up toward full weight by ~8-10 samples.
+  // Learned bias correction -- unchanged from before, ramps continuously
+  // from sample 1 rather than gating to zero below some threshold.
   const biasSamples = params.biasSampleCount ?? 0;
   const biasRaw = params.biasCorrectionF ?? 0;
   const biasWeight = biasSamples > 0 ? Math.tanh(biasSamples / 4) : 0;
   const biasApplied = biasRaw * biasWeight;
-  Tf = Tf + biasApplied;
+
+  let result = rawPrediction + biasApplied;
+
+  // Hard boundary: "always lag behind ambient" isn't just an emergent
+  // property of the math, it's enforced -- the prediction can never sit
+  // outside the recent real-ambient range by more than a small margin, so
+  // a bad bias sample or an edge case in the solar term can't send it
+  // somewhere physically implausible.
+  const recentTemps = points.map((p) => p.tempF);
+  const recentMin = Math.min(...recentTemps);
+  const recentMax = Math.max(...recentTemps);
+  result = clamp(result, recentMin - 2, recentMax + maxSolarBumpF);
 
   return {
-    predictedFuelTempF: round1(Tf),
-    confidence: confidenceFromCloudAndWind(hourlies),
+    predictedFuelTempF: round1(result),
+    confidence: confidenceFromHistory(history, nowTs),
     biasApplied: round1(biasApplied),
     biasSampleCount: biasSamples,
-    debug: { seedFuelTempF: hourlies[0].tempF, lastSimTs, k0, betaSun, rawPrediction: round1(rawPrediction) },
+    debug: {
+      seedFuelTempF: points[0].tempF,
+      pointCount: points.length,
+      halfLifeHours,
+      rawPrediction: round1(rawPrediction),
+    },
   };
 }
