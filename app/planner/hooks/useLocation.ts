@@ -201,6 +201,21 @@ export function useLocation(authUserId: string) {
   }, [authUserId, effectiveLocKey, userLocKey, selectedState, selectedCity, selectedTerminalId]);
 
   // ── Ambient temp via existing /api/fuel-temp (OpenWeather 3.0) ────────────
+  // Stale-while-revalidate, not stale-and-trust: a cache hit is shown
+  // immediately (instant paint, no loading flicker on a normal re-render),
+  // but a real network fetch always fires too, regardless of the cache's
+  // TTL. This used to return early on a cache hit and skip fetching
+  // entirely -- which depended on *something* (a timer, visibilitychange,
+  // pageshow, focus) eventually invalidating that cache to ever self-heal.
+  // In practice, on at least one real device, none of those reliably fired
+  // -- even a full app uninstall/reinstall didn't clear a stuck reading,
+  // which points at the underlying browser tab/WebView process never
+  // actually dying the way "closing the app" suggests it should (Android
+  // PWA shortcuts don't necessarily map to the browser's own site storage
+  // being cleared). Always revalidating on mount means correctness no
+  // longer depends on guessing which lifecycle event this exact device
+  // fires -- every visit to this page corrects itself within a second or
+  // two of arriving, full stop.
   useEffect(() => {
     const city = String(selectedCity ?? "").trim();
     const state = String(selectedState ?? "").trim();
@@ -215,16 +230,17 @@ export function useLocation(authUserId: string) {
 
     const k = ambientKey(state, city);
     const cached = AMBIENT_CACHE.get(k);
-    if (cached && Date.now() - cached.ts < AMBIENT_TTL_MS) {
-      setAmbientTempF(cached.tempF);
-      setLocationLat(cached.lat ?? null);
-      setLocationLon(cached.lon ?? null);
-      setAmbientTempLoading(false);
-      return;
+    const hasFreshEnoughCache = !!cached && Date.now() - cached.ts < AMBIENT_TTL_MS;
+    if (hasFreshEnoughCache) {
+      // Paint instantly from cache while the real fetch below runs -- not a
+      // substitute for it.
+      setAmbientTempF(cached!.tempF);
+      setLocationLat(cached!.lat ?? null);
+      setLocationLon(cached!.lon ?? null);
     }
 
     const ac = new AbortController();
-    setAmbientTempLoading(true);
+    setAmbientTempLoading(!hasFreshEnoughCache);
 
     (async () => {
       try {
