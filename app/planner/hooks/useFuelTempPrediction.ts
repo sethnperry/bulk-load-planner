@@ -115,6 +115,7 @@ export function useFuelTempPrediction(input: Input): Output {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify(payload),
+          cache: "no-store",
         });
 
         const json = await res.json();

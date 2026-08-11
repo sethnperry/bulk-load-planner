@@ -4,6 +4,12 @@ import { createClient } from "@supabase/supabase-js";
 import { predictFuelTempNow, type AmbientPoint } from "@/lib/fuelTempPredictor";
 
 export const runtime = "nodejs";
+// Explicit, not just implied by the fetch(...,{cache:"no-store"}) calls
+// inside this route -- eliminates any possibility of Vercel's own route
+// response caching serving a stale prediction for this POST endpoint,
+// which otherwise would have been silently indistinguishable from a
+// client-side staleness bug (both look like "the number never updates").
+export const dynamic = "force-dynamic";
 
 function tryGetSupabaseAdmin() {
   try {
