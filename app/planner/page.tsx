@@ -53,6 +53,7 @@ import DriverTrainingModal from "./components/DriverTrainingModal";
 // (CalculatorLayoutClient.tsx) -- see the render-site comment further down.
 import TerminalCatalogModal from "./modals/TerminalCatalogModal";
 import LoadingModal from "./modals/LoadingModal";
+import CancelLoadSheet from "./components/CancelLoadSheet";
 import ProductTempModal from "./modals/ProductTempModal";
 import CompartmentModal from "./modals/CompartmentModal";
 
@@ -289,6 +290,11 @@ export default function CalculatorPage() {
   const [compModalOpen, setCompModalOpen] = useState(false);
   const [compModalComp, setCompModalComp] = useState<number | null>(null);
   const [tempDialOpen, setTempDialOpen] = useState(false);
+  // Confirmation shown when the driver closes the Loading modal instead of
+  // tapping LOADED -- see CancelLoadSheet.tsx for why this matters (the
+  // terminal access refresh already happened silently on LOAD tap; this
+  // just makes that explicit instead of a bare close).
+  const [cancelLoadConfirmOpen, setCancelLoadConfirmOpen] = useState(false);
 
   // ── Action row state ────────────────────────────────────────────────────────
   // activeSlotLetter mirrors PresetDial's own (cosmetic) centered/last-tapped
@@ -1643,7 +1649,7 @@ const lastProductInfoById = useMemo(() => {
         onPick={(id, name) => { setTraineeId(id); setTraineeName(name); }}
       />
       <LoadingModal
-        open={loadWorkflow.loadingOpen} onClose={loadWorkflow.cancelActiveLoad}
+        open={loadWorkflow.loadingOpen} onClose={() => setCancelLoadConfirmOpen(true)}
         styles={styles}
         planRows={planRows as any[]}
         productNameById={productNameById}
@@ -1656,6 +1662,12 @@ const lastProductInfoById = useMemo(() => {
         onLoaded={loadWorkflow.onLoadedFromLoadingModal}
         loadedDisabled={loadWorkflow.completeBusy}
         loadedLabel={loadWorkflow.completeBusy ? "Saving…" : "LOADED"}
+      />
+
+      <CancelLoadSheet
+        open={cancelLoadConfirmOpen}
+        onKeepLoading={() => setCancelLoadConfirmOpen(false)}
+        onConfirmCancel={() => { setCancelLoadConfirmOpen(false); loadWorkflow.cancelActiveLoad(); }}
       />
 
       <ProductTempModal
