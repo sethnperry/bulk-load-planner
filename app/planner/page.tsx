@@ -1469,11 +1469,15 @@ const lastProductInfoById = useMemo(() => {
         const diffColor = diff == null ? "rgba(255,255,255,0.85)" : diff > 0 ? "#ef4444" : "#4ade80";
 
         // Always present (and tappable) whenever there's a completed load to
-        // recall at all, valid or not -- the label itself is a permanent
-        // "Recall Last Load" action, not conditional on whether the numbers
-        // below are currently showing.
+        // recall at all -- but the text itself now tracks recapValid: while
+        // the numbers below are genuinely showing the last load ("Recap"),
+        // full detail (which plan, when) is worth surfacing; once they've
+        // dashed out, the plan/date/time detail would describe numbers that
+        // are no longer even visible, so it collapses to a bare action.
         const recapLabel = loadReport
-          ? `Recall Last Load${loadReport.plan_slot ? ` · Plan ${String.fromCharCode(64 + loadReport.plan_slot)}` : ""}${loadReport.completed_at ? ` · ${formatMDYWithTime_(loadReport.completed_at)}` : ""}`
+          ? (recapValid
+              ? `Recap${loadReport.plan_slot ? ` · Plan ${String.fromCharCode(64 + loadReport.plan_slot)}` : ""}${loadReport.completed_at ? ` · ${formatMDYWithTime_(loadReport.completed_at)}` : ""}`
+              : "Recall Last Load")
           : null;
 
         // Actual weight, colored against this combo's own target and the
