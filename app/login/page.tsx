@@ -2,7 +2,32 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { createClient } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase/client";
+
+/**
+ * A throwaway, implicit-flow client used ONLY to fire signInWithOtp below --
+ * never for reading/holding a session (persistSession: false, no storage
+ * writes). The shared `supabase` singleton forces flowType: "pkce" (via
+ * createBrowserClient, see lib/supabase/client.ts), which means the emailed
+ * magic link needs the code_verifier cookie from this exact browser to
+ * complete -- fine on the same device/browser, but breaks the moment the
+ * link is opened somewhere else (a different device, a mail app's in-app
+ * browser, or a security scanner that pre-fetches the link), surfacing as a
+ * generic "link expired" error in CallbackClient.tsx even though the link
+ * itself was fine. Sending the OTP request through an implicit-flow client
+ * instead makes the resulting link carry session tokens directly in the URL
+ * fragment (#access_token=...) -- no stored secret required on the
+ * clicking end, so it completes correctly regardless of where it's opened.
+ * CallbackClient.tsx's existing getSession()/detectSessionInUrl fallback
+ * (the `else` branch, for whenever no ?code= is present) already handles
+ * this without any further changes there.
+ */
+const otpUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const otpKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+const otpOnlyClient = createClient(otpUrl, otpKey, {
+  auth: { flowType: "implicit", persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+});
 
 export default function LoginPage() {
   const router = useRouter();
@@ -53,7 +78,7 @@ export default function LoginPage() {
     : "https://www.protankr.com";
 
 const emailRedirectTo = `${siteUrl}/auth/callback?next=${encodeURIComponent("/planner")}`;
-      const { error: otpError } = await supabase.auth.signInWithOtp({
+      const { error: otpError } = await otpOnlyClient.auth.signInWithOtp({
         email: trimmed,
         options: { emailRedirectTo },
       });

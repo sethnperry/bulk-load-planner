@@ -2645,6 +2645,35 @@ route — only `getSessionUserOrRedirect` (via the Planner gate above) has a
 real caller today. They're no longer *dead* code (the session they'd read
 is real now), just not yet adopted anywhere else.
 
+**Real-world fallout, fixed same day**: the very first genuine re-login
+after this shipped hit a "link expired" error on a legitimate, unused
+magic link. Root cause: `createBrowserClient` hardcodes `flowType: "pkce"`
+(confirmed via the SDK source, not overridable through its public options),
+and `/login`'s `signInWithOtp()` was running on that same shared client —
+so the emailed link carried `?code=...`, which only completes
+(`exchangeCodeForSession`) if the *same browser* that requested the link
+still has the `code_verifier` cookie. Opening the link from a different
+device, a different browser, or a mail app's in-app browser breaks that,
+and reads as a generic "expired/already used" error even though the link
+itself is fine — a well-known PKCE-and-email tradeoff, not a bug in the
+exchange logic itself.
+
+Fixed in `app/login/page.tsx`: `signInWithOtp` now runs on a dedicated,
+throwaway `createClient` instance configured `flowType: "implicit",
+persistSession: false` instead of the shared singleton — this client only
+ever fires that one request, never reads/holds a session. The resulting
+magic link now carries session tokens directly in the URL fragment
+(`#access_token=...`) instead of a `?code=`, which needs no stored secret
+to complete on the clicking end. `CallbackClient.tsx` needed no changes:
+its existing `else` branch (`getSession()`, for whenever no `?code=` is
+present) already handles this, and `_initialize()`'s hash-vs-code
+detection (confirmed via the `@supabase/auth-js` source) is independent of
+the *client's own* configured `flowType` — it reads whatever's actually in
+the URL. Live-verified: submitted the login form fresh and inspected the
+real outgoing `/auth/v1/otp` request body — `code_challenge` and
+`code_challenge_method` are both `null`, confirming the implicit client is
+genuinely in effect, not just configured.
+
 ### Stale-column audit — 2026-08-13
 
 After the `buffer_lbs` bug (a dead `equipment_combos` column reference that
