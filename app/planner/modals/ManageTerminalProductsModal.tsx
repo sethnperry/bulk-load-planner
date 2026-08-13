@@ -1,13 +1,16 @@
 "use client";
 // app/planner/modals/ManageTerminalProductsModal.tsx
 //
-// Lets a driver add/remove products from the terminal's active product list,
-// directly from the compartment product picker. Reachable from any
-// compartment's CompartmentModal; changes are written to `terminal_products`
-// (toggling `active`, never deleting the row -- preserves last_api/last_temp_f
-// history the same way the canonical-grouping insert-if-missing path does)
-// and then propagate to every compartment's picker via the shared
-// `terminalProducts` refetch passed in as `onChanged`.
+// Lets a driver add/remove products from the current RACK's active product
+// list (see CLAUDE.md "rack-aware loading, unified") -- different racks at
+// the same terminal genuinely carry different products, so this curates
+// rack_product_status for the specific rack currently selected, not a
+// terminal-wide list. Reachable from any compartment's CompartmentModal;
+// changes are written by toggling `active` (never deleting the row --
+// preserves last_api/last_temp_f history the same way the canonical-
+// grouping insert-if-missing path does) and then propagate to every
+// compartment's picker via the shared `terminalProducts` refetch passed in
+// as `onChanged`.
 
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
@@ -42,52 +45,54 @@ function groupFor(name: string): string {
 export default function ManageTerminalProductsModal({
   open,
   onClose,
-  terminalId,
+  rackId,
+  rackName,
   terminalName,
   onChanged,
 }: {
   open: boolean;
   onClose: () => void;
-  terminalId: string;
+  rackId: string;
+  rackName?: string;
   terminalName?: string;
   onChanged: () => void;
 }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [allProducts, setAllProducts] = useState<CatalogProduct[]>([]);
-  // undefined = no terminal_products row yet; true/false = row exists with that active flag
+  // undefined = no rack_product_status row yet; true/false = row exists with that active flag
   const [activeMap, setActiveMap] = useState<Record<string, boolean | undefined>>({});
   const [savingId, setSavingId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
 
   useEffect(() => {
-    if (!open || !terminalId) return;
+    if (!open || !rackId) return;
     let cancelled = false;
     (async () => {
       setLoading(true);
       setError(null);
-      const [{ data: products, error: pErr }, { data: tp, error: tpErr }] = await Promise.all([
+      const [{ data: products, error: pErr }, { data: rps, error: rpsErr }] = await Promise.all([
         supabase.from("products")
           .select("product_id, product_name, display_name, description, button_code, hex_code, is_dyed")
           .order("product_name"),
-        supabase.from("terminal_products")
+        supabase.from("rack_product_status")
           .select("product_id, active")
-          .eq("terminal_id", terminalId),
+          .eq("rack_id", rackId),
       ]);
       if (cancelled) return;
-      if (pErr || tpErr) {
-        setError(pErr?.message ?? tpErr?.message ?? "Failed to load products.");
+      if (pErr || rpsErr) {
+        setError(pErr?.message ?? rpsErr?.message ?? "Failed to load products.");
         setLoading(false);
         return;
       }
       const map: Record<string, boolean | undefined> = {};
-      for (const row of (tp ?? []) as any[]) map[row.product_id] = row.active !== false;
+      for (const row of (rps ?? []) as any[]) map[row.product_id] = row.active !== false;
       setAllProducts((products ?? []) as CatalogProduct[]);
       setActiveMap(map);
       setLoading(false);
     })();
     return () => { cancelled = true; };
-  }, [open, terminalId]);
+  }, [open, rackId]);
 
   async function toggle(productId: string) {
     const isActive = activeMap[productId] === true;
@@ -97,14 +102,14 @@ export default function ManageTerminalProductsModal({
     // a defined value -- undefined means insert, defined means update. Never
     // delete: matches the insert-if-missing / never-touch-on-conflict pattern
     // used everywhere else this session so last_api/last_temp_f history for
-    // a product a terminal previously curated is never lost by a re-toggle.
+    // a product this rack previously curated is never lost by a re-toggle.
     const rowExists = activeMap[productId] !== undefined;
     const { error: err } = rowExists
-      ? await supabase.from("terminal_products")
+      ? await supabase.from("rack_product_status")
           .update({ active: nextActive })
-          .eq("terminal_id", terminalId).eq("product_id", productId)
-      : await supabase.from("terminal_products")
-          .insert({ terminal_id: terminalId, product_id: productId, active: nextActive });
+          .eq("rack_id", rackId).eq("product_id", productId)
+      : await supabase.from("rack_product_status")
+          .insert({ rack_id: rackId, product_id: productId, active: nextActive });
     setSavingId(null);
     if (err) { setError(err.message); return; }
     setActiveMap((prev) => ({ ...prev, [productId]: nextActive }));
@@ -134,11 +139,24 @@ export default function ManageTerminalProductsModal({
     cursor: "pointer", width: "100%", boxSizing: "border-box" as const,
   };
 
+  // "Main Rack" is the invisible default name auto-created for every
+  // terminal that's never touched the Terminal tab (see CLAUDE.md
+  // "rack-aware loading, unified") -- naming it in this copy would read as
+  // a confusing reference to a rack the driver never picked. Only surface
+  // the rack name for a terminal where it actually means something (a real,
+  // named, multi-rack facility).
+  const showRackName = rackName && rackName !== "Main Rack";
+
   return (
     <FullscreenModal open={open} title="Terminal Products" onClose={onClose}>
       <div style={{ display: "grid", gap: 12 }}>
         <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)" }}>
-          {terminalName ? <>Active products at <span style={{ color: "rgba(255,255,255,0.75)", fontWeight: 700 }}>{terminalName}</span>.</> : "Active products at this terminal."}
+          {terminalName ? (
+            <>
+              Active products at <span style={{ color: "rgba(255,255,255,0.75)", fontWeight: 700 }}>{terminalName}</span>
+              {showRackName && <> — <span style={{ color: "rgba(255,255,255,0.75)", fontWeight: 700 }}>{rackName}</span></>}.
+            </>
+          ) : "Active products at this terminal."}
           {" "}Tap to add or remove — changes apply to every compartment's picker immediately.
         </div>
 

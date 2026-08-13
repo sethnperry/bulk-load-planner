@@ -23,6 +23,31 @@ import IncentiveSettingsModal from "./IncentiveSettingsModal";
 import PayrollReportModal from "./PayrollReportModal";
 import UnderloadingDashboardModal from "./UnderloadingDashboardModal";
 
+// Paginated fetch -- PostgREST/Supabase caps every response at a
+// server-side "max rows" setting (confirmed live: 1000, unaffected by
+// `.range()` on the client -- a request for rows 0-4999 still comes back
+// with only 1000 rows and a 206 Partial Content). Several tables here
+// (terminals: 1,238 rows as of this write, terminal_racks, rack_product_status)
+// are past that cap, so a single unpaginated fetch silently truncates --
+// this loops `.range()` in page-sized chunks until a page comes back
+// short, which works regardless of whatever the server's actual cap is.
+const FETCH_PAGE_SIZE = 1000;
+async function fetchAllRows<T>(
+  build: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: any }>
+): Promise<T[]> {
+  const all: T[] = [];
+  let from = 0;
+  for (;;) {
+    const { data, error } = await build(from, from + FETCH_PAGE_SIZE - 1);
+    if (error) throw error;
+    const rows = data ?? [];
+    all.push(...rows);
+    if (rows.length < FETCH_PAGE_SIZE) break;
+    from += FETCH_PAGE_SIZE;
+  }
+  return all;
+}
+
 // ─────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────
@@ -785,10 +810,42 @@ function TerminalModal({ terminal, companyId, allProducts, onClose, onDone }: {
     setCityId(found?.city_id ?? null);
   };
 
-  // Products assigned — just an ordered list of product_ids (duplicates allowed)
-  const [assigned, setAssigned] = useState<string[]>(
-    (terminal?.products ?? []).map(p => p.product_id)
-  );
+  // Products assigned — just an ordered list of product_ids (duplicates
+  // allowed). Curation now lives on rack_product_status per rack, not a
+  // terminal-wide table (see CLAUDE.md "rack-aware loading, unified") --
+  // this legacy screen has no rack-picker UI at all, so it can only safely
+  // edit a terminal that resolves to exactly one rack (targetRackId below).
+  // Starts empty; seeded async once that rack is known (isNew has no rack
+  // yet -- one gets created on save).
+  const [assigned, setAssigned] = useState<string[]>([]);
+  const [targetRackId, setTargetRackId] = useState<string | null>(null);
+  const [terminalRackCount, setTerminalRackCount] = useState<number | null>(isNew ? 0 : null);
+
+  useEffect(() => {
+    if (isNew || !terminal) return;
+    let cancelled = false;
+    (async () => {
+      const { data: racks } = await supabase
+        .from("terminal_racks")
+        .select("rack_id, created_at")
+        .eq("terminal_id", terminal.terminal_id)
+        .order("created_at", { ascending: true });
+      if (cancelled) return;
+      const rows = racks ?? [];
+      setTerminalRackCount(rows.length);
+      if (rows.length === 1) {
+        const rackId = (rows[0] as any).rack_id as string;
+        setTargetRackId(rackId);
+        const { data: rps } = await supabase
+          .from("rack_product_status")
+          .select("product_id")
+          .eq("rack_id", rackId)
+          .eq("active", true);
+        if (!cancelled) setAssigned((rps ?? []).map((r: any) => r.product_id));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isNew, terminal]);
 
   const [catalogOpen,   setCatalogOpen]   = useState(false);
   const [catalogSearch, setCatalogSearch] = useState("");
@@ -830,20 +887,48 @@ function TerminalModal({ terminal, companyId, allProducts, onClose, onDone }: {
         const { data: newT, error: tErr } = await supabase.from("terminals").insert(payload).select("terminal_id").single();
         if (tErr) throw tErr;
         tid = newT.terminal_id;
+
+        // Every terminal needs at least one rack now (see CLAUDE.md
+        // "rack-aware loading, unified") -- this screen has no rack-picker
+        // UI, so a brand-new terminal always gets one, generically named
+        // the same way the backfill migration named every pre-existing
+        // rackless terminal's default rack.
+        const { data: newRack, error: rackErr } = await supabase
+          .from("terminal_racks")
+          .insert({ terminal_id: tid, rack_name: "Main Rack" })
+          .select("rack_id")
+          .single();
+        if (rackErr) throw rackErr;
+
+        if (assigned.length > 0) {
+          const { error: pErr } = await supabase.from("rack_product_status").insert(
+            assigned.map(productId => ({ rack_id: newRack.rack_id, product_id: productId, active: true }))
+          );
+          if (pErr) throw pErr;
+        }
       } else {
         const { error: tErr } = await supabase.from("terminals").update(payload).eq("terminal_id", tid!);
         if (tErr) throw tErr;
-      }
 
-      // Sync terminal_products — delete all then re-insert
-      await supabase.from("terminal_products").delete().eq("terminal_id", tid!);
-      if (assigned.length > 0) {
-        const { error: pErr } = await supabase.from("terminal_products").insert(
-          assigned.map(productId => ({
-            terminal_id: tid!, product_id: productId, active: true, is_out_of_stock: false,
-          }))
-        );
-        if (pErr) throw pErr;
+        // Only sync product curation when this terminal resolves to exactly
+        // one rack -- a genuinely multi-rack terminal's racks are curated
+        // independently via the Terminal tab's Edit Terminal screen, and
+        // this legacy form has no way to know which one the admin means
+        // (the Products section below is hidden/disabled for that case, so
+        // `assigned` should never have been touched, but guard here too).
+        // Delete-then-reinsert, same as this screen's terminal_products
+        // behavior before it -- note this does wipe last_api/last_temp_f
+        // for this rack's products on every save, not just product-list
+        // edits; that's pre-existing behavior carried over, not new.
+        if (targetRackId) {
+          await supabase.from("rack_product_status").delete().eq("rack_id", targetRackId);
+          if (assigned.length > 0) {
+            const { error: pErr } = await supabase.from("rack_product_status").insert(
+              assigned.map(productId => ({ rack_id: targetRackId, product_id: productId, active: true }))
+            );
+            if (pErr) throw pErr;
+          }
+        }
       }
       onDone();
     } catch (e: any) { setErr(e?.message ?? "Save failed."); }
@@ -907,6 +992,13 @@ function TerminalModal({ terminal, companyId, allProducts, onClose, onDone }: {
       <hr style={css.divider} />
 
       {/* ── Products ── */}
+      {terminalRackCount != null && terminalRackCount > 1 ? (
+        <div style={{ fontSize: 12, color: T.muted, padding: "8px 0" }}>
+          This terminal has {terminalRackCount} racks, each with its own product list —
+          manage them individually from the Terminal tab's Edit Terminal screen, not here.
+        </div>
+      ) : (
+      <>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
         <SubSectionTitle>Products at This Terminal</SubSectionTitle>
         <button type="button"
@@ -969,6 +1061,8 @@ function TerminalModal({ terminal, companyId, allProducts, onClose, onDone }: {
           );
         })
       }
+      </>
+      )}
 
       <hr style={css.divider} />
 
@@ -1153,39 +1247,69 @@ export default function AdminPage() {
         (prodRows ?? []).map((p: any) => [p.product_id, p as Product])
       );
 
-      // Terminals — no company gating, all active terminals are available
-      // Load all terminals with their products
-      const { data: termRows } = await supabase
-        .from("terminals")
-        .select("terminal_id, terminal_name, city, state, city_id, timezone, active, renewal_days, lat, lon")
-        .order("state").order("city").order("terminal_name");
+      // Terminals — no company gating, all active terminals are available.
+      // Load all terminals with their products. Paginated (fetchAllRows) --
+      // PostgREST's server-side max-rows cap (confirmed live: 1000, and
+      // unaffected by `.range()` on the client -- a request for rows
+      // 0-4999 still silently comes back with only 1000 rows) means this
+      // catalog (1,238 terminals as of this write, see CLAUDE.md's
+      // terminal-seeding work) was ALREADY being truncated in the admin
+      // terminal list before this pass touched anything; fixed here since
+      // the rack aggregation below needs the complete terminal_id set to
+      // be correct.
+      const termRows = await fetchAllRows<any>((from, to) =>
+        supabase
+          .from("terminals")
+          .select("terminal_id, terminal_name, city, state, city_id, timezone, active, renewal_days, lat, lon")
+          .order("state").order("city").order("terminal_name")
+          .range(from, to)
+      );
 
-      const termIds = (termRows ?? []).map((t: any) => t.terminal_id);
+      // Product curation now lives on rack_product_status per rack, not a
+      // terminal-wide table (see CLAUDE.md "rack-aware loading, unified") --
+      // this admin overview aggregates the DISTINCT active products across
+      // ALL of a terminal's racks (union), a reasonable "what's offered here
+      // overall" summary for a cross-rack list view. Fetched in full (not
+      // `.in(bigIdList)`) -- an id-list filter over ~1,240 racks blows well
+      // past PostgREST's URL length limit and 400s (confirmed live) --
+      // these are small reference tables, cheap to fetch whole (paginated,
+      // same reason as terminals above) and join client-side like
+      // everything else in this file already does.
+      const rackRows = await fetchAllRows<any>((from, to) =>
+        supabase.from("terminal_racks").select("rack_id, terminal_id").range(from, to)
+      );
+      const terminalIdByRackId: Record<string, string> = {};
+      for (const r of rackRows) terminalIdByRackId[r.rack_id] = r.terminal_id;
 
-      const { data: tpRows } = termIds.length > 0
-        ? await supabase
-            .from("terminal_products")
-            .select("terminal_id, product_id, active, is_out_of_stock")
-            .in("terminal_id", termIds)
-            .eq("active", true)
-        : { data: [] };
+      const rpsRows = await fetchAllRows<any>((from, to) =>
+        supabase
+          .from("rack_product_status")
+          .select("rack_id, product_id, active, is_out")
+          .eq("active", true)
+          .range(from, to)
+      );
 
       const tpMap: Record<string, TerminalProduct[]> = {};
-      for (const tp of (tpRows ?? []) as any[]) {
-        const p = prodMap[tp.product_id];
+      const seenByTerminal: Record<string, Set<string>> = {};
+      for (const rps of rpsRows) {
+        const terminalId = terminalIdByRackId[rps.rack_id];
+        if (!terminalId) continue;
+        const p = prodMap[rps.product_id];
         if (!p) continue;
-        if (!tpMap[tp.terminal_id]) tpMap[tp.terminal_id] = [];
-        tpMap[tp.terminal_id].push({
-          product_id: tp.product_id, button_code: p.button_code,
+        const seen = (seenByTerminal[terminalId] ??= new Set());
+        if (seen.has(rps.product_id)) continue; // already counted from another rack at this terminal
+        seen.add(rps.product_id);
+        (tpMap[terminalId] ??= []).push({
+          product_id: rps.product_id, button_code: p.button_code,
           product_name: p.product_name, hex_code: p.hex_code,
           description: p.description, un_number: p.un_number,
           is_dyed: p.is_dyed ?? false,
-          is_out_of_stock: tp.is_out_of_stock ?? false,
-          active: tp.active ?? true,
+          is_out_of_stock: rps.is_out ?? false,
+          active: rps.active ?? true,
         });
       }
 
-      setTerminals((termRows ?? []).map((t: any) => ({
+      setTerminals(termRows.map((t: any) => ({
         ...t,
         products: tpMap[t.terminal_id] ?? [],
       })) as Terminal[]);

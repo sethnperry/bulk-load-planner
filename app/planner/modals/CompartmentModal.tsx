@@ -18,7 +18,8 @@ export default function CompartmentModal({
   styles,
   setCompPlan,
   onClose,
-  selectedTerminalId,
+  selectedRackId,
+  rackName,
   terminalName,
   onTerminalProductsChanged,
   myRole,
@@ -31,7 +32,8 @@ export default function CompartmentModal({
   styles: any;
   setCompPlan: (fn: any) => void;
   onClose: () => void;
-  selectedTerminalId?: string;
+  selectedRackId?: string;
+  rackName?: string;
   terminalName?: string;
   onTerminalProductsChanged?: () => void;
   myRole?: string | null;
@@ -129,7 +131,7 @@ export default function CompartmentModal({
           })}
         </div>
 
-        {selectedTerminalId && canManageProducts && (
+        {selectedRackId && canManageProducts && (
           <button
             type="button"
             onClick={() => setManageOpen(true)}
@@ -144,11 +146,12 @@ export default function CompartmentModal({
         )}
       </div>
 
-      {selectedTerminalId && canManageProducts && (
+      {selectedRackId && canManageProducts && (
         <ManageTerminalProductsModal
           open={manageOpen}
           onClose={() => setManageOpen(false)}
-          terminalId={selectedTerminalId}
+          rackId={selectedRackId}
+          rackName={rackName}
           terminalName={terminalName}
           onChanged={() => onTerminalProductsChanged?.()}
         />

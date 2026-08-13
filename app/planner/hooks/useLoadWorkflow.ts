@@ -371,106 +371,47 @@ try {
   console.warn("calculate_load_points failed (non-fatal):", e);
 }
 
-// Fallback: persist "last observed" API/temp so LoadingModal can show previous API on reload
-// (Non-fatal if RLS blocks it)
-try {
-  if (selectedTerminalId && product_updates.length > 0) {
-    const now = new Date().toISOString();
-
-    // Pool onto the canonical product's row for rack-injected-variance
-    // products (e.g. dyed diesel) -- same resolution complete_load's RPC
-    // does server-side; this client-side fallback upsert has its own
-    // separate write path and needs the same redirect, or a dyed-diesel
-    // delivery would still build up its own separate row here.
-    const canonicalByProductId = new Map(
-      terminalProducts.map((p) => [p.product_id, p.canonical_product_id ?? null])
-    );
-
-    const rows = product_updates.map((u) => ({
-      terminal_id: selectedTerminalId,
-      product_id: canonicalByProductId.get(u.product_id) || u.product_id,
-
-      // values
-      last_api: u.api,
-      last_temp_f: u.temp_f,
-
-      // timestamps (these ARE the real column names in your table)
-      last_api_updated_at: now,
-      last_loaded_at: now,
-      last_updated_at: now,
-
-      // optional but useful for traceability (exists in your table)
-      last_updated_by_load_id: activeLoadId,
-
-      // keep your normal row-updated timestamp too
-      updated_at: now,
-    }));
-
-    // Update-then-insert-if-missing instead of a plain upsert: `active`
-    // defaults to true on this table, and a canonical-grouped product (e.g.
-    // dyed diesel) can pool onto a "main" product row that doesn't exist yet
-    // at a terminal that only ever curated the variant (confirmed live --
-    // Kinder Morgan offers dyed diesel but has no plain D2 row at all). A
-    // blind upsert would either silently no-op (update) or, if it did
-    // insert, wrongly surface that main product as a new driver-selectable
-    // option nobody curated. Only a genuine insert sets active explicitly
-    // (to false, pooling-only); an existing row's active flag is never
-    // touched.
-    for (const row of rows) {
-      const { data: updated, error: updateErr } = await supabase
-        .from("terminal_products")
-        .update({
-          last_api: row.last_api,
-          last_temp_f: row.last_temp_f,
-          last_api_updated_at: row.last_api_updated_at,
-          last_loaded_at: row.last_loaded_at,
-          last_updated_by_load_id: row.last_updated_by_load_id,
-          updated_at: row.updated_at,
-        })
-        .eq("terminal_id", row.terminal_id)
-        .eq("product_id", row.product_id)
-        .select("terminal_id");
-
-      if (updateErr) { console.warn("terminal_products update failed (non-fatal):", updateErr); continue; }
-
-      if (!updated || updated.length === 0) {
-        const { error: insertErr } = await supabase
-          .from("terminal_products")
-          .insert({ ...row, active: false });
-        if (insertErr) console.warn("terminal_products insert failed (non-fatal):", insertErr);
-      }
-    }
-  }
-} catch (e) {
-  console.warn("terminal_products upsert threw (non-fatal):", e);
-}
-
-// Rack-aware loading (see CLAUDE.md "rack-aware loading"): also write the
-// actual observed API/temp into this specific rack's own row, so it stops
-// relying solely on the terminal-wide pooled number above (which is what
-// silently blended different racks' real readings together before this).
-// Keyed on the RAW product_id, matching RackProductStatusModal.tsx's own
-// STUD write shape -- not canonicalized like the terminal_products block
-// above, since rack_product_status is meant to hold each rack-injected
-// variant's own reading (the Terminal tab's Lane Map reads it that way).
-// Skipped entirely when no rack is selected (0/1-rack terminal, or the
-// driver dismissed the picker) -- terminal_products stays the only source
-// in that case, unchanged from today's behavior.
-//
-// Update-then-insert-if-missing, same reasoning as the terminal_products
-// block above, not a blind upsert: the Terminal tab's rack Product List
-// filters rack_product_status on active = true (page.tsx / EditTerminalModal.tsx),
-// which is an admin/lead-curated "this rack carries this product" flag --
-// a blind upsert defaulting active's own column default (true) would
-// silently add a product to that curated list just because a driver
-// happened to plan it here, even if nobody ever actually assigned it to
-// this rack. A genuine insert sets active: false (informational reading
-// only, not a curation claim); an existing row's active flag is never
-// touched either way.
+// Persist "last observed" API/temp so LoadingModal can show previous API on
+// reload -- rack_product_status only (see CLAUDE.md "rack-aware loading,
+// unified"). terminal_products is deliberately no longer written here: with
+// every terminal now guaranteed a rack (auto-named "Main Rack" for
+// terminals that never touched the Terminal tab), a rack IS the terminal's
+// product list and reference reading, so there's no separate terminal-wide
+// store left to keep in sync. (Non-fatal if RLS blocks it.)
 try {
   if (selectedRackId && product_updates.length > 0) {
     const now = new Date().toISOString();
+
+    // Canonical-group siblings on this rack (e.g. D2 <-> its dyed variant)
+    // -- physically the same tank/feed at the point of loading, so one
+    // product's observed reading is also true for the other. Propagation
+    // is update-only, same reasoning as the insert-vs-update split below:
+    // a sibling only gets the new reading if it already has a real row on
+    // this rack (i.e. it was already offered/tracked here) -- this never
+    // creates a new curated entry for a sibling nobody actually assigned
+    // to this rack.
+    const canonicalRootByProductId = new Map(
+      terminalProducts.map((p) => [p.product_id, p.canonical_product_id || p.product_id])
+    );
+    const siblingsByRoot = new Map<string, string[]>();
+    for (const p of terminalProducts) {
+      const root = canonicalRootByProductId.get(p.product_id)!;
+      const list = siblingsByRoot.get(root) ?? [];
+      list.push(p.product_id);
+      siblingsByRoot.set(root, list);
+    }
+
     for (const u of product_updates) {
+      // Update-then-insert-if-missing instead of a blind upsert: the
+      // Terminal tab's rack Product List filters rack_product_status on
+      // active = true (page.tsx / EditTerminalModal.tsx), an admin/lead-
+      // curated "this rack carries this product" flag -- a blind upsert
+      // defaulting active's own column default (true) would silently add
+      // a product to that curated list just because a driver happened to
+      // plan it here, even if nobody ever actually assigned it to this
+      // rack. A genuine insert sets active: false (informational reading
+      // only, not a curation claim); an existing row's active flag is
+      // never touched either way.
       const { data: rpsUpdated, error: rpsUpdateErr } = await supabase
         .from("rack_product_status")
         .update({ last_api: u.api, last_temp_f: u.temp_f, updated_at: now, updated_by: authUserId || null })
@@ -478,9 +419,9 @@ try {
         .eq("product_id", u.product_id)
         .select("rack_id");
 
-      if (rpsUpdateErr) { console.warn("rack_product_status update failed (non-fatal):", rpsUpdateErr); continue; }
-
-      if (!rpsUpdated || rpsUpdated.length === 0) {
+      if (rpsUpdateErr) {
+        console.warn("rack_product_status update failed (non-fatal):", rpsUpdateErr);
+      } else if (!rpsUpdated || rpsUpdated.length === 0) {
         const { error: rpsInsertErr } = await supabase.from("rack_product_status").insert({
           rack_id: selectedRackId,
           product_id: u.product_id,
@@ -491,6 +432,17 @@ try {
           active: false,
         });
         if (rpsInsertErr) console.warn("rack_product_status insert failed (non-fatal):", rpsInsertErr);
+      }
+
+      const root = canonicalRootByProductId.get(u.product_id) ?? u.product_id;
+      const siblingIds = (siblingsByRoot.get(root) ?? []).filter((pid) => pid !== u.product_id);
+      for (const siblingId of siblingIds) {
+        const { error: siblingErr } = await supabase
+          .from("rack_product_status")
+          .update({ last_api: u.api, last_temp_f: u.temp_f, updated_at: now, updated_by: authUserId || null })
+          .eq("rack_id", selectedRackId)
+          .eq("product_id", siblingId);
+        if (siblingErr) console.warn("rack_product_status sibling propagation failed (non-fatal):", siblingErr);
       }
     }
   }

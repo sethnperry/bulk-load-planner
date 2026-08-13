@@ -86,47 +86,33 @@ export default function RackProductStatusModal({
       return;
     }
 
-    // Write through to terminal_products -- the same table useLoadWorkflow.ts
-    // updates after a real load completes -- so a STUD submission and an
-    // actual load are two ways of updating one shared "last known" value,
-    // not two parallel data stores. Same canonical-product pooling as that
-    // path: a rack-injected variant (e.g. dyed diesel) pools onto its
-    // canonical product's row instead of forking its own. Only fires when
-    // both API and temp are supplied together, same gate as the temp-bias
-    // call below, so a partial STUD (say, API only) never blanks out a
-    // previously-good value in the other column.
+    // Propagate to canonical-group siblings ON THIS SAME RACK (e.g. D2 <->
+    // its dyed variant) -- see CLAUDE.md "rack-aware loading, unified".
+    // Physically the same tank/feed at the point of loading, so this STUD
+    // reading is also true for its sibling. Replaces the old write-through
+    // to terminal_products (a separate terminal-wide table this codebase no
+    // longer reads at all) -- update-only, matching useLoadWorkflow.ts's own
+    // rule: a sibling only gets the new reading if it already has a real row
+    // on this rack, never auto-curating a product nobody assigned here.
+    // Same API+temp-both-supplied gate as the temp-bias call below, so a
+    // partial STUD (say, API only) never blanks out a sibling's previously-
+    // good value in the other column.
     if (apiNum != null && tempNum != null) {
-      const canonicalProductId = product?.canonical_product_id || productId;
+      const canonicalRootByProductId = new Map(
+        rackProducts.map((r) => [r.product_id, productsById[r.product_id]?.canonical_product_id || r.product_id])
+      );
+      const root = canonicalRootByProductId.get(productId) ?? productId;
+      const siblingIds = rackProducts
+        .map((r) => r.product_id)
+        .filter((pid) => pid !== productId && (canonicalRootByProductId.get(pid) ?? pid) === root);
       const nowIso = new Date().toISOString();
-      const { data: updated, error: tpUpdateErr } = await supabase
-        .from("terminal_products")
-        .update({
-          last_api: apiNum,
-          last_temp_f: tempNum,
-          last_api_updated_at: nowIso,
-          last_loaded_at: nowIso,
-          last_updated_by_load_id: null,
-          updated_at: nowIso,
-        })
-        .eq("terminal_id", rack.terminal_id)
-        .eq("product_id", canonicalProductId)
-        .select("terminal_id");
-
-      if (tpUpdateErr) {
-        console.warn("terminal_products update failed (non-fatal):", tpUpdateErr);
-      } else if (!updated || updated.length === 0) {
-        const { error: tpInsertErr } = await supabase.from("terminal_products").insert({
-          terminal_id: rack.terminal_id,
-          product_id: canonicalProductId,
-          last_api: apiNum,
-          last_temp_f: tempNum,
-          last_api_updated_at: nowIso,
-          last_loaded_at: nowIso,
-          last_updated_by_load_id: null,
-          updated_at: nowIso,
-          active: false,
-        });
-        if (tpInsertErr) console.warn("terminal_products insert failed (non-fatal):", tpInsertErr);
+      for (const siblingId of siblingIds) {
+        const { error: siblingErr } = await supabase
+          .from("rack_product_status")
+          .update({ last_api: apiNum, last_temp_f: tempNum, updated_at: nowIso, updated_by: authUserId || null })
+          .eq("rack_id", rack.rack_id)
+          .eq("product_id", siblingId);
+        if (siblingErr) console.warn("rack_product_status sibling propagation failed (non-fatal):", siblingErr);
       }
     }
 
@@ -238,7 +224,7 @@ export default function RackProductStatusModal({
           </div>
         </div>
         <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", lineHeight: 1.5 }}>
-          API and temp are optional — supplying both updates this product's known reading for the whole terminal, visible to any driver in any company, the same way completing a real load does.
+          API and temp are optional — supplying both updates this product's known reading for {rack.rack_name}, visible to any driver in any company, the same way completing a real load at this rack does.
         </div>
 
         <button

@@ -391,9 +391,10 @@ export function CalculatorShellProvider({ children }: { children: React.ReactNod
   const [selectedDriverId, setSelectedDriverId] = useState("");
 
   // ── Rack-aware loading ────────────────────────────────────────────────────
-  // See CLAUDE.md "rack-aware loading": without this, a terminal's actual
-  // observed API/temp readings from different physical racks silently pool
-  // into one shared terminal_products number. This resolves (or asks for)
+  // See CLAUDE.md "rack-aware loading, unified": every terminal now has at
+  // least one rack (auto-named "Main Rack" if it never touched the Terminal
+  // tab), and a rack owns both its product list and its reference reading --
+  // this resolves (or asks for, when a terminal genuinely has more than one)
   // which rack, in one place shared by every terminal-selection entry point.
   const [rackPickerOpen, setRackPickerOpen] = useState(false);
   const [rackPickerRacks, setRackPickerRacks] = useState<{ rack_id: string; rack_name: string }[]>([]);

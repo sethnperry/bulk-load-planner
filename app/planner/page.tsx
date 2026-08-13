@@ -67,7 +67,7 @@ import { normState } from "./utils/normalize";
 import { cgSliderToBias, bestLbsPerGallon, planForGallons, CG_NEUTRAL } from "./utils/planMath";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
-import type { ActiveComp, CompPlanInput, CompRow, ProductRow, TerminalProductMetaRow } from "./types";
+import type { ActiveComp, CompPlanInput, CompRow, ProductRow } from "./types";
 
 
 // ─── Local UI helpers ─────────────────────────────────────────────────────────
@@ -383,66 +383,41 @@ export default function CalculatorPage() {
 
   // ── Terminal products ──────────────────────────────────────────────────────
   const [terminalProducts, setTerminalProducts] = useState<ProductRow[]>([]);
-  const [terminalProductMetaRows, setTerminalProductMetaRows] = useState<TerminalProductMetaRow[]>([]);
 
-  // Extract terminal products fetch as a named callback so it can be called post-load
+  // Extract terminal products fetch as a named callback so it can be called post-load.
+  //
+  // Reads rack_product_status only -- every terminal always has at least
+  // one rack now (auto-named "Main Rack" for terminals that never touched
+  // the Terminal tab, see the "unify_terminals_onto_racks" migration), so
+  // there's no more terminal-wide-pool-with-optional-rack-override dual
+  // path: a rack IS the terminal's product list and reference reading, full
+  // stop. Waits for location.selectedRackId to resolve (chooseTerminal sets
+  // it async, right after selectedTerminalId) rather than reading anything
+  // terminal-scoped in the meantime -- a brief empty list while it resolves
+  // beats a stale/wrong terminal's data flashing first.
   const fetchTerminalProducts = useCallback(async () => {
-    if (!location.selectedTerminalId) { setTerminalProducts([]); return; }
+    if (!location.selectedTerminalId || !location.selectedRackId) { setTerminalProducts([]); return; }
     const { data, error } = await supabase
-      .from("terminal_products")
-      .select(`active, last_api, last_api_updated_at, last_temp_f, last_loaded_at,
+      .from("rack_product_status")
+      .select(`active, last_api, last_temp_f, updated_at,
         products (product_id, product_name, display_name, description, product_code, button_code, hex_code, api_60, alpha_per_f, un_number, is_dyed, canonical_product_id)`)
-      .eq("terminal_id", location.selectedTerminalId);
+      .eq("rack_id", location.selectedRackId);
     if (error) { setTerminalProducts([]); return; }
-    // Stats lookup by product_id across ALL rows at this terminal (not just
+    // Stats lookup by product_id across ALL rows on this rack (not just
     // active ones) -- a rack-injected-variance product (e.g. dyed diesel)
     // pools its tracking onto the canonical product's row, which needs to
     // be found here even if the canonical product itself isn't separately
-    // offered/active at this terminal's driver-facing list.
+    // offered/active on this rack's driver-facing list.
     const statsByProductId: Record<string, { last_api: number | null; last_api_updated_at: string | null; last_temp_f: number | null; last_loaded_at: string | null }> = {};
     for (const row of (data ?? []) as any[]) {
       const pid = row.products?.product_id;
       if (!pid) continue;
       statsByProductId[pid] = {
         last_api: row.last_api ?? null,
-        last_api_updated_at: row.last_api_updated_at ?? null,
+        last_api_updated_at: row.updated_at ?? null,
         last_temp_f: row.last_temp_f ?? null,
-        last_loaded_at: row.last_loaded_at ?? null,
+        last_loaded_at: row.updated_at ?? null,
       };
-    }
-
-    // Rack-aware overlay (see CLAUDE.md "rack-aware loading"): when a
-    // specific rack is selected, its own rack_product_status reading -- if
-    // one exists -- wins over the terminal-wide pooled number above, for
-    // any product this specific rack has no reading of yet, the pooled
-    // terminal-wide stats stay untouched (never blended, always one or the
-    // other). Redirected onto the canonical product id, same as everywhere
-    // else this file pools rack-injected-variance products (dyed diesel
-    // etc.) -- rack_product_status itself is keyed by the raw variant id
-    // (matching RackProductStatusModal.tsx's own STUD write), but the
-    // final display below always reads a variant's stats from its
-    // canonical entry, so a DYED-specific rack reading would silently
-    // never surface without this same redirect.
-    if (location.selectedRackId) {
-      const canonicalByRawProductId = new Map(
-        (data ?? []).map((row: any) => [row.products?.product_id, row.products?.canonical_product_id ?? null])
-      );
-      const { data: rackRows } = await supabase
-        .from("rack_product_status")
-        .select("product_id, last_api, last_temp_f, updated_at")
-        .eq("rack_id", location.selectedRackId);
-      for (const row of (rackRows ?? []) as any[]) {
-        if (row.last_api == null && row.last_temp_f == null) continue;
-        const rawPid = String(row.product_id);
-        const pid = canonicalByRawProductId.get(rawPid) || rawPid;
-        const existing = statsByProductId[pid];
-        statsByProductId[pid] = {
-          last_api: row.last_api ?? existing?.last_api ?? null,
-          last_api_updated_at: row.last_api != null ? row.updated_at : existing?.last_api_updated_at ?? null,
-          last_temp_f: row.last_temp_f ?? existing?.last_temp_f ?? null,
-          last_loaded_at: existing?.last_loaded_at ?? null,
-        };
-      }
     }
 
     const products = (data ?? []).filter((row: any) => row.active !== false)
@@ -457,18 +432,27 @@ export default function CalculatorPage() {
     setTerminalProducts(products as ProductRow[]);
   }, [location.selectedTerminalId, location.selectedRackId]);
 
-  useEffect(() => { fetchTerminalProducts(); }, [fetchTerminalProducts]);
-
+  // Rack's own name, for ManageTerminalProductsModal's "Active products at
+  // {terminal} — {rack}" label (hidden there for the generic "Main Rack"
+  // default). Cheap, separate fetch rather than piggybacking on
+  // shell.rackPickerRacks -- that list only exists transiently while the
+  // rack-select sheet is open, not for whatever rack ends up selected.
+  const [selectedRackName, setSelectedRackName] = useState<string | undefined>(undefined);
   useEffect(() => {
-    if (!location.selectedTerminalId) { setTerminalProductMetaRows([]); return; }
+    if (!location.selectedRackId) { setSelectedRackName(undefined); return; }
+    let cancelled = false;
     (async () => {
-      const { data, error } = await supabase
-        .from("terminal_products")
-        .select("terminal_id, product_id, last_api, last_api_updated_at, last_temp_f, last_loaded_at")
-        .eq("terminal_id", location.selectedTerminalId);
-      if (!error) setTerminalProductMetaRows((data ?? []) as any);
+      const { data } = await supabase
+        .from("terminal_racks")
+        .select("rack_name")
+        .eq("rack_id", location.selectedRackId)
+        .maybeSingle();
+      if (!cancelled) setSelectedRackName((data as any)?.rack_name ?? undefined);
     })();
-  }, [location.selectedTerminalId]);
+    return () => { cancelled = true; };
+  }, [location.selectedRackId]);
+
+  useEffect(() => { fetchTerminalProducts(); }, [fetchTerminalProducts]);
 
   // ── Planning inputs ────────────────────────────────────────────────────────
   // ── Persisted plan state — survives page refresh ─────────────────────────
@@ -1366,7 +1350,8 @@ const lastProductInfoById = useMemo(() => {
         styles={styles}
         setCompPlan={setCompPlan}
         onClose={() => { setCompModalOpen(false); setCompModalComp(null); setSelectedComp(null); }}
-        selectedTerminalId={location.selectedTerminalId ?? ""}
+        selectedRackId={location.selectedRackId ?? ""}
+        rackName={selectedRackName}
         terminalName={terminalLabel}
         onTerminalProductsChanged={fetchTerminalProducts}
         myRole={shell.role}
