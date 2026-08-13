@@ -32,6 +32,26 @@ export function formatMDYSlash_(dateLike: string) {
   return `${m}/${d}/${y.slice(2)}`;
 }
 
+// Date AND time derived from the same local-timezone-converted Date object
+// -- formatMDYSlash_ takes the date-only "YYYY-MM-DD" prefix as a literal
+// string slice (correct for date-only values, but for a real timestamptz
+// like load_log.completed_at that's the UTC calendar date, not necessarily
+// the driver's local one). Mixing that with a separately-computed local
+// time would risk a mismatched date/time pair near a timezone boundary
+// (e.g. 10pm UTC showing as "08/13 @ 21:45" when the driver's actual local
+// evening is still 08/12) -- this derives both from one Date instance so
+// they always agree.
+export function formatMDYWithTime_(dateLike: string) {
+  const d = new Date(dateLike);
+  if (Number.isNaN(d.getTime())) return formatMDYSlash_(dateLike);
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  const yy = String(d.getFullYear()).slice(2);
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mi = String(d.getMinutes()).padStart(2, "0");
+  return `${mm}/${dd}/${yy} @ ${hh}:${mi}`;
+}
+
 export function isoToday_() {
   return new Date().toISOString().slice(0, 10); // YYYY-MM-DD
 }

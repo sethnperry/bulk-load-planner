@@ -272,7 +272,7 @@ export function usePlanSlots({
     // Actual/Diff summary. No fallback to "any status" on purpose.
     const { data: comboRows, error: comboErr } = await supabase
       .from("load_log")
-      .select("load_id, status, started_at, completed_at, terminal_id, planned_total_gal, planned_gross_lbs, diff_lbs, plan_slot")
+      .select("load_id, status, started_at, completed_at, terminal_id, planned_total_gal, planned_gross_lbs, diff_lbs, plan_slot, cg_bias")
       .eq("combo_id", selectedComboId)
       .eq("status", "loaded")
       .order("started_at", { ascending: false })
@@ -315,12 +315,19 @@ export function usePlanSlots({
       plan_slot: (resolvedRow as any).plan_slot ?? null,
     } : null;
 
+    // Real CG the driver actually used for this load, not a hardcoded
+    // default -- see CLAUDE.md "recap / recall last load" discussion.
+    // load_log.cg_bias is written at begin_load time (useLoadWorkflow.ts),
+    // so it's the true value for this specific completed load.
+    const cgFromLoad = (resolvedRow as any).cg_bias;
+    const cgSlider = typeof cgFromLoad === "number" && Number.isFinite(cgFromLoad) ? cgFromLoad : 0.5;
+
     return {
       v: 1,
       savedAt: resolvedRow.started_at ? new Date(resolvedRow.started_at).getTime() : Date.now(),
       terminalId: String((resolvedRow as any).terminal_id ?? selectedTerminalId ?? ""),
       tempF: 60,
-      cgSlider: 0.5,
+      cgSlider,
       compPlan,
       lastLoadLines: lines,
       lastLoadId: resolvedRow.load_id,
@@ -460,7 +467,10 @@ export function usePlanSlots({
       const slotIsEmpty = !localRaw || !localRaw.savedAt;
       if (slotIsEmpty) {
         safeWrite(planStoreKey(0), dbPayload);
-        applySnapshot(dbPayload);
+        // restoreCg: true -- see CLAUDE.md "recap / recall last load": a
+        // fresh mount/refresh should reproduce the last completed load
+        // exactly, CG position included, not just the product selection.
+        applySnapshot(dbPayload, { restoreCg: true });
       }
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -605,6 +615,42 @@ export function usePlanSlots({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedComboId, selectedTerminalId, planStoreKey, safeWrite, refreshSlotHas]);
 
+  // Public: "Recall Last Load" button (page.tsx) -- unlike the passive
+  // mount-time restore above (which deliberately never clobbers an
+  // existing slot-0 draft, so a driver's real in-progress work is never
+  // silently discarded), this is a direct, explicit user request to throw
+  // the current draft away and go back to the last real load. Applies the
+  // DB snapshot live (compPlan + CG) immediately, unconditionally -- no
+  // slotIsEmpty gate, no reload, and no dependency on the fresh-mount
+  // ordering between this hook's own restore effects (those two effects
+  // have independent trigger dependencies and can fire in either order;
+  // a page reload was tried first and found to lose that race in
+  // practice, live-verified before switching to this direct approach).
+  const recallLastLoad = useCallback(async () => {
+    const dbPayload = await fetchLastLoadFromLog();
+    if (!dbPayload) return null;
+    safeWrite(planStoreKey(0), dbPayload);
+    if (selectedComboId) {
+      const llKey = `proTankr:${authUserId ? "u:" + authUserId : "anon"}:combo:${selectedComboId}:lastLoadLines`;
+      safeWrite(llKey, { lastLoadLines: dbPayload.lastLoadLines, lastLoadId: dbPayload.lastLoadId });
+      setLastLoadLines(dbPayload.lastLoadLines ?? []);
+    }
+    applySnapshot(dbPayload, { restoreCg: true });
+    const report = dbPayload.loadReport ? { ...dbPayload.loadReport, recovered_points: dbPayload.loadReport.recovered_points ?? null } : null;
+    setLastLoadReport(report);
+    refreshSlotHas();
+    // Returned (not just set on internal lastLoadReport state) because
+    // page.tsx's loadWorkflow.loadReport -- what the recap card actually
+    // renders -- is a SEPARATE piece of state in a different hook, synced
+    // from lastLoadReport by a mount-time seed effect that's guarded to
+    // only ever fire once (while loadReport is still null). By the time
+    // this runs, loadReport is already set from before, so that seed
+    // effect won't re-fire -- the caller has to push this report into
+    // loadWorkflow directly.
+    return report;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedComboId, authUserId, planStoreKey, safeWrite, applySnapshot, refreshSlotHas]);
+
   return {
     PLAN_SLOTS,
     slotHas,
@@ -616,5 +662,6 @@ export function usePlanSlots({
     loadFromSlot,
     peekSlot,
     refreshLastLoad,
+    recallLastLoad,
   };
 }

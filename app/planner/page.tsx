@@ -61,7 +61,7 @@ import CompartmentModal from "./modals/CompartmentModal";
 import { styles } from "./ui/styles";
 
 // ── Utils ──────────────────────────────────────────────────────────────────────
-import { addDaysISO_, daysUntilISO_, formatMDYWithCountdown_, formatMDYSlash_, isPastISO_ } from "./utils/dates";
+import { addDaysISO_, daysUntilISO_, formatMDYWithCountdown_, formatMDYWithTime_, isPastISO_ } from "./utils/dates";
 import { themeFill, themeTextOnFill } from "./theme";
 import { normState } from "./utils/normalize";
 import { cgSliderToBias, bestLbsPerGallon, planForGallons, CG_NEUTRAL } from "./utils/planMath";
@@ -1071,6 +1071,53 @@ export default function CalculatorPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [planSlots.lastLoadReport]);
 
+  // "Recall Last Load" card: captures exactly what was live the instant
+  // loadReport became set -- either the state a fresh mount just restored
+  // from the last completed load (compPlan + CG, see usePlanSlots.ts's
+  // restoreCg fix), or the plan the driver just actually submitted this
+  // session. Compared against current live state below (recapValid) to
+  // decide whether the card's numbers still mean anything -- see that
+  // memo's own comment for why this replaced the old "always show the
+  // last load's numbers, label says whether they're live" design.
+  //
+  // Real state, not a ref: a ref mutation doesn't trigger a re-render, so
+  // recapValid's comparison below would never re-run right after this was
+  // captured (only on some LATER, unrelated state change) -- the classic
+  // ref-vs-state trap, caught live before shipping (recapValid stayed
+  // false forever otherwise, even the instant after a perfectly matching
+  // baseline was captured).
+  type RecapBaseline = { compPlanJSON: string; cgSlider: number; comboId: string; terminalId: string; rackId: string };
+  const [recapBaseline, setRecapBaseline] = useState<RecapBaseline | null>(null);
+  const prevLoadReportRef = useRef<typeof loadWorkflow.loadReport>(null);
+  useEffect(() => {
+    if (loadWorkflow.loadReport && loadWorkflow.loadReport !== prevLoadReportRef.current) {
+      setRecapBaseline({
+        compPlanJSON: JSON.stringify(compPlan),
+        cgSlider,
+        comboId: String(equipment.selectedComboId || ""),
+        terminalId: String(location.selectedTerminalId || ""),
+        rackId: String(location.selectedRackId || ""),
+      });
+    }
+    prevLoadReportRef.current = loadWorkflow.loadReport;
+  }, [loadWorkflow.loadReport, compPlan, cgSlider, equipment.selectedComboId, location.selectedTerminalId, location.selectedRackId]);
+
+  // False the moment ANYTHING about the live plan drifts from the baseline
+  // captured above -- product swapped, cap dragged, CG moved, equipment or
+  // terminal/rack changed. Per explicit direction: rather than a label
+  // that says "this is historical, not live" (tried already, still read as
+  // ambiguous), the numbers themselves disappear the instant they'd be
+  // wrong -- if they're showing, they're guaranteed accurate to the
+  // current plan, full stop.
+  const recapValid =
+    !!recapBaseline &&
+    !!loadWorkflow.loadReport &&
+    recapBaseline.compPlanJSON === JSON.stringify(compPlan) &&
+    recapBaseline.cgSlider === cgSlider &&
+    recapBaseline.comboId === String(equipment.selectedComboId || "") &&
+    recapBaseline.terminalId === String(location.selectedTerminalId || "") &&
+    recapBaseline.rackId === String(location.selectedRackId || "");
+
 
   // ── Terminal filters / expirations ────────────────────────────────────────
   // Also shared via context (see above) -- myTerminalIdSet, terminalFilters,
@@ -1400,35 +1447,40 @@ const lastProductInfoById = useMemo(() => {
       {(() => {
         const { loadReport } = loadWorkflow;
 
-        // This card is a RECAP of the last completed load, not a live
-        // preview of the current plan -- it only ever changes after a load
-        // is actually completed through the Loading modal (which is what
-        // populates loadReport, either fresh this session or seeded from
-        // the last completed load on mount, see the lastLoadReport seed
-        // effect above). Live plan edits (switching presets, swapping a
-        // product, dragging a cap) intentionally do NOT touch this card;
-        // the "Recap · Plan X · date" label below exists specifically so
-        // that's unambiguous at a glance, after this being a live-vs-recap
-        // point of confusion. Gallons alone still falls back to the live
-        // plan when there's no completed load at all yet (pre-existing
-        // behavior, e.g. a brand new combo).
-        const plannedGal = loadReport?.planned_total_gal ?? (planRows.length ? plannedGallonsTotal : null);
+        // This card recalls the last completed load -- see recapValid above
+        // for the full reasoning. Its numbers only ever show real, accurate
+        // figures: exactly what was loaded, for as long as the live plan
+        // still matches it exactly (product, gallons, CG, equipment,
+        // terminal, rack); the instant any of that drifts, they dash out
+        // rather than keep displaying a number that's no longer true.
+        // Gallons alone still falls back to the live plan when there's no
+        // completed load at all yet (pre-existing behavior, e.g. a brand
+        // new combo -- nothing to recall yet, so nothing to invalidate).
+        const plannedGal = loadReport
+          ? (recapValid ? loadReport.planned_total_gal : null)
+          : (planRows.length ? plannedGallonsTotal : null);
         const plannedGalText = plannedGal == null ? "—" : `${Math.round(plannedGal).toLocaleString()} gal`;
-        const targetText = loadReport?.planned_gross_lbs == null ? "—" : `${Math.round(loadReport.planned_gross_lbs).toLocaleString()} lbs`;
-        const actualText = loadReport?.actual_gross_lbs == null ? "—" : `${Math.round(loadReport.actual_gross_lbs).toLocaleString()} lbs`;
-        const diff = loadReport?.diff_lbs ?? null;
+        const targetLbs = loadReport && recapValid ? loadReport.planned_gross_lbs : null;
+        const targetText = targetLbs == null ? "—" : `${Math.round(targetLbs).toLocaleString()} lbs`;
+        const actualLbs = loadReport && recapValid ? loadReport.actual_gross_lbs : null;
+        const actualText = actualLbs == null ? "—" : `${Math.round(actualLbs).toLocaleString()} lbs`;
+        const diff = loadReport && recapValid ? loadReport.diff_lbs ?? null : null;
         const diffText = diff == null ? "—" : `${diff >= 0 ? "+" : ""}${Math.round(diff).toLocaleString()} lbs`;
         const diffColor = diff == null ? "rgba(255,255,255,0.85)" : diff > 0 ? "#ef4444" : "#4ade80";
 
+        // Always present (and tappable) whenever there's a completed load to
+        // recall at all, valid or not -- the label itself is a permanent
+        // "Recall Last Load" action, not conditional on whether the numbers
+        // below are currently showing.
         const recapLabel = loadReport
-          ? `Recap${loadReport.plan_slot ? ` · Plan ${String.fromCharCode(64 + loadReport.plan_slot)}` : ""}${loadReport.completed_at ? ` · ${formatMDYSlash_(loadReport.completed_at)}` : ""}`
+          ? `Recall Last Load${loadReport.plan_slot ? ` · Plan ${String.fromCharCode(64 + loadReport.plan_slot)}` : ""}${loadReport.completed_at ? ` · ${formatMDYWithTime_(loadReport.completed_at)}` : ""}`
           : null;
 
         // Actual weight, colored against this combo's own target and the
         // fixed 80,000 lb federal legal limit (same threshold LoadReportModal
         // already uses for its "drain to 80k" line).
         const LEGAL_GROSS_LBS = 80000;
-        const actualGross = loadReport?.actual_gross_lbs ?? null;
+        const actualGross = actualLbs;
         const actualColor =
           actualGross == null || !(targetWeight > 0) ? "#fff"
           : actualGross >= LEGAL_GROSS_LBS ? "#ef4444"
@@ -1651,13 +1703,33 @@ const lastProductInfoById = useMemo(() => {
               </div>
             )}
 
-            {/* Load summary -- a recap of the last COMPLETED load, see the
-                comment above where recapLabel is built. */}
+            {/* Load summary -- recalls the last COMPLETED load, see
+                recapValid's comment above for the full reasoning. */}
             <div style={{ borderRadius: 16, background: "rgba(255,255,255,0.03)", padding: "10px 14px" }}>
               {recapLabel && (
-                <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.4)", textTransform: "uppercase" as const, letterSpacing: 0.4, marginBottom: 6 }}>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    // planSlots.recallLastLoad() applies the DB snapshot
+                    // live and directly (compPlan + CG), unconditionally --
+                    // see that function's own comment for why a plain
+                    // reload was tried first and found unreliable (races
+                    // against this hook's own mount-time restore effects).
+                    // Its return value has to be pushed into loadWorkflow
+                    // here explicitly -- the effect that normally syncs
+                    // planSlots.lastLoadReport into loadWorkflow.loadReport
+                    // only ever fires once, on first mount.
+                    const report = await planSlots.recallLastLoad();
+                    if (report) loadWorkflow.setLoadReport(report);
+                  }}
+                  style={{
+                    background: "none", border: "none", padding: 0, marginBottom: 6, cursor: "pointer",
+                    fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.4)",
+                    textTransform: "uppercase" as const, letterSpacing: 0.4, textAlign: "left" as const,
+                  }}
+                >
                   {recapLabel}
-                </div>
+                </button>
               )}
               <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8 }}>
                 <div style={{ fontSize: 20, fontWeight: 700, color: "#fff" }}>{plannedGalText}</div>
