@@ -1060,7 +1060,39 @@ callout box on a dark background. Checked on both desktop and mobile
 widths. Invalid slug (`/about/not-a-real-topic`) 404s cleanly. No console
 errors anywhere. `tsc --noEmit` clean throughout.
 
-### Open questions (Fleet spec)
+#### Shipped 2026-08-13: homepage closing CTA + shared site footer
+
+Per explicit direction, after flagging it as the landing page's biggest
+gap: the homepage previously just ended after the feature grid, with no
+closing CTA and no footer at all -- `/pricing`, `/about`, and
+`/get-the-app` all existed by this point but nothing on the homepage
+itself funneled a visitor toward them beyond the header nav.
+
+`app/marketing/SiteFooter.tsx` (new) -- same reasoning as `SiteHeader.tsx`,
+a shared component so a future footer edit lands everywhere at once, not
+three copies. Deliberately minimal (brand + tagline, a single nav row,
+copyright) -- this is a pre-launch site with no blog/careers/social
+accounts to link to yet, so a sparse footer here is honest, not
+under-built. Uses `<style jsx global>` from the start, per the scoping bug
+already found in `SiteHeader`.
+
+`app/page.tsx` gained a `.closing` section between the feature grid and
+the new footer: "Stop Guessing. Start Loading." + a line about the
+early-access rollout, a primary CTA to `/get-the-app` and a secondary
+link to `/pricing` -- both real routes this session already shipped, not
+placeholders.
+
+**Verification note**: this session's screenshot tool got stuck returning
+a stale cached frame for this page specifically, across multiple fresh
+tabs, viewport sizes, and scroll methods (JS `scrollTo`, `scrollIntoView`,
+mouse-wheel `scroll` actions) -- confirmed independently via
+`getBoundingClientRect`/`getComputedStyle`/`scrollY`/`scrollWidth`
+JS checks that the actual live page has zero horizontal overflow, the
+closing section and footer are correctly positioned in-flow, and the
+mobile media query's smaller heading size is genuinely applied -- but a
+real pixel screenshot to visually confirm final layout was never
+obtained this session. Worth a real look next session before considering
+this fully closed.
 - Tie-break rule if a split load has two compartments with exactly equal
   gallons of different products.
 

@@ -22,7 +22,9 @@
 // Logo mark is the real PT.svg flag glyph, now filled black to sit on the
 // white header instead of white-on-dark.
 
+import Link from "next/link";
 import SiteHeader from "./marketing/SiteHeader";
+import SiteFooter from "./marketing/SiteFooter";
 
 type CardSpec = {
   eyebrow: string;
@@ -150,6 +152,21 @@ export default function Home() {
         </div>
       </section>
 
+      <section className="closing">
+        <h2 className="closing-h2">Stop Guessing. Start Loading.</h2>
+        <p className="closing-sub">
+          ProTankr is rolling out access gradually — no pricing decided
+          yet, no commitment. Get on the list and we'll reach out when a
+          spot opens up.
+        </p>
+        <div className="closing-actions">
+          <Link href="/get-the-app" className="closing-cta">Request Early Access</Link>
+          <Link href="/pricing" className="closing-secondary">See pricing &rarr;</Link>
+        </div>
+      </section>
+
+      <SiteFooter />
+
       <style jsx global>{`
         .page {
           --ink: #0d0d0c;
@@ -229,6 +246,44 @@ export default function Home() {
           to { opacity: 1; }
         }
 
+        .closing {
+          padding: 30px 48px 70px;
+          max-width: 720px;
+          margin: 0 auto;
+          text-align: center;
+        }
+        .closing-h2 { margin: 0; font: 900 44px var(--font); letter-spacing: -0.02em; color: #111; }
+        .closing-sub {
+          margin: 14px auto 0;
+          max-width: 460px;
+          font: 400 16px var(--font);
+          color: rgba(0,0,0,0.6);
+          line-height: 1.55;
+        }
+        .closing-actions {
+          margin-top: 26px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 22px;
+          flex-wrap: wrap;
+        }
+        .closing-cta {
+          padding: 14px 26px;
+          border-radius: 999px;
+          background: #111;
+          color: #fff;
+          font: 700 15px var(--font);
+          text-decoration: none;
+        }
+        .closing-cta:hover { opacity: 0.85; }
+        .closing-secondary {
+          font: 700 14px var(--font);
+          color: rgba(0,0,0,0.55);
+          text-decoration: none;
+        }
+        .closing-secondary:hover { color: #111; }
+
         @media (max-width: 980px) {
           .hero { padding: 20px 24px 0; }
           .hero-h1 { font-size: 52px; }
@@ -241,6 +296,8 @@ export default function Home() {
           .card { margin-top: 0 !important; margin-bottom: 14px; }
           .label { margin-top: 0 !important; margin-bottom: 8px; text-align: left !important; }
           .phone { width: min(362px, 86vw); }
+          .closing { padding: 24px 24px 56px; }
+          .closing-h2 { font-size: 32px; }
         }
       `}</style>
     </div>
