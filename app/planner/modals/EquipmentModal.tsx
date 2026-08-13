@@ -16,8 +16,12 @@
  *
  * Schema:
  *   equipment_combos: combo_id, combo_name, truck_id, trailer_id,
- *                     tare_lbs, target_weight, buffer_lbs,
+ *                     tare_lbs, target_weight,
  *                     active, claimed_by, claimed_at, company_id
+ *   (buffer_lbs was a real load_log concept, replaced by target_weight and
+ *   removed -- see supabase/migrations/20260222172537_remote_schema.sql's
+ *   own comments -- equipment_combos never had this column at all; reading
+ *   it below was dead code left over from before that removal)
  *   trucks:           truck_id, truck_name, active, company_id, region
  *   trailers:         trailer_id, trailer_name, cg_max, active, company_id, region
  *   profiles:         user_id, display_name
@@ -42,7 +46,6 @@ export type ComboRow = {
   trailer_id?: string | null;
   tare_lbs?: number | null;
   target_weight?: number | null;
-  buffer_lbs?: number | null;
   active?: boolean | null;
   claimed_by?: string | null;
   claimed_at?: string | null;
@@ -238,7 +241,6 @@ function EquipmentDetailsModal({
 
   const tare    = Number(c.tare_lbs      ?? 0);
   const targetW = Number((c as any).target_weight ?? 0);
-  const buffer  = Number(c.buffer_lbs   ?? 0);
   const label   = `${truck?.truck_name ?? c.truck_id ?? "—"} / ${trailer?.trailer_name ?? c.trailer_id ?? "—"}`;
   const inUse   = Boolean(c.claimed_by) || Boolean(forceInUse);
 
@@ -266,11 +268,10 @@ function EquipmentDetailsModal({
           <span style={{ fontSize: 18, color: "rgba(255,255,255,0.25)", flexShrink: 0, marginTop: 4 }}>›</span>
         </div>
 
-        {(tare > 0 || targetW > 0 || buffer > 0) && (
+        {(tare > 0 || targetW > 0) && (
           <div style={{ marginTop: 10 }}>
             {tare    > 0 && <div style={{ color: "rgba(255,255,255,0.45)", fontWeight: 800, fontSize: 14 }}>Tare {tare.toLocaleString()} lbs</div>}
             {targetW > 0 && <div style={{ marginTop: 6, color: "rgba(255,255,255,0.45)", fontWeight: 800, fontSize: 14 }}>Target {targetW.toLocaleString()} lbs</div>}
-            {buffer  > 0 && <div style={{ marginTop: 6, color: "rgba(255,255,255,0.45)", fontWeight: 800, fontSize: 14 }}>Buffer {buffer.toLocaleString()} lbs</div>}
           </div>
         )}
 
@@ -1142,7 +1143,7 @@ export default function EquipmentModal({
     try {
       const { data, error } = await supabase
         .from("equipment_combos")
-        .select("combo_id, tare_lbs, target_weight, buffer_lbs, claimed_by, claimed_at, company_id, truck_id, trailer_id")
+        .select("combo_id, tare_lbs, target_weight, claimed_by, claimed_at, company_id, truck_id, trailer_id")
         .in("combo_id", ids);
       if (error) throw error;
 
@@ -1152,7 +1153,6 @@ export default function EquipmentModal({
         map[id] = {
           tare_lbs: (r as any).tare_lbs ?? null,
           target_weight: (r as any).target_weight ?? null,
-          buffer_lbs: (r as any).buffer_lbs ?? null,
           claimed_by: (r as any).claimed_by ?? null,
           claimed_at: (r as any).claimed_at ?? null,
           company_id: (r as any).company_id ?? null,
