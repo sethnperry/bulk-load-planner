@@ -1246,9 +1246,15 @@ const lastProductInfoById = useMemo(() => {
     if (unavailableComps.length === 0) setLoadBlockedMsg(null);
   }, [unavailableComps]);
 
+  // "RELOAD" means "the plan I'm about to submit is the same one already on
+  // file as the last load" -- tracks recapValid (the live plan genuinely
+  // matching the last completed load), not just "a last load exists at
+  // all" (loadWorkflow.loadReport, which stays set from history even after
+  // the driver has built a totally different plan -- that's what made this
+  // say RELOAD for a brand new plan; caught live, not the original design).
   const loadLabel = loadWorkflow.beginLoadBusy ? "Loading…"
-    : loadWorkflow.loadReport ? "RELOAD"
     : loadWorkflow.activeLoadId ? "Load started"
+    : recapValid ? "RELOAD"
     : "LOAD";
 
   // ── Render ─────────────────────────────────────────────────────────────────
