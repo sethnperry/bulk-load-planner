@@ -403,7 +403,29 @@ try {
 // product list and reference reading, so there's no separate terminal-wide
 // store left to keep in sync. (Non-fatal if RLS blocks it.)
 try {
-  if (selectedRackId && product_updates.length > 0) {
+  // Fall back to resolving the terminal's own rack when none was selected
+  // at load time -- confirmed live (2026-08-13) this genuinely happens: a
+  // completed load's load_log.rack_id came back null even though the
+  // terminal has exactly one real rack, silently skipping this whole
+  // block and leaving rack_product_status stuck on whatever a manual STUD
+  // last set, potentially days stale, while terminal_products (written by
+  // the complete_load RPC itself, unconditionally) had the fresh reading
+  // the whole time. Root cause of why selectedRackId was empty in that
+  // specific case wasn't pinned down, but a terminal with more than one
+  // rack still can't be safely guessed here -- that's exactly the
+  // ambiguity chooseTerminal()'s own rack-picker prompt exists to force a
+  // real choice on, so this only ever resolves the 0/1-rack case, never a
+  // silent guess among several.
+  let effectiveRackId = selectedRackId || null;
+  if (!effectiveRackId && selectedTerminalId) {
+    const { data: racks } = await supabase
+      .from("terminal_racks")
+      .select("rack_id")
+      .eq("terminal_id", selectedTerminalId);
+    if (racks && racks.length === 1) effectiveRackId = racks[0].rack_id;
+  }
+
+  if (effectiveRackId && product_updates.length > 0) {
     const now = new Date().toISOString();
 
     // Canonical-group siblings on this rack (e.g. D2 <-> its dyed variant)
@@ -439,7 +461,7 @@ try {
       const { data: rpsUpdated, error: rpsUpdateErr } = await supabase
         .from("rack_product_status")
         .update({ last_api: u.api, last_temp_f: u.temp_f, updated_at: now, updated_by: authUserId || null })
-        .eq("rack_id", selectedRackId)
+        .eq("rack_id", effectiveRackId)
         .eq("product_id", u.product_id)
         .select("rack_id");
 
@@ -447,7 +469,7 @@ try {
         console.warn("rack_product_status update failed (non-fatal):", rpsUpdateErr);
       } else if (!rpsUpdated || rpsUpdated.length === 0) {
         const { error: rpsInsertErr } = await supabase.from("rack_product_status").insert({
-          rack_id: selectedRackId,
+          rack_id: effectiveRackId,
           product_id: u.product_id,
           last_api: u.api,
           last_temp_f: u.temp_f,
@@ -464,7 +486,7 @@ try {
         const { error: siblingErr } = await supabase
           .from("rack_product_status")
           .update({ last_api: u.api, last_temp_f: u.temp_f, updated_at: now, updated_by: authUserId || null })
-          .eq("rack_id", selectedRackId)
+          .eq("rack_id", effectiveRackId)
           .eq("product_id", siblingId);
         if (siblingErr) console.warn("rack_product_status sibling propagation failed (non-fatal):", siblingErr);
       }
@@ -509,8 +531,8 @@ try {
       setCompleteBusy(false);
     }
   }, [activeLoadId, planRows, productInputs, productNameById, tare, plannedGallonsTotal, terminalProducts,
-      selectedTerminalId, tempF, onRefreshTerminalProducts, onRefreshTerminalAccess, onPostLoadComplete,
-      activeSlotLetter]);
+      selectedTerminalId, selectedRackId, tempF, onRefreshTerminalProducts, onRefreshTerminalAccess,
+      onPostLoadComplete, activeSlotLetter]);
 
   return {
     activeLoadId,
