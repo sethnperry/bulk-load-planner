@@ -24,7 +24,7 @@ import React from "react";
 
 type Props = {
   open: boolean;
-  onKeepEditing: () => void;
+  onBackToPlanner: () => void;
   onLogTheLoad: () => void;
   onUpdateCardOnly: () => void;
 };
@@ -39,12 +39,12 @@ const cancelStyle: React.CSSProperties = {
   background: "transparent", color: "rgba(255,255,255,0.45)", fontSize: 14, fontWeight: 700, cursor: "pointer",
 };
 
-export default function CancelLoadSheet({ open, onKeepEditing, onLogTheLoad, onUpdateCardOnly }: Props) {
+export default function CancelLoadSheet({ open, onBackToPlanner, onLogTheLoad, onUpdateCardOnly }: Props) {
   if (!open) return null;
 
   return (
     <div
-      onClick={onKeepEditing}
+      onClick={onBackToPlanner}
       style={{ position: "fixed", inset: 0, zIndex: 10400, background: "rgba(0,0,0,0.72)", display: "flex", alignItems: "flex-end", justifyContent: "center" }}
     >
       <div
@@ -59,7 +59,7 @@ export default function CancelLoadSheet({ open, onKeepEditing, onLogTheLoad, onU
         </div>
         <button type="button" style={rowStyle} onClick={onLogTheLoad}>Log the Load</button>
         <button type="button" style={rowStyle} onClick={onUpdateCardOnly}>Update Card, No Load</button>
-        <button type="button" style={cancelStyle} onClick={onKeepEditing}>Keep Editing</button>
+        <button type="button" style={cancelStyle} onClick={onBackToPlanner}>Back to Planner</button>
       </div>
     </div>
   );

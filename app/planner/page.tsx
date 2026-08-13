@@ -1670,7 +1670,7 @@ const lastProductInfoById = useMemo(() => {
 
       <CancelLoadSheet
         open={cancelLoadConfirmOpen}
-        onKeepEditing={() => setCancelLoadConfirmOpen(false)}
+        onBackToPlanner={() => setCancelLoadConfirmOpen(false)}
         onLogTheLoad={() => { setCancelLoadConfirmOpen(false); loadWorkflow.onLoadedFromLoadingModal(); }}
         onUpdateCardOnly={() => { setCancelLoadConfirmOpen(false); loadWorkflow.cancelActiveLoad(); }}
       />
