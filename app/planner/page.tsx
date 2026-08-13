@@ -1559,6 +1559,18 @@ const lastProductInfoById = useMemo(() => {
                         {expirationSub ?? " "}
                       </div>
                     </div>
+                    {/* Rack, same column pattern as terminal -- hidden for
+                        "Main Rack" (the invisible default every terminal
+                        gets, see CLAUDE.md "rack-aware loading, unified"),
+                        shown only for a real, named, multi-rack facility. */}
+                    {terminalSelected && selectedRackName && selectedRackName !== "Main Rack" && (
+                      <div style={{ minWidth: 0, overflow: "hidden" }}>
+                        <div style={{ fontSize: 14, fontWeight: 600, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
+                          {selectedRackName}
+                        </div>
+                        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginTop: 2 }}> </div>
+                      </div>
+                    )}
                   </div>
                   <span style={chevron}>›</span>
                 </>
