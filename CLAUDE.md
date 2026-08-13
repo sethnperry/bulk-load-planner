@@ -918,6 +918,77 @@ the admin's; "← Return to Admin" clears the setup session
 `/admin`. `tsc --noEmit` clean throughout; no new console errors beyond
 routine dev-server HMR websocket noise from the mid-task server restart.
 
+#### Shipped 2026-08-13: `/pricing` and `/get-the-app` (placeholder pricing + early-access form)
+
+Next slice of the marketing site, per explicit direction: a real (if
+price-less) `/pricing` page, and `/get-the-app` repurposed from "just
+links to the app" into a "Request Early Access" contact form -- the same
+URL is meant to become the real subscription-enrollment page later, so it
+was built at that permanent path rather than a throwaway `/early-access`
+one.
+
+`app/marketing/SiteHeader.tsx` (new) -- the landing page's original header
+(logo, About/Pricing/"Get the App") was inline JSX+CSS inside
+`app/page.tsx`; extracted into a shared component so the nav can't drift
+across the three pages that now need it, and so the two nav changes below
+land everywhere at once. Two real changes from the original: a new
+**Login** link (plain text, next to the CTA pill) and the **Get the App**
+CTA now points to `/get-the-app` instead of `/planner` -- previously
+"Get the App" *was* the only way to reach `/login` from the landing page
+(via `/planner`'s own client-side redirect-when-signed-out), so once its
+destination became the early-access form instead, an explicit Login link
+was the direct fix for existing users losing their way in.
+
+**Real bug hit and fixed while building `SiteHeader`**: its first version
+used a normal scoped `<style jsx>` block (matching how every other page in
+this app writes component CSS) and rendered completely unstyled live --
+logo stacked above wordmark instead of inline, "Get the App" showing black
+text with no pill background. Confirmed via `getComputedStyle` and reading
+the actual `<style>` tag content: the scoped CSS was correctly generated
+(rules like `.brand.jsx-<hash>{...}`), but the DOM elements only ever
+carried their plain `className` (`"brand"`), never the matching
+`jsx-<hash>` class needed for the rule to apply at all -- so every rule
+silently matched nothing. Root cause not chased further (plausibly a
+Turbopack/styled-jsx scoping gap), but the fix was straightforward once
+diagnosed: switched to `<style jsx global>` with specific, collision-safe
+class names (`.site-header .nav-cta`, etc.) -- the exact pattern
+`app/page.tsx`'s own original inline header already used successfully,
+which is presumably why this bug was never hit before now.
+
+`app/pricing/page.tsx` (new) -- two tiers, **Solo** and **Fleet**, sourced
+directly from "Product direction" and "Roles & permissions" → Pricing
+above (not invented): Solo for an individual owner-operator, Fleet
+described with its real shape (1 admin + 4 team seats included,
+additional team/admin seats priced separately) but with every dollar
+figure replaced by a literal **TBD** rather than a guessed number, per
+explicit direction -- pricing itself isn't finalized yet, only the tier
+structure is. Both tiers' CTA goes to `/get-the-app`.
+
+`app/get-the-app/page.tsx` (new) -- Name/Email (required) + Company/Fleet
+size/Message (optional) → posts to `app/api/early-access/route.ts` (new),
+which sends a plain notification email via the same Resend setup
+`app/api/admin/invite/route.ts` already uses (`RESEND_API_KEY`/
+`INVITE_FROM_EMAIL`, confirmed live via `vercel env ls` to already exist
+in Production, not configured in this session's local `.env.local` or in
+Preview) -- to `sethnperry@gmail.com`, with `reply_to` set to the
+submitter's own address so a reply goes straight to them. No DB write, no
+auth -- this is a public contact form, not an app feature, so there's
+nothing to persist beyond the email itself. A "Log in" note above the form
+covers existing users who land here by habit.
+
+**Live-verified**: header renders correctly (logo inline, nav links
+correct, CTA pill styled) on both desktop and mobile widths, on all three
+pages (`/`, `/pricing`, `/get-the-app`), with the active nav item dimmed
+correctly per page. Pricing page's two cards, feature lists, and TBD
+pricing render as designed. Get-the-app form: submitted with a real name/
+email locally and confirmed the expected, graceful failure path -- server
+log showed `RESEND_API_KEY not set` (correct, since that key only exists
+in Production) and the form surfaced a clean "Something went wrong" error
+rather than crashing; the actual send path itself was not exercised
+end-to-end this session (would need a production deploy to test against
+the real key) but is the exact same code path already proven live by the
+invite-email feature. `tsc --noEmit` clean throughout.
+
 ### Open questions (Fleet spec)
 - Tie-break rule if a split load has two compartments with exactly equal
   gallons of different products.

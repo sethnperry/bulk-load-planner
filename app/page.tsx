@@ -22,7 +22,7 @@
 // Logo mark is the real PT.svg flag glyph, now filled black to sit on the
 // white header instead of white-on-dark.
 
-import Link from "next/link";
+import SiteHeader from "./marketing/SiteHeader";
 
 type CardSpec = {
   eyebrow: string;
@@ -79,9 +79,6 @@ function Card({ c }: { c: CardSpec }) {
 // screenshot indefinitely (same URL every time, no cache-buster).
 const PLANNER_SCREEN_VERSION = "20260808d-realmockup";
 
-const LOGO_PATH =
-  "m -50.568768,-33.479618 c -0.379508,0 -0.747403,0.04834 -1.09766,0.139414 -0.241358,0.06276 -0.287389,0.279561 -0.110962,0.455988 l 2.762871,2.762871 a 1.1791924,1.1791924 22.5 0 0 0.833814,0.345377 h 4.240473 3.803385 4.844666 c 0.320197,0 0.577742,0.257545 0.577742,0.577742 0,0.320197 -0.257545,0.578259 -0.577742,0.578259 h -4.844666 -3.259536 a 0.54384869,0.54384869 135 0 0 -0.543849,0.543849 v 3.02906 0.19637 10.722212 a 0.21369808,0.21369808 22.501943 0 0 0.364795,0.151117 l 3.05794,-3.057525 a 1.2994077,1.2994077 112.50194 0 0 0.38065,-0.918882 v -3.289907 -3.607015 h 4.877222 c 2.390258,0 4.314982,-1.924207 4.314982,-4.314465 0,-2.390258 -1.924724,-4.314465 -4.314982,-4.314465 h -4.877222 -3.803385 z";
-
 function PhoneScreen() {
   return (
     <div className="phone">
@@ -101,36 +98,10 @@ function PhoneScreen() {
   );
 }
 
-function PhoneIcon() {
-  return (
-    <svg width="11" height="15" viewBox="0 0 11 15" fill="none" aria-hidden="true">
-      <rect x="0.75" y="0.75" width="9.5" height="13.5" rx="1.6" stroke="currentColor" strokeWidth="1.3" />
-      <line x1="4" y1="12.2" x2="7" y2="12.2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-    </svg>
-  );
-}
-
 export default function Home() {
   return (
     <div className="page">
-      <header className="header">
-        <div className="nav-row">
-          <div className="brand">
-            <svg className="mark" width="20" height="18" viewBox="-53.56 -35.05 24.29 22.70" aria-hidden="true">
-              <path d={LOGO_PATH} fill="#111111" />
-            </svg>
-            <span className="wordmark">PROTANKR</span>
-          </div>
-
-          <nav className="nav-links">
-            <Link href="/about">About</Link>
-            <Link href="/pricing">Pricing</Link>
-            <Link href="/planner" className="nav-cta">
-              Get the App <PhoneIcon />
-            </Link>
-          </nav>
-        </div>
-      </header>
+      <SiteHeader />
 
       <section className="hero">
         <div className="hero-inline">
@@ -189,15 +160,6 @@ export default function Home() {
           font-family: var(--font);
           overflow-x: hidden;
         }
-
-        .header { padding: 28px 48px 0; }
-        .nav-row { display: flex; align-items: center; gap: 16px; }
-        .brand { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
-        .wordmark { font: 800 15px var(--font); letter-spacing: 0.04em; color: #111; }
-        .nav-links { display: flex; align-items: center; gap: 30px; flex-shrink: 0; margin-left: auto; }
-        .nav-links :global(a) { font: 600 14px var(--font); color: #111; text-decoration: none; }
-        .nav-links :global(a:hover) { opacity: 0.6; }
-        .nav-cta { display: inline-flex; align-items: center; gap: 5px; }
 
         .hero { padding: 18px 48px 0; }
         .hero-inline { display: flex; align-items: baseline; gap: 22px; flex-wrap: wrap; }
@@ -268,10 +230,6 @@ export default function Home() {
         }
 
         @media (max-width: 980px) {
-          .header { padding: 20px 24px 0; }
-          .nav-row { flex-wrap: wrap; row-gap: 12px; }
-          .nav-links { gap: 20px; flex-wrap: wrap; }
-          .nav-links :global(a) { font-size: 14px; }
           .hero { padding: 20px 24px 0; }
           .hero-h1 { font-size: 52px; }
           .hero-eyebrow { font-size: 14px; }
