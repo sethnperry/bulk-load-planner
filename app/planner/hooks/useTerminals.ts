@@ -195,6 +195,45 @@ export function useTerminals(
     await loadMyTerminals();
   }, [effectiveUserId, isSetup, loadMyTerminals]);
 
+  // ── Fully revert a terminal's access record ───────────────────────────────
+  // Used by the Loading modal's "Back to Planner" exit (page.tsx): tapping
+  // LOAD silently re-cards the terminal via begin_load before this modal
+  // ever opens (see useLoadWorkflow.ts's cancelActiveLoad comment), so a
+  // driver who wants to truly walk away with nothing changed needs this to
+  // undo that -- not just leave the fresh re-card in place the way "Update
+  // Card, No Load" deliberately does. Deletes the row entirely rather than
+  // setting some fallback date, since a terminal with no prior visit at all
+  // has no earlier date to fall back to -- it needs to go back to genuinely
+  // "not carded," which is what an absent row already means everywhere else
+  // in the app (see cardStateFor/expStateFor's own "not_set" branches).
+  const deleteAccessDateForTerminal = useCallback(async (terminalId: string) => {
+    if (!effectiveUserId) return;
+    setAccessDateByTerminalId((prev) => {
+      const next = { ...prev };
+      delete next[terminalId];
+      return next;
+    });
+    if (isSetup) {
+      // adminSetupClient.ts has no delete counterpart to setTerminalAccess --
+      // reverting a load for a terminal with zero prior card history while
+      // impersonating is a narrow edge case not worth building out yet.
+      // Local state above still reflects the intent even though the
+      // server-side row isn't removed in this mode.
+      console.warn("deleteAccessDateForTerminal: not supported during setup-session impersonation");
+      return;
+    }
+    const res = await supabase
+      .from("terminal_access")
+      .delete()
+      .eq("user_id", effectiveUserId)
+      .eq("terminal_id", terminalId);
+    if (res.error) {
+      console.error("deleteAccessDateForTerminal error:", res.error);
+      return;
+    }
+    await loadMyTerminals();
+  }, [effectiveUserId, isSetup, loadMyTerminals]);
+
   // ── Get carded ────────────────────────────────────────────────────────────
 
   const doGetCarded = useCallback(async (terminalId: string) => {
@@ -289,6 +328,7 @@ export function useTerminals(
     loadMyTerminals,
     refreshTerminalAccessForUser,
     setAccessDateForTerminal,
+    deleteAccessDateForTerminal,
     doGetCarded,
     toggleTerminalStar,
     terminalDisplayInfo,

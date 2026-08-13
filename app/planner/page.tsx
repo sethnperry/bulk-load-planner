@@ -299,6 +299,11 @@ export default function CalculatorPage() {
   // already re-cards the terminal on LOAD tap, before this modal ever
   // opens.
   const [cancelLoadConfirmOpen, setCancelLoadConfirmOpen] = useState(false);
+  // Captured the instant LOAD/RELOAD is tapped -- whatever this terminal's
+  // access date was *before* begin_load's silent re-card, so "Back to
+  // Planner" can genuinely undo it (see handleBackToPlannerNoUpdate below).
+  // null prevValue means the terminal had no prior access record at all.
+  const preLoadCardedOnRef = useRef<{ terminalId: string; prevValue: string | null } | null>(null);
 
   // ── Action row state ────────────────────────────────────────────────────────
   // activeSlotLetter mirrors PresetDial's own (cosmetic) centered/last-tapped
@@ -1002,6 +1007,27 @@ export default function CalculatorPage() {
     activeSlotLetter,
   });
 
+  // "Back to Planner" -- per explicit follow-up, this must genuinely undo
+  // everything: no load logged AND the terminal card reverted to whatever
+  // it was before this LOAD tap (not left at the fresh re-card the way
+  // "Update Card, No Load" deliberately keeps). Cancels the load first
+  // (closes the modal, deletes the load_log row), then restores the
+  // captured pre-load access date -- or, if there was none, deletes the
+  // row entirely so the terminal goes back to genuinely "not carded"
+  // rather than picking some fallback date that was never real.
+  const handleBackToPlannerNoUpdate = useCallback(async () => {
+    setCancelLoadConfirmOpen(false);
+    await loadWorkflow.cancelActiveLoad();
+    const captured = preLoadCardedOnRef.current;
+    preLoadCardedOnRef.current = null;
+    if (!captured) return;
+    if (captured.prevValue) {
+      await terminals.setAccessDateForTerminal(captured.terminalId, captured.prevValue);
+    } else {
+      await terminals.deleteAccessDateForTerminal(captured.terminalId);
+    }
+  }, [loadWorkflow, terminals]);
+
   // Seed the Target/Actual/Diff summary from the last *completed* load for
   // this combo as soon as it's available (mount, or switching equipment) --
   // there's no "My Loads" button on this page anymore, so this is the only
@@ -1548,6 +1574,10 @@ const lastProductInfoById = useMemo(() => {
                   setLoadBlockedMsg(`Cannot Load, all planned products are not available at ${terminalLabel || "this terminal"}`);
                   return;
                 }
+                preLoadCardedOnRef.current = {
+                  terminalId: location.selectedTerminalId,
+                  prevValue: terminals.accessDateByTerminalId[location.selectedTerminalId] ?? null,
+                };
                 loadWorkflow.beginLoadToSupabase();
               }}
               disabled={loadDisabled}
@@ -1670,7 +1700,8 @@ const lastProductInfoById = useMemo(() => {
 
       <CancelLoadSheet
         open={cancelLoadConfirmOpen}
-        onBackToPlanner={() => setCancelLoadConfirmOpen(false)}
+        onDismiss={() => setCancelLoadConfirmOpen(false)}
+        onBackToPlanner={handleBackToPlannerNoUpdate}
         onLogTheLoad={() => { setCancelLoadConfirmOpen(false); loadWorkflow.onLoadedFromLoadingModal(); }}
         onUpdateCardOnly={() => { setCancelLoadConfirmOpen(false); loadWorkflow.cancelActiveLoad(); }}
       />

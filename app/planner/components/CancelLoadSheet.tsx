@@ -15,15 +15,23 @@
 // Three choices, not two: tapping LOAD already re-cards the terminal as a
 // side effect of begin_load (see useLoadWorkflow.ts's cancelActiveLoad
 // comment) before this modal ever opens, and canceling only removes the
-// load_log row, never reverts that -- so "log the load" and "leave without
-// logging" were never actually mutually exclusive with "the card gets
-// refreshed." Making that a real, separate, always-available choice is the
-// whole point of this sheet.
+// load_log row, never reverts that. "Update Card, No Load" leaves that
+// re-card in place deliberately; "Back to Planner" (per explicit follow-up)
+// genuinely undoes it -- deletes the load AND restores the terminal's
+// access date to whatever it was before this LOAD tap (see
+// handleBackToPlannerNoUpdate in page.tsx).
+//
+// Because "Back to Planner" now does real, consequential writes (not just
+// closing this sheet), backdrop-tap is wired to onDismiss -- a genuine
+// no-op that just returns to the Loading modal -- instead of reusing
+// onBackToPlanner. A stray tap outside the sheet shouldn't carry the same
+// weight as the labeled button.
 
 import React from "react";
 
 type Props = {
   open: boolean;
+  onDismiss: () => void;
   onBackToPlanner: () => void;
   onLogTheLoad: () => void;
   onUpdateCardOnly: () => void;
@@ -39,12 +47,12 @@ const cancelStyle: React.CSSProperties = {
   background: "transparent", color: "rgba(255,255,255,0.45)", fontSize: 14, fontWeight: 700, cursor: "pointer",
 };
 
-export default function CancelLoadSheet({ open, onBackToPlanner, onLogTheLoad, onUpdateCardOnly }: Props) {
+export default function CancelLoadSheet({ open, onDismiss, onBackToPlanner, onLogTheLoad, onUpdateCardOnly }: Props) {
   if (!open) return null;
 
   return (
     <div
-      onClick={onBackToPlanner}
+      onClick={onDismiss}
       style={{ position: "fixed", inset: 0, zIndex: 10400, background: "rgba(0,0,0,0.72)", display: "flex", alignItems: "flex-end", justifyContent: "center" }}
     >
       <div
@@ -55,7 +63,7 @@ export default function CancelLoadSheet({ open, onBackToPlanner, onLogTheLoad, o
           What do you want to do?
         </div>
         <div style={{ fontSize: 13, color: "rgba(255,255,255,0.45)", marginBottom: 14 }}>
-          Your terminal access is refreshed for today either way.
+          Logging or updating your card keeps today's terminal access. Going back to the planner undoes it.
         </div>
         <button type="button" style={rowStyle} onClick={onLogTheLoad}>Log the Load</button>
         <button type="button" style={rowStyle} onClick={onUpdateCardOnly}>Update Card, No Load</button>
