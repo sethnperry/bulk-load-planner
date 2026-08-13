@@ -984,10 +984,81 @@ pricing render as designed. Get-the-app form: submitted with a real name/
 email locally and confirmed the expected, graceful failure path -- server
 log showed `RESEND_API_KEY not set` (correct, since that key only exists
 in Production) and the form surfaced a clean "Something went wrong" error
-rather than crashing; the actual send path itself was not exercised
-end-to-end this session (would need a production deploy to test against
-the real key) but is the exact same code path already proven live by the
-invite-email feature. `tsc --noEmit` clean throughout.
+rather than crashing. **Since resolved**: after deploying, submitted a
+real request against production and got the "Request received"
+confirmation — the actual Resend send path is now confirmed working
+end-to-end, not just architecturally sound. `tsc --noEmit` clean
+throughout.
+
+**Copy fix, same day**: the Solo card's "Cross-company temperature
+network" line was factually wrong on two counts, caught by the user, not
+guessed at — confirmed against the live schema before touching anything
+(`terminal_products`/`terminal_temp_bias` both keyed by `terminal_id`
+only, no `company_id` at all, matching "Cross-company reading network"
+above): it's **API gravity readings** that get crowdsourced (temperature
+is predicted, with manual override — a separate mechanism), and the
+pooling is **global** across every company, not scoped to one. Reworded
+to "Crowdsourced API data, shared industry-wide". Also dropped "&
+payroll reporting" from the Fleet card's incentive-tracking line per
+explicit direction — the app tracks incentive points, it doesn't run
+payroll, and the original wording overstated that.
+
+#### Shipped 2026-08-13: `/about` — card grid + per-topic deep dives, content shared with the in-app Learn page
+
+Per explicit direction: reuse the in-app `/learn` page's existing
+technical content rather than writing new copy from scratch, since editing
+it twice (once for the app, once for marketing) is exactly the kind of
+drift this project has hit before with duplicated logic (see
+`CustomSelect.tsx`'s and `ServiceTypeManager.tsx`'s own header comments on
+the same lesson). Each of `/learn`'s four content-heavy accordions
+(equipment setup, temperature prediction, weight plan, over/under) is now
+sourced from one place and rendered two different ways.
+
+`lib/content/learnTopics.tsx` (new) — the single source of truth. Each
+topic carries the exact detailed body content `/learn`'s accordions
+already had (ported verbatim, not rewritten) *plus* new marketing-only
+fields (`shortName`, `tagline`, `marketing`) that only the About pages
+use. The detail content is deliberately **theme-agnostic**: emphasis uses
+a bare `<Em>` (`<strong className="lt-em">`) instead of a hardcoded color,
+because the exact same JSX now has to render legibly on both the in-app
+Learn page's dark background and the marketing site's light one — each
+consumer defines its own `.lt-em` color rather than the shared content
+picking one. "Guided tours" (the tour-launcher block) stayed inline in
+`app/learn/page.tsx`, not moved into the shared module — it's an app
+mechanic, not a marketable "why this matters" story, so it isn't an About
+topic.
+
+`app/learn/page.tsx` — its `Section`/`Divider`/`Accordion` components are
+unchanged; only the CONTENT source changed, mapping over
+`LEARN_TOPICS[].blocks` instead of the content being hand-written inline.
+Live-verified pixel-for-pixel against the pre-refactor version (same 5
+accordion titles, same body text, same emphasis rendering) — this was a
+refactor, not a content change, and had to look identical.
+
+`app/about/page.tsx` (new) — card grid, one card per topic: emoji,
+`shortName`, `tagline`, the full `marketing` pitch (a real paragraph, not
+a one-liner, per explicit direction), and a "Learn more →" link to
+`app/about/[slug]/page.tsx` (new, dynamic route) — which shows the same
+marketing intro up top, then renders the topic's `blocks` in full on a
+dedicated page instead of a collapsed accordion, ending in a "Request
+Early Access" CTA back to `/get-the-app`. 404s cleanly for an unknown
+slug via `notFound()`.
+
+**Real bug, same root cause as `SiteHeader`'s earlier one, hit and fixed
+proactively this time**: nothing new to diagnose — already knew from that
+earlier incident that scoped `<style jsx>` silently fails to attach its
+`jsx-<hash>` class to elements in this dev setup, so both new About pages
+were written with `<style jsx global>` and specific class names
+(`.topic-card`, `.lt-section`, etc.) from the start, not scoped mode.
+
+**Live-verified**: `/about` renders all 4 topic cards with real marketing
+copy; `/about/temperature-prediction` renders the full detail (all 7
+sections + the amber callout box + CTA) correctly on a light background,
+including `<Em>` emphasis in dark text; `/learn` re-checked afterward and
+still renders identically to before the refactor, including the same
+callout box on a dark background. Checked on both desktop and mobile
+widths. Invalid slug (`/about/not-a-real-topic`) 404s cleanly. No console
+errors anywhere. `tsc --noEmit` clean throughout.
 
 ### Open questions (Fleet spec)
 - Tie-break rule if a split load has two compartments with exactly equal
