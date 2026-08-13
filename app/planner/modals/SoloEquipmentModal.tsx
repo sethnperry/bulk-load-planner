@@ -43,6 +43,7 @@ type ComboRow = {
   tare_lbs: number | null;
   target_weight: number | null;
   active: boolean | null;
+  claimed_by: string | null;
 };
 type UnitServiceDue = {
   unitLabel: "Truck" | "Trailer";
@@ -386,6 +387,16 @@ export default function SoloEquipmentModal({
   const [newTareTarget, setNewTareTarget] = useState<{ truckId: string; trailerId: string } | null>(null);
   const [newTareInput, setNewTareInput] = useState("");
 
+  // Display names for whoever currently holds an active combo, keyed by
+  // user_id -- only needs entries for OTHER users (never authUserId's own
+  // id), used to warn before this screen's tap-to-switch silently steals
+  // someone else's truck/trailer (couple_combo's p_force:true force-
+  // decouples whatever's currently coupled, with no prior check at all).
+  const [claimedByNames, setClaimedByNames] = useState<Record<string, string>>({});
+  const [commandeerTarget, setCommandeerTarget] = useState<
+    { kind: "truck" | "trailer"; id: string; ownerName: string } | null
+  >(null);
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const truckCardRef = useRef<HTMLDivElement>(null);
   const trailerCardRef = useRef<HTMLDivElement>(null);
@@ -398,16 +409,34 @@ export default function SoloEquipmentModal({
     const [{ data: t, error: tErr }, { data: tr, error: trErr }, { data: c, error: cErr }] = await Promise.all([
       supabase.from("trucks").select("truck_id, truck_name, active").eq("company_id", companyId).eq("active", true).order("truck_name"),
       supabase.from("trailers").select("trailer_id, trailer_name, active").eq("company_id", companyId).eq("active", true).order("trailer_name"),
-      supabase.from("equipment_combos").select("combo_id, truck_id, trailer_id, tare_lbs, target_weight, active").eq("company_id", companyId).eq("active", true),
+      supabase.from("equipment_combos").select("combo_id, truck_id, trailer_id, tare_lbs, target_weight, active, claimed_by").eq("company_id", companyId).eq("active", true),
     ]);
     if (tErr || trErr || cErr) {
       setError(tErr?.message ?? trErr?.message ?? cErr?.message ?? "Failed to load equipment.");
     }
     setTrucks((t ?? []) as TruckRow[]);
     setTrailers((tr ?? []) as TrailerRow[]);
-    setCombos((c ?? []) as ComboRow[]);
+    const comboRows = (c ?? []) as ComboRow[];
+    setCombos(comboRows);
+
+    // Resolve display names for anyone ELSE currently holding a combo --
+    // needed to name them in the "commandeer this unit from X" warning.
+    const otherClaimerIds = Array.from(new Set(
+      comboRows.map((r) => r.claimed_by).filter((id): id is string => !!id && id !== authUserId)
+    ));
+    if (otherClaimerIds.length > 0) {
+      const { data: nameRows } = await supabase.rpc("get_display_names_full", { p_user_ids: otherClaimerIds });
+      const map: Record<string, string> = {};
+      for (const row of (nameRows ?? []) as any[]) {
+        if (row.user_id) map[row.user_id] = row.display_name ?? "another driver";
+      }
+      setClaimedByNames(map);
+    } else {
+      setClaimedByNames({});
+    }
+
     setLoading(false);
-  }, [companyId]);
+  }, [companyId, authUserId]);
 
   const loadServiceTypes = useCallback(async () => {
     const { data } = await supabase
@@ -447,11 +476,11 @@ export default function SoloEquipmentModal({
       truckWashedAt = (washes ?? [])[0]?.washed_at ?? null;
     }
     if (trailerId) {
-      const [{ data: records }, { data: washes }] = await Promise.all([
-        supabase.from("service_records").select("service_type_id, date, reading_value, created_at").eq("trailer_id", trailerId),
-        supabase.from("wash_records").select("washed_at").eq("trailer_id", trailerId).order("washed_at", { ascending: false }).limit(1),
-      ]);
-      serviceResults.push(computeUnitServiceDue("Trailer", (records ?? []) as any, types));
+      // Service due is deliberately truck-only in the report section below
+      // (per explicit direction: "just the trucks next service due") -- so
+      // this only needs the trailer's wash record, not a service query too.
+      const { data: washes } = await supabase
+        .from("wash_records").select("washed_at").eq("trailer_id", trailerId).order("washed_at", { ascending: false }).limit(1);
       trailerWashedAt = (washes ?? [])[0]?.washed_at ?? null;
     }
 
@@ -564,15 +593,47 @@ export default function SoloEquipmentModal({
     }
   }
 
+  // Only relevant when SELECTING a different truck/trailer -- deselecting
+  // (tapping the currently-selected one to clear it) never commandeers
+  // anything from anyone, so callers only check this for the incoming `id`.
+  function claimedByOther(kind: "truck" | "trailer", id: string): string | null {
+    const combo = combos.find((c) =>
+      c.active !== false && (kind === "truck" ? c.truck_id : c.trailer_id) === id
+    );
+    if (!combo?.claimed_by || combo.claimed_by === authUserId) return null;
+    return claimedByNames[combo.claimed_by] ?? "another driver";
+  }
+
   function toggleTruck(id: string) {
     const next = selectedTruckId === id ? null : id;
+    if (next) {
+      const ownerName = claimedByOther("truck", next);
+      if (ownerName) { setCommandeerTarget({ kind: "truck", id: next, ownerName }); return; }
+    }
     setSelectedTruckId(next);
     void resolvePair(next, selectedTrailerId);
   }
   function toggleTrailer(id: string) {
     const next = selectedTrailerId === id ? null : id;
+    if (next) {
+      const ownerName = claimedByOther("trailer", next);
+      if (ownerName) { setCommandeerTarget({ kind: "trailer", id: next, ownerName }); return; }
+    }
     setSelectedTrailerId(next);
     void resolvePair(selectedTruckId, next);
+  }
+
+  function confirmCommandeer() {
+    if (!commandeerTarget) return;
+    const { kind, id } = commandeerTarget;
+    setCommandeerTarget(null);
+    if (kind === "truck") {
+      setSelectedTruckId(id);
+      void resolvePair(id, selectedTrailerId);
+    } else {
+      setSelectedTrailerId(id);
+      void resolvePair(selectedTruckId, id);
+    }
   }
 
   async function confirmRemove() {
@@ -702,20 +763,16 @@ export default function SoloEquipmentModal({
                 <span style={{ fontWeight: 900, color: COLOR_TARE }}>{Number(selectedCombo.target_weight).toLocaleString()} lbs</span>
               </div>
             )}
+            {/* Truck-only -- see loadServiceAndWash's own comment for why
+                the trailer's service due was dropped from this line. */}
             {serviceLines.length > 0 ? (
               <div style={S.reportLine} onClick={() => setServiceHistoryOpen(true)}>
-                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  {serviceLines.map((s) => (
-                    <div key={s.unitLabel} style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-                      <span style={S.reportLabel}>{s.unitLabel}{s.typeName ? ` · ${s.typeName}` : ""}</span>
-                      <span style={{ fontWeight: 900, color: COLOR_SERVICE, fontSize: 13 }}>{s.display}</span>
-                    </div>
-                  ))}
-                </div>
+                <span style={S.reportLabel}>Next Service{serviceLines[0].typeName ? ` · ${serviceLines[0].typeName}` : ""}</span>
+                <span style={{ fontWeight: 900, color: COLOR_SERVICE, fontSize: 13 }}>{serviceLines[0].display}</span>
               </div>
             ) : (
               <div style={S.reportLine} onClick={() => setServiceHistoryOpen(true)}>
-                <span style={S.reportLabel}>Service</span>
+                <span style={S.reportLabel}>Next Service</span>
                 <span style={{ fontWeight: 900, color: COLOR_SERVICE }}>No service recorded</span>
               </div>
             )}
@@ -743,6 +800,14 @@ export default function SoloEquipmentModal({
               <div style={S.actionBtn()} onClick={() => setWashOpen(true)}>Wash</div>
               <div style={S.actionBtn()} onClick={() => setBinderOpen(true)}>File</div>
             </div>
+
+            {/* This modal opts out of FullscreenModal's own default Done
+                button (footer={null}, see header comment -- everything here
+                autosaves, no Save/Decouple step) but still needs an
+                explicit, deliberate way to close. */}
+            <button type="button" onClick={onClose} style={{ ...saveBtnStyle, marginTop: 10 }}>
+              Done
+            </button>
           </div>
         </div>
       </FullscreenModal>
@@ -841,6 +906,30 @@ export default function SoloEquipmentModal({
       )}
       {addTrailerOpen && (
         <AdminTrailerModal trailer={null} companyId={companyId} onClose={() => setAddTrailerOpen(false)} onDone={() => { setAddTrailerOpen(false); loadEquipment(); }} />
+      )}
+
+      {/* ── Commandeer confirmation -- selecting a truck/trailer another
+          driver currently has claimed. couple_combo's p_force:true would
+          otherwise silently force-decouple it with no warning at all. ── */}
+      {commandeerTarget && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 60, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <div style={{ background: "#151515", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8, padding: 20, maxWidth: 360 }}>
+            <div style={{ fontWeight: 900, fontSize: 16, marginBottom: 8 }}>Commandeer this unit?</div>
+            <div style={{ fontSize: 13, color: "rgba(255,255,255,0.55)", lineHeight: 1.6, marginBottom: 18 }}>
+              Do you want to commandeer this unit from {commandeerTarget.ownerName}?
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button type="button" onClick={() => setCommandeerTarget(null)} disabled={busy}
+                style={{ flex: 1, padding: "10px 14px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.14)", background: "rgba(255,255,255,0.06)", color: "#fff", cursor: "pointer" }}>
+                Cancel
+              </button>
+              <button type="button" onClick={confirmCommandeer} disabled={busy}
+                style={{ flex: 1, padding: "10px 14px", borderRadius: 6, border: "1px solid rgba(220,160,60,0.5)", background: "rgba(180,120,40,0.25)", color: "#fde68a", fontWeight: 800, cursor: "pointer" }}>
+                Commandeer
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ── Remove confirmation ── */}
