@@ -1,23 +1,32 @@
 "use client";
 // app/planner/components/CancelLoadSheet.tsx
 //
-// Shown when the driver closes the Loading modal instead of tapping
-// LOADED. Per user report: backing out felt like a dead end with no
-// acknowledgment of what actually happens -- and it does happen: tapping
-// LOAD already re-cards the terminal (begin_load's own side effect, see
-// useLoadWorkflow.ts's cancelActiveLoad comment) before the Loading modal
-// ever opens, and canceling only removes the load_log row, never reverts
-// that. So a driver who visits a terminal just to keep their card current,
-// without actually loading, was already getting exactly that outcome --
-// just silently, with no confirmation telling them so. This sheet makes it
-// explicit instead of just closing on a bare tap.
+// Rework (2026-08-13), per explicit user direction: the Loading modal used
+// to have two separate exit paths -- a small "Close" text button in the
+// header that silently canceled with no confirmation at all, and a big
+// LOADED button that submitted directly. Collapsed into one deliberate
+// exit point instead: the header Close button is gone (see
+// FullscreenModal's hideCloseButton), the bottom button is now labeled
+// "Complete" (or whatever loadedLabel page.tsx passes), and EVERY way of
+// leaving the modal -- that button, backdrop click, or Escape, all routed
+// through the same onClose prop -- opens this sheet instead of doing
+// anything directly.
+//
+// Three choices, not two: tapping LOAD already re-cards the terminal as a
+// side effect of begin_load (see useLoadWorkflow.ts's cancelActiveLoad
+// comment) before this modal ever opens, and canceling only removes the
+// load_log row, never reverts that -- so "log the load" and "leave without
+// logging" were never actually mutually exclusive with "the card gets
+// refreshed." Making that a real, separate, always-available choice is the
+// whole point of this sheet.
 
 import React from "react";
 
 type Props = {
   open: boolean;
-  onKeepLoading: () => void;
-  onConfirmCancel: () => void;
+  onKeepEditing: () => void;
+  onLogTheLoad: () => void;
+  onUpdateCardOnly: () => void;
 };
 
 const rowStyle: React.CSSProperties = {
@@ -30,12 +39,12 @@ const cancelStyle: React.CSSProperties = {
   background: "transparent", color: "rgba(255,255,255,0.45)", fontSize: 14, fontWeight: 700, cursor: "pointer",
 };
 
-export default function CancelLoadSheet({ open, onKeepLoading, onConfirmCancel }: Props) {
+export default function CancelLoadSheet({ open, onKeepEditing, onLogTheLoad, onUpdateCardOnly }: Props) {
   if (!open) return null;
 
   return (
     <div
-      onClick={onKeepLoading}
+      onClick={onKeepEditing}
       style={{ position: "fixed", inset: 0, zIndex: 10400, background: "rgba(0,0,0,0.72)", display: "flex", alignItems: "flex-end", justifyContent: "center" }}
     >
       <div
@@ -43,14 +52,14 @@ export default function CancelLoadSheet({ open, onKeepLoading, onConfirmCancel }
         style={{ width: "100%", maxWidth: 480, background: "#111518", borderRadius: "16px 16px 0 0", border: "1px solid rgba(255,255,255,0.1)", padding: "18px 16px calc(18px + env(safe-area-inset-bottom))" }}
       >
         <div style={{ fontSize: 15, fontWeight: 700, color: "rgba(255,255,255,0.90)", marginBottom: 4 }}>
-          Not loading here?
+          What do you want to do?
         </div>
         <div style={{ fontSize: 13, color: "rgba(255,255,255,0.45)", marginBottom: 14 }}>
-          Your terminal access is already refreshed for today. Choose whether to keep loading or leave without logging a load.
+          Your terminal access is refreshed for today either way.
         </div>
-        <button type="button" style={rowStyle} onClick={onKeepLoading}>Keep Loading</button>
-        <button type="button" style={rowStyle} onClick={onConfirmCancel}>Don't Log a Load</button>
-        <button type="button" style={cancelStyle} onClick={onKeepLoading}>Back</button>
+        <button type="button" style={rowStyle} onClick={onLogTheLoad}>Log the Load</button>
+        <button type="button" style={rowStyle} onClick={onUpdateCardOnly}>Update Card, No Load</button>
+        <button type="button" style={cancelStyle} onClick={onKeepEditing}>Keep Editing</button>
       </div>
     </div>
   );

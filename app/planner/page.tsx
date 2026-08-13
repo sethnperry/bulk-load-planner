@@ -290,10 +290,14 @@ export default function CalculatorPage() {
   const [compModalOpen, setCompModalOpen] = useState(false);
   const [compModalComp, setCompModalComp] = useState<number | null>(null);
   const [tempDialOpen, setTempDialOpen] = useState(false);
-  // Confirmation shown when the driver closes the Loading modal instead of
-  // tapping LOADED -- see CancelLoadSheet.tsx for why this matters (the
-  // terminal access refresh already happened silently on LOAD tap; this
-  // just makes that explicit instead of a bare close).
+  // The Loading modal's single exit point -- opened by its bottom button
+  // (renamed from "LOADED" to "Complete") or by FullscreenModal's own
+  // backdrop-click/Escape (the header Close button is hidden now, see
+  // hideCloseButton in LoadingModal.tsx). Offers Log the Load / Update
+  // Card Only / Keep Editing -- see CancelLoadSheet.tsx for why the
+  // "update card only" branch is real, not just a courtesy: begin_load
+  // already re-cards the terminal on LOAD tap, before this modal ever
+  // opens.
   const [cancelLoadConfirmOpen, setCancelLoadConfirmOpen] = useState(false);
 
   // ── Action row state ────────────────────────────────────────────────────────
@@ -1659,15 +1663,16 @@ const lastProductInfoById = useMemo(() => {
         lastProductInfoById={lastProductInfoById}
         setProductApi={(productId, api) => setProductInputs((prev) => ({ ...prev, [productId]: { ...(prev[productId] ?? {}), api } }))}
         setProductTemp={(productId, tempF) => setProductInputs((prev) => ({ ...prev, [productId]: { ...(prev[productId] ?? {}), tempF } }))}
-        onLoaded={loadWorkflow.onLoadedFromLoadingModal}
+        onLoaded={() => setCancelLoadConfirmOpen(true)}
         loadedDisabled={loadWorkflow.completeBusy}
-        loadedLabel={loadWorkflow.completeBusy ? "Saving…" : "LOADED"}
+        loadedLabel={loadWorkflow.completeBusy ? "Saving…" : "Complete"}
       />
 
       <CancelLoadSheet
         open={cancelLoadConfirmOpen}
-        onKeepLoading={() => setCancelLoadConfirmOpen(false)}
-        onConfirmCancel={() => { setCancelLoadConfirmOpen(false); loadWorkflow.cancelActiveLoad(); }}
+        onKeepEditing={() => setCancelLoadConfirmOpen(false)}
+        onLogTheLoad={() => { setCancelLoadConfirmOpen(false); loadWorkflow.onLoadedFromLoadingModal(); }}
+        onUpdateCardOnly={() => { setCancelLoadConfirmOpen(false); loadWorkflow.cancelActiveLoad(); }}
       />
 
       <ProductTempModal

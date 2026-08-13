@@ -113,6 +113,11 @@ export default function LoadingModal(props: {
   setProductTemp: (productId: string, tempF: number) => void;
 
   onOpenTempDial?: (productId: string) => void;
+  // Fired by the bottom button (and, via FullscreenModal's onClose, by
+  // backdrop-click/Escape too -- see page.tsx). No longer submits directly;
+  // opens a 3-way confirmation (Log the Load / Update Card Only / Keep
+  // Editing) so there's a single, deliberate exit point instead of a
+  // silent header Close button plus a separate submit button.
   onLoaded: () => void;
 
   loadedDisabled?: boolean;
@@ -187,7 +192,7 @@ useEffect(() => {
 }, [open, productGroups, lastProductInfoById, productInputs, setProductApi]);
 
   return (
-    <FullscreenModal open={open} title="Loading" onClose={onClose} footer={null}>
+    <FullscreenModal open={open} title="Loading" onClose={onClose} footer={null} hideCloseButton>
       <div style={{ display: "flex", flexDirection: "column", gap: 12, maxWidth: "100%", boxSizing: "border-box" }}>
         {/* A) Compartments */}
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -378,7 +383,7 @@ useEffect(() => {
                 width: "100%",
               }}
             >
-              {loadedLabel ?? "LOADED"}
+              {loadedLabel ?? "Complete"}
             </button>
           </div>
         </div>

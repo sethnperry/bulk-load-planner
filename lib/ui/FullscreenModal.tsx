@@ -18,9 +18,15 @@ type Props = {
 
   /** Optional content in the header's right slot (replaces the plain spacer). */
   headerRight?: ReactNode;
+
+  /** Hides the header's "Close" text button. Backdrop click and Escape
+   * still call onClose -- use this when the modal has its own single,
+   * deliberate exit control (e.g. LoadingModal's bottom button) and a
+   * second silent header exit would undercut it. */
+  hideCloseButton?: boolean;
 };
 
-export function FullscreenModal({ open, title, onClose, children, footer, headerRight }: Props) {
+export function FullscreenModal({ open, title, onClose, children, footer, headerRight, hideCloseButton }: Props) {
   useEffect(() => {
     if (!open) return;
 
@@ -73,13 +79,17 @@ export function FullscreenModal({ open, title, onClose, children, footer, header
         >
           {/* Header */}
           <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
-            <button
-              onClick={onClose}
-              className="rounded-xl px-3 py-2 text-sm hover:bg-white/10"
-              aria-label="Close"
-            >
-              Close
-            </button>
+            {hideCloseButton ? (
+              <div className="min-w-[64px]" />
+            ) : (
+              <button
+                onClick={onClose}
+                className="rounded-xl px-3 py-2 text-sm hover:bg-white/10"
+                aria-label="Close"
+              >
+                Close
+              </button>
+            )}
 
             <div className="text-base font-semibold">{title}</div>
 
