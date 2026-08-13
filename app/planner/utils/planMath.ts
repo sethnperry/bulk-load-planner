@@ -115,6 +115,33 @@ export function cgSliderToBias(slider: number): number {
   return 1 + Math.pow(Math.max(0, Math.min(1, t2)), CG_CURVE) * (PLOW_BIAS_MAX - 1);
 }
 
+/**
+ * Inverse of cgSliderToBias -- recovers the 0-1 slider position from a
+ * stored bias value (e.g. load_log.cg_bias, written via cgSliderToBias at
+ * begin_load time). Needed anywhere a load's real CG needs to be restored
+ * onto the slider (see CLAUDE.md "recap / recall last load") -- feeding
+ * the bias straight into the slider is a unit mismatch (bias ranges
+ * roughly -1..2.5 on a nonlinear curve, the slider is a plain 0-1), which
+ * is exactly what sent the slider to a clamped, "way off to unstable
+ * land" position before this existed.
+ */
+export function biasToCgSlider(bias: number): number {
+  const b = Math.max(-1, Math.min(PLOW_BIAS_MAX, Number(bias) || 0));
+
+  if (b < 0) {
+    const t = Math.pow(-b, 1 / CG_CURVE);
+    return CG_NEUTRAL - t * (CG_NEUTRAL - CG_REAR_MAX);
+  }
+
+  if (b <= 1) {
+    const t = Math.pow(b, 1 / CG_CURVE);
+    return CG_NEUTRAL + t * (CG_FRONT_MAX - CG_NEUTRAL);
+  }
+
+  const t2 = Math.pow((b - 1) / (PLOW_BIAS_MAX - 1), 1 / CG_CURVE);
+  return CG_FRONT_MAX + t2 * (1 - CG_FRONT_MAX);
+}
+
 // ─── Allocation ───────────────────────────────────────────────────────────────
 
 type AllocComp = {

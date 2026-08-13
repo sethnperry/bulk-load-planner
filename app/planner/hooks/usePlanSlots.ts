@@ -5,6 +5,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
+import { biasToCgSlider } from "../utils/planMath";
 import type { CompPlanInput, PlanSnapshot } from "../types";
 
 const PLAN_SLOTS = [1, 2, 3, 4, 5] as const;
@@ -318,9 +319,16 @@ export function usePlanSlots({
     // Real CG the driver actually used for this load, not a hardcoded
     // default -- see CLAUDE.md "recap / recall last load" discussion.
     // load_log.cg_bias is written at begin_load time (useLoadWorkflow.ts),
-    // so it's the true value for this specific completed load.
+    // so it's the true value for this specific completed load -- but it's
+    // the CONVERTED physics bias (cgSliderToBias's output, a nonlinear
+    // curve roughly -1..2.5), not the raw 0-1 slider position. Feeding it
+    // to the slider directly is a unit mismatch that sent the puck to a
+    // clamped, "way off to unstable land" position -- confirmed live
+    // (real cg_bias values like 1.5+ clamp a 0-1 range straight to 1,
+    // full front, regardless of what the driver actually had it at).
+    // biasToCgSlider is the inverse of that same conversion.
     const cgFromLoad = (resolvedRow as any).cg_bias;
-    const cgSlider = typeof cgFromLoad === "number" && Number.isFinite(cgFromLoad) ? cgFromLoad : 0.5;
+    const cgSlider = typeof cgFromLoad === "number" && Number.isFinite(cgFromLoad) ? biasToCgSlider(cgFromLoad) : 0.5;
 
     return {
       v: 1,
