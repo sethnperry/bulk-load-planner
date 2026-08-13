@@ -26,6 +26,7 @@ import ExpirationModal from "./modals/ExpirationModal";
 import SettingsModal from "./modals/SettingsModal";
 import LocationModal from "./modals/LocationModal";
 import MyTerminalsModal from "./modals/MyTerminalsModal";
+import RackSelectSheet from "./components/RackSelectSheet";
 import { CalculatorShellProvider, useCalculatorShell } from "./CalculatorShellContext";
 import { addDaysISO_, isPastISO_, formatMDYWithCountdown_ } from "./utils/dates";
 import { normState } from "./utils/normalize";
@@ -337,9 +338,18 @@ function ShellChrome({ children }: { children: React.ReactNode }) {
         cardDataByTerminalId={shell.cardDataByTerminalId}
         myTerminalIds={shell.myTerminalIdSet}
         setMyTerminalIds={() => {}}
-        setSelectedTerminalId={shell.location.setSelectedTerminalId}
+        setSelectedTerminalId={shell.chooseTerminal}
         setTermOpen={shell.setTermOpen}
         onChangeLocation={() => { shell.setTermOpen(false); shell.setLocOpen(true); }}
+      />
+
+      <RackSelectSheet
+        open={shell.rackPickerOpen}
+        terminalLabel={shell.terminalFilters.terminalsFiltered.find(
+          (t: any) => String(t.terminal_id) === String(shell.location.selectedTerminalId)
+        )?.terminal_name ?? undefined}
+        racks={shell.rackPickerRacks}
+        onPick={shell.resolveRackPick}
       />
 
       <style jsx global>{`

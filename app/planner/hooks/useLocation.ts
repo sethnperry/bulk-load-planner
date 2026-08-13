@@ -27,7 +27,7 @@ function locKey(userId: string) {
   return `protankr_location_v2:${userId || "anon"}`;
 }
 
-function readPersistedLocation(key: string): { state: string; city: string; terminalId: string } | null {
+function readPersistedLocation(key: string): { state: string; city: string; terminalId: string; rackId: string } | null {
   try {
     const raw = localStorage.getItem(key);
     if (!raw) return null;
@@ -36,14 +36,15 @@ function readPersistedLocation(key: string): { state: string; city: string; term
     const st = normState((parsed as any).state || "");
     const ct = normCity((parsed as any).city || "");
     const tid = String((parsed as any).terminalId || "");
+    const rid = String((parsed as any).rackId || "");
     if (!st) return null;
-    return { state: st, city: ct, terminalId: tid };
+    return { state: st, city: ct, terminalId: tid, rackId: rid };
   } catch {
     return null;
   }
 }
 
-function writePersistedLocation(key: string, state: string, city: string, terminalId: string) {
+function writePersistedLocation(key: string, state: string, city: string, terminalId: string, rackId: string) {
   try {
     localStorage.setItem(
       key,
@@ -51,6 +52,7 @@ function writePersistedLocation(key: string, state: string, city: string, termin
         state: normState(state),
         city: normCity(city),
         terminalId: String(terminalId || ""),
+        rackId: String(rackId || ""),
       })
     );
   } catch {}
@@ -62,6 +64,12 @@ export function useLocation(authUserId: string) {
   const [selectedState, setSelectedState] = useState("");
   const [selectedCity, setSelectedCity] = useState("");
   const [selectedTerminalId, setSelectedTerminalId] = useState("");
+  // Which physical rack at selectedTerminalId the driver is loading at --
+  // "" means either the terminal has 0/1 racks (nothing to disambiguate) or
+  // a rack hasn't been chosen yet for a multi-rack terminal. See CLAUDE.md
+  // "rack-aware loading" discussion: without this, actual API/temp readings
+  // from different racks at the same terminal silently pool into one number.
+  const [selectedRackId, setSelectedRackId] = useState("");
 
   const [statesCatalog, setStatesCatalog] = useState<StateRow[]>([]);
   const [statesLoading, setStatesLoading] = useState(false);
@@ -131,17 +139,29 @@ export function useLocation(authUserId: string) {
     })();
   }, [selectedState]);
 
-  // ── Reset city/terminal on state change ───────────────────────────────────
+  // ── Reset city/terminal/rack on state change ──────────────────────────────
   useEffect(() => {
     if (skipResetRef.current) return;
     setSelectedCity("");
     setSelectedTerminalId("");
+    setSelectedRackId("");
   }, [selectedState]);
 
   useEffect(() => {
     if (skipResetRef.current) return;
     setSelectedTerminalId("");
+    setSelectedRackId("");
   }, [selectedCity]);
+
+  // NOTE: deliberately no separate effect resetting selectedRackId off of
+  // selectedTerminalId alone -- the rack-selection flow (ShellChrome, see
+  // CLAUDE.md "rack-aware loading") needs to set terminalId and its
+  // resolved rackId together, atomically, in one handler; an effect
+  // reacting to the terminalId change alone would fire after that same
+  // batch and immediately clobber the rackId it just set back to "".
+  // Every call site that sets selectedTerminalId without also knowing
+  // about racks (persisted-location restore below, the dispatch/admin
+  // Cards-tab contextual picker) is responsible for clearing rackId itself.
 
   // ── Restore persisted location ───────────────────────────────────────────
   useEffect(() => {
@@ -160,10 +180,15 @@ export function useLocation(authUserId: string) {
       setSelectedState(loc.state);
       setSelectedCity(loc.city || "");
       setSelectedTerminalId(loc.terminalId || "");
+      // Restored as-is (written together with terminalId, see the persist
+      // effect below) -- the consumer that reads terminal_racks for this
+      // terminal is responsible for treating a stale/deleted rack id
+      // gracefully (fall back to re-prompting) rather than trusting it blind.
+      setSelectedRackId(loc.rackId || "");
     }
 
     if (authUserId && !fromUser && fromAnon) {
-      writePersistedLocation(userLocKey, fromAnon.state, fromAnon.city, fromAnon.terminalId);
+      writePersistedLocation(userLocKey, fromAnon.state, fromAnon.city, fromAnon.terminalId, fromAnon.rackId);
     }
 
     setTimeout(() => {
@@ -180,18 +205,18 @@ export function useLocation(authUserId: string) {
     if (hydratingRef.current) return;
     if (skipResetRef.current) return;
     userTouchedRef.current = true;
-  }, [selectedState, selectedCity, selectedTerminalId]);
+  }, [selectedState, selectedCity, selectedTerminalId, selectedRackId]);
 
   // ── Persist on change ─────────────────────────────────────────────────────
   useEffect(() => {
     if (hydratedForKeyRef.current !== effectiveLocKey) return;
     if (hydratingRef.current) return;
 
-    writePersistedLocation(ANON_LOC_KEY, selectedState, selectedCity, selectedTerminalId);
+    writePersistedLocation(ANON_LOC_KEY, selectedState, selectedCity, selectedTerminalId, selectedRackId);
     if (authUserId && userLocKey) {
-      writePersistedLocation(userLocKey, selectedState, selectedCity, selectedTerminalId);
+      writePersistedLocation(userLocKey, selectedState, selectedCity, selectedTerminalId, selectedRackId);
     }
-  }, [authUserId, effectiveLocKey, userLocKey, selectedState, selectedCity, selectedTerminalId]);
+  }, [authUserId, effectiveLocKey, userLocKey, selectedState, selectedCity, selectedTerminalId, selectedRackId]);
 
   // ── Ambient temp via existing /api/fuel-temp (OpenWeather 3.0) ────────────
   // Stale-while-revalidate, not stale-and-trust: a cache hit is shown
@@ -341,6 +366,8 @@ export function useLocation(authUserId: string) {
     setSelectedCity,
     selectedTerminalId,
     setSelectedTerminalId,
+    selectedRackId,
+    setSelectedRackId,
     selectedCityId,
     locationLabel,
     statesCatalog,

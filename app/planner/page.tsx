@@ -410,6 +410,41 @@ export default function CalculatorPage() {
         last_loaded_at: row.last_loaded_at ?? null,
       };
     }
+
+    // Rack-aware overlay (see CLAUDE.md "rack-aware loading"): when a
+    // specific rack is selected, its own rack_product_status reading -- if
+    // one exists -- wins over the terminal-wide pooled number above, for
+    // any product this specific rack has no reading of yet, the pooled
+    // terminal-wide stats stay untouched (never blended, always one or the
+    // other). Redirected onto the canonical product id, same as everywhere
+    // else this file pools rack-injected-variance products (dyed diesel
+    // etc.) -- rack_product_status itself is keyed by the raw variant id
+    // (matching RackProductStatusModal.tsx's own STUD write), but the
+    // final display below always reads a variant's stats from its
+    // canonical entry, so a DYED-specific rack reading would silently
+    // never surface without this same redirect.
+    if (location.selectedRackId) {
+      const canonicalByRawProductId = new Map(
+        (data ?? []).map((row: any) => [row.products?.product_id, row.products?.canonical_product_id ?? null])
+      );
+      const { data: rackRows } = await supabase
+        .from("rack_product_status")
+        .select("product_id, last_api, last_temp_f, updated_at")
+        .eq("rack_id", location.selectedRackId);
+      for (const row of (rackRows ?? []) as any[]) {
+        if (row.last_api == null && row.last_temp_f == null) continue;
+        const rawPid = String(row.product_id);
+        const pid = canonicalByRawProductId.get(rawPid) || rawPid;
+        const existing = statsByProductId[pid];
+        statsByProductId[pid] = {
+          last_api: row.last_api ?? existing?.last_api ?? null,
+          last_api_updated_at: row.last_api != null ? row.updated_at : existing?.last_api_updated_at ?? null,
+          last_temp_f: row.last_temp_f ?? existing?.last_temp_f ?? null,
+          last_loaded_at: existing?.last_loaded_at ?? null,
+        };
+      }
+    }
+
     const products = (data ?? []).filter((row: any) => row.active !== false)
       .map((row: any) => {
         if (!row.products) return null;
@@ -420,7 +455,7 @@ export default function CalculatorPage() {
       })
       .filter(Boolean);
     setTerminalProducts(products as ProductRow[]);
-  }, [location.selectedTerminalId]);
+  }, [location.selectedTerminalId, location.selectedRackId]);
 
   useEffect(() => { fetchTerminalProducts(); }, [fetchTerminalProducts]);
 
@@ -991,6 +1026,7 @@ export default function CalculatorPage() {
     authUserId: effectiveUserId || null,
     selectedComboId: equipment.selectedComboId,
     selectedTerminalId: location.selectedTerminalId,
+    selectedRackId: location.selectedRackId,
     selectedState: location.selectedState,
     selectedCity: location.selectedCity,
     selectedCityId: location.selectedCityId,

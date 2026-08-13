@@ -19,7 +19,7 @@
 // shared via context; everything else (compartments, plan math, presets,
 // load workflow, temp prediction) stays local to page.tsx as before.
 
-import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
 import { getSetupSession } from "@/lib/setupSession";
@@ -94,6 +94,19 @@ type ShellValue = {
   // driver/lead roles.
   selectedDriverId: string;
   setSelectedDriverId: (id: string) => void;
+  // Rack-aware loading (see CLAUDE.md "rack-aware loading" discussion): the
+  // ONE place that should ever change location.selectedTerminalId in the
+  // driver-facing app -- resolves how many racks the terminal has and
+  // either sets location.selectedRackId directly (0 or 1 rack, nothing to
+  // ask) or opens rackPickerOpen for a multi-rack terminal. Every terminal-
+  // selection call site (MyTerminalsModal, the Cards tab's "Select" button)
+  // should call this instead of location.setSelectedTerminalId directly, so
+  // a rack pick is never skipped just because a second entry point forgot to
+  // ask.
+  chooseTerminal: (terminalId: string) => void;
+  rackPickerOpen: boolean;
+  rackPickerRacks: { rack_id: string; rack_name: string }[];
+  resolveRackPick: (rackId: string) => void;
 };
 
 const ShellContext = createContext<ShellValue | null>(null);
@@ -377,6 +390,56 @@ export function CalculatorShellProvider({ children }: { children: React.ReactNod
 
   const [selectedDriverId, setSelectedDriverId] = useState("");
 
+  // ── Rack-aware loading ────────────────────────────────────────────────────
+  // See CLAUDE.md "rack-aware loading": without this, a terminal's actual
+  // observed API/temp readings from different physical racks silently pool
+  // into one shared terminal_products number. This resolves (or asks for)
+  // which rack, in one place shared by every terminal-selection entry point.
+  const [rackPickerOpen, setRackPickerOpen] = useState(false);
+  const [rackPickerRacks, setRackPickerRacks] = useState<{ rack_id: string; rack_name: string }[]>([]);
+  const rackPickerTerminalIdRef = useRef("");
+  // Guards against a stale async rack-count lookup resolving after a second,
+  // newer terminal pick already superseded it (see this ref's use below).
+  const latestTerminalRequestRef = useRef("");
+
+  const chooseTerminal = useCallback((terminalId: string) => {
+    latestTerminalRequestRef.current = terminalId;
+    location.setSelectedTerminalId(terminalId);
+    if (!terminalId) {
+      location.setSelectedRackId("");
+      return;
+    }
+    (async () => {
+      const { data } = await supabase
+        .from("terminal_racks")
+        .select("rack_id, rack_name")
+        .eq("terminal_id", terminalId)
+        .order("rack_name", { ascending: true });
+      if (latestTerminalRequestRef.current !== terminalId) return; // superseded
+      const racks = (data ?? []) as { rack_id: string; rack_name: string }[];
+      if (racks.length <= 1) {
+        location.setSelectedRackId(racks[0]?.rack_id ?? "");
+        return;
+      }
+      rackPickerTerminalIdRef.current = terminalId;
+      setRackPickerRacks(racks);
+      setRackPickerOpen(true);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.setSelectedTerminalId, location.setSelectedRackId]);
+
+  const resolveRackPick = useCallback((rackId: string) => {
+    // If the terminal changed again while this sheet was open (shouldn't
+    // happen -- the sheet is modal -- but cheap to guard), don't apply a
+    // pick meant for a terminal that's no longer selected.
+    if (rackPickerTerminalIdRef.current === location.selectedTerminalId) {
+      location.setSelectedRackId(rackId);
+    }
+    setRackPickerOpen(false);
+    setRackPickerRacks([]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.setSelectedRackId, location.selectedTerminalId]);
+
   const value: ShellValue = {
     authEmail, authUserId, setupSession, effectiveUserId,
     equipment, location, terminals, expirations,
@@ -391,6 +454,7 @@ export function CalculatorShellProvider({ children }: { children: React.ReactNod
     theme,
     role, companyId, isSuperAdmin,
     selectedDriverId, setSelectedDriverId,
+    chooseTerminal, rackPickerOpen, rackPickerRacks, resolveRackPick,
   };
 
   return <ShellContext.Provider value={value}>{children}</ShellContext.Provider>;

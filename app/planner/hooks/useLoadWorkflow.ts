@@ -14,6 +14,7 @@ type Props = {
   authUserId: string | null;
   selectedComboId: string;
   selectedTerminalId: string;
+  selectedRackId?: string | null; // see CLAUDE.md "rack-aware loading"
   selectedState: string;
   selectedCity: string;
   selectedCityId: string | null;
@@ -39,7 +40,7 @@ type Props = {
 
 export function useLoadWorkflow({
   authUserId,
-  selectedComboId, selectedTerminalId, selectedState, selectedCity, selectedCityId,
+  selectedComboId, selectedTerminalId, selectedRackId, selectedState, selectedCity, selectedCityId,
   tare, cgBias, ambientTempF, tempF,
   planRows, plannedGallonsTotal, plannedWeightLbs,
   terminalProducts, productNameById,
@@ -146,6 +147,17 @@ export function useLoadWorkflow({
 
       setActiveLoadId(result.load_id);
 
+      // Rack-aware loading: tag which physical rack this load happened at
+      // (see CLAUDE.md "rack-aware loading"). Plain UPDATE on the row just
+      // created, same non-blocking pattern as trainee_id/plan_slot below --
+      // a failure here only means this load can't be attributed to a rack
+      // later, never blocks the load itself. Skipped entirely for a 0/1-rack
+      // terminal (selectedRackId is "" -- nothing to tag).
+      if (selectedRackId && result.load_id) {
+        supabase.from("load_log").update({ rack_id: selectedRackId }).eq("load_id", result.load_id)
+          .then(({ error }) => { if (error) console.error("[rack] failed to tag rack_id:", error.message); });
+      }
+
       // Driver Training: tag this load for the trainee (single-load model --
       // see CLAUDE.md "Terminal Tier — Build Spec"). Plain UPDATE on the
       // lead's own just-created row, already covered by load_log_update_own;
@@ -207,7 +219,7 @@ export function useLoadWorkflow({
       setBeginLoadBusy(false);
     }
   }, [
-    beginLoadBusy, selectedComboId, selectedTerminalId, selectedState, selectedCity,
+    beginLoadBusy, selectedComboId, selectedTerminalId, selectedRackId, selectedState, selectedCity,
     selectedCityId, planRows, plannedGallonsTotal, plannedWeightLbs,
     tare, cgBias, ambientTempF, tempF, setProductInputs, onRefreshTerminalAccess, authUserId,
     trainingTraineeId, activeSlotLetter,
@@ -431,6 +443,59 @@ try {
   }
 } catch (e) {
   console.warn("terminal_products upsert threw (non-fatal):", e);
+}
+
+// Rack-aware loading (see CLAUDE.md "rack-aware loading"): also write the
+// actual observed API/temp into this specific rack's own row, so it stops
+// relying solely on the terminal-wide pooled number above (which is what
+// silently blended different racks' real readings together before this).
+// Keyed on the RAW product_id, matching RackProductStatusModal.tsx's own
+// STUD write shape -- not canonicalized like the terminal_products block
+// above, since rack_product_status is meant to hold each rack-injected
+// variant's own reading (the Terminal tab's Lane Map reads it that way).
+// Skipped entirely when no rack is selected (0/1-rack terminal, or the
+// driver dismissed the picker) -- terminal_products stays the only source
+// in that case, unchanged from today's behavior.
+//
+// Update-then-insert-if-missing, same reasoning as the terminal_products
+// block above, not a blind upsert: the Terminal tab's rack Product List
+// filters rack_product_status on active = true (page.tsx / EditTerminalModal.tsx),
+// which is an admin/lead-curated "this rack carries this product" flag --
+// a blind upsert defaulting active's own column default (true) would
+// silently add a product to that curated list just because a driver
+// happened to plan it here, even if nobody ever actually assigned it to
+// this rack. A genuine insert sets active: false (informational reading
+// only, not a curation claim); an existing row's active flag is never
+// touched either way.
+try {
+  if (selectedRackId && product_updates.length > 0) {
+    const now = new Date().toISOString();
+    for (const u of product_updates) {
+      const { data: rpsUpdated, error: rpsUpdateErr } = await supabase
+        .from("rack_product_status")
+        .update({ last_api: u.api, last_temp_f: u.temp_f, updated_at: now, updated_by: authUserId || null })
+        .eq("rack_id", selectedRackId)
+        .eq("product_id", u.product_id)
+        .select("rack_id");
+
+      if (rpsUpdateErr) { console.warn("rack_product_status update failed (non-fatal):", rpsUpdateErr); continue; }
+
+      if (!rpsUpdated || rpsUpdated.length === 0) {
+        const { error: rpsInsertErr } = await supabase.from("rack_product_status").insert({
+          rack_id: selectedRackId,
+          product_id: u.product_id,
+          last_api: u.api,
+          last_temp_f: u.temp_f,
+          updated_at: now,
+          updated_by: authUserId || null,
+          active: false,
+        });
+        if (rpsInsertErr) console.warn("rack_product_status insert failed (non-fatal):", rpsInsertErr);
+      }
+    }
+  }
+} catch (e) {
+  console.warn("rack_product_status upsert threw (non-fatal):", e);
 }
 
       const plannedGross = computePlannedGrossLbs();

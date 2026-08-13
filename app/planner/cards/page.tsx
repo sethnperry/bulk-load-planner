@@ -430,7 +430,10 @@ export default function CardsPage() {
   };
   const handleSelect = (tid: string) => {
     if (!terminals.accessDateByTerminalId[tid]) terminals.setAccessDateForTerminal(tid, new Date().toISOString().slice(0, 10));
-    location.setSelectedTerminalId(tid);
+    // Routes through the shared chooseTerminal (not location.setSelectedTerminalId
+    // directly) so this entry point also gets the rack-selection prompt for a
+    // multi-rack terminal -- see CalculatorShellContext.tsx's "rack-aware loading".
+    shell.chooseTerminal(tid);
     handleFlipClose();
     router.push("/planner");
   };
