@@ -43,16 +43,25 @@ export default function CallbackClient() {
     }
 
     const code = searchParams.get("code");
-    if (code) {
-      const url = `/auth/confirm?code=${encodeURIComponent(code)}&next=${encodeURIComponent(nextPath)}`;
-      window.location.replace(url);
-      return;
-    }
 
     (async () => {
-      const { data, err: authErr } = await supabase.auth.getSession() as any;
-      if (authErr) { setError("Auth error: " + authErr.message); return; }
-      if (!data?.session) { setError("No session found. Open the newest magic link, or request a fresh one."); return; }
+      if (code) {
+        // PKCE flow (the client now forces flowType: "pkce" via
+        // createBrowserClient) -- the emailed link carries ?code=, which
+        // must be exchanged here, in the same browser that generated the
+        // original code_verifier. Redirecting to /auth/confirm (as this
+        // used to do) doesn't work: that page only ever reads token_hash,
+        // never code, so the exchange has to happen right here.
+        const { data, error: exErr } = await supabase.auth.exchangeCodeForSession(code);
+        if (exErr || !data?.session) {
+          setError("Auth error: " + (exErr?.message ?? "Could not complete sign-in."));
+          return;
+        }
+      } else {
+        const { data, error: authErr } = await supabase.auth.getSession();
+        if (authErr) { setError("Auth error: " + authErr.message); return; }
+        if (!data?.session) { setError("No session found. Open the newest magic link, or request a fresh one."); return; }
+      }
 
       // Ensure every signed-in user has at least one company membership before
       // landing in the app. Idempotent -- a no-op for anyone already invited

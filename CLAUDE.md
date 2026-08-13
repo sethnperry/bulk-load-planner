@@ -2586,27 +2586,81 @@ queries against `information_schema.columns`, `pg_policies`, `pg_proc` /
 `pg_get_functiondef`, and `terminal_temp_bias` (or check with Supabase MCP/CLI if
 available) rather than assuming the repo's migration file is current.
 
-**Server-side auth checks don't work anywhere in this app today, and it's not
-obvious from reading the code.** `lib/supabase/client.ts` (the one browser
-Supabase client every authenticated call in the app goes through) persists
-sessions to `window.localStorage` only, via plain `createClient` from
-`@supabase/supabase-js` — not `@supabase/ssr`'s cookie-syncing
-`createBrowserClient`. `lib/authz.ts`'s server-side helpers
-(`getSessionUserOrRedirect`, `requireSuperAdmin`, `requireMembershipOrJoin`)
-read the session via `next/headers`'s `cookies()`, which is never populated,
-so they can't see a real session **regardless of whether the browser is
-actually logged in** — confirmed live 2026-08-07 (see "Website / landing
-page rework" → "Shipped 2026-08-07" below): adding one of these to a server
-component layout redirected an already-authenticated session straight to
-`/login`. This is also why none of the three were called from anywhere in
-the app before that pass — every existing auth-gated screen (`/admin`, the
-Planner) enforces auth client-side (`supabase.auth.getUser()` in a
-`useEffect`, redirecting via `router` if empty), which does work, since the
-browser client has the session in memory/localStorage regardless of cookies.
-**If you're tempted to reach for `lib/authz.ts`'s server-side helpers, they
-won't work until `lib/supabase/client.ts` is migrated to
-`createBrowserClient` — a foundational change, not something to casually
-bundle into an unrelated task.**
+**Server-side auth checks — fixed 2026-08-13.** `lib/supabase/client.ts`
+previously persisted sessions to `window.localStorage` only, via plain
+`createClient` from `@supabase/supabase-js` — not `@supabase/ssr`'s
+cookie-syncing `createBrowserClient` — so `lib/authz.ts`'s server-side
+helpers (`getSessionUserOrRedirect`, `requireSuperAdmin`,
+`requireMembershipOrJoin`) could never see a real session regardless of
+whether the browser was actually logged in (confirmed live 2026-08-07, see
+"Website / landing page rework" → "Shipped 2026-08-07" below). This is now
+fixed: `lib/supabase/client.ts`'s singleton is `createBrowserClient`, and
+`lib/supabase/browser.ts` (a second, previously-independent
+`createClient()` instance used by `JoinClient.tsx`/`ActiveCompanySelect.tsx`
+— would otherwise have split-brained against the new cookie-backed
+singleton) now just re-exports the same singleton instead of creating its
+own.
+
+Three things had to be handled together for this to actually work, not
+just compile:
+- **Existing localStorage sessions don't carry over automatically** —
+  `createBrowserClient` reads/writes cookies, not the old
+  `sb-<ref>-auth-token` localStorage key, so shipping this as a bare swap
+  would have silently logged out every currently-signed-in user (dev and
+  production) on their next load. `lib/supabase/client.ts` now runs a
+  one-time client-side migration on load: if a legacy localStorage session
+  exists and no cookie session does, it's lifted in via
+  `supabase.auth.setSession()` and the old key is cleared. Live-verified:
+  confirmed the legacy key disappears and a real `sb-<ref>-auth-token`
+  *cookie* appears after one page load with a pre-existing localStorage
+  session.
+- **`createBrowserClient` hardcodes `flowType: "pkce"`**, not overridable
+  via options — this changes what `/login`'s `signInWithOtp()` magic link
+  actually sends back: a `?code=` query param instead of a `#access_token=`
+  hash fragment. `app/auth/callback/CallbackClient.tsx` already had `code`-
+  handling code (redirecting to `/auth/confirm?code=...`), but
+  `/auth/confirm` only ever read `token_hash`, never `code` — so that
+  branch was dead/broken before this pass too, just never exercised since
+  the client wasn't PKCE before. Fixed by calling
+  `supabase.auth.exchangeCodeForSession(code)` directly in
+  `CallbackClient.tsx` instead of redirecting. The *other* login flow
+  (`/auth/confirm`'s own `token_hash`/`verifyOtp()` path, used by admin
+  invites) doesn't depend on `flowType` at all and was unaffected — live-
+  verified end-to-end via a real `admin/generate_link` magic-link token
+  (session established, `/admin` and `/planner` both loaded real company
+  data afterward).
+- **`app/planner/layout.tsx` now actually has the server-side gate** this
+  section used to warn against adding — `getSessionUserOrRedirect()` runs
+  before `CalculatorLayoutClient` renders. Live-verified both directions:
+  an authenticated session gets real Planner content directly (no
+  `/login` flash); a session with cookies + localStorage fully cleared
+  gets server-redirected to `/login` before any client JS runs.
+  `CalculatorShellContext.tsx`'s own client-side
+  `supabase.auth.getUser()` check is unchanged and still runs too (catches
+  a session that expires mid-visit) — this is a first line of defense, not
+  a replacement.
+
+`requireSuperAdmin`/`requireMembershipOrJoin` are still not wired into any
+route — only `getSessionUserOrRedirect` (via the Planner gate above) has a
+real caller today. They're no longer *dead* code (the session they'd read
+is real now), just not yet adopted anywhere else.
+
+### Stale-column audit — 2026-08-13
+
+After the `buffer_lbs` bug (a dead `equipment_combos` column reference that
+silently 400'd `EquipmentModal.tsx`'s entire fallback-hydration query, not
+just its own dead "Buffer" display line — fixed same day), ran a full
+repo-wide audit for the same failure class: every `.from(table).select(...)`
+and every `.insert/.update/.upsert({...})` call, cross-checked against the
+live schema (fetched via PostgREST's own OpenAPI introspection at
+`/rest/v1/`, not the migrations folder — consistent with "Architecture
+reality" above). The checker is relation-aware (recurses into embedded
+`alias:table(cols)` joins rather than flagging the join itself as a bad
+column) and skips anything containing a spread (`...obj`) rather than
+guess. Validated against synthetic known-bad cases before trusting a clean
+result. **Zero further findings** — `buffer_lbs` was the only stale
+reference in the codebase, both passes (350 `.from()` calls / 201 read
+queries, plus every write call) came back clean otherwise.
 
 ## Key existing infrastructure (already built, don't rebuild)
 
@@ -3178,34 +3232,44 @@ but don't assume that stays true if someone wires it in later.)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.
 
-- **Orphaned "planned" `load_log` rows never get cleaned up.** Tapping LOAD on
-  the planner immediately inserts a `load_log` row with `status='planned'` --
-  before the driver ever reaches the Loading modal's LOADED button. If the
-  load is abandoned (backgrounds the app, changes their mind, was just poking
-  at the UI), that row lingers forever with no expiry/cleanup path. Confirmed
-  live 2026-07-22: dozens of these already exist for a single combo going back
-  to June, interspersed with real `status='loaded'` completions -- this has
-  been silently accumulating for a while, not a one-off. They're low-harm
-  (no `actual_total_gal`, don't feed `terminal_temp_bias` or
-  `terminal_products`, and "My Loads" shows them with a bare `—` instead of a
-  diff) but it's unbounded table growth and clutters load history. Needs
-  either: (a) a scheduled cleanup (delete/archive `planned` rows past some
-  age with no completion), or (b) app-side logic to reuse/replace a combo's
-  existing `planned` row instead of inserting a new one each time LOAD is
-  tapped.
+- ~~**Orphaned "planned" `load_log` rows never get cleaned up.**~~ —
+  **prevention shipped 2026-08-13**, backlog cleanup written but not yet
+  applied. Option (b) from the original writeup: `useLoadWorkflow.ts`'s
+  `beginLoadToSupabase` now deletes any existing `status='planned'` row for
+  the same `combo_id`+`user_id` (via the same `deleteLoad`/`delete_load`
+  RPC the explicit Cancel path already used) *before* calling `begin_load`,
+  so a combo can never accumulate more than one abandoned planned row going
+  forward, regardless of why the previous attempt was abandoned (background/
+  close, not just an explicit Cancel tap). Live-verified: inserted a
+  synthetic stale planned row for a real combo directly in the DB, tapped
+  LOAD in the app, confirmed via a direct query that the synthetic row was
+  gone and exactly one new planned row existed. Live count check the same
+  day found only 3 real backlog rows total (not "dozens" — the DB has
+  apparently been reseeded/reset since the original July note), all
+  identically timestamped (a seed-data artifact, not real accumulated
+  abandonment). `supabase/migrations/20260817000000_cleanup_orphaned_planned_loads.sql`
+  (written, cascade-delete-safe per `load_lines_load_id_fkey ... ON DELETE
+  CASCADE`, **not yet applied** — a bulk production DELETE, even of 3
+  known-blank rows, needs the user's own go-ahead, not something to run
+  unilaterally) clears anything still `planned` after 24 hours.
 
-- **Abandoned solo companies accumulate with no cleanup.** The solo→fleet
-  join flow (`app/calculator/components/JoinFleetView.tsx`, shipped
+- ~~**Abandoned solo companies accumulate with no cleanup.**~~ — **checked
+  2026-08-13, currently a non-issue.** Live query (every `companies` row
+  with `is_solo = true`, cross-referenced against every
+  `user_settings.active_company_id`) found only 3 solo companies total in
+  the live DB, and **zero** currently abandoned — every one still has at
+  least one user actively pointing at it. The underlying gap described
+  below is still real and unfixed (the solo→fleet join flow still doesn't
+  clean up the old company), but building a flagging/archive mechanism for
+  a problem with zero live instances would be pure speculative
+  infrastructure — re-run this same check periodically as the user base
+  grows, and only build cleanup once there's an actual backlog to clean.
+  Original description, still accurate as an explanation of the gap: the
+  solo→fleet join flow (`app/planner/components/JoinFleetView.tsx`, shipped
   2026-08-06) deliberately **abandons** a user's solo company entirely when
   they redeem a fleet invite code — no equipment migration, no deletion of
   the old `companies`/`user_companies` rows, per explicit product decision
-  (see "Fleet Tier — Build Spec" → solo→fleet join flow). This means every
-  solo user who later joins a real fleet leaves an orphaned, never-cleaned-up
-  solo `companies` row behind forever — same shape as the `load_log` issue
-  above (unbounded, low-harm-per-row table growth). Worth a scheduled
-  cleanup pass eventually (e.g. flag/archive solo companies with no
-  `user_companies` row still pointing at them as `active_company_id`), not
-  urgent enough to block anything today.
+  (see "Fleet Tier — Build Spec" → solo→fleet join flow).
 
 ## Files safe to delete
 - `supabase/migrations_old/` — superseded, confirmed not referenced.

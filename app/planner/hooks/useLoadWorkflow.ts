@@ -95,6 +95,30 @@ export function useLoadWorkflow({
       if (!selectedCityId) throw new Error("City ID not found.");
       if (!planRows || planRows.length === 0) throw new Error("No plan to load.");
 
+      // Clean up any stale "planned" row left behind by a previous LOAD tap
+      // for this same combo that never reached LOADED or Cancel (app
+      // backgrounded/closed mid-session -- see CLAUDE.md "Pre-launch
+      // cleanup: orphaned planned load_log rows"). Reuses the same
+      // delete_load RPC the explicit Cancel path already calls, so this is
+      // just making sure begin_load never accumulates more than one
+      // abandoned planned row per combo going forward. Best-effort: a
+      // failure here shouldn't block starting the new load.
+      if (authUserId && selectedComboId) {
+        try {
+          const { data: stale } = await supabase
+            .from("load_log")
+            .select("load_id")
+            .eq("user_id", authUserId)
+            .eq("combo_id", selectedComboId)
+            .eq("status", "planned");
+          if (stale && stale.length > 0) {
+            await Promise.all(stale.map((r: any) => deleteLoad(r.load_id).catch(() => {})));
+          }
+        } catch (err) {
+          console.warn("stale planned-row cleanup failed (non-fatal):", err);
+        }
+      }
+
       const lines = (planRows as any[])
         .filter((r) => r.productId && Number(r.planned_gallons ?? 0) > 0)
         .map((r) => {

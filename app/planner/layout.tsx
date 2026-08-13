@@ -28,6 +28,7 @@
 
 import type { Metadata, Viewport } from "next";
 import CalculatorLayoutClient from "./CalculatorLayoutClient";
+import { getSessionUserOrRedirect } from "@/lib/authz";
 
 export const viewport: Viewport = {
   themeColor: "#ffffff",
@@ -41,21 +42,15 @@ export const metadata: Metadata = {
 };
 
 // Per the website rework spec: /planner redirects unauthenticated visitors
-// to /login. That gate lives in CalculatorShellContext.tsx (client-side),
-// NOT here -- this app's browser Supabase client (lib/supabase/client.ts)
-// persists sessions to localStorage only, not cookies, so a server
-// component here calling lib/authz.ts's cookie-based
-// getSessionUserOrRedirect() can never see a real session and would
-// redirect every visitor to /login unconditionally, authenticated or not
-// (confirmed live: it did exactly that to an already-logged-in session
-// before this was caught and reverted). lib/authz.ts's server-side helpers
-// are correct for cookie-based auth in general, just incompatible with how
-// this app's client actually persists sessions -- switching the browser
-// client to @supabase/ssr's cookie-syncing createBrowserClient would fix
-// that properly, but that's a foundational, app-wide change (every
-// authenticated call in the app goes through that one client) well outside
-// the scope of a route rename, not something to slip in as a side effect
-// here.
-export default function CalculatorLayout({ children }: { children: React.ReactNode }) {
+// to /login. This now redirects server-side (no flash of app content before
+// client JS runs) -- lib/supabase/client.ts was migrated to @supabase/ssr's
+// cookie-syncing createBrowserClient specifically to make this possible;
+// see that file's own comment for why the old localStorage-only client
+// couldn't support this. CalculatorShellContext.tsx's own client-side
+// supabase.auth.getUser() check stays in place too, unchanged -- it still
+// does real work (e.g. catching a session that expires mid-visit), this is
+// just the first line of defense now.
+export default async function CalculatorLayout({ children }: { children: React.ReactNode }) {
+  await getSessionUserOrRedirect();
   return <CalculatorLayoutClient>{children}</CalculatorLayoutClient>;
 }
