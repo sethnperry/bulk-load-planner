@@ -586,7 +586,7 @@ export const LEARN_TOPICS: LearnTopic[] = [
             could make any drain down unnecessary. If the tare weight
             entered included a full saddle, you will have burned roughly
             25 gallons by the time you reach the scale, so if the
-            calculated drain down is more than 25 gallons, you're in good
+            calculated drain down is less than 25 gallons, you're in good
             shape.
           </>
         ),
