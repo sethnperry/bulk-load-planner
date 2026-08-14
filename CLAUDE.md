@@ -1093,8 +1093,90 @@ mobile media query's smaller heading size is genuinely applied -- but a
 real pixel screenshot to visually confirm final layout was never
 obtained this session. Worth a real look next session before considering
 this fully closed.
+
+### Open questions (Fleet spec)
 - Tie-break rule if a split load has two compartments with exactly equal
   gallons of different products.
+
+## Billing & Subscriptions — Build Spec (sketched 2026-08-14, no payment processor wired up yet)
+
+Recorded from a design conversation, not yet integrated with Stripe or
+RevenueCat -- what's below is the app-side scaffold that a real payment
+integration will write into and read from, built now so the seat-usage
+UX exists and is testable before billing itself is live.
+
+**Decided architecture**: checkout happens on whatever processor is
+appropriate for the surface (Stripe Checkout for web/PWA signup, since
+`/get-the-app` is meant to become the real enrollment page -- RevenueCat
+once the native iOS/Android apps exist, since Apple/Google both require
+their own in-app-purchase system for subscriptions bought inside a native
+app, not a third-party processor like Stripe). Neither is wired up yet --
+no Stripe/RevenueCat keys exist in this project's env vars as of this
+pass. **Activation is webhook-driven, never client-redirect-driven** --
+the payment success redirect page only shows a "setting up" state; the
+thing that actually flips a company to active is a server-to-server
+webhook from the processor, signature-verified, landing in a not-yet-built
+`/api/stripe/webhook` route.
+
+**Trials**: Stripe supports `trial_period_days` natively at the
+subscription level -- card collected up front, not charged until the
+trial ends, `status` is `trialing` the whole time. The app's own
+activation check should treat `trialing` the same as `active` (has
+access), so no separate trial-tracking logic is needed on this side.
+
+**Discount codes**: Stripe's built-in Coupons/Promotion Codes, no custom
+code needed -- its hosted Checkout page has a promo-code field already.
+
+**Seat model (shipped this pass, schema + UI only)**: two independent
+paid-capacity pools, matching the pricing already decided above --
+`paid_admin_seats` (base plan includes 1) and `paid_other_seats` (base
+plan includes 4), tracked in a new `company_subscriptions` table
+(migration `20260814000000_company_subscriptions.sql`, **written but not
+applied** -- no direct DB write access this session, same as other
+schema work this pass; needs to be run in the Supabase SQL editor before
+any of this activates). Actual seat *usage* is deliberately never stored
+-- it's computed live from `user_companies` role counts each time, so it
+can't drift from reality the way a cached counter could. RLS: any staff
+member (admin/lead/dispatch) can read their own company's row via
+`is_company_staff()`; no insert/update/delete policy at all, since the
+only writer is meant to be a service-role webhook handler, same
+no-direct-client-write shape as `load_points`.
+
+`lib/billing/useCompanySubscription.ts` (new) -- `useCompanySubscription(companyId)`
+hook + two pure functions (`computeSeatCapacity`, `wouldExceedCapacity`)
+kept outside the hook so they're trivially reusable/testable. Deliberately
+**fails open**: any error reading the table (migration not applied yet,
+RLS denial, no row for this company) resolves to `hasSubscription: false`,
+which every consumer treats as "render nothing, gate nothing." This is
+what makes it safe to ship into production today, before the migration
+is even applied -- confirmed live: `/admin` for the real, non-billed demo
+company renders identically to before (no seat pill, no invite warning),
+with the only visible trace being a single expected 404 in the console
+for the not-yet-existing table (matches this project's own established
+"confirmed via direct PostgREST query not to exist live yet" pattern for
+other pre-migration tables).
+
+`app/admin/page.tsx` -- two UI pieces wired to the hook, both invisible
+whenever `hasSubscription` is false (i.e. always, today):
+- A small pill next to "Users (N)" showing "{used} of {paid} seats",
+  turning amber when either pool is full.
+- `InviteModal` shows an inline amber warning + relabels its submit
+  button to "Add Seat & Invite" when the selected role would push usage
+  over paid capacity. **This is informational only** -- there's no real
+  billing integration to actually add a seat or block anything yet, so
+  the invite always proceeds regardless. It exists so the UX pattern is
+  built and reviewable now, ready to gate for real the moment a genuine
+  processor integration exists.
+
+**Explicitly not built this pass**: the Stripe/RevenueCat integration
+itself (checkout session creation, `/api/stripe/webhook`, a
+`webhook_events` dedup table Stripe's own docs recommend for safe retry
+handling), the bulk "set seats to N" billing-settings control for a
+company onboarding many drivers at once (vs. the incremental per-invite
+warning built here), and the actual product decision of whether going
+over capacity **hard-blocks** the invite or **auto-scales** the Stripe
+subscription quantity with proration -- flagged as a real open question,
+not guessed at.
 
 ## Terminal Tier — Build Spec (recorded 2026-08-03, not yet scoped into sprint work)
 

@@ -22,6 +22,7 @@ import FleetCredentialsModal from "./FleetCredentialsModal";
 import IncentiveSettingsModal from "./IncentiveSettingsModal";
 import PayrollReportModal from "./PayrollReportModal";
 import UnderloadingDashboardModal from "./UnderloadingDashboardModal";
+import { useCompanySubscription, computeSeatCapacity, wouldExceedCapacity, type SeatCapacity } from "@/lib/billing/useCompanySubscription";
 
 // Paginated fetch -- PostgREST/Supabase caps every response at a
 // server-side "max rows" setting (confirmed live: 1000, unaffected by
@@ -419,10 +420,14 @@ function ComboCard({ combo, onEdit }: { combo: Combo; onEdit: () => void }) {
 // Invite Modal
 // ─────────────────────────────────────────────────────────────
 
-function InviteModal({ companyId, onClose, onDone }: { companyId: string; onClose: () => void; onDone: () => void }) {
+function InviteModal({ companyId, seats, onClose, onDone }: { companyId: string; seats: SeatCapacity; onClose: () => void; onDone: () => void }) {
   const [email, setEmail] = useState(""); const [role, setRole] = useState("driver");
   const [status, setStatus] = useState<{ type: "error" | "success"; msg: string } | null>(null);
   const [loading, setLoading] = useState(false);
+  // Informational only -- there's no live billing integration yet, so this
+  // never actually blocks the invite, it just previews what a real one
+  // would need to warn about (see lib/billing/useCompanySubscription.ts).
+  const overCapacity = wouldExceedCapacity(seats, role);
   async function send() {
     if (!email.trim()) return; setLoading(true); setStatus(null);
     try {
@@ -442,10 +447,23 @@ function InviteModal({ companyId, onClose, onDone }: { companyId: string; onClos
       {status && <Banner msg={status.msg} type={status.type} />}
       <Field label="Email"><input type="email" value={email} onChange={e => setEmail(e.target.value)} style={css.input} onKeyDown={e => e.key === "Enter" && send()} autoFocus /></Field>
       <Field label="Role"><select value={role} onChange={e => setRole(e.target.value)} style={{ ...css.select, width: "100%" }}><option value="driver">Driver</option><option value="lead">Lead</option><option value="dispatch">Dispatch</option><option value="admin">Admin</option></select></Field>
+      {overCapacity && (
+        <div style={{
+          fontSize: 12, fontWeight: 500, lineHeight: 1.6, color: "#fdba74",
+          background: "rgba(251,146,60,0.08)", border: "1px solid rgba(251,146,60,0.22)",
+          borderLeft: "3px solid #fb923c", borderRadius: "0 8px 8px 0", padding: "10px 12px", marginBottom: 16,
+        }}>
+          <strong style={{ color: "#fb923c" }}>⚠ Over your paid seat limit.</strong>{" "}
+          {role === "admin"
+            ? `You're using ${seats.usedAdminSeats} of ${seats.paidAdminSeats} admin seats.`
+            : `You're using ${seats.usedOtherSeats} of ${seats.paidOtherSeats} team seats.`}{" "}
+          This invite will need an additional seat added to your plan.
+        </div>
+      )}
       <div style={{ fontSize: 12, color: T.muted, marginBottom: 18, lineHeight: 1.5 }}>If the user already has an account they'll be added immediately. New users receive a magic link.</div>
       <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
         <button style={css.btn("ghost")} onClick={onClose}>Cancel</button>
-        <button style={css.btn("primary")} onClick={send} disabled={loading || !email.trim()}>{loading ? "Sending…" : "Send Invite"}</button>
+        <button style={css.btn("primary")} onClick={send} disabled={loading || !email.trim()}>{loading ? "Sending…" : overCapacity ? "Add Seat & Invite" : "Send Invite"}</button>
       </div>
     </Modal>
   );
@@ -1152,6 +1170,15 @@ export default function AdminPage() {
   const [terminalModal, setTerminalModal] = useState<Terminal | null | "new">(null);
   const [terminalSearch, setTerminalSearch] = useState("");
 
+  // Seat usage -- see lib/billing/useCompanySubscription.ts. hasSubscription
+  // is false for every company today (no billing integration live yet), so
+  // this is invisible/no-op until a real subscription row exists.
+  const { subscription } = useCompanySubscription(companyId);
+  const seats = useMemo(
+    () => computeSeatCapacity(members.map((m) => m.role), subscription),
+    [members, subscription]
+  );
+
   const loadAll = useCallback(async () => {
     setLoading(true); setErr(null);
     try {
@@ -1450,6 +1477,23 @@ export default function AdminPage() {
                 <span style={{ transition: "transform 150ms", transform: usersOpen ? "rotate(90deg)" : "none", display: "inline-block", fontSize: 14 }}>›</span>
                 Users ({members.length})
               </h2>
+              {seats.hasSubscription && (
+                <span
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    padding: "3px 9px",
+                    borderRadius: 999,
+                    marginRight: 8,
+                    color: seats.otherSeatsFull || seats.adminSeatsFull ? "#fb923c" : T.muted,
+                    background: seats.otherSeatsFull || seats.adminSeatsFull ? "rgba(251,146,60,0.10)" : "rgba(255,255,255,0.05)",
+                    whiteSpace: "nowrap" as const,
+                  }}
+                  title={`${seats.usedAdminSeats} of ${seats.paidAdminSeats} admin seats · ${seats.usedOtherSeats} of ${seats.paidOtherSeats} team seats`}
+                >
+                  {seats.usedAdminSeats + seats.usedOtherSeats} of {seats.paidAdminSeats + seats.paidOtherSeats} seats
+                </span>
+              )}
               {myRole === "admin" && <button style={plusBtn} onClick={() => setInviteModal(true)}>+</button>}
             </div>
             {usersOpen && (
@@ -1661,7 +1705,7 @@ export default function AdminPage() {
       )}
 
       {/* ── Modals ── */}
-      {inviteModal && myRole === "admin" && <InviteModal companyId={companyId!} onClose={() => setInviteModal(false)} onDone={() => { setInviteModal(false); loadAll(); }} />}
+      {inviteModal && myRole === "admin" && <InviteModal companyId={companyId!} seats={seats} onClose={() => setInviteModal(false)} onDone={() => { setInviteModal(false); loadAll(); }} />}
       {profileModal && <DriverProfileModal member={profileModal.member} companyId={companyId!} onClose={() => setProfileModal(null)} onDone={(u) => { profileModal.onSaved(u); setProfileModal(null); }} onRemove={() => { setProfileModal(null); loadAll(); }} />}
       {truckModal   && <TruckModal truck={truckModal === "new" ? null : truckModal} companyId={companyId!} onClose={() => setTruckModal(null)} onDone={() => { setTruckModal(null); loadAll(); }} myRole={myRole} />}
       {trailerModal && <TrailerModal trailer={trailerModal === "new" ? null : trailerModal} companyId={companyId!} onClose={() => setTrailerModal(null)} onDone={() => { setTrailerModal(null); loadAll(); }} myRole={myRole} />}
