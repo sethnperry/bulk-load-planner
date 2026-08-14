@@ -8,12 +8,12 @@
 import { useParams, notFound } from "next/navigation";
 import Link from "next/link";
 import SiteHeader from "../../marketing/SiteHeader";
-import { getLearnTopic, type LearnBlock } from "@/lib/content/learnTopics";
+import { getLearnTopic, Icon, type LearnBlock } from "@/lib/content/learnTopics";
 
 function Section({ emoji, title, children }: { emoji: string; title: string; children: React.ReactNode }) {
   return (
     <div className="lt-section">
-      <div className="lt-section-title">{emoji}&nbsp;&nbsp;{title}</div>
+      <div className="lt-section-title"><Icon value={emoji} size={16} />&nbsp;&nbsp;{title}</div>
       <div className="lt-section-body">{children}</div>
     </div>
   );
@@ -58,7 +58,7 @@ export default function AboutTopicPage() {
 
       <section className="hero">
         <Link href="/about" className="back-link">&larr; How ProTankr Works</Link>
-        <div className="hero-emoji">{topic.emoji}</div>
+        <div className="hero-emoji"><Icon value={topic.emoji} size={34} /></div>
         <h1 className="hero-h1">{topic.title}</h1>
         <div className="hero-marketing">{topic.marketing}</div>
       </section>

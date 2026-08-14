@@ -32,6 +32,28 @@ export function List({ children }: { children: ReactNode }) {
   );
 }
 
+/**
+ * Renders a topic/block `icon` value: a plain emoji character stays literal
+ * text, a "/..." value is treated as an image path (public/) and rendered
+ * as an <img> instead -- lets equipment-setup use the real truck renders
+ * while every other topic keeps its plain emoji, from the same field.
+ */
+export function Icon({ value, size = 18 }: { value: string; size?: number }) {
+  if (value.startsWith("/")) {
+    // eslint-disable-next-line @next/next/no-img-element -- tiny static
+    // icon rendered at varying sizes across three very different layout
+    // contexts; not a Next/Image candidate.
+    return (
+      <img
+        src={value}
+        alt=""
+        style={{ height: size, width: "auto", display: "inline-block", verticalAlign: "middle" }}
+      />
+    );
+  }
+  return <span style={{ fontSize: size, lineHeight: 1, verticalAlign: "middle" }}>{value}</span>;
+}
+
 export type LearnBlock =
   | { type: "section"; emoji: string; title: string; body: ReactNode }
   | { type: "divider"; label: string }
@@ -56,7 +78,7 @@ export const LEARN_TOPICS: LearnTopic[] = [
   // ── Equipment & compartment setup ───────────────────────────────────────
   {
     slug: "equipment-setup",
-    emoji: "🚀",
+    emoji: "/icons/truck-front.png",
     title: "How to set up the planner",
     shortName: "Equipment Setup",
     tagline: "Set it once, load in seconds.",
@@ -96,7 +118,7 @@ export const LEARN_TOPICS: LearnTopic[] = [
       { type: "divider", label: "Step 1: Equipment  (set it and forget it)" },
       {
         type: "section",
-        emoji: "🚛",
+        emoji: "/icons/truck-side.png",
         title: "Select your Equipment",
         body: (
           <List>

@@ -8,7 +8,7 @@
 
 import Link from "next/link";
 import SiteHeader from "../marketing/SiteHeader";
-import { LEARN_TOPICS } from "@/lib/content/learnTopics";
+import { LEARN_TOPICS, Icon } from "@/lib/content/learnTopics";
 
 export default function AboutPage() {
   return (
@@ -56,7 +56,7 @@ export default function AboutPage() {
         <div className="topic-grid">
           {LEARN_TOPICS.map((topic) => (
             <Link key={topic.slug} href={`/about/${topic.slug}`} className="topic-card">
-              <div className="topic-emoji">{topic.emoji}</div>
+              <div className="topic-emoji"><Icon value={topic.emoji} size={28} /></div>
               <div className="topic-name">{topic.shortName}</div>
               <div className="topic-tagline">{topic.tagline}</div>
               <div className="topic-marketing">{topic.marketing}</div>

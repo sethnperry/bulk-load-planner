@@ -3,13 +3,13 @@
 
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
-import { LEARN_TOPICS, type LearnBlock } from "@/lib/content/learnTopics";
+import { LEARN_TOPICS, Icon, type LearnBlock } from "@/lib/content/learnTopics";
 
 function Section({ emoji, title, children }: { emoji: string; title: string; children: React.ReactNode }) {
   return (
     <div style={{ padding: "14px 16px", borderRadius: 14, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)" }}>
       <div style={{ fontSize: 13, fontWeight: 800, color: "rgba(255,255,255,0.80)", marginBottom: 6 }}>
-        {emoji}&nbsp;&nbsp;{title}
+        <Icon value={emoji} size={14} />&nbsp;&nbsp;{title}
       </div>
       <div style={{ fontSize: 13, color: "rgba(255,255,255,0.50)", lineHeight: 1.65 }}>{children}</div>
     </div>
@@ -34,7 +34,7 @@ function Callout({ children }: { children: React.ReactNode }) {
   );
 }
 
-function Accordion({ title, children }: { title: string; children: React.ReactNode }) {
+function Accordion({ title, children }: { title: React.ReactNode; children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
   return (
     <div style={{ borderRadius: 14, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.02)", overflow: "hidden" }}>
@@ -120,7 +120,15 @@ export default function LearnPage() {
 
         {/* ── Shared topics (also power app/about) ── */}
         {LEARN_TOPICS.map((topic) => (
-          <Accordion key={topic.slug} title={`${topic.emoji} ${topic.title}`}>
+          <Accordion
+            key={topic.slug}
+            title={
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                <Icon value={topic.emoji} size={16} />
+                {topic.title}
+              </span>
+            }
+          >
             {topic.blocks.map(renderBlock)}
           </Accordion>
         ))}
