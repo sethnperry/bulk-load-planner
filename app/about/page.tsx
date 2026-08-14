@@ -17,12 +17,39 @@ export default function AboutPage() {
 
       <section className="hero">
         <h1 className="hero-h1">How ProTankr Works</h1>
-        <p className="hero-sub">
-          Every fuel transport driver has loaded conservatively at some
-          point — guessing low because the alternative was finding out the
-          hard way, at the scale. Here's exactly what ProTankr does about
-          each part of that problem.
-        </p>
+        <div className="hero-sub">
+          <p>
+            Every truck-and-trailer combination has its own tare weight.
+            Every trailer has its own compartment count and capacities.
+            Every product has its own API range and density behavior,
+            shaped by the terminal, the additives, the blend. Every driver
+            has their own read on the road, the terrain, the delivery.
+          </p>
+          <p>
+            The variables stack up fast. So the industry found the
+            simplest fix: pick a safe, memorable volume — well under the
+            legal limit — and load that same number every time, no matter
+            what actually changed.
+          </p>
+          <p>
+            It works, until it doesn't. A temporary shift causes an
+            overweight ticket, and the response is to drop the volume
+            again — permanently. The event that caused it passes. The
+            lower volume never does.
+          </p>
+          <p>
+            This looks complicated. It isn't — not anymore. ProTankr
+            handles all of it behind the scenes, so the driver stays
+            focused on the road. In fact, we've stripped the input down so
+            far that most days, opening the app is the only step: your
+            load plan is already updated and waiting. When something does
+            need adjusting, it's a few seconds, not a few minutes.
+          </p>
+          <p>
+            So while what the driver sees is simple, here's exactly what
+            ProTankr is doing underneath.
+          </p>
+        </div>
       </section>
 
       <section className="grid-section">
@@ -52,7 +79,9 @@ export default function AboutPage() {
 
         .hero { padding: 40px 48px 0; max-width: 680px; }
         .hero-h1 { margin: 0; font: 900 52px var(--font); letter-spacing: -0.02em; color: #111; }
-        .hero-sub { margin: 14px 0 0; font: 400 16px var(--font); color: rgba(0,0,0,0.6); line-height: 1.55; }
+        .hero-sub { margin: 18px 0 0; font: 400 17px var(--font); color: rgba(0,0,0,0.65); line-height: 1.65; }
+        .hero-sub p { margin: 0 0 16px; }
+        .hero-sub p:last-child { margin-bottom: 0; }
 
         .grid-section { padding: 44px 48px 100px; }
         .topic-grid {
