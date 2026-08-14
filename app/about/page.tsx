@@ -19,7 +19,7 @@ export default function AboutPage() {
         <h1 className="hero-h1">How ProTankr Works</h1>
         <div className="hero-sub">
           <p>
-            Every truck and trailer combination has its own tare weight.
+            Every truck-and-trailer combination has its own tare weight.
             Every trailer has its own compartment count and capacities.
             Every product has its own API range and density behavior,
             shaped by the terminal, the additives, the blend. Every driver

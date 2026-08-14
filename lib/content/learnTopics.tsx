@@ -317,7 +317,7 @@ export const LEARN_TOPICS: LearnTopic[] = [
         title: "Large tank model, intentionally conservative",
         body: (
           <>
-            We model a large aboveground storage tank (~1 million
+            We model a large above-ground storage tank (~1 million
             gallons). Large tanks have enormous thermal mass, they heat
             and cool very slowly, lagging well behind ambient swings. This
             is <Em>intentional</Em>: we'd rather predict the product is
@@ -335,14 +335,14 @@ export const LEARN_TOPICS: LearnTopic[] = [
             The current ambient temp is gently blended into the final
             result to account for the last few minutes of temperature
             change. This keeps the prediction current without overreacting
-            to short term spikes.
+            to short-term spikes.
           </>
         ),
       },
       {
         type: "section",
         emoji: "🧠",
-        title: "Self training bias correction",
+        title: "Self-training bias correction",
         body: (
           <>
             Every time you complete a load and enter the actual observed
@@ -351,10 +351,10 @@ export const LEARN_TOPICS: LearnTopic[] = [
             stored per terminal, per hour of day, and per month of year.
             <br />
             <br />
-            Over time, the model learns patterns specific to each
-            terminal, for example, that a particular terminal's tanks run
-            5 to 9°F colder than predicted at 3am in March, or warmer on
-            sunny afternoons.
+            Over time, the model learns terminal-specific patterns, for
+            example, that a particular terminal's tanks run 5 to 9°F
+            colder than predicted at 3am in March, or warmer on sunny
+            afternoons.
             The correction is applied automatically on the next prediction
             at that terminal.
             <br />
@@ -373,7 +373,7 @@ export const LEARN_TOPICS: LearnTopic[] = [
         body: (
           <>
             <Em>High</Em>: Clear skies and calm winds over the past 24h.
-            Solar gain was predictable and the model is well constrained.
+            Solar gain was predictable and the model is well-constrained.
             <br />
             <br />
             <Em>Medium</Em>: Partly cloudy. Cloud variability introduces
@@ -415,7 +415,7 @@ export const LEARN_TOPICS: LearnTopic[] = [
         <p>
           The only defense against an overweight ticket has been to either
           load on an axle scale or load conservatively, because doing the
-          real density and thermal expansion math by hand, for every load,
+          real density and thermal-expansion math by hand, for every load,
           at every terminal, isn't realistic on a schedule measured in
           minutes.
         </p>
@@ -494,7 +494,7 @@ export const LEARN_TOPICS: LearnTopic[] = [
     slug: "self-correcting-network",
     emoji: "📊",
     title: "Understanding over/under",
-    shortName: "Self Correcting Network",
+    shortName: "Self-Correcting Network",
     tagline: "Every load makes the next one smarter.",
     marketing: (
       <>
@@ -511,7 +511,7 @@ export const LEARN_TOPICS: LearnTopic[] = [
           ProTankr turns that around. The first driver to observe a shift
           corrects it for every driver who loads there next, across every
           company, in real time, instead of everyone independently
-          rediscovering the same surprise.
+          re-discovering the same surprise.
         </p>
       </>
     ),
@@ -551,7 +551,7 @@ export const LEARN_TOPICS: LearnTopic[] = [
             eliminating any overweight tickets. The app is updated for that
             specific product at that terminal for every driver who loads
             there next. The next driver plans with your fresh observation,
-            and the community corrects itself in real time.
+            and the community self-corrects in real time.
             <br />
             <br />
             <Em>Temperature</Em> is the second cause. If the product is
@@ -559,7 +559,7 @@ export const LEARN_TOPICS: LearnTopic[] = [
             condensed into the same gross gallon. The pump only recognizes
             volume, so more product ends up on board. The temperature
             prediction model attempts to remedy this variable. The model
-            has a self training feature that over time will dial the
+            has a self-training feature that over time will dial the
             prediction closer and closer to reality with every load. Still,
             there are unknown variables that cannot be fully accounted for
             in any model.
@@ -569,7 +569,7 @@ export const LEARN_TOPICS: LearnTopic[] = [
       {
         type: "section",
         emoji: "🪣",
-        title: "Drain down calculation",
+        title: "Drain-down calculation",
         body: (
           <>
             If the load report shows you are over the legal 80,000 lb gross
@@ -580,13 +580,13 @@ export const LEARN_TOPICS: LearnTopic[] = [
             <br />
             <br />
             Be sure to follow company policy to account for where and how
-            to drain down, if ever necessary. This is only meant to
+            to drain-down, if ever necessary. This is only meant to
             quickly determine the exact gallons required to get legal
             again. Keep in mind the burn buffer from the saddle tank(s)
-            could make any drain down unnecessary. If the tare weight
+            could make any drain-down unnecessary. If the tare weight
             entered included a full saddle, you will have burned roughly
             25 gallons by the time you reach the scale, so if the
-            calculated drain down is less than 25 gallons, you're in good
+            calculated drain-down is less than 25 gallons, you're in good
             shape.
           </>
         ),
