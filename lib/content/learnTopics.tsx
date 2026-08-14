@@ -64,7 +64,7 @@ export const LEARN_TOPICS: LearnTopic[] = [
       <>
         <p>
           ProTankr also doubles as a place to store and share equipment
-          details — a real digital transfer of knowledge (TOK) for your
+          details, a real digital transfer of knowledge (TOK) for your
           fleet. None of that is required to use the Planner, though;
           setup stays quick and simple.
         </p>
@@ -76,12 +76,12 @@ export const LEARN_TOPICS: LearnTopic[] = [
         <p>
           Tare weight is the detail that matters most. Every coupled unit
           needs one. We recommend weighing the combined truck and trailer
-          empty but with full saddle tanks — it normalizes the math and
-          builds in a burn buffer for the diesel used between the
+          empty but with full saddle tanks, since it normalizes the math
+          and builds in a burn buffer for the diesel used between the
           terminal and the scale.
         </p>
         <p>
-          Everything is tied to the equipment, not the driver — so it
+          Everything is tied to the equipment, not the driver, so it
           survives trailer swaps and shift changes without a reweigh or a
           lost detail.
         </p>
@@ -258,14 +258,14 @@ export const LEARN_TOPICS: LearnTopic[] = [
       <>
         <p>
           Product temperature is one of the biggest hidden variables in a
-          load — colder product is denser, so the same gallon count weighs
+          load, colder product is denser, so the same gallon count weighs
           more. Guess wrong and you're either leaving gallons on the table
           out of caution, or finding out you're overweight at the scale.
         </p>
         <p>
           ProTankr predicts product temperature from real weather data and
           the physics of a large storage tank, then keeps correcting itself
-          against what actually happened at each terminal — while always
+          against what actually happened at each terminal, while always
           leaving the final call to you.
         </p>
       </>
@@ -278,7 +278,7 @@ export const LEARN_TOPICS: LearnTopic[] = [
         body: (
           <>
             We pull hourly temperature, wind speed, and cloud cover from
-            OpenWeather for the past 24–30 hours at this terminal's
+            OpenWeather for the past 24 to 30 hours at this terminal's
             location. This gives the model a full picture of how the
             environment has been heating or cooling the storage tank.
           </>
@@ -314,11 +314,11 @@ export const LEARN_TOPICS: LearnTopic[] = [
       {
         type: "section",
         emoji: "🛢",
-        title: "Large tank model — intentionally conservative",
+        title: "Large tank model, intentionally conservative",
         body: (
           <>
-            We model a large above-ground storage tank (~1 million
-            gallons). Large tanks have enormous thermal mass — they heat
+            We model a large aboveground storage tank (~1 million
+            gallons). Large tanks have enormous thermal mass, they heat
             and cool very slowly, lagging well behind ambient swings. This
             is <Em>intentional</Em>: we'd rather predict the product is
             colder and denser than it turns out to be, which keeps you
@@ -335,14 +335,14 @@ export const LEARN_TOPICS: LearnTopic[] = [
             The current ambient temp is gently blended into the final
             result to account for the last few minutes of temperature
             change. This keeps the prediction current without overreacting
-            to short-term spikes.
+            to short term spikes.
           </>
         ),
       },
       {
         type: "section",
         emoji: "🧠",
-        title: "Self-training bias correction",
+        title: "Self training bias correction",
         body: (
           <>
             Every time you complete a load and enter the actual observed
@@ -351,14 +351,15 @@ export const LEARN_TOPICS: LearnTopic[] = [
             stored per terminal, per hour of day, and per month of year.
             <br />
             <br />
-            Over time, the model learns terminal-specific patterns — for
-            example, that a particular terminal's tanks run 5–9°F colder
-            than predicted at 3am in March, or warmer on sunny afternoons.
+            Over time, the model learns patterns specific to each
+            terminal, for example, that a particular terminal's tanks run
+            5 to 9°F colder than predicted at 3am in March, or warmer on
+            sunny afternoons.
             The correction is applied automatically on the next prediction
             at that terminal.
             <br />
             <br />
-            The correction is weighted by confidence — it takes at least 3
+            The correction is weighted by confidence, it takes at least 3
             observations before any correction is applied, and grows to
             full weight around 10+ observations. This prevents a single
             outlier from throwing off the model.
@@ -371,15 +372,15 @@ export const LEARN_TOPICS: LearnTopic[] = [
         title: "Confidence levels",
         body: (
           <>
-            <Em>High</Em> — Clear skies and calm winds over the past 24h.
-            Solar gain was predictable and the model is well-constrained.
+            <Em>High</Em>: Clear skies and calm winds over the past 24h.
+            Solar gain was predictable and the model is well constrained.
             <br />
             <br />
-            <Em>Medium</Em> — Partly cloudy. Cloud variability introduces
+            <Em>Medium</Em>: Partly cloudy. Cloud variability introduces
             some uncertainty in how much solar heat the tank absorbed.
             <br />
             <br />
-            <Em>Low</Em> — Heavy cloud cover or high winds. Use the number
+            <Em>Low</Em>: Heavy cloud cover or high winds. Use the number
             as a starting point but lean on what you know about this
             terminal.
           </>
@@ -390,7 +391,7 @@ export const LEARN_TOPICS: LearnTopic[] = [
         body: (
           <>
             <strong>⚠ Use your judgement.</strong> Override the prediction
-            freely — you know your terminal better than any model. It is
+            freely, you know your terminal better than any model. It is
             strongly recommended <strong>not to set the planned product
             temp above ambient</strong> unless you have full confidence from
             a recent BOL. When in doubt, err cold. A colder planned temp
@@ -412,14 +413,15 @@ export const LEARN_TOPICS: LearnTopic[] = [
     marketing: (
       <>
         <p>
-          For years, the only defense against an overweight ticket was
-          loading conservatively — because doing the real density and
-          thermal-expansion math by hand, for every load, at every
-          terminal, isn't realistic on a schedule measured in minutes.
+          The only defense against an overweight ticket has been to either
+          load on an axle scale or load conservatively, because doing the
+          real density and thermal expansion math by hand, for every load,
+          at every terminal, isn't realistic on a schedule measured in
+          minutes.
         </p>
         <p>
-          ProTankr runs the actual ASTM D1250 calculation automatically —
-          the same standard terminals and weight enforcement use — so you
+          ProTankr runs the actual ASTM D1250 calculation automatically,
+          the same standard terminals and weight enforcement use, so you
           can load to your real legal capacity instead of a safety margin
           built on guesswork.
         </p>
@@ -434,7 +436,7 @@ export const LEARN_TOPICS: LearnTopic[] = [
           <>
             API gravity is the industry standard for measuring how light or
             heavy a petroleum product is. A lower API number means heavier
-            product — more pounds per gallon. The plan uses the most
+            product, more pounds per gallon. The plan uses the most
             recently observed API at this terminal (entered by the last
             driver) to calculate how many pounds each gallon will weigh at
             the planned temperature.
@@ -448,9 +450,9 @@ export const LEARN_TOPICS: LearnTopic[] = [
         body: (
           <>
             Petroleum expands when warm and contracts when cold. The same
-            number of gallons weighs more at 40°F than at 90°F. The plan
+            number of gallons weigh more at 40°F than at 90°F. The plan
             corrects for this using the ASTM D1250 thermal expansion
-            formula — the same standard used by terminals and weight
+            formula, the same standard used by terminals and weight
             enforcement.
           </>
         ),
@@ -461,10 +463,10 @@ export const LEARN_TOPICS: LearnTopic[] = [
         title: "Target weight",
         body: (
           <>
-            The target weight is your gross vehicle weight goal — tare
-            weight plus payload — set conservatively below the legal limit.
-            The plan fills compartments to hit this target, not to maximize
-            gallons.
+            The target weight is your gross vehicle weight goal, tare
+            weight plus payload, set below the legal limit for a small
+            buffer. The plan fills compartments to hit this target, not to
+            maximize gallons.
           </>
         ),
       },
@@ -475,10 +477,12 @@ export const LEARN_TOPICS: LearnTopic[] = [
         body: (
           <>
             The center of gravity slider shifts weight distribution between
-            the front and rear of the trailer. Moving it forward puts more
-            weight on the drive axles; moving it rearward shifts weight
-            toward the trailer axles. Use it to optimize axle weight
-            distribution for your specific equipment.
+            the front and rear of the trailer. Moving it moves gallons
+            between the compartments. Moving it forward puts more weight on
+            the drive axles, moving it rearward shifts weight toward the
+            trailer axles. Use it to optimize axle weight distribution for
+            your specific terrain and conditions, or simply to shift things
+            for a slightly faster drop when delivering.
           </>
         ),
       },
@@ -490,7 +494,7 @@ export const LEARN_TOPICS: LearnTopic[] = [
     slug: "self-correcting-network",
     emoji: "📊",
     title: "Understanding over/under",
-    shortName: "Self-Correcting Network",
+    shortName: "Self Correcting Network",
     tagline: "Every load makes the next one smarter.",
     marketing: (
       <>
@@ -502,9 +506,9 @@ export const LEARN_TOPICS: LearnTopic[] = [
         </p>
         <p>
           ProTankr turns that around. The first driver to observe a shift
-          corrects it for every driver who loads there next — across every
-          company, in real time — instead of everyone independently
-          re-discovering the same surprise.
+          corrects it for every driver who loads there next, across every
+          company, in real time, instead of everyone independently
+          rediscovering the same surprise.
         </p>
       </>
     ),
@@ -515,16 +519,16 @@ export const LEARN_TOPICS: LearnTopic[] = [
         title: "Why you might go over",
         body: (
           <>
-            <Em>API drift</Em> is the most common cause — and the hardest
-            to predict. When a terminal receives a new shipment, the
-            product gravity will shift. The change is usually minor and
-            equates to less than a couple hundred pounds in a full load.
-            Setting the target slightly lower than legal will accommodate
-            these minor swings.
+            <Em>API drift</Em> is the most common cause, and the hardest to
+            predict. When a terminal receives a new shipment, the product
+            gravity will shift. The change is usually minor and equates to
+            less than a couple hundred pounds in a full load. Setting the
+            target slightly lower than legal will accommodate these minor
+            swings.
             <br />
             <br />
             However, there have been black swan events in which a
-            dramatically heavier product is received — likely a different
+            dramatically heavier product is received, likely a different
             grade from an atypical refinery. This is an outlier, but
             traditionally every driver would need to load significantly
             less than they otherwise could, all the time, just to
@@ -538,12 +542,12 @@ export const LEARN_TOPICS: LearnTopic[] = [
             <br />
             <Em>The silver lining:</Em> the moment you enter the actual API
             from the BOL at the loading rack, two things happen. You will
-            know immediately — before crossing a scale — if the load is
+            know immediately, before crossing a scale, if the load is
             overweight, and will have a chance to correct it, virtually
             eliminating any overweight tickets. The app is updated for that
             specific product at that terminal for every driver who loads
-            there next. The next driver plans with your fresh observation —
-            the community self-corrects in real time.
+            there next. The next driver plans with your fresh observation,
+            and the community corrects itself in real time.
             <br />
             <br />
             <Em>Temperature</Em> is the second cause. If the product is
@@ -551,7 +555,7 @@ export const LEARN_TOPICS: LearnTopic[] = [
             condensed into the same gross gallon. The pump only recognizes
             volume, so more product ends up on board. The temperature
             prediction model attempts to remedy this variable. The model
-            has a self-training feature that over time will dial the
+            has a self training feature that over time will dial the
             prediction closer and closer to reality with every load. Still,
             there are unknown variables that cannot be fully accounted for
             in any model.
@@ -561,7 +565,7 @@ export const LEARN_TOPICS: LearnTopic[] = [
       {
         type: "section",
         emoji: "🪣",
-        title: "Drain-down calculation",
+        title: "Drain down calculation",
         body: (
           <>
             If the load report shows you are over the legal 80,000 lb gross

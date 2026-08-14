@@ -19,7 +19,7 @@ export default function AboutPage() {
         <h1 className="hero-h1">How ProTankr Works</h1>
         <div className="hero-sub">
           <p>
-            Every truck-and-trailer combination has its own tare weight.
+            Every truck and trailer combination has its own tare weight.
             Every trailer has its own compartment count and capacities.
             Every product has its own API range and density behavior,
             shaped by the terminal, the additives, the blend. Every driver
@@ -27,18 +27,18 @@ export default function AboutPage() {
           </p>
           <p>
             The variables stack up fast. So the industry found the
-            simplest fix: pick a safe, memorable volume — well under the
-            legal limit — and load that same number every time, no matter
+            simplest fix: pick a safe, memorable volume, well under the
+            legal limit, and load that same number every time, no matter
             what actually changed.
           </p>
           <p>
             It works, until it doesn't. A temporary shift causes an
             overweight ticket, and the response is to drop the volume
-            again — permanently. The event that caused it passes. The
+            again, permanently. The event that caused it passes. The
             lower volume never does.
           </p>
           <p>
-            This looks complicated. It isn't — not anymore. ProTankr
+            This looks complicated. It isn't, not anymore. ProTankr
             handles all of it behind the scenes, so the driver stays
             focused on the road. In fact, we've stripped the input down so
             far that most days, opening the app is the only step: your
