@@ -499,10 +499,13 @@ export const LEARN_TOPICS: LearnTopic[] = [
     marketing: (
       <>
         <p>
-          Every driver at a terminal is fighting the same invisible enemy:
-          a density reading that's gone stale since the last shipment came
-          in. Traditionally, everyone pays for that uncertainty by loading
-          light, all the time, just to cover the worst case.
+          Every driver is fighting the same invisible enemy: a new
+          shipment or a tank change with a different product weight and/or
+          density reading. Everyone pays for that uncertainty at the scale
+          without any means to communicate the change with each other. As
+          a consequence, many drivers get many overweight tickets before
+          ultimately resolving to load light, all the time, just to cover
+          the worst case.
         </p>
         <p>
           ProTankr turns that around. The first driver to observe a shift
@@ -537,12 +540,13 @@ export const LEARN_TOPICS: LearnTopic[] = [
             correcting the density calculation for everyone thereafter. The
             "as of" date shown next to the planned API in your load report
             tells you how stale the API reading is. A reading from four
-            days ago is a warning sign.
+            days ago is a warning sign. In this case, simply load light or
+            update the API from a more current BOL before loading.
             <br />
             <br />
             <Em>The silver lining:</Em> the moment you enter the actual API
             from the BOL at the loading rack, two things happen. You will
-            know immediately, before crossing a scale, if the load is
+            know immediately, before crossing any scale, if the load is
             overweight, and will have a chance to correct it, virtually
             eliminating any overweight tickets. The app is updated for that
             specific product at that terminal for every driver who loads
@@ -573,6 +577,17 @@ export const LEARN_TOPICS: LearnTopic[] = [
             the rear compartment to bring you legal. This uses the actual
             observed density from that compartment's loaded weight and
             gallons.
+            <br />
+            <br />
+            Be sure to follow company policy to account for where and how
+            to drain down, if ever necessary. This is only meant to
+            quickly determine the exact gallons required to get legal
+            again. Keep in mind the burn buffer from the saddle tank(s)
+            could make any drain down unnecessary. If the tare weight
+            entered included a full saddle, you will have burned roughly
+            25 gallons by the time you reach the scale, so if the
+            calculated drain down is more than 25 gallons, you're in good
+            shape.
           </>
         ),
       },
