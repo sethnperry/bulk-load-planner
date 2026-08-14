@@ -87,6 +87,7 @@ export default function AboutPage() {
         .topic-grid {
           display: grid;
           grid-template-columns: repeat(2, minmax(0, 1fr));
+          align-items: start;
           gap: 20px;
           max-width: 940px;
           margin: 0 auto;

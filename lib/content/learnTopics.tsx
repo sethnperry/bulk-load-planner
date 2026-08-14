@@ -54,17 +54,32 @@ export const LEARN_TOPICS: LearnTopic[] = [
     marketing: (
       <>
         <p>
-          Most fleet software makes you re-enter the same tare weight,
-          compartment caps, and load plan every single time. ProTankr
-          front-loads all of that into a five-minute setup, tied to the
-          equipment itself rather than the driver — so it survives slip
-          seats, trailer swaps, and shift changes without anyone re-doing
-          the math.
+          ProTankr also doubles as a place to store and share equipment
+          details — a real digital transfer of knowledge (TOK) for your
+          fleet. None of that is required to use the Planner, though;
+          setup stays quick and simple.
         </p>
         <p>
-          After that first setup, loading a truck is three taps: pick your
-          terminal, tap a saved plan slot, hit Load. Everything else runs
-          silently in the background.
+          Name the equipment (Unit #), add your compartments and their max
+          volumes, and set your safety cap. Couple trucks to trailers
+          freely.
+        </p>
+        <p>
+          Tare weight is the detail that matters most. Every coupled unit
+          needs one. We recommend weighing the combined truck and trailer
+          empty but with full saddle tanks — it normalizes the math and
+          builds in a burn buffer for the diesel used between the
+          terminal and the scale.
+        </p>
+        <p>
+          Everything is tied to the equipment, not the driver — so it
+          survives trailer swaps and shift changes without a reweigh or a
+          lost detail.
+        </p>
+        <p>
+          After that, loading a truck is three taps: pick your terminal,
+          tap a saved plan, hit Load. Everything else runs silently in
+          the background.
         </p>
       </>
     ),
