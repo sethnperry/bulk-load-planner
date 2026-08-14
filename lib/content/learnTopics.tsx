@@ -23,6 +23,15 @@ export function Em({ children }: { children: ReactNode }) {
   return <strong className="lt-em">{children}</strong>;
 }
 
+/** Bare bullet list, spacing-only (no color) so it's safe in either theme. */
+export function List({ children }: { children: ReactNode }) {
+  return (
+    <ul style={{ margin: 0, paddingLeft: 20, display: "flex", flexDirection: "column", gap: 10 }}>
+      {children}
+    </ul>
+  );
+}
+
 export type LearnBlock =
   | { type: "section"; emoji: string; title: string; body: ReactNode }
   | { type: "divider"; label: string }
@@ -84,43 +93,54 @@ export const LEARN_TOPICS: LearnTopic[] = [
       </>
     ),
     blocks: [
-      { type: "divider", label: "Step 1 — Equipment  (set it and forget it)" },
+      { type: "divider", label: "Step 1: Equipment  (set it and forget it)" },
       {
         type: "section",
         emoji: "🚛",
-        title: "Select your equipment",
+        title: "Select your Equipment",
         body: (
-          <>
-            Tap the equipment area at the top of the planner and select your
-            truck and trailer combination. This is the most important step —
-            everything in the plan flows from it.
-            <br />
-            <br />
-            <Em>Tare weight</Em> is the empty weight of your truck and
-            trailer combined. The plan subtracts this from your target gross
-            weight to determine how many pounds of product you can legally
-            carry.
-            <br />
-            <br />
-            <Em>Target weight</Em> is your gross vehicle weight goal — set
-            intentionally below the legal limit to give yourself a safety
-            buffer for API drift and temperature variance. A good target
-            leaves 200–400 lbs of room.
-          </>
+          <List>
+            <li>
+              Tap the equipment area at the top of the planner and select
+              your truck and trailer combination. This is the most
+              important step, since everything in the plan flows from it.
+            </li>
+            <li>
+              <Em>Tare weight</Em> is the empty weight of your truck and
+              trailer combined. The plan subtracts this from your target
+              gross weight to determine how many pounds of product you can
+              legally carry.
+            </li>
+            <li>
+              <Em>Target weight</Em> is your gross vehicle weight goal, set
+              intentionally below the legal limit to give yourself a safety
+              buffer for API drift and temperature variance. A good target
+              leaves 400 to 600 lbs of room.
+            </li>
+          </List>
         ),
       },
       {
         type: "section",
         emoji: "🔄",
-        title: "Slip seating another driver's truck",
+        title: "Slip seating",
         body: (
-          <>
-            If you are taking over a truck someone else drove, select their
-            exact combination. The compartment configuration, tare, and
-            target are all tied to the equipment — not the driver. Selecting
-            the right unit means the math is already dialed in from the
-            previous driver's setup.
-          </>
+          <List>
+            <li>
+              If you are taking over a truck someone else drove, select
+              their exact combination. The compartment configuration,
+              tare, and target are all tied to the equipment, not the
+              driver. Selecting the right unit means the math is already
+              dialed in from the previous driver's setup.
+            </li>
+            <li>
+              If being utilized the driver will see the next service due,
+              wash record and other details about the shared equipment.
+              Any permit or compliance document expiring soon will appear
+              in the notification bell. Digital copies of documents can
+              also be stored and shared easily.
+            </li>
+          </List>
         ),
       },
       {
@@ -129,80 +149,98 @@ export const LEARN_TOPICS: LearnTopic[] = [
         title: "Coupling loose units",
         body: (
           <>
-            If your company has individual tractors and trailers that can be
-            mixed and matched, you may need to create a combination in the
-            admin page first. The reason we track them as a pair rather than
-            separately is that tare weight and compartment configuration are
-            specific to the trailer, while axle weights and bridge laws
-            depend on how the tractor and trailer are connected. The
-            combination gives the plan everything it needs to compute a
-            legal, accurate load.
+            Individual tractors and trailers can be mixed and matched, each
+            combination is tracked. The reason we track them as a pair
+            rather than separately is that the compartment configurations
+            are specific to the trailer, while axle weights and bridge laws
+            depend on the tractor and trailer combination. This gives the
+            plan everything it needs to compute a legal, accurate load.
           </>
         ),
       },
-      { type: "divider", label: "Step 2 — Compartment caps  (set it and forget it)" },
+      { type: "divider", label: "Step 2: Compartment caps  (set it and forget it)" },
       {
         type: "section",
         emoji: "🛢",
         title: "Setting headspace caps",
         body: (
           <>
-            Each compartment bar in the planner has a headspace setting —
-            the percentage of capacity to leave empty at the top. Terminals
-            require this for product expansion, vapor space, and safe
-            transport regulations.
-            <br />
-            <br />
-            Tap any compartment bar to set its cap. This is saved per
-            trailer so you only do it once. Unless you switch trailers or
-            your terminal changes its requirements, you will never need to
-            touch this again.
+            <p>
+              Each compartment has three volume caps. The max volume is the
+              total physical space in the compartment, hard stop. The
+              safety cap, or headspace is intended to keep the formula from
+              calculating a volume too close to the max, keeping the
+              product safely away from the trailer's overflow prevention
+              system. The third cap is a handle on the plan compartment
+              itself. It is a quick throw for the driver to dial in the
+              planner within the preset boundary. The company would set the
+              boundary and the driver operates within it.
+            </p>
+            <p>
+              One strategy may be for the driver to set up the planner
+              presets to fill each compartment to the same memorable volume
+              they always have, but allow the rear compartment to change
+              with conditions. Allowing for the same muscle memory they are
+              used to with only one new number to think about before
+              jumping out to load (the rear compartment). No need to write
+              anything down. If the delivery location can only hold a
+              limited amount of one product, simply dial in that
+              compartment and let the others compensate with a quick swipe
+              gesture.
+            </p>
           </>
         ),
       },
-      { type: "divider", label: "Step 3 — Plan slots  (per terminal, per product)" },
+      { type: "divider", label: "Step 3: Plan slots  (You drive the plan)" },
       {
         type: "section",
         emoji: "📋",
         title: "What are plan slots?",
         body: (
           <>
-            Plan slots are saved load configurations — which product goes
-            in which compartment, at what quantity. Think of them as
-            presets you build once and reuse every time you load at that
-            terminal.
-            <br />
-            <br />
-            Slots are saved <Em>per terminal</Em> rather than universally
-            because different terminals carry different products, have
-            different rack configurations, and may load compartments in a
-            specific order. A plan that works perfectly at one terminal may
-            be completely wrong at another.
-            <br />
-            <br />
-            Most drivers have two or three slots per terminal — a full
-            load, a split load with two products, and maybe a light load
-            for weight-restricted routes. Build them once and they are
-            there every time you pull into that terminal.
+            <p>
+              Plan slots are saved load configurations: which product goes
+              in which compartment, at what quantity. Think of them as
+              presets you build once and reuse every time you load that
+              specific product. You could even save one layout for split
+              loads. The planner makes split loads just as efficient as
+              any.
+            </p>
+            <p>
+              Most drivers work in divisions with a primary focus on
+              loading the same type of products. Slots are saved
+              configurations that allow the driver to repeat the same plan
+              again and again. If a driver moonlights in a different
+              division or gets an irregular load, simply change the
+              planner without saving the plan.
+            </p>
+            <p>
+              Build them once and they are there every time with a single
+              tap. Make temporary changes on the fly. You decide how to use
+              them for your specific situation.
+            </p>
           </>
         ),
       },
       {
         type: "section",
         emoji: "⚡",
-        title: "Once you are set up — it's this simple",
+        title: "Once you are set up, it's this simple",
         body: (
           <>
-            Open the app. Select your location and terminal. The planner
-            shows your saved slots for that terminal. Tap the one that
-            matches today's load. The plan is built instantly —
-            compartments filled, weight calculated, CG balanced. Tap Load.
-            Done.
-            <br />
-            <br />
-            The whole process from opening the app to starting the load
-            takes under a minute. Everything you set up in steps 1 and 2
-            runs silently in the background every time.
+            <p>
+              No password. The profile is keyed to the device after the
+              initial login. Just open the app. Select your location and
+              terminal. The planner shows your saved slots. Tap the one
+              that matches today's load. The plan is built instantly:
+              compartments filled, weight calculated, CG balanced. Tap
+              Load. Done.
+            </p>
+            <p>
+              The whole process from opening the app to starting the load
+              takes under a minute. Everything you set up runs silently in
+              the background every time.
+            </p>
           </>
         ),
       },
