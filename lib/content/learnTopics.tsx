@@ -36,9 +36,38 @@ export function List({ children }: { children: ReactNode }) {
  * Renders a topic/block `icon` value: a plain emoji character stays literal
  * text, a "/..." value is treated as an image path (public/) and rendered
  * as an <img> instead -- lets equipment-setup use the real truck renders
- * while every other topic keeps its plain emoji, from the same field.
+ * while every other topic keeps its plain emoji, from the same field. A
+ * "badge:X" value renders a small black rounded-rect badge with letter X
+ * (Outfit, matching the app font) over a dot -- the same look
+ * PresetDial.tsx gives an active preset slot -- so the plan-slots topic can
+ * use a real plan slot instead of a generic clipboard icon.
  */
 export function Icon({ value, size = 18 }: { value: string; size?: number }) {
+  if (value.startsWith("badge:")) {
+    const letter = value.slice(6);
+    return (
+      <span
+        style={{
+          display: "inline-flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          width: size * 0.82,
+          height: size * 1.1,
+          borderRadius: size * 0.26,
+          background: "#000",
+          gap: size * 0.09,
+          flexShrink: 0,
+          verticalAlign: "middle",
+        }}
+      >
+        <span style={{ fontFamily: "var(--font-outfit), Outfit, sans-serif", fontWeight: 600, fontSize: size * 0.48, lineHeight: 1, color: "#fff" }}>
+          {letter}
+        </span>
+        <span style={{ width: size * 0.1, height: size * 0.1, borderRadius: "50%", background: "#fff" }} />
+      </span>
+    );
+  }
   if (value.startsWith("/")) {
     // eslint-disable-next-line @next/next/no-img-element -- tiny static
     // icon rendered at varying sizes across three very different layout
@@ -216,7 +245,7 @@ export const LEARN_TOPICS: LearnTopic[] = [
       { type: "divider", label: "Step 3: Plan slots  (You drive the plan)" },
       {
         type: "section",
-        emoji: "📋",
+        emoji: "badge:E",
         title: "What are plan slots?",
         body: (
           <>
