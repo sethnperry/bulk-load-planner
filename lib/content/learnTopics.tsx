@@ -540,11 +540,11 @@ export const LEARN_TOPICS: LearnTopic[] = [
     ],
   },
 
-  // ── Self-correcting network (over/under) ───────────────────────────────
+  // ── Self-correcting network ─────────────────────────────────────────────
   {
     slug: "self-correcting-network",
     emoji: "📊",
-    title: "Understanding over/under",
+    title: "How the self-correcting network works",
     shortName: "Self-Correcting Network",
     tagline: "Every load makes the next one smarter.",
     marketing: (
@@ -563,6 +563,83 @@ export const LEARN_TOPICS: LearnTopic[] = [
           corrects it for every driver who loads there next, across every
           company, in real time, instead of everyone independently
           re-discovering the same surprise.
+        </p>
+      </>
+    ),
+    blocks: [
+      {
+        type: "section",
+        emoji: "📡",
+        title: "What actually gets shared",
+        body: (
+          <>
+            Just the observed API gravity, tied to a specific product at a
+            specific terminal, plus the time it was recorded. Nothing about
+            your route, your company, or your identity travels with it.
+            It's a density reading, not a tracking system.
+          </>
+        ),
+      },
+      {
+        type: "section",
+        emoji: "⚡",
+        title: "How fast it propagates",
+        body: (
+          <>
+            The moment you enter the actual API from the BOL at the loading
+            rack, the correction is live. The very next driver who plans a
+            load for that same product at that same terminal sees your
+            fresh number, not one from four days ago. There's no batch job
+            or delay, the update happens the instant you submit it.
+          </>
+        ),
+      },
+      {
+        type: "section",
+        emoji: "🌐",
+        title: "Shared industry-wide, not just your fleet",
+        body: (
+          <>
+            The network isn't scoped to your company. A driver from a
+            completely different fleet, loading the same product at the
+            same terminal, benefits from your observation, and you benefit
+            from theirs. The more drivers loading there, the fresher the
+            reading stays for everyone, regardless of who they drive for.
+          </>
+        ),
+      },
+      {
+        type: "callout",
+        body: (
+          <>
+            <strong>⚙ Runs quietly in the background.</strong> There's no
+            alert, no notification, no extra step. You just open the app
+            next time you load at that terminal, and the number waiting
+            for you is already current.
+          </>
+        ),
+      },
+    ],
+  },
+
+  // ── Over/under ───────────────────────────────────────────────────────────
+  {
+    slug: "over-under",
+    emoji: "📉",
+    title: "Understanding over/under",
+    shortName: "Over/Under",
+    tagline: "What causes it, and how to fix it fast.",
+    marketing: (
+      <>
+        <p>
+          Even with real time corrections from the self-correcting network,
+          an occasional overweight reading still happens. API drift and
+          temperature are the two real causes, and both are explainable,
+          not random.
+        </p>
+        <p>
+          Here's why each one happens, and exactly what to do if your load
+          report shows you over the legal limit.
         </p>
       </>
     ),
