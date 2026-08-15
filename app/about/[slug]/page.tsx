@@ -58,20 +58,26 @@ export default function AboutTopicPage() {
       <SiteHeader active="about" />
 
       <section className="hero">
-        <Link href="/about" className="back-link">&larr; How ProTankr Works</Link>
-        <div className="hero-emoji"><Icon value={topic.emoji} size={34} /></div>
-        <FitHeading className="hero-h1" maxSize={40} minSize={16}>{topic.title}</FitHeading>
-        <div className="hero-marketing">{topic.marketing}</div>
+        <div className="hero-inner">
+          <Link href="/about" className="back-link">&larr; How ProTankr Works</Link>
+          <FitHeading className="hero-h1" maxSize={40} minSize={16}>
+            <Icon value={topic.emoji} size={32} />
+            {topic.title}
+          </FitHeading>
+          <div className="hero-marketing">{topic.marketing}</div>
+        </div>
       </section>
 
       <section className="detail-section">
-        <div className="detail-card">
-          {topic.blocks.map(renderBlock)}
-        </div>
+        <div className="detail-inner">
+          <div className="detail-card">
+            {topic.blocks.map(renderBlock)}
+          </div>
 
-        <Link href="/get-the-app" className="cta-link">
-          Request Early Access <span>&rarr;</span>
-        </Link>
+          <Link href="/get-the-app" className="cta-link">
+            Request Early Access <span>&rarr;</span>
+          </Link>
+        </div>
       </section>
 
       <style jsx global>{`
@@ -86,6 +92,7 @@ export default function AboutTopicPage() {
         }
 
         .hero { padding: 40px 48px 0; }
+        .hero-inner { max-width: 680px; margin: 0 auto; }
         .back-link {
           display: inline-block;
           font: 700 13px var(--font);
@@ -94,13 +101,22 @@ export default function AboutTopicPage() {
           margin-bottom: 18px;
         }
         .back-link:hover { color: rgba(0,0,0,0.75); }
-        .hero-emoji { font-size: 34px; line-height: 1; }
-        .hero-h1 { margin: 12px 0 0; font-weight: 900; font-family: var(--font); letter-spacing: -0.02em; color: #111; }
-        .hero-marketing { max-width: 680px; margin: 16px auto 0; font: 400 16px var(--font); color: rgba(0,0,0,0.62); line-height: 1.6; }
+        .hero-h1 {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          margin: 12px 0 0;
+          font-weight: 900;
+          font-family: var(--font);
+          letter-spacing: -0.02em;
+          color: #111;
+        }
+        .hero-marketing { margin: 16px 0 0; font: 400 16px var(--font); color: rgba(0,0,0,0.62); line-height: 1.6; }
         .hero-marketing p { margin: 0 0 12px; }
         .hero-marketing p:last-child { margin-bottom: 0; }
 
-        .detail-section { padding: 36px 48px 100px; max-width: 680px; margin: 0 auto; }
+        .detail-section { padding: 36px 48px 100px; }
+        .detail-inner { max-width: 680px; margin: 0 auto; }
         .detail-card {
           display: flex;
           flex-direction: column;
