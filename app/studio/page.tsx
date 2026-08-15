@@ -49,6 +49,18 @@ export default function StudioPage() {
   const [showScriptEditor, setShowScriptEditor] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
+  const captionRef = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-grow the caption textarea to its own content height (classic
+  // reset-to-auto-then-read-scrollHeight technique) so the frame around it
+  // (which just follows the textarea's height) hugs short captions instead
+  // of always reserving the phone's full height.
+  useEffect(() => {
+    const el = captionRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [caption]);
 
   // Load any previously-saved script on mount.
   useEffect(() => {
@@ -209,14 +221,18 @@ export default function StudioPage() {
             </div>
           </div>
 
-          <div className="caption-panel">
-            <textarea
-              className="caption-text"
-              value={caption}
-              onChange={(e) => setCaption(e.target.value)}
-              placeholder="Type your instructions here…"
-              spellCheck={false}
-            />
+          <div className="caption-frame">
+            <div className="caption-inner">
+              <textarea
+                ref={captionRef}
+                className="caption-text"
+                value={caption}
+                onChange={(e) => setCaption(e.target.value)}
+                placeholder="Type your instructions here…"
+                spellCheck={false}
+                rows={1}
+              />
+            </div>
           </div>
         </div>
 
@@ -394,19 +410,44 @@ export default function StudioPage() {
           box-shadow: inset 0 0 0 1px rgba(255,255,255,0.06);
         }
 
-        .caption-panel {
+        /* Same graphite-bezel family as .phone (gradient frame around a dark
+           inner panel) so the two feel like a matched pair, just without any
+           of the phone's hardware details (side buttons, notch). Height is
+           content-driven -- the textarea auto-grows to its own text
+           (see the caption effect above), and this frame just follows it,
+           bounded between a comfortable floor and the phone's own height as
+           a ceiling so a short caption isn't stuck reserving all that empty
+           space, and a very long one never grows taller than the phone next
+           to it (.stage's fixed size is unaffected either way -- it centers
+           this frame vertically as its height changes, same as before). */
+        .caption-frame {
           flex-shrink: 0;
           width: 300px;
-          height: ${PHONE_HEIGHT + 16}px;
+          min-height: 160px;
+          max-height: ${PHONE_HEIGHT + 16}px;
+          background: linear-gradient(160deg, #4a4a4d 0%, #232326 40%, #0c0c0d 100%);
+          border-radius: 40px;
+          padding: 8px;
+          box-sizing: border-box;
+          display: flex;
+          box-shadow:
+            0 32px 60px rgba(0,0,0,0.28),
+            0 10px 22px rgba(0,0,0,0.18),
+            inset 0 0 0 1px rgba(255,255,255,0.10),
+            inset 0 1px 1px rgba(255,255,255,0.18);
+        }
+        .caption-inner {
+          flex: 1;
+          min-height: 0;
           background: #111111;
-          border-radius: 24px;
+          border-radius: 34px;
           padding: 32px 28px;
           box-sizing: border-box;
           display: flex;
+          overflow-y: auto;
         }
         .caption-text {
           width: 100%;
-          height: 100%;
           background: transparent;
           border: none;
           outline: none;
@@ -414,6 +455,7 @@ export default function StudioPage() {
           color: #ffffff;
           font: 500 26px/1.5 var(--font-outfit), sans-serif;
           letter-spacing: -0.01em;
+          overflow: hidden;
         }
         .caption-text::placeholder { color: rgba(255,255,255,0.28); }
 
