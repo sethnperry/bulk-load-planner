@@ -1,22 +1,14 @@
 // lib/supabase/server.ts
-import { cookies, headers } from "next/headers";
+import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 
 export async function createSupabaseServer() {
   const cookieStore = await cookies();
 
-  // Mirrors lib/supabase/client.ts's cookie-domain fix -- without it, a
-  // server-triggered token refresh (setAll below) would write a host-only
-  // cookie scoped to whatever host the request came in on (www vs. bare
-  // apex), reintroducing the same cross-host session split server-side.
-  const host = (await headers()).get("host") ?? "";
-  const isProtankrDomain = /(^|\.)protankr\.com$/.test(host.split(":")[0]);
-
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
-      cookieOptions: isProtankrDomain ? { domain: ".protankr.com" } : undefined,
       cookies: {
         getAll() {
           return cookieStore.getAll();

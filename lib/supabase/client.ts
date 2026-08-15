@@ -13,23 +13,6 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=${supabaseAnonKey ? "[set]" : "[missing]"}`
 }
 
 /**
- * Without an explicit cookie domain, the SDK writes a host-only cookie --
- * valid only for the exact host that set it. protankr.com is served on both
- * the bare apex and "www", and Supabase Auth's configured redirect sends
- * magic links to "www" while most in-app links use the bare apex -- so a
- * session established via a magic link silently didn't exist on the other
- * host (confirmed live: [SW] registered under www.protankr.com with a real
- * sb-*-auth-token cookie present, vs. the exact same browser on bare
- * protankr.com showing zero cookies and a 400 on the refresh-token
- * endpoint). Scoping to ".protankr.com" makes the cookie valid for both.
- * Guarded to production hosts only -- a literal ".protankr.com" domain
- * attribute is invalid (silently rejected by the browser) on localhost or
- * any *.vercel.app preview deploy, which would otherwise break login there.
- */
-const hostname = typeof window !== "undefined" ? window.location.hostname : "";
-const isProtankrDomain = /(^|\.)protankr\.com$/.test(hostname);
-
-/**
  * @supabase/ssr's createBrowserClient (not plain createClient) -- this is
  * what actually syncs the session to cookies instead of localStorage-only.
  * Every server-side auth helper in lib/authz.ts reads the session via
@@ -37,9 +20,7 @@ const isProtankrDomain = /(^|\.)protankr\.com$/.test(hostname);
  * see CLAUDE.md "Architecture reality" for the full history of why those
  * helpers were dead code.
  */
-export const supabase = createBrowserClient(supabaseUrl, supabaseAnonKey, {
-  cookieOptions: isProtankrDomain ? { domain: ".protankr.com" } : undefined,
-});
+export const supabase = createBrowserClient(supabaseUrl, supabaseAnonKey);
 
 /**
  * One-time migration: every already-logged-in user has their session sitting
