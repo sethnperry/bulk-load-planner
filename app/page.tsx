@@ -118,7 +118,7 @@ export default function Home() {
         <div className="manifesto">
           <p>
             Across the country, drivers intentionally load bulk fuel
-            conservatively — guessing low to avoid a ticket.
+            conservatively, guessing low to avoid a ticket.
           </p>
           <p>
             When you see a fuel transport truck on the highway, odds are
@@ -129,7 +129,7 @@ export default function Home() {
             underloading, and stop the tickets.
           </p>
           <p>
-            Know your weight before you go — and pass the scale with
+            Know your weight before you go and pass the scale with
             confidence.
           </p>
         </div>
@@ -192,7 +192,6 @@ export default function Home() {
         .hero-eyebrow { font: 800 20px var(--font); letter-spacing: 0.06em; text-transform: uppercase; color: #c7c7c7; }
 
         .manifesto {
-          max-width: 620px;
           margin: 18px 0 0;
           font: 400 17px var(--font);
           color: rgba(0,0,0,0.72);
@@ -327,7 +326,6 @@ export default function Home() {
           .hero { padding: 20px 24px 0; }
           .hero-h1 { font-size: 52px; }
           .hero-eyebrow { font-size: 14px; }
-          .manifesto { max-width: none; }
           .grid-section { padding: 32px 24px 56px; }
 
           /* Mobile stack order is Preset, Load, Compartment, Relay, Temp,
