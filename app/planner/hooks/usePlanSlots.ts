@@ -102,16 +102,34 @@ export function usePlanSlots({
   }, [authUserId, selectedTerminalId]);
 
   // Slot 0 (autosave/last-load draft) stays keyed per-terminal, exactly as
-  // before. Slots 1-5 (named A-E presets) are keyed per-user only -- no
-  // terminal component at all -- so the same preset shows up and loads
-  // regardless of which terminal is currently selected.
+  // before. Slots 1-5 (named A-E presets) are keyed per-user *and*
+  // per-equipment-combo -- no terminal component -- so the same preset
+  // shows up and loads regardless of which terminal is currently selected,
+  // but different trucks/trailers (different compartment layouts) get
+  // independent presets. Requires selectedComboId to resolve; falls back to
+  // "c:none" when it hasn't yet (matches every other guard in this file
+  // that treats an unresolved combo as "nothing to scope to yet").
   const planStoreKey = useCallback(
     (slot: number) => {
       if (slot === 0) return `${planScopeKey}:plan:slot:0`;
       const who = authUserId ? `u:${authUserId}` : "anon";
+      const combo = selectedComboId ? `c:${selectedComboId}` : "c:none";
+      return `proTankr:${who}:${combo}:preset:slot:${slot}`;
+    },
+    [planScopeKey, authUserId, selectedComboId]
+  );
+
+  // Pre-equipment-scoping key (every preset used to live here, user-only,
+  // shared across all equipment). Kept as a READ-ONLY fallback so existing
+  // presets don't silently vanish for any combo that hasn't been
+  // individually customized yet -- see readSlot below. Writes only ever go
+  // to the new combo-specific key; this key is never written to again.
+  const legacyPresetKey = useCallback(
+    (slot: number) => {
+      const who = authUserId ? `u:${authUserId}` : "anon";
       return `proTankr:${who}:preset:slot:${slot}`;
     },
-    [planScopeKey, authUserId]
+    [authUserId]
   );
 
   const serverSyncEnabled = Boolean(authUserId);
@@ -133,12 +151,37 @@ export function usePlanSlots({
     catch {}
   }, []);
 
+  // Read a preset slot's raw payload, falling back to the pre-equipment-
+  // scoping legacy key when this specific combo has never had that slot
+  // saved yet. No implicit write-on-read -- once this combo's own key has
+  // *any* value (including an explicit "cleared" marker written by
+  // clearSlot below), the legacy fallback stops applying for it.
+  const readSlot = useCallback(
+    (slot: number) => {
+      if (slot === 0) return safeRead(planStoreKey(0));
+      return safeRead(planStoreKey(slot)) ?? safeRead(legacyPresetKey(slot));
+    },
+    [planStoreKey, legacyPresetKey, safeRead]
+  );
+
+  // "Has real content" rather than "has a record at all" -- a slot that's
+  // been explicitly cleared (see clearSlot) still has a record (an empty
+  // marker, so the legacy fallback doesn't leak through) but should read as
+  // unset for the dial's own has-data indicator.
+  function snapshotHasContent(snap: any): boolean {
+    if (!snap || snap.v !== 1 || !snap.compPlan || typeof snap.compPlan !== "object") return false;
+    return Object.values(snap.compPlan).some((v: any) => v && !v.empty && v.productId);
+  }
+
   // ── Slot has map ──────────────────────────────────────────────────────────
 
   const refreshSlotHas = useCallback(() => {
     if (!selectedTerminalId) { setSlotHas({}); setLastLoadLines([]); return; }
+    // PLAN_SLOTS is always [1,2,3,4,5] -- slot 0 (autosave) never goes
+    // through this map, so every slot here goes through readSlot's
+    // combo-aware + legacy-fallback lookup.
     const next: Record<number, boolean> = {};
-    for (const s of PLAN_SLOTS) next[s] = !!safeRead(planStoreKey(s));
+    for (const s of PLAN_SLOTS) next[s] = snapshotHasContent(readSlot(s));
     setSlotHas(next);
     // Read lastLoadLines from dedicated key (never clobbered by autosave)
     if (selectedComboId) {
@@ -147,23 +190,34 @@ export function usePlanSlots({
       const ll = llData?.lastLoadLines ?? [];
       setLastLoadLines(ll);
     }
-  }, [selectedTerminalId, planStoreKey, safeRead]);
+  }, [selectedTerminalId, selectedComboId, authUserId, readSlot, safeRead]);
 
   // ── Supabase server sync ──────────────────────────────────────────────────
-  // Slot 0 stays scoped to the real terminal/combo; slots 1-5 (presets) use
-  // UNIVERSAL_SCOPE so the same row is visible/loadable from any terminal.
+  // Slot 0 stays scoped to the real terminal/combo. Slots 1-5 (presets) use
+  // terminal_id = UNIVERSAL_SCOPE (loadable from any terminal) but a real
+  // combo_id -- different equipment (different compartment layouts) gets
+  // independent presets. Requires a resolved combo to write to at all,
+  // same as slot 0 requires a resolved terminal+combo.
 
   function scopeFor(slot: number): { terminalId: string; comboId: string } | null {
     if (slot === 0) {
       if (!selectedTerminalId || !selectedComboId) return null;
       return { terminalId: String(selectedTerminalId), comboId: String(selectedComboId) };
     }
-    return { terminalId: UNIVERSAL_SCOPE, comboId: UNIVERSAL_SCOPE };
+    if (!selectedComboId) return null;
+    return { terminalId: UNIVERSAL_SCOPE, comboId: String(selectedComboId) };
   }
 
-  async function serverFetchSlots(): Promise<Record<number, any>> {
-    if (!authUserId) return {};
-    const out: Record<number, any> = {};
+  // Returns both the combo-scoped preset rows (preferred, post-rework) and
+  // the pre-equipment-scoping legacy rows (terminal_id AND combo_id both
+  // UNIVERSAL_SCOPE -- every preset lived here before this rework). The
+  // pull effect below writes each into its own local cache; readSlot
+  // prefers the combo-scoped one and only falls back to legacy for a combo
+  // that's never had that slot saved under the new scheme.
+  async function serverFetchSlots(): Promise<{ scoped: Record<number, any>; legacy: Record<number, any> }> {
+    if (!authUserId) return { scoped: {}, legacy: {} };
+    const scoped: Record<number, any> = {};
+    const legacy: Record<number, any> = {};
 
     if (selectedTerminalId && selectedComboId) {
       const { data, error } = await supabase
@@ -174,20 +228,32 @@ export function usePlanSlots({
         .eq("combo_id", String(selectedComboId))
         .eq("slot", 0);
       if (error) console.warn("serverFetchSlots (slot 0) error:", error.message);
-      else (data || []).forEach((r: any) => { out[Number(r.slot)] = r.payload ?? null; });
+      else (data || []).forEach((r: any) => { scoped[Number(r.slot)] = r.payload ?? null; });
     }
 
-    const { data: presetRows, error: presetErr } = await supabase
+    if (selectedComboId) {
+      const { data: presetRows, error: presetErr } = await supabase
+        .from("user_plan_slots")
+        .select("slot,payload,updated_at")
+        .eq("user_id", authUserId)
+        .eq("terminal_id", UNIVERSAL_SCOPE)
+        .eq("combo_id", String(selectedComboId))
+        .in("slot", [1, 2, 3, 4, 5]);
+      if (presetErr) console.warn("serverFetchSlots (presets, combo-scoped) error:", presetErr.message);
+      else (presetRows || []).forEach((r: any) => { scoped[Number(r.slot)] = r.payload ?? null; });
+    }
+
+    const { data: legacyRows, error: legacyErr } = await supabase
       .from("user_plan_slots")
       .select("slot,payload,updated_at")
       .eq("user_id", authUserId)
       .eq("terminal_id", UNIVERSAL_SCOPE)
       .eq("combo_id", UNIVERSAL_SCOPE)
       .in("slot", [1, 2, 3, 4, 5]);
-    if (presetErr) console.warn("serverFetchSlots (presets) error:", presetErr.message);
-    else (presetRows || []).forEach((r: any) => { out[Number(r.slot)] = r.payload ?? null; });
+    if (legacyErr) console.warn("serverFetchSlots (presets, legacy) error:", legacyErr.message);
+    else (legacyRows || []).forEach((r: any) => { legacy[Number(r.slot)] = r.payload ?? null; });
 
-    return out;
+    return { scoped, legacy };
   }
 
   async function serverUpsertSlot(slot: number, payload: any) {
@@ -390,30 +456,43 @@ export function usePlanSlots({
     serverSyncInFlightRef.current = true;
     (async () => {
       try {
-        const server = await serverFetchSlots();
-        for (const s of [0, 1, 2, 3, 4, 5]) {
-          const sp = server[s];
-          if (!sp) continue;
-          const localRaw = typeof window !== "undefined" ? localStorage.getItem(planStoreKey(s)) : null;
+        const { scoped, legacy } = await serverFetchSlots();
+
+        // Normalize into the same { v: 1, savedAt, ... } shape buildSnapshot
+        // produces -- the server's own payload shape (version/savedAtISO) is
+        // a different, older schema, and loadFromSlot only recognizes v:1.
+        // Writing the raw server shape here made freshly-pulled slots (e.g.
+        // a brand-new device, or any slot re-pulled after a local cache
+        // clear) silently fail to load on tap until a save from that device
+        // produced a compliant local entry.
+        function normalize(sp: any, terminalIdFallback: string) {
+          return {
+            v: 1,
+            savedAt: sp.savedAtISO ? (Date.parse(String(sp.savedAtISO)) || Date.now()) : Date.now(),
+            terminalId: String(sp.terminalId ?? terminalIdFallback),
+            tempF: typeof sp.tempF === "number" ? sp.tempF : 60,
+            cgSlider: typeof sp.cgSlider === "number" ? sp.cgSlider : undefined,
+            compPlan: sp.compPlan ?? {},
+          };
+        }
+
+        function pullInto(key: string, sp: any) {
+          if (!sp) return;
+          const localRaw = typeof window !== "undefined" ? localStorage.getItem(key) : null;
           const lp = parsePlanPayload(localRaw, selectedTerminalId, selectedComboId);
           if (!lp || compareSavedAt(sp, lp) > 0) {
-            // Normalize into the same { v: 1, savedAt, ... } shape buildSnapshot
-            // produces -- the server's own payload shape (version/savedAtISO)
-            // is a different, older schema, and loadFromSlot only recognizes
-            // v:1. Writing the raw server shape here made freshly-pulled slots
-            // (e.g. a brand-new device, or any slot re-pulled after a local
-            // cache clear) silently fail to load on tap until a save from that
-            // device produced a compliant local entry.
-            const normalized = {
-              v: 1,
-              savedAt: sp.savedAtISO ? (Date.parse(String(sp.savedAtISO)) || Date.now()) : Date.now(),
-              terminalId: String(sp.terminalId ?? selectedTerminalId),
-              tempF: typeof sp.tempF === "number" ? sp.tempF : 60,
-              cgSlider: typeof sp.cgSlider === "number" ? sp.cgSlider : undefined,
-              compPlan: sp.compPlan ?? {},
-            };
-            try { localStorage.setItem(planStoreKey(s), JSON.stringify(normalized)); setSlotBump((v) => v + 1); } catch {}
+            try { localStorage.setItem(key, JSON.stringify(normalize(sp, selectedTerminalId))); setSlotBump((v) => v + 1); } catch {}
           }
+        }
+
+        pullInto(planStoreKey(0), scoped[0]);
+        for (const s of [1, 2, 3, 4, 5]) {
+          // Combo-scoped (preferred) and legacy (fallback) are independent
+          // local caches -- both get pulled so readSlot's fallback has
+          // something to find even on a brand-new device that's never
+          // cached anything locally yet.
+          pullInto(planStoreKey(s), scoped[s]);
+          pullInto(legacyPresetKey(s), legacy[s]);
         }
 
         const local0 = parsePlanPayload(
@@ -564,25 +643,43 @@ export function usePlanSlots({
 
   // ── Public save/load ──────────────────────────────────────────────────────
 
+  // Slot 0 needs a resolved terminal (it's per-terminal); presets (1-5) need
+  // a resolved equipment combo instead (terminal-independent, combo-specific).
+  function canUseSlot(slot: number): boolean {
+    return slot === 0 ? !!selectedTerminalId : !!selectedComboId;
+  }
+
   const saveToSlot = useCallback((slot: number) => {
-    if (!selectedTerminalId) return;
+    if (!canUseSlot(slot)) return;
     const snap = buildSnapshot(String(selectedTerminalId), { stripFillLevel: slot !== 0 });
     safeWrite(planStoreKey(slot), snap);
     refreshSlotHas();
     afterLocalSlotWrite(slot);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedTerminalId, buildSnapshot, safeWrite, planStoreKey, refreshSlotHas]);
+  }, [selectedTerminalId, selectedComboId, buildSnapshot, safeWrite, planStoreKey, refreshSlotHas]);
 
   const clearSlot = useCallback((slot: number) => {
-    if (!selectedTerminalId) return;
-    safeDelete(planStoreKey(slot));
+    if (!canUseSlot(slot)) return;
+    if (slot === 0) {
+      safeDelete(planStoreKey(slot));
+    } else {
+      // Write an explicit empty marker rather than deleting -- a bare
+      // delete would just let the legacy fallback (readSlot) show back
+      // through for a combo that's never had this slot customized, making
+      // "Clear" look like it silently did nothing. Also syncs to the
+      // server via the normal write path, so this combo is clear
+      // cross-device too, without touching the legacy shared row (other,
+      // not-yet-customized equipment keeps seeing it).
+      safeWrite(planStoreKey(slot), { v: 1, savedAt: Date.now(), terminalId: UNIVERSAL_SCOPE, compPlan: {} });
+      afterLocalSlotWrite(slot);
+    }
     refreshSlotHas();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedTerminalId, safeDelete, planStoreKey, refreshSlotHas]);
+  }, [selectedTerminalId, selectedComboId, safeDelete, safeWrite, planStoreKey, refreshSlotHas]);
 
   const loadFromSlot = useCallback((slot: number) => {
-    if (!selectedTerminalId) return;
-    const raw = safeRead(planStoreKey(slot)) as PlanSnapshot | null;
+    if (!canUseSlot(slot)) return;
+    const raw = readSlot(slot) as PlanSnapshot | null;
     if (!raw || raw.v !== 1) return;
     // Terminal-match is only meaningful for slot 0 (the real per-terminal
     // draft) -- named presets (1-5) are terminal-independent by design, so
@@ -595,16 +692,16 @@ export function usePlanSlots({
     queueMicrotask(() => {
       if (planRestoreReadyRef.current === planScopeKey) planRestoreReadyRef.current = null;
     });
-  }, [selectedTerminalId, planStoreKey, safeRead, applySnapshot, planScopeKey]);
+  }, [selectedTerminalId, selectedComboId, readSlot, applySnapshot, planScopeKey]);
 
   // Read-only peek at a slot's saved compPlan, for showing a real summary
   // (e.g. "Load Diesel, Regular") in the action sheet before committing to
   // load or overwrite it. Never mutates anything.
   const peekSlot = useCallback((slot: number): PlanSnapshot | null => {
-    const raw = safeRead(planStoreKey(slot)) as PlanSnapshot | null;
+    const raw = readSlot(slot) as PlanSnapshot | null;
     if (!raw || raw.v !== 1) return null;
     return raw;
-  }, [planStoreKey, safeRead]);
+  }, [readSlot]);
 
   // Public: refresh slot 0 from load_log after a completed load
   // Called by page.tsx post-completeLoad so slip seat state updates without reload
