@@ -77,9 +77,9 @@ export default function AboutPage() {
           overflow-x: hidden;
         }
 
-        .hero { padding: 40px 48px 0; max-width: 680px; }
+        .hero { padding: 40px 48px 0; }
         .hero-h1 { margin: 0; font: 900 52px var(--font); letter-spacing: -0.02em; color: #111; }
-        .hero-sub { margin: 18px 0 0; font: 400 17px var(--font); color: rgba(0,0,0,0.65); line-height: 1.65; }
+        .hero-sub { max-width: 940px; margin: 18px auto 0; font: 400 17px var(--font); color: rgba(0,0,0,0.65); line-height: 1.65; }
         .hero-sub p { margin: 0 0 16px; }
         .hero-sub p:last-child { margin-bottom: 0; }
 
@@ -94,7 +94,9 @@ export default function AboutPage() {
         }
 
         .topic-card {
-          display: block;
+          display: flex;
+          flex-direction: column;
+          height: 420px;
           text-decoration: none;
           color: inherit;
           border-radius: 20px;
@@ -105,15 +107,39 @@ export default function AboutPage() {
         }
         .topic-card:hover { background: #f0f0ee; border-color: rgba(0,0,0,0.14); }
 
-        .topic-emoji { font-size: 28px; line-height: 1; }
-        .topic-name { margin-top: 14px; font: 800 20px var(--font); }
-        .topic-tagline { margin-top: 4px; font: 600 13px var(--font); color: rgba(0,0,0,0.45); }
+        .topic-emoji { flex: 0 0 auto; font-size: 28px; line-height: 1; }
+        .topic-name { flex: 0 0 auto; margin-top: 14px; font: 800 20px var(--font); }
+        .topic-tagline { flex: 0 0 auto; margin-top: 4px; font: 600 13px var(--font); color: rgba(0,0,0,0.45); }
 
-        .topic-marketing { margin-top: 14px; font: 400 14px var(--font); color: rgba(0,0,0,0.62); line-height: 1.6; }
+        .topic-marketing {
+          flex: 1 1 auto;
+          min-height: 0;
+          position: relative;
+          overflow: hidden;
+          margin-top: 14px;
+          font: 400 14px var(--font);
+          color: rgba(0,0,0,0.62);
+          line-height: 1.6;
+        }
         .topic-marketing p { margin: 0 0 10px; }
         .topic-marketing p:last-child { margin-bottom: 0; }
+        .topic-marketing::after {
+          content: "";
+          position: absolute;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          height: 52px;
+          background: linear-gradient(to bottom, rgba(246,246,245,0), rgba(246,246,245,0.94) 65%, #f6f6f5);
+          pointer-events: none;
+          transition: background 150ms ease;
+        }
+        .topic-card:hover .topic-marketing::after {
+          background: linear-gradient(to bottom, rgba(240,240,238,0), rgba(240,240,238,0.94) 65%, #f0f0ee);
+        }
 
         .topic-more {
+          flex: 0 0 auto;
           margin-top: 18px;
           font: 700 13px var(--font);
           color: #111;

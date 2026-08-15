@@ -28,7 +28,7 @@ export default function SiteHeader({ active }: { active?: ActiveNav }) {
     <header className="site-header">
       <div className="nav-row">
         <Link href="/" className="brand">
-          <svg className="mark" width="20" height="18" viewBox="-53.56 -35.05 24.29 22.70" aria-hidden="true">
+          <svg className="mark" width="40" height="36" viewBox="-53.56 -35.05 24.29 22.70" aria-hidden="true">
             <path d={LOGO_PATH} fill="#111111" />
           </svg>
           <span className="wordmark">PROTANKR</span>
