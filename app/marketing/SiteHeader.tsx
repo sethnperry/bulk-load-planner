@@ -14,9 +14,10 @@ const LOGO_PATH =
 
 function PhoneIcon() {
   return (
-    <svg width="11" height="15" viewBox="0 0 11 15" fill="none" aria-hidden="true">
-      <rect x="0.75" y="0.75" width="9.5" height="13.5" rx="1.6" stroke="currentColor" strokeWidth="1.3" />
-      <line x1="4" y1="12.2" x2="7" y2="12.2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+    <svg width="11" height="16" viewBox="0 0 11 16" fill="none" aria-hidden="true">
+      <rect x="0.6" y="0.6" width="9.8" height="14.8" rx="1.8" stroke="currentColor" strokeWidth="0.9" />
+      <line x1="4.1" y1="2.3" x2="6.9" y2="2.3" stroke="currentColor" strokeWidth="0.9" strokeLinecap="round" />
+      <circle cx="5.5" cy="13.4" r="0.75" fill="currentColor" />
     </svg>
   );
 }
@@ -28,7 +29,7 @@ export default function SiteHeader({ active }: { active?: ActiveNav }) {
     <header className="site-header">
       <div className="nav-row">
         <Link href="/" className="brand">
-          <svg className="mark" width="40" height="36" viewBox="-53.56 -35.05 24.29 22.70" aria-hidden="true">
+          <svg className="mark" width="58" height="54" viewBox="-53.56 -35.05 24.29 22.70" aria-hidden="true">
             <path d={LOGO_PATH} fill="#111111" />
           </svg>
           <span className="wordmark">PROTANKR</span>
@@ -61,11 +62,11 @@ export default function SiteHeader({ active }: { active?: ActiveNav }) {
       <style jsx global>{`
         .site-header { padding: 28px 48px 0; }
         .site-header .nav-row { display: flex; align-items: center; gap: 16px; }
-        .site-header .brand { display: flex; align-items: center; gap: 8px; flex-shrink: 0; text-decoration: none; }
-        .site-header .wordmark { font: 800 15px var(--font-outfit), sans-serif; letter-spacing: 0.04em; color: #111; }
-        .site-header .nav-links { display: flex; align-items: center; gap: 26px; flex-shrink: 0; margin-left: auto; }
+        .site-header .brand { display: flex; align-items: flex-start; gap: 14px; flex-shrink: 0; text-decoration: none; }
+        .site-header .wordmark { margin-top: 14px; font: 800 24px var(--font-outfit), sans-serif; letter-spacing: 0.02em; color: #111; }
+        .site-header .nav-links { display: flex; align-items: center; gap: 30px; flex-shrink: 0; margin-left: auto; }
         .site-header .nav-links a {
-          font: 600 14px var(--font-outfit), sans-serif;
+          font: 600 17px var(--font-outfit), sans-serif;
           color: #111;
           text-decoration: none;
         }
@@ -75,10 +76,10 @@ export default function SiteHeader({ active }: { active?: ActiveNav }) {
         .site-header .nav-cta {
           display: inline-flex;
           align-items: center;
-          gap: 5px;
+          gap: 7px;
           background: #111;
           color: #fff !important;
-          padding: 9px 16px;
+          padding: 12px 20px;
           border-radius: 999px;
         }
         .site-header .nav-cta:hover { opacity: 0.85 !important; }
@@ -86,8 +87,11 @@ export default function SiteHeader({ active }: { active?: ActiveNav }) {
         @media (max-width: 980px) {
           .site-header { padding: 20px 24px 0; }
           .site-header .nav-row { flex-wrap: wrap; row-gap: 12px; }
+          .site-header .brand { gap: 10px; }
+          .site-header .mark { width: 46px; height: 43px; }
+          .site-header .wordmark { margin-top: 10px; font-size: 19px; }
           .site-header .nav-links { gap: 18px; flex-wrap: wrap; }
-          .site-header .nav-links a { font-size: 14px; }
+          .site-header .nav-links a { font-size: 15px; }
         }
       `}</style>
     </header>
