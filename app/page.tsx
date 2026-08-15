@@ -56,9 +56,9 @@ const RIGHT_CARDS: [CardSpec, CardSpec] = [
     style: { marginTop: 60 },
   },
   {
-    eyebrow: "Network",
-    title: "Communicate Product Conditions",
-    body: "Track product API with ease for all to see. If the API drifts the next driver will have the most recent product weight.",
+    eyebrow: "API Network",
+    title: "Crowdsourced Product Conditions",
+    body: "Use the most recent API for each product automatically. If it drifts, the drivers behind you get your most recent update.",
     style: { marginTop: 110 },
   },
 ];
@@ -139,7 +139,7 @@ export default function Home() {
         <div className="feature-grid">
           <div className="col col-left">
             <Card c={LEFT_CARDS[0]} className="item-preset" />
-            <p className="label label-load item-load">Load.</p>
+            <p className="label label-plan item-plan">Plan.</p>
             <Card c={LEFT_CARDS[1]} className="item-temp" />
             <p className="label label-reload item-reload">Reload.</p>
           </div>
@@ -150,7 +150,7 @@ export default function Home() {
 
           <div className="col col-right">
             <Card c={RIGHT_CARDS[0]} className="item-compartment" />
-            <p className="label label-relay item-relay">Relay.</p>
+            <p className="label label-load item-load">Load.</p>
             <Card c={RIGHT_CARDS[1]} className="item-network" />
           </div>
         </div>
@@ -158,7 +158,7 @@ export default function Home() {
 
       <section className="closing">
         <div className="closing-inner">
-          <h2 className="closing-h2">Stop Guessing.<br />Start Loading.</h2>
+          <h2 className="closing-h2">Stop Leaving Gallons Behind.</h2>
           <div className="closing-right">
             <p className="closing-sub">
               ProTankr is rolling out access gradually, no pricing decided
@@ -212,9 +212,9 @@ export default function Home() {
         .col { display: flex; flex-direction: column; gap: 0; }
 
         .label { margin: 0; font: 800 42px var(--font); letter-spacing: -0.01em; color: #111; }
-        .label-load { margin-top: 28px; text-align: right; }
+        .label-plan { margin-top: 28px; text-align: right; }
         .label-reload { margin-top: 130px; text-align: right; }
-        .label-relay { margin-top: 56px; text-align: left; }
+        .label-load { margin-top: 56px; text-align: left; }
 
         .card {
           border-radius: 14px;
@@ -328,7 +328,7 @@ export default function Home() {
           .hero-eyebrow { font-size: 14px; }
           .grid-section { padding: 32px 24px 56px; }
 
-          /* Mobile stack order is Preset, Load, Compartment, Relay, Temp,
+          /* Mobile stack order is Preset, Plan, Compartment, Load, Temp,
              Reload, Network -- interleaved between the desktop's left/right
              columns, not "left column then right column". col-left/col-right
              dissolve (display:contents) so their children become direct
@@ -338,9 +338,9 @@ export default function Home() {
           .feature-grid { display: flex; flex-direction: column; gap: 0; }
           .col-left, .col-right { display: contents; }
           .item-preset { order: 1; }
-          .item-load { order: 2; }
+          .item-plan { order: 2; }
           .item-compartment { order: 3; }
-          .item-relay { order: 4; }
+          .item-load { order: 4; }
           .item-temp { order: 5; }
           .item-reload { order: 6; }
           .item-network { order: 7; }
