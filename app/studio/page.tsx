@@ -13,12 +13,29 @@
 // The iframe is a real, live, tappable instance of the actual app (whatever
 // path is typed into the bar above) -- same-origin, so an existing login
 // session is shared automatically; no separate auth needed here.
+//
+// Script/steps: a pre-written sequence of caption texts (authored once in
+// the script editor, blank-line-separated, persisted to localStorage) that
+// Next/Prev step through -- lets you tap through the app at full speed and
+// only pause to advance the caption, instead of typing narration live while
+// also trying to demo taps. Next/Prev work identically in and out of
+// Present mode, and via the Right/Left arrow keys too (ignored while
+// actually typing in the path bar, caption box, or script editor, so the
+// shortcut can't hijack normal typing).
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const DEFAULT_PATH = "/planner";
 const PHONE_WIDTH = 375;
 const PHONE_HEIGHT = 812;
+const SCRIPT_STORAGE_KEY = "protankr_studio_script_v1";
+
+function parseSteps(text: string): string[] {
+  return text
+    .split(/\n\s*\n/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
 
 export default function StudioPage() {
   const [path, setPath] = useState(DEFAULT_PATH);
@@ -26,8 +43,28 @@ export default function StudioPage() {
   const [caption, setCaption] = useState("");
   const [showIsland, setShowIsland] = useState(true);
   const [focusMode, setFocusMode] = useState(false);
+  const [scriptText, setScriptText] = useState("");
+  const [steps, setSteps] = useState<string[]>([]);
+  const [stepIndex, setStepIndex] = useState(-1);
+  const [showScriptEditor, setShowScriptEditor] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
+
+  // Load any previously-saved script on mount.
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(SCRIPT_STORAGE_KEY);
+      if (saved) {
+        const parsed = parseSteps(saved);
+        setScriptText(saved);
+        setSteps(parsed);
+        if (parsed.length) {
+          setStepIndex(0);
+          setCaption(parsed[0]);
+        }
+      }
+    } catch {}
+  }, []);
 
   function go(e?: React.FormEvent) {
     e?.preventDefault();
@@ -57,26 +94,100 @@ export default function StudioPage() {
     }
   }
 
+  function saveScript() {
+    const parsed = parseSteps(scriptText);
+    setSteps(parsed);
+    try {
+      window.localStorage.setItem(SCRIPT_STORAGE_KEY, scriptText);
+    } catch {}
+    setStepIndex(parsed.length ? 0 : -1);
+    setCaption(parsed[0] ?? "");
+    setShowScriptEditor(false);
+  }
+
+  function nextStep() {
+    setStepIndex((i) => {
+      const next = Math.min(i + 1, steps.length - 1);
+      if (steps[next] != null) setCaption(steps[next]);
+      return next;
+    });
+  }
+
+  function prevStep() {
+    setStepIndex((i) => {
+      const prev = Math.max(i - 1, 0);
+      if (steps[prev] != null) setCaption(steps[prev]);
+      return prev;
+    });
+  }
+
+  // Right/Space = next step, Left = previous -- skipped while typing
+  // anywhere (path bar, caption box, script editor) so the shortcut can't
+  // eat a real keystroke.
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      if (!steps.length) return;
+      if (e.key === "ArrowRight" || e.key === " ") {
+        e.preventDefault();
+        nextStep();
+      } else if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        prevStep();
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [steps]);
+
+  const hasSteps = steps.length > 0;
+
   return (
     <div className="studio-root">
       {!focusMode && (
-        <form className="controls" onSubmit={go}>
-          <span className="controls-label">Path</span>
-          <input
-            className="path-input"
-            value={pendingPath}
-            onChange={(e) => setPendingPath(e.target.value)}
-            placeholder="/planner"
-          />
-          <button type="submit" className="btn">Go</button>
-          <button type="button" className="btn" onClick={reload}>Reload</button>
-          <label className="island-toggle">
-            <input type="checkbox" checked={showIsland} onChange={(e) => setShowIsland(e.target.checked)} />
-            Notch
-          </label>
-          <button type="button" className="btn" onClick={() => setCaption("")}>Clear caption</button>
-          <button type="button" className="btn btn-primary" onClick={toggleFocusMode}>Present</button>
-        </form>
+        <>
+          <form className="controls" onSubmit={go}>
+            <span className="controls-label">Path</span>
+            <input
+              className="path-input"
+              value={pendingPath}
+              onChange={(e) => setPendingPath(e.target.value)}
+              placeholder="/planner"
+            />
+            <button type="submit" className="btn">Go</button>
+            <button type="button" className="btn" onClick={reload}>Reload</button>
+            <label className="island-toggle">
+              <input type="checkbox" checked={showIsland} onChange={(e) => setShowIsland(e.target.checked)} />
+              Notch
+            </label>
+            <button type="button" className="btn" onClick={() => setCaption("")}>Clear caption</button>
+            <button type="button" className="btn" onClick={() => setShowScriptEditor((v) => !v)}>
+              {showScriptEditor ? "Close script" : "Edit script"}
+            </button>
+            <button type="button" className="btn btn-primary" onClick={toggleFocusMode}>Present</button>
+          </form>
+
+          {showScriptEditor && (
+            <div className="script-editor">
+              <div className="script-editor-hint">
+                One step per paragraph -- leave a blank line between steps. Saving resets you to Step 1.
+              </div>
+              <textarea
+                className="script-textarea"
+                value={scriptText}
+                onChange={(e) => setScriptText(e.target.value)}
+                placeholder={"Step 1: Tap the equipment card to select your truck and trailer.\n\nStep 2: Tap Browse Fleet to couple a truck and trailer.\n\nStep 3: ..."}
+                spellCheck={false}
+              />
+              <div className="script-editor-actions">
+                <span className="script-count">{parseSteps(scriptText).length} step{parseSteps(scriptText).length === 1 ? "" : "s"}</span>
+                <button type="button" className="btn btn-primary" onClick={saveScript}>Save script</button>
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       <div className="stage-wrap">
@@ -109,17 +220,28 @@ export default function StudioPage() {
           </div>
         </div>
 
-        {focusMode && (
-          <button type="button" className="exit-focus" onClick={toggleFocusMode}>
-            Exit present mode
-          </button>
-        )}
+        <div className="step-controls">
+          {hasSteps && (
+            <div className="step-nav">
+              <button type="button" className="step-btn" onClick={prevStep} disabled={stepIndex <= 0}>‹</button>
+              <span className="step-count">{stepIndex + 1} / {steps.length}</span>
+              <button type="button" className="step-btn step-btn-next" onClick={nextStep} disabled={stepIndex >= steps.length - 1}>
+                Next step ›
+              </button>
+            </div>
+          )}
+          {focusMode && (
+            <button type="button" className="exit-focus" onClick={toggleFocusMode}>
+              Exit present mode
+            </button>
+          )}
+        </div>
       </div>
 
       <style jsx global>{`
         .studio-root {
           min-height: 100dvh;
-          background: #e8e8e6;
+          background: #ffffff;
           font-family: var(--font-outfit), "Outfit", Helvetica, Arial, sans-serif;
           display: flex;
           flex-direction: column;
@@ -135,6 +257,7 @@ export default function StudioPage() {
           box-sizing: border-box;
           background: #ffffff;
           border-bottom: 1px solid rgba(0,0,0,0.08);
+          flex-wrap: wrap;
         }
         .controls-label {
           font: 700 12px var(--font-outfit), sans-serif;
@@ -161,8 +284,9 @@ export default function StudioPage() {
           cursor: pointer;
         }
         .btn:hover { background: #e8e8e6; }
-        .btn-primary { background: #111; color: #fff; border-color: #111; margin-left: auto; }
+        .btn-primary { background: #111; color: #fff; border-color: #111; }
         .btn-primary:hover { opacity: 0.85; background: #111; }
+        .controls .btn-primary { margin-left: auto; }
         .island-toggle {
           display: flex;
           align-items: center;
@@ -171,6 +295,42 @@ export default function StudioPage() {
           color: rgba(0,0,0,0.55);
           cursor: pointer;
           user-select: none;
+        }
+
+        .script-editor {
+          width: 100%;
+          box-sizing: border-box;
+          padding: 16px 18px;
+          background: #fafafa;
+          border-bottom: 1px solid rgba(0,0,0,0.08);
+        }
+        .script-editor-hint {
+          font: 500 12px var(--font-outfit), sans-serif;
+          color: rgba(0,0,0,0.45);
+          margin-bottom: 8px;
+        }
+        .script-textarea {
+          width: 100%;
+          height: 160px;
+          box-sizing: border-box;
+          padding: 12px 14px;
+          border-radius: 10px;
+          border: 1px solid rgba(0,0,0,0.15);
+          font: 400 14px/1.6 var(--font-outfit), sans-serif;
+          color: #111;
+          outline: none;
+          resize: vertical;
+        }
+        .script-textarea:focus { border-color: rgba(0,0,0,0.4); }
+        .script-editor-actions {
+          display: flex;
+          align-items: center;
+          gap: 14px;
+          margin-top: 10px;
+        }
+        .script-count {
+          font: 600 12px var(--font-outfit), sans-serif;
+          color: rgba(0,0,0,0.4);
         }
 
         .stage-wrap {
@@ -194,7 +354,6 @@ export default function StudioPage() {
           align-items: center;
           justify-content: center;
           gap: 48px;
-          box-shadow: 0 1px 3px rgba(0,0,0,0.06);
         }
 
         .phone {
@@ -258,10 +417,45 @@ export default function StudioPage() {
         }
         .caption-text::placeholder { color: rgba(255,255,255,0.28); }
 
-        .exit-focus {
+        .step-controls {
           position: fixed;
           bottom: 20px;
           right: 20px;
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          z-index: 50;
+        }
+        .step-nav {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          background: rgba(0,0,0,0.7);
+          border-radius: 999px;
+          padding: 6px 8px 6px 14px;
+        }
+        .step-count {
+          font: 700 12px var(--font-outfit), sans-serif;
+          color: rgba(255,255,255,0.65);
+          min-width: 40px;
+          text-align: center;
+        }
+        .step-btn {
+          font: 700 13px var(--font-outfit), sans-serif;
+          padding: 8px 12px;
+          border-radius: 999px;
+          border: none;
+          background: rgba(255,255,255,0.12);
+          color: #fff;
+          cursor: pointer;
+        }
+        .step-btn:hover:not(:disabled) { background: rgba(255,255,255,0.22); }
+        .step-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+        .step-btn-next { background: #fff; color: #111; padding: 8px 16px; }
+        .step-btn-next:hover:not(:disabled) { opacity: 0.85; background: #fff; }
+        .step-btn-next:disabled { opacity: 0.3; }
+
+        .exit-focus {
           font: 700 13px var(--font-outfit), sans-serif;
           padding: 10px 16px;
           border-radius: 999px;
@@ -269,7 +463,6 @@ export default function StudioPage() {
           background: rgba(0,0,0,0.7);
           color: #fff;
           cursor: pointer;
-          z-index: 50;
         }
 
         @media (max-width: 880px) {
