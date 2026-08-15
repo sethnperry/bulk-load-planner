@@ -271,7 +271,6 @@ function ShellChrome({ children }: { children: React.ReactNode }) {
         selectedComboId={shell.equipment.selectedComboId ?? ""}
         onSelectComboId={(id: string) => shell.equipment.setSelectedComboId(id)}
         onRefreshCombos={shell.equipment.fetchCombos}
-        onTourAdvance={() => {}}
         myRole={shell.role}
       />
 

@@ -2,8 +2,6 @@
 import { motion } from "framer-motion";
 import { clearSetupSession } from "@/lib/setupSession";
 import { useRouter } from "next/navigation";
-import { useTour } from "./hooks/useTour";
-import TourOverlay from "./components/TourOverlay";
 import SetupGate from "./components/SetupGate";
 import { useCalculatorShell } from "./CalculatorShellContext";
 
@@ -634,33 +632,6 @@ export default function CalculatorPage() {
     hydratedCompPlanRef.current = null;
     setCompPlanRaw({});
   }, [compPlanKey]);
-  // ── Guided tour ───────────────────────────────────────────────────────────
-  const tour = useTour({
-    stateConditions: {
-      "tour-fleet-instruction":    !!equipment.selectedComboId && !equipOpen,
-      "tour-location-instruction": !!location.selectedCity && !locOpen,
-      "tour-terminal-instruction": !!location.selectedTerminalId && !termOpen,
-    },
-  });
-
-  // Close comp modal when tour advances past the comp-instruction step
-  const prevTourStepRef = useRef<string | null>(null);
-  useEffect(() => {
-    const prev = prevTourStepRef.current;
-    const curr = tour.currentStep?.targetId ?? null;
-    if (prev === "tour-comp-instruction" && curr !== "tour-comp-instruction") {
-      setCompModalOpen(false);
-      setCompModalComp(null);
-    }
-    prevTourStepRef.current = curr;
-  }, [tour.currentStep?.targetId]);
-
-  // When tour is active and user taps highlighted element, advance
-  function tourAdvanceIfTarget(id: string) {
-    if (tour.active && tour.currentStep?.targetId === id && tour.currentStep?.waitFor === "tap") {
-      tour.advance();
-    }
-  }
   const [productInputs, setProductInputs] = useState<Record<string, { api?: string; tempF?: number }>>({});
 
   // Fuel temp prediction — drives temp button border color and pre-fills ProductTempModal.
@@ -1295,7 +1266,7 @@ const lastProductInfoById = useMemo(() => {
       {/* Preset dial -- sits directly under the Planner/Cards/Vault tab bar,
           per the design handoff (Preset dial is listed first in the
           Planner tab's content, above the compartment strip). */}
-      <div id="tour-plan-slots">
+      <div>
         <PresetDial
           slots={planSlots.PLAN_SLOTS}
           slotHas={planSlots.slotHas}
@@ -1307,7 +1278,6 @@ const lastProductInfoById = useMemo(() => {
           }}
           onOpenActions={(n) => setPresetSheetSlot(n)}
           onSave={(n) => { planSlots.saveToSlot(n); setBaselineOverrides(overridesSnapshot(compPlan, cgSlider)); }}
-          onTourAdvance={tourAdvanceIfTarget}
           onActiveChange={setActiveSlotLetter}
           syncTo={presetDialSyncTo}
         />
@@ -1362,7 +1332,7 @@ const lastProductInfoById = useMemo(() => {
             <div>
               {selectedComp != null && (
                 <button type="button"
-                  onClick={() => { setCompModalComp(selectedComp); setCompModalOpen(true); tourAdvanceIfTarget("tour-comp-area"); }}
+                  onClick={() => { setCompModalComp(selectedComp); setCompModalOpen(true); }}
                   style={{ background: "none", border: "none", padding: 0, color: "rgba(255,255,255,0.75)", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
                   Edit Comp {selectedComp} Product
                 </button>
@@ -1388,9 +1358,7 @@ const lastProductInfoById = useMemo(() => {
         onSelectComp={(n: number) => {
           if (!location.selectedTerminalId) return;
           setSelectedComp(n);
-          tourAdvanceIfTarget("tour-comp-area");
         }}
-        onTourAdvance={tourAdvanceIfTarget}
         selectedTerminalId={location.selectedTerminalId ?? ""}
       />
 
@@ -1411,7 +1379,7 @@ const lastProductInfoById = useMemo(() => {
       />
 
       {/* CG Slider — always visible */}
-      <div id="tour-cg-slider" style={{ marginTop: 8 }}>
+      <div style={{ marginTop: 8 }}>
         {unstableLoad && (
           <div style={{ ...styles.error, marginTop: 0, marginBottom: 10, textAlign: "center" }}>
             ⚠️ Unstable load (rear of neutral)
@@ -1427,7 +1395,7 @@ const lastProductInfoById = useMemo(() => {
         `}</style>
         <div style={{ position: "relative", width: "100%" }}>
           <input type="range" className="cgRange" min={0} max={1} step={0.005} value={cgSlider}
-            onChange={(e) => { setCgSlider(Number(e.target.value)); tourAdvanceIfTarget("tour-cg-slider"); }}
+            onChange={(e) => setCgSlider(Number(e.target.value))}
             style={{ width: "100%" }} disabled={!equipment.selectedCombo}
           />
           {/* Puck — themed fill (light gray / dark graphite / custom accent), no label, centered on the 4px track */}
@@ -1542,8 +1510,7 @@ const lastProductInfoById = useMemo(() => {
             {(() => {
               const equipBtnProps = {
                 type: "button" as const,
-                id: "tour-equipment-btn",
-                onClick: () => { setEquipOpen(true); tourAdvanceIfTarget("tour-equipment-btn"); },
+                onClick: () => setEquipOpen(true),
                 style: { ...infoCard, width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, cursor: "pointer", textAlign: "left" as const },
               };
               const children = !hasEquipment ? (
@@ -1590,10 +1557,9 @@ const lastProductInfoById = useMemo(() => {
               const step: "location" | "terminal" = locationSelected ? "terminal" : "location";
               const locTermBtnProps = {
                 type: "button" as const,
-                id: step === "location" ? "tour-location-btn" : "tour-terminal-btn",
                 onClick: () => {
-                  if (step === "location") { setLocOpen(true); tourAdvanceIfTarget("tour-location-btn"); }
-                  else { setTermOpen(true); tourAdvanceIfTarget("tour-terminal-btn"); }
+                  if (step === "location") setLocOpen(true);
+                  else setTermOpen(true);
                 },
                 style: { ...infoCard, width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, cursor: "pointer", textAlign: "left" as const },
               };
@@ -1770,8 +1736,6 @@ const lastProductInfoById = useMemo(() => {
       })()}
 
 
-      {/* ── Guided tour overlay ── */}
-      <TourOverlay tour={tour} />
       <SetupGate
         comboSelected={!!equipment.selectedComboId}
         locationSelected={!!(location.selectedState && location.selectedCity)}
@@ -1783,11 +1747,6 @@ const lastProductInfoById = useMemo(() => {
         onOpenLocation={() => setLocOpen(true)}
         onOpenTerminal={() => setTermOpen(true)}
       />
-      {/* Tour anchor elements for state-wait steps */}
-      <div id="tour-location-instruction" style={{ display: "none" }} />
-      <div id="tour-terminal-instruction" style={{ display: "none" }} />
-      <div id="tour-comp-instruction" style={{ display: "none" }} />
-      <div id="tour-fleet-instruction" style={{ display: "none" }} />
 
       {/* ── Modals ── */}
       <DriverTrainingModal

@@ -94,27 +94,17 @@ export default function LearnPage() {
       {/* Content */}
       <div style={{ padding: "20px 18px", display: "flex", flexDirection: "column" as const, gap: 12, maxWidth: 600, margin: "0 auto" }}>
 
-        {/* ── Guided Tours ── */}
+        {/* ── Guided Tours ──
+            The old interactive in-app tour (pulsing-ring, tap-to-advance,
+            /planner?tour=setup) is retired -- unreliable tap-zone targeting,
+            and it forced the user to actually perform each step instead of
+            just watching one. Replaced with short video walkthroughs
+            (recorded, not interactive); this section is the future landing
+            spot for those once they exist. Honest placeholder, not a link to
+            content that doesn't exist yet. */}
         <Accordion title="▶ Guided tours">
           <div style={{ fontSize: 13, color: "rgba(255,255,255,0.50)", lineHeight: 1.65, padding: "4px 0 8px" }}>
-            These tours run on the planner page and walk you through each step interactively. A pulsing ring will highlight what to tap next.
-          </div>
-          <div style={{ display: "flex", flexDirection: "column" as const, gap: 6 }}>
-            {[
-              { id: "setup", label: "First-time setup", desc: "Select equipment, set compartment caps, save a plan slot" },
-            ].map(t => (
-              <a
-                key={t.id}
-                href={`/planner?tour=${t.id}`}
-                style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", borderRadius: 12, border: "1px solid rgba(103,232,249,0.20)", background: "rgba(103,232,249,0.05)", textDecoration: "none", cursor: "pointer" }}
-              >
-                <div>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: "rgba(255,255,255,0.88)", marginBottom: 2 }}>{t.label}</div>
-                  <div style={{ fontSize: 12, color: "rgba(255,255,255,0.40)" }}>{t.desc}</div>
-                </div>
-                <span style={{ fontSize: 18, color: "rgba(103,232,249,0.70)", flexShrink: 0, marginLeft: 12 }}>›</span>
-              </a>
-            ))}
+            Short video walkthroughs are on the way. Check back soon.
           </div>
         </Accordion>
 

@@ -2,11 +2,7 @@
 // app/planner/components/SetupGate.tsx
 //
 // Blank-screen, hard-gated setup sequence for first-run (and any-time-unset)
-// equipment -> location -> terminal selection. Replaces steps 1-6 of the
-// existing useTour "setup" tour (tour-equipment-btn through
-// tour-terminal-instruction) with a forced, non-skippable flow. The existing
-// tour is left untouched for its later steps (compartments, CG slider, plan
-// slots) -- see integration notes below for how the two hand off.
+// equipment -> location -> terminal selection.
 //
 // Mechanic: each step renders a large centered CTA using a framer-motion
 // layoutId that matches the *real* button sitting in its normal resting
@@ -18,9 +14,6 @@
 //
 // z-index: 40. The real modals (FullscreenModal) use Tailwind's z-50, so they
 // correctly render on top of this gate when the centered button opens them.
-// The existing TourOverlay uses z ~10490+, well above both -- no collision,
-// since the tour's early steps are superseded by this component and its later
-// steps only ever run after this gate is fully satisfied and hidden.
 
 import React, { useEffect, useState } from "react";
 import { createPortal } from "react-dom";

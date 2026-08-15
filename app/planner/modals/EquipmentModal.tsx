@@ -92,7 +92,6 @@ type Props = {
   selectedComboId: string;
   onSelectComboId: (id: string) => void;
   onRefreshCombos: () => void;
-  onTourAdvance?: (id: string) => void;
   myRole?: string | null;
 };
 
@@ -1037,7 +1036,7 @@ export default function EquipmentModal({
   open, onClose, authUserId, setupSession,
   combos, combosLoading, combosError,
   selectedComboId, onSelectComboId, onRefreshCombos,
-  onTourAdvance, myRole,
+  myRole,
 }: Props) {
   const [view, setView] = useState<View>("list");
   const [localErr, setLocalErr] = useState<string | null>(null);
@@ -1552,8 +1551,7 @@ export default function EquipmentModal({
 
         <button type="button"
           style={{ ...S.btn, ...S.btnPrimary, width: "100%", padding: "16px 18px", borderRadius: 18, fontSize: 17, textAlign: "center" as const, opacity: busy ? 0.55 : 1 }}
-          id="tour-fleet-couple"
-          onClick={() => { doCouple(null, Number(newTargetLbs) || 80000); onTourAdvance?.("tour-fleet-couple"); }} disabled={busy}>
+          onClick={() => doCouple(null, Number(newTargetLbs) || 80000)} disabled={busy}>
           {busy ? "Coupling…" : "Couple & Select"}
         </button>
       </ModalShell>
@@ -1746,9 +1744,8 @@ export default function EquipmentModal({
 
         <div style={{ height: 8 }} />
         <button type="button"
-          id="tour-fleet-btn"
           style={{ ...S.btn, width: "100%", textAlign: "center" as const, padding: "11px 16px", borderRadius: 10, fontSize: 14 }}
-          onClick={() => { setFleetOpen(true); onTourAdvance?.("tour-fleet-btn"); }}>
+          onClick={() => setFleetOpen(true)}>
           Browse fleet & couple equipment →
         </button>
 

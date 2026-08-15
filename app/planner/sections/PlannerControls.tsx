@@ -21,7 +21,7 @@ export default function PlannerControls(props: any) {
     styles, selectedTrailerId, compLoading, compartments, compError,
     persistedCapForComp, effectiveMaxGallonsForComp, plannedGallonsByComp,
     compPlan, setCompPlan, terminalProducts, selectedComp, onSelectComp,
-    onTourAdvance, selectedTerminalId,
+    selectedTerminalId,
   } = props;
 
   const shell = useCalculatorShell();
@@ -47,7 +47,7 @@ export default function PlannerControls(props: any) {
       {compError && <div style={styles.error}>Error loading compartments: {compError}</div>}
 
       {selectedTrailerId && !compLoading && !compError && compartments.length > 0 && (
-        <div id="tour-comp-area" style={{ marginTop: 6, marginBottom: 2, position: "relative" as const, opacity: selectedTerminalId ? 1 : 0.45, transition: "opacity 200ms" }}>
+        <div style={{ marginTop: 6, marginBottom: 2, position: "relative" as const, opacity: selectedTerminalId ? 1 : 0.45, transition: "opacity 200ms" }}>
           {!selectedTerminalId && (
             <div style={{ position: "absolute" as const, inset: 0, zIndex: 2, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none" as const }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.50)", background: "rgba(0,0,0,0.55)", borderRadius: 8, padding: "4px 10px" }}>

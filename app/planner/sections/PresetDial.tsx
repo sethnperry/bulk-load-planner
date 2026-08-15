@@ -19,7 +19,7 @@
 import React, { useEffect, useRef, useState } from "react";
 
 export default function PresetDial({
-  slots, slotHas, disabled, onLoad, onOpenActions, onSave, onTourAdvance, onActiveChange, syncTo,
+  slots, slotHas, disabled, onLoad, onOpenActions, onSave, onActiveChange, syncTo,
 }: {
   slots: readonly number[];
   slotHas: Record<number, boolean>;
@@ -29,7 +29,6 @@ export default function PresetDial({
   // Long-pressing a filled slot opens the management action sheet (Edit/Clear).
   onOpenActions: (n: number) => void;
   onSave: (n: number) => void;
-  onTourAdvance?: (id: string) => void;
   onActiveChange?: (n: number) => void;
   // One-shot external sync -- jumps the dial to this slot once, distinct
   // from normal tap/scroll (which manage `active` locally). Exists so the
@@ -115,7 +114,7 @@ export default function PresetDial({
             pressTimer = setTimeout(() => {
               didLongPress = true;
               if (has) onOpenActions(n);
-              else { onSave(n); onTourAdvance?.("tour-plan-slots"); }
+              else onSave(n);
             }, 600);
           };
           const onPressEnd = () => {
@@ -129,14 +128,13 @@ export default function PresetDial({
             // both act on a plain tap. Management actions (Edit/Clear) live
             // behind the long-press instead, see onPressStart above.
             if (has) onLoad(n);
-            else { onSave(n); onTourAdvance?.("tour-plan-slots"); }
+            else onSave(n);
           };
 
           return (
             <div key={n} style={{ flex: "0 0 60px", scrollSnapAlign: "center", display: "flex", justifyContent: "center" }}>
               <button
                 type="button" disabled={disabled}
-                id={n === 1 ? "tour-plan-slot-A" : undefined}
                 onPointerDown={onPressStart}
                 onPointerUp={onPressEnd}
                 onPointerLeave={onPressEnd}
