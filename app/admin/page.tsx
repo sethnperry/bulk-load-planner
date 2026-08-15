@@ -1430,43 +1430,91 @@ export default function AdminPage() {
   const filterRow: React.CSSProperties = { display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" };
 
   return (
-    <div style={css.page}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 28, gap: 12 }}>
+    <div style={css.page} className="admin-page-root">
+      <div className="admin-header-row" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 28, gap: 12 }}>
         <div><h1 style={css.heading}>{companyName}</h1><p style={css.subheading}>Company Admin</p></div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          {(myRole === "admin" || myRole === "dispatch") && (
-            <button type="button" onClick={() => setFleetCardsOpen(true)}
-              style={{ fontSize: 12, fontWeight: 800, padding: "7px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.75)", cursor: "pointer", whiteSpace: "nowrap" as const }}>
-              Fleet Cards
-            </button>
-          )}
-          {(myRole === "admin" || myRole === "dispatch") && (
-            <button type="button" onClick={() => setFleetCredsOpen(true)}
-              style={{ fontSize: 12, fontWeight: 800, padding: "7px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.75)", cursor: "pointer", whiteSpace: "nowrap" as const }}>
-              Credentials
-            </button>
-          )}
-          {myRole === "admin" && (
-            <button type="button" onClick={() => setIncentiveSettingsOpen(true)}
-              style={{ fontSize: 12, fontWeight: 800, padding: "7px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.75)", cursor: "pointer", whiteSpace: "nowrap" as const }}>
-              Incentives
-            </button>
-          )}
-          {myRole === "admin" && (
-            <button type="button" onClick={() => setPayrollReportOpen(true)}
-              style={{ fontSize: 12, fontWeight: 800, padding: "7px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.75)", cursor: "pointer", whiteSpace: "nowrap" as const }}>
-              Payroll
-            </button>
-          )}
-          {(myRole === "admin" || myRole === "lead" || myRole === "dispatch") && (
-            <button type="button" onClick={() => setUnderloadingOpen(true)}
-              style={{ fontSize: 12, fontWeight: 800, padding: "7px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.75)", cursor: "pointer", whiteSpace: "nowrap" as const }}>
-              Underloading
-            </button>
-          )}
+        <div className="admin-header-actions" style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div className="admin-header-btns" style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {(myRole === "admin" || myRole === "dispatch") && (
+              <button type="button" onClick={() => setFleetCardsOpen(true)}
+                style={{ fontSize: 12, fontWeight: 800, padding: "7px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.75)", cursor: "pointer", whiteSpace: "nowrap" as const, flexShrink: 0 }}>
+                Fleet Cards
+              </button>
+            )}
+            {(myRole === "admin" || myRole === "dispatch") && (
+              <button type="button" onClick={() => setFleetCredsOpen(true)}
+                style={{ fontSize: 12, fontWeight: 800, padding: "7px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.75)", cursor: "pointer", whiteSpace: "nowrap" as const, flexShrink: 0 }}>
+                Credentials
+              </button>
+            )}
+            {myRole === "admin" && (
+              <button type="button" onClick={() => setIncentiveSettingsOpen(true)}
+                style={{ fontSize: 12, fontWeight: 800, padding: "7px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.75)", cursor: "pointer", whiteSpace: "nowrap" as const, flexShrink: 0 }}>
+                Incentives
+              </button>
+            )}
+            {myRole === "admin" && (
+              <button type="button" onClick={() => setPayrollReportOpen(true)}
+                style={{ fontSize: 12, fontWeight: 800, padding: "7px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.75)", cursor: "pointer", whiteSpace: "nowrap" as const, flexShrink: 0 }}>
+                Payroll
+              </button>
+            )}
+            {(myRole === "admin" || myRole === "lead" || myRole === "dispatch") && (
+              <button type="button" onClick={() => setUnderloadingOpen(true)}
+                style={{ fontSize: 12, fontWeight: 800, padding: "7px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.75)", cursor: "pointer", whiteSpace: "nowrap" as const, flexShrink: 0 }}>
+                Underloading
+              </button>
+            )}
+          </div>
           <NavMenu />
         </div>
       </div>
+
+      {/* Mobile fixes for the header row above:
+          - admin-header-row stacks (company name full-width on its own
+            line, action row below) instead of squeezing the heading into
+            whatever space is left over from justify-content:space-between
+            fighting a 5-button row -- that squeeze is what was making the
+            company name wrap "for no reason" even when there was plenty
+            of width available once stacked.
+          - admin-header-btns (the pill buttons only, NOT the hamburger)
+            becomes a horizontally-scrollable strip instead of overflowing
+            the viewport with no way to reach the buttons or the menu.
+          - NavMenu sits outside the scroll area so it's always reachable
+            without scrolling, and inside a row that's guaranteed to fit
+            (flex-shrink:0), instead of being pushed off-screen by an
+            unwrapped row of five pill buttons -- confirmed live that this
+            is exactly what was happening (button row + hamburger, one
+            unbroken flex line with no wrap/scroll/overflow handling).
+          - Every input/select/textarea on this page bumped to 16px on
+            mobile: several inline styles set them as small as 11-12px,
+            and iOS Safari auto-zooms the whole page on focusing any input
+            under 16px -- that's the "tapping things make the page do some
+            kind of zoom thing." !important is deliberate here: it has to
+            beat the inline style attribute, and only applies below the
+            breakpoint where this Safari behavior is actually in play, so
+            desktop's existing density is untouched. */}
+      <style jsx global>{`
+        @media (max-width: 640px) {
+          .admin-header-row { flex-direction: column !important; align-items: flex-start !important; }
+          .admin-header-actions { width: 100%; }
+          .admin-header-btns {
+            overflow-x: auto;
+            flex: 1;
+            min-width: 0;
+            -webkit-overflow-scrolling: touch;
+            padding-bottom: 2px;
+          }
+          .admin-header-btns::-webkit-scrollbar { display: none; }
+        }
+        @media (max-width: 768px) {
+          .admin-page-root input,
+          .admin-page-root select,
+          .admin-page-root textarea {
+            font-size: 16px !important;
+          }
+        }
+      `}</style>
 
       {/* ── USERS (admin sees + manages; dispatch sees roster + Loads only, no invite/reassign/remove) ── */}
       {(myRole === "admin" || myRole === "dispatch") && (
