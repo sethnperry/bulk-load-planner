@@ -8,6 +8,7 @@
 
 import Link from "next/link";
 import SiteHeader from "../marketing/SiteHeader";
+import FitHeading from "../marketing/FitHeading";
 import { LEARN_TOPICS, Icon } from "@/lib/content/learnTopics";
 
 export default function AboutPage() {
@@ -16,7 +17,7 @@ export default function AboutPage() {
       <SiteHeader active="about" />
 
       <section className="hero">
-        <h1 className="hero-h1">How ProTankr Works</h1>
+        <FitHeading className="hero-h1" maxSize={52} minSize={22}>How ProTankr Works</FitHeading>
         <div className="hero-sub">
           <p>
             Every truck-and-trailer combination has its own tare weight.
@@ -78,7 +79,7 @@ export default function AboutPage() {
         }
 
         .hero { padding: 40px 48px 0; }
-        .hero-h1 { margin: 0; font: 900 52px var(--font); letter-spacing: -0.02em; color: #111; }
+        .hero-h1 { margin: 0; font-weight: 900; font-family: var(--font); letter-spacing: -0.02em; color: #111; }
         .hero-sub { max-width: 940px; margin: 18px auto 0; font: 400 17px var(--font); color: rgba(0,0,0,0.65); line-height: 1.65; }
         .hero-sub p { margin: 0 0 16px; }
         .hero-sub p:last-child { margin-bottom: 0; }
@@ -152,7 +153,6 @@ export default function AboutPage() {
 
         @media (max-width: 760px) {
           .hero { padding: 28px 24px 0; }
-          .hero-h1 { font-size: 38px; }
           .grid-section { padding: 32px 24px 64px; }
           .topic-grid { grid-template-columns: 1fr; }
         }

@@ -8,6 +8,7 @@
 import { useParams, notFound } from "next/navigation";
 import Link from "next/link";
 import SiteHeader from "../../marketing/SiteHeader";
+import FitHeading from "../../marketing/FitHeading";
 import { getLearnTopic, Icon, type LearnBlock } from "@/lib/content/learnTopics";
 
 function Section({ emoji, title, children }: { emoji: string; title: string; children: React.ReactNode }) {
@@ -59,7 +60,7 @@ export default function AboutTopicPage() {
       <section className="hero">
         <Link href="/about" className="back-link">&larr; How ProTankr Works</Link>
         <div className="hero-emoji"><Icon value={topic.emoji} size={34} /></div>
-        <h1 className="hero-h1">{topic.title}</h1>
+        <FitHeading className="hero-h1" maxSize={40} minSize={16}>{topic.title}</FitHeading>
         <div className="hero-marketing">{topic.marketing}</div>
       </section>
 
@@ -84,7 +85,7 @@ export default function AboutTopicPage() {
           overflow-x: hidden;
         }
 
-        .hero { padding: 40px 48px 0; max-width: 680px; }
+        .hero { padding: 40px 48px 0; }
         .back-link {
           display: inline-block;
           font: 700 13px var(--font);
@@ -94,8 +95,8 @@ export default function AboutTopicPage() {
         }
         .back-link:hover { color: rgba(0,0,0,0.75); }
         .hero-emoji { font-size: 34px; line-height: 1; }
-        .hero-h1 { margin: 12px 0 0; font: 900 40px var(--font); letter-spacing: -0.02em; color: #111; }
-        .hero-marketing { margin-top: 16px; font: 400 16px var(--font); color: rgba(0,0,0,0.62); line-height: 1.6; }
+        .hero-h1 { margin: 12px 0 0; font-weight: 900; font-family: var(--font); letter-spacing: -0.02em; color: #111; }
+        .hero-marketing { max-width: 680px; margin: 16px auto 0; font: 400 16px var(--font); color: rgba(0,0,0,0.62); line-height: 1.6; }
         .hero-marketing p { margin: 0 0 12px; }
         .hero-marketing p:last-child { margin-bottom: 0; }
 
@@ -155,7 +156,6 @@ export default function AboutTopicPage() {
 
         @media (max-width: 760px) {
           .hero { padding: 28px 24px 0; }
-          .hero-h1 { font-size: 32px; }
           .detail-section { padding: 28px 24px 64px; }
         }
       `}</style>
