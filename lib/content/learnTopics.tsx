@@ -33,12 +33,53 @@ export function List({ children }: { children: ReactNode }) {
 }
 
 /**
- * Renders a topic/block `icon` value: a plain emoji character stays literal
- * text, a "/..." value is treated as an image path (public/) and rendered
- * as an <img> instead -- lets equipment-setup use the real truck renders
- * while every other topic keeps its plain emoji, from the same field. A
- * "badge:X" value renders a small black rounded-rect badge with letter X
- * (Outfit, matching the app font) over a dot -- the same look
+ * Every plain emoji character used anywhere in LEARN_TOPICS, mapped to a
+ * locally-hosted Twemoji SVG (public/icons/emoji/, pinned to twemoji
+ * 14.0.2 -- graphics are Twitter/X's Twemoji, licensed CC-BY 4.0:
+ * https://github.com/jdecked/twemoji, attribution required if this ever
+ * gets a public credits/about page). Native emoji glyphs render completely
+ * differently per platform (Apple's iOS set is glossy and colorful,
+ * Windows' Segoe set is flatter and duller, Android's Noto set is
+ * different again) -- confirmed by the user as the reason icons looked
+ * "more graphic" on their phone than on desktop. Rendering one shared SVG
+ * set as an <img> instead of literal emoji text makes every platform show
+ * the exact same icon. Falls back to literal emoji text for anything not in
+ * this table (shouldn't happen for content in this file, but keeps Icon
+ * safe if a new emoji gets added here later without updating the map).
+ */
+const EMOJI_MAP: Record<string, string> = {
+  "🔄": "/icons/emoji/1f504.svg",
+  "🔗": "/icons/emoji/1f517.svg",
+  "🛢": "/icons/emoji/1f6e2.svg",
+  "⚡": "/icons/emoji/26a1.svg",
+  "🌡": "/icons/emoji/1f321.svg",
+  "🌤": "/icons/emoji/1f324.svg",
+  "☀️": "/icons/emoji/2600.svg",
+  "🌬": "/icons/emoji/1f32c.svg",
+  "🧠": "/icons/emoji/1f9e0.svg",
+  "🎯": "/icons/emoji/1f3af.svg",
+  "⚠️": "/icons/emoji/26a0.svg",
+  "⚠": "/icons/emoji/26a0.svg",
+  "⚖️": "/icons/emoji/2696.svg",
+  "⚖": "/icons/emoji/2696.svg",
+  "🧮": "/icons/emoji/1f9ee.svg",
+  "📊": "/icons/emoji/1f4ca.svg",
+  "📡": "/icons/emoji/1f4e1.svg",
+  "🌐": "/icons/emoji/1f310.svg",
+  "⚙️": "/icons/emoji/2699.svg",
+  "⚙": "/icons/emoji/2699.svg",
+  "📉": "/icons/emoji/1f4c9.svg",
+  "🪣": "/icons/emoji/1faa3.svg",
+};
+
+/**
+ * Renders a topic/block `icon` value: a plain emoji character is resolved
+ * through EMOJI_MAP to a locally-hosted SVG (falling back to literal emoji
+ * text if unmapped), a "/..." value is treated as an image path (public/)
+ * and rendered as an <img> directly -- lets equipment-setup use the real
+ * truck renders while every other topic keeps its emoji, from the same
+ * field. A "badge:X" value renders a small black rounded-rect badge with
+ * letter X (Outfit, matching the app font) over a dot -- the same look
  * PresetDial.tsx gives an active preset slot -- so the plan-slots topic can
  * use a real plan slot instead of a generic clipboard icon.
  */
@@ -68,13 +109,14 @@ export function Icon({ value, size = 18 }: { value: string; size?: number }) {
       </span>
     );
   }
-  if (value.startsWith("/")) {
+  const src = value.startsWith("/") ? value : EMOJI_MAP[value];
+  if (src) {
     // eslint-disable-next-line @next/next/no-img-element -- tiny static
     // icon rendered at varying sizes across three very different layout
     // contexts; not a Next/Image candidate.
     return (
       <img
-        src={value}
+        src={src}
         alt=""
         style={{ height: size, width: "auto", display: "inline-block", verticalAlign: "middle" }}
       />
@@ -441,7 +483,7 @@ export const LEARN_TOPICS: LearnTopic[] = [
         type: "callout",
         body: (
           <>
-            <strong>⚠ Use your judgement.</strong> Override the prediction
+            <strong><Icon value="⚠️" size={14} /> Use your judgement.</strong> Override the prediction
             freely, you know your terminal better than any model. It is
             strongly recommended <strong>not to set the planned product
             temp above ambient</strong> unless you have full confidence from
@@ -612,7 +654,7 @@ export const LEARN_TOPICS: LearnTopic[] = [
         type: "callout",
         body: (
           <>
-            <strong>⚙ Runs quietly in the background.</strong> There's no
+            <strong><Icon value="⚙️" size={14} /> Runs quietly in the background.</strong> There's no
             alert, no notification, no extra step. You just open the app
             next time you load at that terminal, and the number waiting
             for you is already current.
