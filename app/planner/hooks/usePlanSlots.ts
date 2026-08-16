@@ -185,6 +185,19 @@ export function usePlanSlots({
     return Object.values(snap.compPlan).some((v: any) => v && !v.empty && v.productId);
   }
 
+  // Same "does this have a real product selection" check, but for objects
+  // coming out of parsePlanPayload -- which normalizes a locally-written
+  // { v: 1, ... } entry into a DIFFERENT shape ({ version: 0, ... }, no `v`
+  // field at all). snapshotHasContent's `snap.v !== 1` guard would reject
+  // every one of those unconditionally, which isn't what "does the local
+  // cache have real content" should mean here -- only compPlan itself
+  // matters for this check.
+  function hasRealCompPlan(obj: any): boolean {
+    const cp = obj?.compPlan;
+    if (!cp || typeof cp !== "object") return false;
+    return Object.values(cp).some((v: any) => v && !(v as any).empty && (v as any).productId);
+  }
+
   // ── Slot has map ──────────────────────────────────────────────────────────
 
   const refreshSlotHas = useCallback(() => {
@@ -194,9 +207,6 @@ export function usePlanSlots({
     // combo-aware + legacy-fallback lookup.
     const next: Record<number, boolean> = {};
     for (const s of PLAN_SLOTS) next[s] = snapshotHasContent(readSlot(s));
-    // TEMP DIAGNOSTIC -- see PresetDial.tsx.
-    // eslint-disable-next-line no-console
-    console.warn("[preset-diag] refreshSlotHas ->", next);
     setSlotHas(next);
     // Read lastLoadLines from dedicated key (never clobbered by autosave)
     if (selectedComboId) {
@@ -522,7 +532,22 @@ export function usePlanSlots({
           if (!sp) return;
           const localRaw = typeof window !== "undefined" ? localStorage.getItem(key) : null;
           const lp = parsePlanPayload(localRaw, selectedTerminalId, selectedComboId);
-          if (!lp || compareSavedAt(sp, lp) > 0) {
+          // compareSavedAt only has real signal when BOTH sides carry a real
+          // savedAtISO -- but buildSnapshot (the only thing that writes
+          // local data through this app's current code) never sets that
+          // field at all, so parsePlanPayload always normalizes a
+          // locally-written entry to savedAtISO:"". Comparing two blank
+          // ISO strings returns 0 (not > 0), so the pull silently refused
+          // to ever overwrite it -- confirmed live via diagnostic logging:
+          // a slot whose local cache held stale, empty-content data from
+          // a much earlier session stayed stuck on that data forever, even
+          // though the server had real, correct, more recent content the
+          // whole time. There's no real protection being lost by treating
+          // a content-less local entry as always safe to replace -- it
+          // can't represent meaningful unsynced user work if it has no
+          // actual product selections in it.
+          const localHasRealContent = lp && hasRealCompPlan(lp);
+          if (!lp || !localHasRealContent || compareSavedAt(sp, lp) > 0) {
             try { localStorage.setItem(key, JSON.stringify(normalize(sp, selectedTerminalId))); setSlotBump((v) => v + 1); } catch {}
           }
         }
@@ -698,9 +723,6 @@ export function usePlanSlots({
   const saveToSlot = useCallback((slot: number) => {
     if (!canUseSlot(slot)) return;
     const snap = buildSnapshot(String(selectedTerminalId), { stripFillLevel: slot !== 0 });
-    // TEMP DIAGNOSTIC -- see PresetDial.tsx.
-    // eslint-disable-next-line no-console
-    console.warn(`[preset-diag] saveToSlot(${slot})`, { compPlan: snap.compPlan, cgSlider: snap.cgSlider, stack: new Error().stack });
     safeWrite(planStoreKey(slot), snap);
     refreshSlotHas();
     afterLocalSlotWrite(slot);

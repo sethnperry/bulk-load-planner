@@ -163,9 +163,6 @@ export default function PresetDial({
             }
             setActive(n);
             centerSlot(n, true);
-            // TEMP DIAGNOSTIC -- see usePlanSlots.ts.
-            // eslint-disable-next-line no-console
-            console.warn(`[preset-diag] PresetDial onTap(${n})`, { has, slotHas: { ...slotHas } });
             // A filled slot loads immediately; an empty slot saves --
             // both act on a plain tap. Management actions (Edit/Clear) live
             // behind the long-press instead, see onPressStart above.
