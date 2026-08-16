@@ -50,6 +50,26 @@ export default function PresetDial({
   const [active, setActive] = useState<number>(slots[0] ?? 1);
   const appliedSyncRef = useRef<number | null>(null);
 
+  // Long-press state -- component-level refs, not per-.map()-iteration
+  // local variables. This used to be `let pressTimer`/`let didLongPress`
+  // declared fresh on every render inside .map(): if the component
+  // re-rendered while a press was still in flight (easy to trigger --
+  // plenty of other state in this page changes during a 600ms hold), the
+  // pending setTimeout kept running against the OLD closure while the
+  // eventual click event fired against a BRAND NEW closure whose
+  // didLongPress had never been set -- so the tap-load path and the
+  // long-press action-sheet path could both fire for the same gesture, or
+  // the tap's own has/didLongPress read could disagree with what the timer
+  // actually did. Confirmed live: exactly this caused the action sheet to
+  // appear inconsistently and a preset's *stored* content to get silently
+  // overwritten by whatever was still loaded from the previous slot.
+  // Refs persist across re-renders regardless of which render's closure
+  // the DOM's current event handlers happen to be bound to, so there's a
+  // single, consistent source of truth for "is this a long press yet."
+  const pressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pressedSlotRef = useRef<number | null>(null);
+  const didLongPressRef = useRef(false);
+
   useEffect(() => { onActiveChange?.(active); }, [active]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const centerSlot = (n: number, smooth: boolean) => {
@@ -110,23 +130,37 @@ export default function PresetDial({
           const isActive = n === active;
 
           // Tap to load (if saved), long-press to save/clear, shift+click to clear on desktop
-          let pressTimer: ReturnType<typeof setTimeout> | null = null;
-          let didLongPress = false;
-
           const onPressStart = () => {
             if (disabled) return;
-            didLongPress = false;
-            pressTimer = setTimeout(() => {
-              didLongPress = true;
+            // A stray pending timer from a previous, never-completed press
+            // (e.g. pointer left the button) shouldn't be able to fire
+            // against this new press -- clear it defensively.
+            if (pressTimerRef.current) clearTimeout(pressTimerRef.current);
+            pressedSlotRef.current = n;
+            didLongPressRef.current = false;
+            pressTimerRef.current = setTimeout(() => {
+              // Only fire if the pointer is still down on THIS slot -- a
+              // pointerup/leave in between already cleared the timer via
+              // onPressEnd below, but this guards the (rare) case where
+              // that cleanup itself got interrupted by a re-render.
+              if (pressedSlotRef.current !== n) return;
+              didLongPressRef.current = true;
               if (has) onOpenActions(n);
               else onSave(n);
             }, 600);
           };
           const onPressEnd = () => {
-            if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+            if (pressTimerRef.current) { clearTimeout(pressTimerRef.current); pressTimerRef.current = null; }
           };
           const onTap = () => {
-            if (disabled || didLongPress) return;
+            if (disabled) return;
+            // Consume (not just read) the flag -- a long press that already
+            // fired onOpenActions/onSave above must not ALSO run the plain
+            // tap's load/save below for the same gesture.
+            if (didLongPressRef.current && pressedSlotRef.current === n) {
+              didLongPressRef.current = false;
+              return;
+            }
             setActive(n);
             centerSlot(n, true);
             // A filled slot loads immediately; an empty slot saves --
