@@ -194,6 +194,9 @@ export function usePlanSlots({
     // combo-aware + legacy-fallback lookup.
     const next: Record<number, boolean> = {};
     for (const s of PLAN_SLOTS) next[s] = snapshotHasContent(readSlot(s));
+    // TEMP DIAGNOSTIC -- see PresetDial.tsx.
+    // eslint-disable-next-line no-console
+    console.warn("[preset-diag] refreshSlotHas ->", next);
     setSlotHas(next);
     // Read lastLoadLines from dedicated key (never clobbered by autosave)
     if (selectedComboId) {
@@ -695,6 +698,9 @@ export function usePlanSlots({
   const saveToSlot = useCallback((slot: number) => {
     if (!canUseSlot(slot)) return;
     const snap = buildSnapshot(String(selectedTerminalId), { stripFillLevel: slot !== 0 });
+    // TEMP DIAGNOSTIC -- see PresetDial.tsx.
+    // eslint-disable-next-line no-console
+    console.warn(`[preset-diag] saveToSlot(${slot})`, { compPlan: snap.compPlan, cgSlider: snap.cgSlider, stack: new Error().stack });
     safeWrite(planStoreKey(slot), snap);
     refreshSlotHas();
     afterLocalSlotWrite(slot);
