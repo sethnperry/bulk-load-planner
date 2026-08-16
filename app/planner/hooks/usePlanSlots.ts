@@ -73,6 +73,18 @@ export function usePlanSlots({
 }: Props) {
   const [slotBump, setSlotBump] = useState(0);
   const [slotHas, setSlotHas] = useState<Record<number, boolean>>({});
+  // False until the initial server pull has genuinely completed for the
+  // CURRENT equipment combo. Matters because PresetDial treats a tap on a
+  // slot that reads as "empty" as an implicit save -- correct for a
+  // genuinely empty slot, but destructive if it only *looks* empty because
+  // the combo-scoped/legacy local caches haven't finished syncing from the
+  // server yet (confirmed live: a tap during that window silently
+  // overwrote a real, populated preset with whatever was on-screen at the
+  // time, and synced that corruption up to the server too). Resets to
+  // false on every combo change so a newly-selected combo can't be
+  // interacted with until ITS OWN sync has completed.
+  const [presetsReady, setPresetsReady] = useState(false);
+  const presetsReadyForComboRef = useRef<string | null>(null);
   const [lastLoadLines, setLastLoadLines] = useState<any[]>([]);
   const [lastLoadReport, setLastLoadReport] = useState<{
     planned_total_gal: number; planned_gross_lbs: number | null; actual_gross_lbs: number | null; diff_lbs: number | null; recovered_points: number | null;
@@ -444,6 +456,14 @@ export function usePlanSlots({
     }
   }, [setCompPlan, setCgSlider]);
 
+  // A new combo can't be trusted as "synced" just because a PREVIOUS combo
+  // finished syncing -- reset immediately (synchronously) so there's no
+  // window where the dial reads a stale "ready" from the old combo while
+  // showing the new combo's (not-yet-pulled) local cache.
+  useEffect(() => {
+    setPresetsReady(false);
+  }, [selectedComboId]);
+
   // ── Server pull (once per scope) ──────────────────────────────────────────
 
   useEffect(() => {
@@ -517,6 +537,10 @@ export function usePlanSlots({
         }
 
         serverLastPulledScopeRef.current = planScopeKey;
+        if (presetsReadyForComboRef.current !== selectedComboId) {
+          presetsReadyForComboRef.current = selectedComboId;
+          setPresetsReady(true);
+        }
       } finally {
         serverSyncInFlightRef.current = false;
       }
@@ -759,6 +783,7 @@ export function usePlanSlots({
   return {
     PLAN_SLOTS,
     slotHas,
+    presetsReady,
     lastLoadLines,
     lastLoadReport,
     fetchLastProductPerComp,

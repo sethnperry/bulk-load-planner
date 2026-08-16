@@ -1285,7 +1285,14 @@ const lastProductInfoById = useMemo(() => {
         <PresetDial
           slots={planSlots.PLAN_SLOTS}
           slotHas={planSlots.slotHas}
-          disabled={!location.selectedTerminalId}
+          // Also gated on presetsReady -- until the initial server sync for
+          // this equipment combo has actually completed, a slot that reads
+          // "empty" might just be unsynced, not really empty, and PresetDial
+          // treats a tap on an empty slot as an implicit save. Interacting
+          // during that window silently overwrote real presets with
+          // whatever was on-screen at the time -- see usePlanSlots.ts.
+          disabled={!location.selectedTerminalId || !planSlots.presetsReady}
+          disabledReason={!location.selectedTerminalId ? "Select a terminal first" : "Syncing presets…"}
           onLoad={(n) => {
             planSlots.loadFromSlot(n);
             setCaptureBaselineNext(true);

@@ -19,11 +19,16 @@
 import React, { useEffect, useRef, useState } from "react";
 
 export default function PresetDial({
-  slots, slotHas, disabled, onLoad, onOpenActions, onSave, onActiveChange, syncTo,
+  slots, slotHas, disabled, disabledReason, onLoad, onOpenActions, onSave, onActiveChange, syncTo,
 }: {
   slots: readonly number[];
   slotHas: Record<number, boolean>;
   disabled: boolean;
+  // Shown in the disabled tooltip -- disabled can mean "no terminal yet" or
+  // "still syncing this equipment's presets," which need different copy.
+  // Defaults to the original terminal-only message so existing callers
+  // that don't pass this keep working unchanged.
+  disabledReason?: string;
   // Tapping a filled slot loads it immediately.
   onLoad: (n: number) => void;
   // Long-pressing a filled slot opens the management action sheet (Edit/Clear).
@@ -144,7 +149,7 @@ export default function PresetDial({
                   border: "none", background: "transparent", padding: "3px 4px",
                   cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.4 : 1,
                 }}
-                title={disabled ? "Select a terminal first" : has ? "Tap to load, hold for options" : "Tap to save"}
+                title={disabled ? (disabledReason ?? "Select a terminal first") : has ? "Tap to load, hold for options" : "Tap to save"}
               >
                 <span style={{
                   font: isActive ? "600 15px Outfit" : "500 12px Outfit",
