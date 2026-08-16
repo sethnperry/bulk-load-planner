@@ -1750,7 +1750,7 @@ const lastProductInfoById = useMemo(() => {
 
             {/* Footnote */}
             <div style={{ fontSize: 10, color: "rgba(255,255,255,0.32)", textAlign: "center" as const, lineHeight: 1.4 }}>
-              Product API & temp confirm automatically after this load — sharpens the number for the next driver at this terminal.
+              Product API & temp confirm automatically after this load, sharpening the number for the next driver at this terminal.
             </div>
 
           </div>
