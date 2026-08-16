@@ -676,6 +676,11 @@ export function usePlanSlots({
   const saveToSlot = useCallback((slot: number) => {
     if (!canUseSlot(slot)) return;
     const snap = buildSnapshot(String(selectedTerminalId), { stripFillLevel: slot !== 0 });
+    // TEMP DIAGNOSTIC -- tracking down a real bug where a preset's saved
+    // content is getting silently overwritten by whatever was most
+    // recently loaded into a DIFFERENT slot. Remove once root-caused.
+    // eslint-disable-next-line no-console
+    console.warn(`[preset-diag] saveToSlot(${slot})`, { compPlan: snap.compPlan, cgSlider: snap.cgSlider, stack: new Error().stack });
     safeWrite(planStoreKey(slot), snap);
     refreshSlotHas();
     afterLocalSlotWrite(slot);
@@ -704,6 +709,9 @@ export function usePlanSlots({
   const loadFromSlot = useCallback((slot: number) => {
     if (!canUseSlot(slot)) return;
     const raw = readSlot(slot) as PlanSnapshot | null;
+    // TEMP DIAGNOSTIC -- see saveToSlot above.
+    // eslint-disable-next-line no-console
+    console.warn(`[preset-diag] loadFromSlot(${slot})`, { found: !!raw, compPlan: raw?.compPlan, cgSlider: (raw as any)?.cgSlider });
     if (!raw || raw.v !== 1) return;
     // Terminal-match is only meaningful for slot 0 (the real per-terminal
     // draft) -- named presets (1-5) are terminal-independent by design, so
