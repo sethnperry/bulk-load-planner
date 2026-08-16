@@ -18,11 +18,13 @@ export const TUTORIAL_VIDEOS: TutorialVideo[] = [
   {
     id: "typical-workflow-1",
     title: "Typical Workflow - 1",
+    description: "The simplest case: nothing's changed since the last load but the weather. Open the app, tap Reload, confirm the updated API and temp, and log it.",
     src: "/videos/typical-workflow-1.mp4",
   },
   {
     id: "typical-workflow-2",
     title: "Typical Workflow - 2",
+    description: "The same reload workflow, this time switching to a different preset and picking a different terminal first.",
     src: "/videos/typical-workflow-2.mp4",
   },
 ];
