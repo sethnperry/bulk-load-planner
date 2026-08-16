@@ -32,7 +32,7 @@ export default function AboutVideosPage() {
           {TUTORIAL_VIDEOS.map((v) => (
             <div key={v.id} className="video-card">
               <div className="video-title">{v.title}</div>
-              <div className="video-desc">{v.description}</div>
+              {v.description && <div className="video-desc">{v.description}</div>}
               <video
                 src={v.src}
                 controls

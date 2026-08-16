@@ -10,21 +10,19 @@
 export type TutorialVideo = {
   id: string;
   title: string;
-  description: string;
+  description?: string;
   src: string; // public/videos/*
 };
 
 export const TUTORIAL_VIDEOS: TutorialVideo[] = [
   {
     id: "typical-workflow-1",
-    title: "A Typical Workflow, Part 1",
-    description: "Selecting equipment, setting a terminal, and building out a load plan from scratch.",
+    title: "Typical Workflow - 1",
     src: "/videos/typical-workflow-1.mp4",
   },
   {
     id: "typical-workflow-2",
-    title: "A Typical Workflow, Part 2",
-    description: "Continuing the load plan through to submission.",
+    title: "Typical Workflow - 2",
     src: "/videos/typical-workflow-2.mp4",
   },
 ];
