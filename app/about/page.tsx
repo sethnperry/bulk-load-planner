@@ -66,6 +66,24 @@ export default function AboutPage() {
               <div className="topic-more">Learn more <span>&rarr;</span></div>
             </Link>
           ))}
+
+          {/* Not from LEARN_TOPICS -- a single fixed entry point into
+              /about/videos (its own growing list, see
+              lib/content/tutorialVideos.ts) rather than trying to cram an
+              open-ended, ever-growing set of clips into this fixed grid.
+              Styled identically to the topic cards above so it reads as
+              part of the same set, not a bolted-on afterthought. */}
+          <Link href="/about/videos" className="topic-card">
+            <div className="topic-emoji">🎬</div>
+            <div className="topic-name">Video Walkthroughs</div>
+            <div className="topic-tagline">See it in your hands</div>
+            <div className="topic-marketing">
+              Short, recorded clips of ProTankr in real use -- planning a
+              load, picking equipment, working a terminal. No narration
+              needed, just watch what actually happens on screen.
+            </div>
+            <div className="topic-more">Watch now <span>&rarr;</span></div>
+          </Link>
         </div>
       </section>
 

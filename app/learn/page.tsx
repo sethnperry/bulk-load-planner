@@ -4,6 +4,7 @@
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import { LEARN_TOPICS, Icon, type LearnBlock } from "@/lib/content/learnTopics";
+import { TUTORIAL_VIDEOS } from "@/lib/content/tutorialVideos";
 
 function Section({ emoji, title, children }: { emoji: string; title: string; children: React.ReactNode }) {
   return (
@@ -99,12 +100,32 @@ export default function LearnPage() {
             /planner?tour=setup) is retired -- unreliable tap-zone targeting,
             and it forced the user to actually perform each step instead of
             just watching one. Replaced with short video walkthroughs
-            (recorded, not interactive); this section is the future landing
-            spot for those once they exist. Honest placeholder, not a link to
-            content that doesn't exist yet. */}
+            (recorded, not interactive), sourced from the shared
+            TUTORIAL_VIDEOS list (also read by app/about/videos) so this
+            grows to "a bunch of them" by just adding entries there, not
+            restructuring this page. preload="metadata" per clip -- enough
+            for the browser to show a real first-frame poster and duration
+            without downloading the whole file, which matters once there
+            are many of these stacked in one page. */}
         <Accordion title="▶ Guided tours">
-          <div style={{ fontSize: 13, color: "rgba(255,255,255,0.50)", lineHeight: 1.65, padding: "4px 0 8px" }}>
-            Short video walkthroughs are on the way. Check back soon.
+          <div style={{ display: "flex", flexDirection: "column" as const, gap: 14, padding: "4px 0 8px" }}>
+            {TUTORIAL_VIDEOS.map((v) => (
+              <div key={v.id}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "rgba(255,255,255,0.80)", marginBottom: 3 }}>
+                  {v.title}
+                </div>
+                <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", lineHeight: 1.5, marginBottom: 8 }}>
+                  {v.description}
+                </div>
+                <video
+                  src={v.src}
+                  controls
+                  preload="metadata"
+                  playsInline
+                  style={{ width: "100%", borderRadius: 10, background: "#000", display: "block" }}
+                />
+              </div>
+            ))}
           </div>
         </Accordion>
 
