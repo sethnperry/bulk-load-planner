@@ -17,7 +17,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { lbsPerGallonAtTemp } from "@/app/planner/utils/planMath";
-import { AVERAGING_PERIOD_LABELS, type AveragingPeriodType } from "@/app/planner/utils/incentiveAveragingPeriod";
 import ManageTerminalProductsModal, { type CatalogProduct } from "@/app/planner/modals/ManageTerminalProductsModal";
 
 type ProductRow = {
@@ -55,11 +54,6 @@ export default function IncentiveSettingsModal({ open, onClose, companyId }: Pro
   const [weightCapLbs, setWeightCapLbs] = useState("80000");
   const [payPeriodType, setPayPeriodType] = useState("biweekly");
   const [payPeriodAnchorDate, setPayPeriodAnchorDate] = useState("");
-  // Separate from the report period above -- drives the Planner's live
-  // running-average card instead. See incentiveAveragingPeriod.ts's own
-  // header comment for why this is deliberately independent (no anchor
-  // date, no relation to pay_period_type/payPeriods.ts).
-  const [averagingPeriodType, setAveragingPeriodType] = useState<AveragingPeriodType>("weekly");
 
   const [products, setProducts] = useState<ProductRow[]>([]);
   const [benchmarks, setBenchmarks] = useState<Record<string, BenchmarkRow>>({});
@@ -75,7 +69,7 @@ export default function IncentiveSettingsModal({ open, onClose, companyId }: Pro
     (async () => {
       setLoading(true);
       const [{ data: settings }, { data: prods }, { data: existing }] = await Promise.all([
-        supabase.from("incentive_settings").select("enabled, weight_cap_lbs, pay_period_type, pay_period_anchor_date, averaging_period_type").eq("company_id", companyId).maybeSingle(),
+        supabase.from("incentive_settings").select("enabled, weight_cap_lbs, pay_period_type, pay_period_anchor_date").eq("company_id", companyId).maybeSingle(),
         supabase.from("products").select("product_id, product_name, display_name, button_code, api_60, alpha_per_f").order("product_name"),
         supabase.from("product_benchmarks").select("product_id, benchmark_gallons, reference_density").eq("company_id", companyId),
       ]);
@@ -84,7 +78,6 @@ export default function IncentiveSettingsModal({ open, onClose, companyId }: Pro
       setWeightCapLbs(String(settings?.weight_cap_lbs ?? 80000));
       setPayPeriodType(settings?.pay_period_type ?? "biweekly");
       setPayPeriodAnchorDate(settings?.pay_period_anchor_date ?? new Date().toISOString().slice(0, 10));
-      setAveragingPeriodType((settings?.averaging_period_type as AveragingPeriodType) ?? "weekly");
       setProducts((prods ?? []) as ProductRow[]);
       const map: Record<string, BenchmarkRow> = {};
       for (const row of (existing ?? []) as BenchmarkRow[]) map[row.product_id] = row;
@@ -137,7 +130,6 @@ export default function IncentiveSettingsModal({ open, onClose, companyId }: Pro
         weight_cap_lbs: Number.isFinite(cap) && cap > 0 ? cap : 80000,
         pay_period_type: payPeriodType,
         pay_period_anchor_date: payPeriodAnchorDate || null,
-        averaging_period_type: averagingPeriodType,
         updated_at: new Date().toISOString(),
       });
       if (settingsErr) throw settingsErr;
@@ -216,19 +208,7 @@ export default function IncentiveSettingsModal({ open, onClose, companyId }: Pro
                 </div>
               </div>
               <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginTop: 6, lineHeight: 1.5 }}>
-                Anchor date fixes the start of a period (day-of-week for weekly/biweekly, day-of-month for semi-monthly/monthly). Drives the period dropdown in the Period Report.
-              </div>
-
-              <div style={{ marginTop: 16 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.5)", marginBottom: 6 }}>AVERAGING PERIOD (Planner card)</div>
-                <select value={averagingPeriodType} onChange={(e) => setAveragingPeriodType(e.target.value as AveragingPeriodType)} style={{ ...INPUT, width: "100%" }}>
-                  {(Object.keys(AVERAGING_PERIOD_LABELS) as AveragingPeriodType[]).map((k) => (
-                    <option key={k} value={k}>{AVERAGING_PERIOD_LABELS[k]}</option>
-                  ))}
-                </select>
-                <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginTop: 6, lineHeight: 1.5 }}>
-                  No anchor date needed — always the current calendar period (weeks start Sunday). Sets what "average" means on the driver's Planner points card, separate from the report period above.
-                </div>
+                Anchor date fixes the start of a period (day-of-week for weekly/biweekly, day-of-month for semi-monthly/monthly). Drives the period dropdown in the Period Report, and also the "current period" running average shown on the driver's Planner points card.
               </div>
 
               <div style={{ marginTop: 16, fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.5)", marginBottom: 6 }}>PRODUCT BENCHMARKS (gallons)</div>

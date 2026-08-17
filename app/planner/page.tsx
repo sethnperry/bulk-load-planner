@@ -63,10 +63,14 @@ import { addDaysISO_, daysUntilISO_, formatMDYWithCountdown_, formatMDYWithTime_
 import { themeFill, themeTextOnFill } from "./theme";
 import { normState } from "./utils/normalize";
 import { cgSliderToBias, bestLbsPerGallon, planForGallons, CG_NEUTRAL } from "./utils/planMath";
-import { averagingPeriodStart, AVERAGING_PERIOD_LABELS, type AveragingPeriodType } from "./utils/incentiveAveragingPeriod";
+import { generatePayPeriods, type PayPeriodType } from "@/app/admin/payPeriods";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 import type { ActiveComp, CompPlanInput, CompRow, ProductRow } from "./types";
+
+const PERIOD_TYPE_LABELS: Record<PayPeriodType, string> = {
+  weekly: "Weekly", biweekly: "Biweekly", semi_monthly: "Semi-Monthly", monthly: "Monthly",
+};
 
 
 // ─── Local UI helpers ─────────────────────────────────────────────────────────
@@ -1057,12 +1061,17 @@ export default function CalculatorPage() {
   // Left side of the new card is this load's own points (same value the
   // "You earned X points" line above already shows); right side is the
   // average recovered points per load across the admin-configured
-  // averaging period (see IncentiveSettingsModal.tsx / CLAUDE.md's
-  // "Incentive system" -- Sunday-start weeks, calendar month/quarter/year
-  // to date, no anchor date). Whole card only renders once
+  // Running average uses the SAME report period the admin already
+  // configures for the Period Report (pay_period_type/pay_period_anchor_date)
+  // -- no separate averaging-period concept. Simplified 2026-08-17 per
+  // explicit follow-up ("if we are keeping the report period and anchor
+  // date thing we can just match the averaging period for the planner card
+  // to that same period") -- this reverses the same-day decision to add an
+  // independent, anchor-less averaging period. Whole card only renders once
   // incentive_settings.enabled is confirmed true for this company.
   const [incentiveEnabled, setIncentiveEnabled] = useState(false);
-  const [averagingPeriodType, setAveragingPeriodType] = useState<AveragingPeriodType>("weekly");
+  const [payPeriodType, setPayPeriodType] = useState<PayPeriodType>("biweekly");
+  const [payPeriodAnchorDate, setPayPeriodAnchorDate] = useState("");
   const [avgRecoveredPoints, setAvgRecoveredPoints] = useState<number | null>(null);
 
   useEffect(() => {
@@ -1071,12 +1080,13 @@ export default function CalculatorPage() {
     (async () => {
       const { data } = await supabase
         .from("incentive_settings")
-        .select("enabled, averaging_period_type")
+        .select("enabled, pay_period_type, pay_period_anchor_date")
         .eq("company_id", shell.companyId)
         .maybeSingle();
       if (cancelled) return;
       setIncentiveEnabled(Boolean(data?.enabled));
-      setAveragingPeriodType((data?.averaging_period_type as AveragingPeriodType) ?? "weekly");
+      setPayPeriodType((data?.pay_period_type as PayPeriodType) ?? "biweekly");
+      setPayPeriodAnchorDate((data?.pay_period_anchor_date as string | null) ?? new Date().toISOString().slice(0, 10));
     })();
     return () => { cancelled = true; };
   }, [shell.companyId]);
@@ -1086,10 +1096,11 @@ export default function CalculatorPage() {
   // not just on next mount -- same trigger the "You earned X points" line
   // above already relies on.
   useEffect(() => {
-    if (!incentiveEnabled || !effectiveUserId || !shell.companyId) { setAvgRecoveredPoints(null); return; }
+    if (!incentiveEnabled || !effectiveUserId || !shell.companyId || !payPeriodAnchorDate) { setAvgRecoveredPoints(null); return; }
     let cancelled = false;
     (async () => {
-      const periodStart = averagingPeriodStart(averagingPeriodType, new Date());
+      const periodStart = generatePayPeriods(payPeriodType, payPeriodAnchorDate, 1)[0]?.start;
+      if (!periodStart) { setAvgRecoveredPoints(null); return; }
       const { data } = await supabase
         .from("load_points")
         .select("load_id, recovered_points")
@@ -1110,7 +1121,7 @@ export default function CalculatorPage() {
       setAvgRecoveredPoints(avg);
     })();
     return () => { cancelled = true; };
-  }, [incentiveEnabled, averagingPeriodType, effectiveUserId, shell.companyId, loadWorkflow.loadReport]);
+  }, [incentiveEnabled, payPeriodType, payPeriodAnchorDate, effectiveUserId, shell.companyId, loadWorkflow.loadReport]);
 
   // "Back to Planner" -- per explicit follow-up, this must genuinely undo
   // everything: no load logged AND the terminal card reverted to whatever
@@ -1855,7 +1866,7 @@ const lastProductInfoById = useMemo(() => {
             </div>
 
             {/* Incentive running-average card -- see the effects that
-                compute incentiveEnabled/averagingPeriodType/avgRecoveredPoints
+                compute incentiveEnabled/payPeriodType/avgRecoveredPoints
                 above. Only rendered once the company has actually turned
                 the incentive system on. */}
             {incentiveEnabled && (
@@ -1868,7 +1879,7 @@ const lastProductInfoById = useMemo(() => {
                 </div>
                 <div style={{ textAlign: "right" as const }}>
                   <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.4)", textTransform: "uppercase" as const, letterSpacing: 0.4 }}>
-                    {AVERAGING_PERIOD_LABELS[averagingPeriodType]} Avg
+                    {PERIOD_TYPE_LABELS[payPeriodType]} Avg
                   </div>
                   <div style={{ fontSize: 20, fontWeight: 700, color: "#fff" }}>
                     {avgRecoveredPoints != null ? `${avgRecoveredPoints.toFixed(1)} pts` : "—"}

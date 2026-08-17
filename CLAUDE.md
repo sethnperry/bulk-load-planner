@@ -3611,23 +3611,28 @@ fully functional (rename copy only, same precedent as the `/calculator`→
 - `app/admin/IncentiveSettingsModal.tsx`: `PAY PERIOD` → `REPORT PERIOD`,
   `ANCHOR DATE` → `PERIOD ANCHOR DATE`, helper text updated to say
   "Period Report."
-- **New, fully independent "averaging period"** — drives a live
-  running-average stat on the driver's own Planner, deliberately
-  decoupled from the report-period concept above (no anchor date needed
-  for any of daily/weekly/monthly/quarterly/annually — all calendar-
-  aligned, week starts Sunday). New column
-  `incentive_settings.averaging_period_type`
-  (`supabase/migrations/20260818000000_incentive_averaging_period.sql`,
-  **not yet applied** — needs to be run in the Supabase SQL editor before
-  this feature goes live) + new pure date-math module
-  `app/planner/utils/incentiveAveragingPeriod.ts`
-  (`averagingPeriodStart()`), with a new dropdown in
-  `IncentiveSettingsModal.tsx`.
+- **Planner running-average card, keyed off the SAME report period** —
+  first built same-day as a fully independent, anchor-less
+  "averaging period" concept (new `incentive_settings.averaging_period_type`
+  column + a separate calendar-aligned date-math module), then explicitly
+  simplified via same-day follow-up ("if we are keeping the report period
+  and anchor date thing we can just match the averaging period for the
+  planner card to that same period") — reversed before the migration was
+  ever applied, so no schema change was needed in the end.
+  `app/planner/utils/incentiveAveragingPeriod.ts` and its unapplied
+  migration were both deleted; the Planner card instead reuses
+  `app/admin/payPeriods.ts`'s existing `generatePayPeriods()` (already
+  driving the Period Report) — `generatePayPeriods(payPeriodType,
+  payPeriodAnchorDate, 1)[0].start` gives the period containing today for
+  all four period types, no new date math needed. `IncentiveSettingsModal.tsx`
+  no longer has a second period dropdown at all; its existing Report
+  Period/Anchor Date fields now drive both the Period Report AND the
+  Planner card, and its helper text was updated to say so.
 - New card on the Planner (`app/planner/page.tsx`), directly after the
   existing Load Summary card, visible only when
   `incentive_settings.enabled`: left side shows this load's points
   (`loadReport.recovered_points`), right side shows the running average
-  for the admin-configured period (queries `load_points` filtered by
+  for the current report period (queries `load_points` filtered by
   driver/company/period start, grouped by `load_id` and averaged — same
   pattern `PayrollReportModal.tsx` already uses for its own totals).
 
@@ -3691,11 +3696,9 @@ handful of products) with a Done button to close.
 **Not live-verified this pass** — same category of gap this project has
 flagged repeatedly for role-matrix work: no real dispatch/lead-role login
 was available to exercise the Reports page's driver/equipment pickers
-end-to-end, and the new `averaging_period_type` migration hasn't been
-applied yet, so the Planner's new running-average card can't show real
-numbers until the user runs it. Everything else in this batch (items 1-6,
-8, and the rename half of 7) is verifiable against the existing demo/QA
-company without any new migration.
+end-to-end. No new migration is needed for item 7 after the same-day
+simplification above, so the Planner's running-average card is verifiable
+against the existing demo/QA company like everything else in this batch.
 
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
