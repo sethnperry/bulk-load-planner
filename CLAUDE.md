@@ -3720,6 +3720,75 @@ is untouched and still needed — `app/planner/dispatch/page.tsx`'s own
 Credentials section reads the same tables under the same grant,
 independent of this modal.
 
+**Follow-up same day: nav menu panel anchoring fixed for Admin's new
+left-side hamburger.** `NavMenu.tsx`'s dropdown panel picked which side to
+anchor on (`left:0` vs `right:0`) by checking `isPlanner` (a pathname
+check) — a proxy for "is the hamburger button on the left of the header,"
+which was true for every non-Planner route until today's admin header
+redesign (item 6 above) moved `/admin`'s own `<NavMenu />` from the
+header's trailing-right position to sit inline with the company name on
+the left. `isPlanner` stayed false for `/admin`, so the panel kept
+anchoring `right:0` (opens leftward) against a button now on the far
+left — pushing the whole 240px panel off the left edge of the viewport.
+Fixed with a new optional `anchor?: "left" | "right"` prop, explicit
+callers win over the old route guess (`anchor ?? (isPlanner ? "left" :
+"right")`) — `app/admin/page.tsx` now passes `anchor="left"` since it
+knows its own layout; every other call site (`CalculatorLayoutClient.tsx`,
+`app/profile/page.tsx`, `app/superadmin/page.tsx`) is unchanged and keeps
+the exact same behavior it always had.
+
+**Follow-up same day: invite email — fixed the consuming-link bug and the
+duplicate/broken second email.** User tested onboarding a real second
+driver via a webmail client and hit two real bugs at once: the invite
+link showed "Link expired or already used" / "No token found in this
+link" on first tap, and two separate emails arrived — the intended
+custom-branded one (logo not rendering, an ugly long `supabase.co` URL
+visible next to the link button) and a second, differently-worded,
+visibly broken one with a missing company name and a non-functional-
+looking link.
+
+Root cause, confirmed by reading `app/api/admin/invite/route.ts` end to
+end: both bugs trace to the same design gap already fixed once before for
+the Magic Link *sign-in* email (see "magic link / login reliability"
+history above) but never carried over to this separate *invite* code
+path. (1) **Consuming link**: both branches built `confirmUrl` from
+Supabase's raw `action_link` — a GET request straight to
+`<project>.supabase.co/auth/v1/verify` that consumes the one-time token
+the instant anything (a link-scanner, Outlook Safe Links, a corporate
+mail gateway) requests it, before the human ever taps. Fixed by building
+`confirmUrl` from `linkData.properties.hashed_token` instead, pointed at
+our own `${redirectTo}?token_hash=...&type=...` — `/auth/confirm/page.tsx`
+already expects exactly this shape and only consumes it via an explicit
+client-side `verifyOtp()` call, so this was a drop-in fix, not a new
+mechanism. This also directly explains the "long ugly URL" complaint —
+the raw Supabase action_link is long and points at the `supabase.co`
+project domain; the new `token_hash` link is short and points at
+`protankr.com`. (2) **Duplicate broken email**: the new-user branch called
+`inviteUserByEmail()` (which creates the account) *and then* a second,
+separate `generateLink()` call just to get a link for the custom Resend
+email — but `inviteUserByEmail()` unavoidably triggers Supabase's own
+built-in "Invite user" email as a side effect of creating the account (no
+parameter suppresses it), which is exactly the second, differently-styled
+email the user received — its broken company-name interpolation and
+missing/empty logo are Supabase's own default template, not anything in
+this repo. Fixed by dropping `inviteUserByEmail()` entirely and calling
+`generateLink({type: "invite", ...})` directly — Supabase's own docs
+confirm `generateLink` with `type: "invite"` both creates the account
+*and* returns the link, without ever sending Supabase's own email, which
+is the standard pattern for "invite without their default email." Also
+gave the branded email's logo `<img>` a real `alt="ProTankr"` (was empty)
+so a client that blocks remote images from an unrecognized/new sender —
+plausible here, since the untrusted-sender warning shown in the user's
+screenshots suggests `noreply@protankr.com` hasn't built up mail-client
+reputation yet — shows readable text instead of a blank box; this is a
+mail-client trust/rendering behavior outside what server-side code can
+force, not something to keep chasing further without more evidence.
+
+Not live-verified this pass (no way to trigger a real invite email and
+inspect webmail rendering from this session) — `tsc --noEmit` and `next
+build` both clean; worth a real re-test of the invite flow with a
+disposable second account before considering this fully closed.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.

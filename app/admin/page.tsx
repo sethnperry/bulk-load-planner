@@ -1430,7 +1430,7 @@ export default function AdminPage() {
   return (
     <div style={css.page} className="admin-page-root">
       <div className="admin-header-row" style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
-        <NavMenu />
+        <NavMenu anchor="left" />
         <div><h1 style={css.heading}>{companyName}</h1><p style={css.subheading}>Company Admin</p></div>
       </div>
 

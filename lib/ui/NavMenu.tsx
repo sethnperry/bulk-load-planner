@@ -11,7 +11,7 @@ type Membership = {
   company: { company_id: string; company_name: string } | null;
 };
 
-export default function NavMenu({ darkMode }: { darkMode?: boolean } = {}) {
+export default function NavMenu({ darkMode, anchor }: { darkMode?: boolean; anchor?: "left" | "right" } = {}) {
   const router   = useRouter();
   const pathname = usePathname();
   const panelRef = useRef<HTMLDivElement>(null);
@@ -132,11 +132,16 @@ export default function NavMenu({ darkMode }: { darkMode?: boolean } = {}) {
         <div ref={panelRef} style={{
           position: "absolute", top: "calc(100% + 8px)",
           // The button sits at the left edge of the header on the Planner
-          // (isPlanner) but at the right edge everywhere else (Profile,
-          // Admin, etc.) -- anchoring the panel to the opposite side of
-          // wherever the button actually is keeps it on-screen in both
+          // and Admin (button-on-left contexts) but at the right edge
+          // everywhere else (Profile, Super Admin, etc.) -- anchoring the
+          // panel to the SAME side the button is on (left:0 opens
+          // rightward, right:0 opens leftward) keeps it on-screen in both
           // contexts instead of hanging off the edge of the viewport.
-          ...(isPlanner ? { left: 0 } : { right: 0 }),
+          // Explicit `anchor` prop wins when a caller knows its own layout
+          // (Admin's header moved the button to the left 2026-08-17,
+          // independent of the Planner-only `isPlanner` route check this
+          // used to rely on); falls back to the route guess otherwise.
+          ...((anchor ?? (isPlanner ? "left" : "right")) === "left" ? { left: 0 } : { right: 0 }),
           width: 240, background: "#111",
           border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8,
           boxShadow: "0 16px 48px rgba(0,0,0,0.7)", overflow: "hidden", zIndex: 500,

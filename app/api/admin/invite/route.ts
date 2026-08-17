@@ -98,17 +98,30 @@ export async function POST(req: NextRequest) {
 
     let confirmUrl: string;
 
+    // Both branches build confirmUrl from a token_hash pointing at our own
+    // /auth/confirm route -- NOT Supabase's raw action_link, which points
+    // at <project>.supabase.co/auth/v1/verify. That endpoint is a GET
+    // request that consumes the one-time token on hit, so any link-scanner
+    // that prefetches it (Outlook Safe Links, some corporate mail gateways)
+    // silently burns the invite before the user ever taps it -- the exact
+    // same class of bug already fixed for the Magic Link sign-in email
+    // template (see CLAUDE.md's "magic link / login reliability" history).
+    // /auth/confirm/page.tsx already expects `?token_hash=...&type=...` and
+    // only consumes it via an explicit client-side verifyOtp() call, so
+    // this is a drop-in fix, not a new mechanism.
+
     if (existing) {
-      // User exists — generate a fresh magic link so they can log in
+      // User exists — generate a fresh magic link so they can log in.
+      // generateLink() never sends an email itself either way.
       const { data: linkData, error: linkErr } = await admin.auth.admin.generateLink({
         type: "magiclink",
         email,
         options: { redirectTo },
       });
-      if (linkErr || !linkData?.properties?.action_link) {
+      if (linkErr || !linkData?.properties?.hashed_token) {
         throw new Error(linkErr?.message ?? "Failed to generate login link.");
       }
-      confirmUrl = linkData.properties.action_link;
+      confirmUrl = `${redirectTo}?token_hash=${encodeURIComponent(linkData.properties.hashed_token)}&type=magiclink`;
 
       // Ensure they're in the company (re-invite may change role)
       await admin.from("user_companies").upsert(
@@ -122,34 +135,32 @@ export async function POST(req: NextRequest) {
         { onConflict: "user_id" }
       );
     } else {
-      // New user — create account via invite
-      const { data: inviteData, error: inviteErr } =
-        await admin.auth.admin.inviteUserByEmail(email, {
-          redirectTo,
-          data: { company_id: companyId, role },
-        });
-      if (inviteErr) throw inviteErr;
-
-      // Generate the actual confirm link (inviteUserByEmail sends Supabase's default
-      // email which we want to suppress — we send our own via Resend instead)
+      // New user — generateLink({type:"invite"}) both creates the account
+      // AND returns a link, without ever sending Supabase's own built-in
+      // invite email the way inviteUserByEmail() unavoidably does (that API
+      // has no flag to suppress it). Using generateLink directly here --
+      // instead of calling inviteUserByEmail() and then generateLink() a
+      // second time just to get a link, as before -- is what actually
+      // stops Supabase's own (broken, uncustomized) invite email from
+      // going out alongside our branded Resend one.
       const { data: linkData, error: linkErr } = await admin.auth.admin.generateLink({
         type: "invite",
         email,
-        options: { redirectTo },
+        options: { redirectTo, data: { company_id: companyId, role } },
       });
-      if (linkErr || !linkData?.properties?.action_link) {
+      if (linkErr || !linkData?.properties?.hashed_token) {
         throw new Error(linkErr?.message ?? "Failed to generate invite link.");
       }
-      confirmUrl = linkData.properties.action_link;
+      confirmUrl = `${redirectTo}?token_hash=${encodeURIComponent(linkData.properties.hashed_token)}&type=invite`;
 
       // Pre-create company membership + active company setting
-      if (inviteData?.user?.id) {
+      if (linkData.user?.id) {
         await admin.from("user_companies").upsert(
-          { user_id: inviteData.user.id, company_id: companyId, role },
+          { user_id: linkData.user.id, company_id: companyId, role },
           { onConflict: "user_id,company_id" }
         );
         await admin.from("user_settings").upsert(
-          { user_id: inviteData.user.id, active_company_id: companyId },
+          { user_id: linkData.user.id, active_company_id: companyId },
           { onConflict: "user_id" }
         );
       }
@@ -188,7 +199,7 @@ function buildEmailHtml(confirmUrl: string, companyName: string): string {
         <div style="font-size:24px;font-weight:900;letter-spacing:-0.5px;color:#111111;white-space:nowrap;">ProTankr</div>
       </td>
       <td valign="middle" align="right" width="40">
-        <img src="https://protankr.com/icons/icon-email-black.png" width="36" height="36" alt="" style="display:block;" />
+        <img src="https://protankr.com/icons/icon-email-black.png" width="36" height="36" alt="ProTankr" style="display:block;" />
       </td>
     </tr></table>
   </td></tr>
