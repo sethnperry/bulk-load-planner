@@ -3838,8 +3838,51 @@ had its one and only chance to call it. This change only makes future
 gaps impossible (an admin can now configure benchmarks/weight cap with the
 toggle off and have real data waiting the moment they flip it on) — a true
 historical backfill for loads that already happened before today would
-still need the separate admin-triggered RPC described above, and wasn't
-built since the user's simplified proposal covers the actual ask.
+still need the separate admin-triggered RPC described above.
+
+**Follow-up same day: that historical backfill, shipped.** User asked for
+it directly. Migration `supabase/migrations/20260817020000_incentive_backfill.sql`
+(**not yet applied**) refactors the split-load formula out of
+`calculate_load_points` into a private, unauthenticated
+`_calculate_load_points_core(p_load_id, p_user_id, p_company_id,
+p_tare_lbs)` — deliberately extracted rather than duplicated a second time
+inline, per this project's own established "duplicating this is how the
+bug creeps back in" precedent (`CustomSelect.tsx`/`ServiceTypeManager.tsx`).
+`calculate_load_points(p_load_id)` keeps its exact existing public
+signature/behavior (owner-only — `auth.uid()` must match the load's own
+driver), just delegates its math to the core after that check.
+`_calculate_load_points_core` has `execute` revoked from
+`public`/`anon`/`authenticated` so it's unreachable via PostgREST directly
+— only the two auth-checked wrappers (as function owners) can call it.
+
+New `backfill_incentive_points(p_company_id, p_since default null)` —
+admin-gated (role checked inside the function, same pattern
+`recalculate_load_points` already established), loops every `load_log`
+row with `status = 'completed'` belonging to a *current* member of
+`p_company_id` (join through `user_companies`, since `load_log` itself has
+no `company_id` column — confirmed by reading its actual definition in
+`20260222172537_remote_schema.sql` rather than assuming) and calls the
+core for each, using the caller's chosen company as the calc context
+directly rather than each row's own `get_active_company_id()` (irrelevant
+here — the admin already explicitly scoped this to their own company).
+`p_since` defaults to null (whole history), matching "calculates all the
+loads" as literally asked; a caller could pass a cutoff for a narrower
+re-run later, though nothing in the UI exposes that yet. Idempotent
+(same upsert-on-conflict the core always had), so safe to tap again after
+adding a benchmark that didn't exist on an earlier pass.
+
+New "Backfill Historical Loads" button in `IncentiveSettingsModal.tsx`
+(bottom of the modal, its own "Historical data" section) — confirm
+prompt, then calls the RPC and shows "{N} loads processed, {X} total
+recovered gallons" or surfaces the error inline, same pattern the rest of
+this modal already uses for its own save errors.
+
+Not live-verified this pass (no DB write access from this session to
+apply either migration or trigger a real backfill) — `tsc --noEmit` and
+`next build` both clean. Both `20260817010000_incentive_calc_always_runs.sql`
+and `20260817020000_incentive_backfill.sql` need to be applied, in that
+order, before either the always-calculate behavior or the backfill button
+work against live data.
 
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.

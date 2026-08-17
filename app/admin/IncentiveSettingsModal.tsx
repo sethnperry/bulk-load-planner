@@ -59,6 +59,8 @@ export default function IncentiveSettingsModal({ open, onClose, companyId }: Pro
   const [benchmarks, setBenchmarks] = useState<Record<string, BenchmarkRow>>({});
   const [removedProductIds, setRemovedProductIds] = useState<Set<string>>(new Set());
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [backfilling, setBackfilling] = useState(false);
+  const [backfillResult, setBackfillResult] = useState<{ loads_processed: number; total_recovered_gallons: number } | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -117,6 +119,31 @@ export default function IncentiveSettingsModal({ open, onClose, companyId }: Pro
 
   function removeProduct(productId: string) {
     setRemovedProductIds((prev) => new Set(prev).add(productId));
+  }
+
+  // Points now calculate for every load regardless of the enabled toggle
+  // (see 20260817010000_incentive_calc_always_runs.sql) -- but that only
+  // covers loads completed AFTER that migration shipped. This reaches back
+  // and calculates points for everything that already happened, using
+  // whatever benchmarks are configured right now. Idempotent server-side
+  // (upsert-on-conflict), so safe to tap again later if benchmarks change.
+  async function handleBackfill() {
+    if (!confirm("Calculate incentive points for every completed load in this company's history, using the current benchmarks? This can take a moment for a large company and can be re-run any time.")) return;
+    setBackfilling(true);
+    setError(null);
+    setBackfillResult(null);
+    try {
+      const { data, error: err } = await supabase.rpc("backfill_incentive_points", { p_company_id: companyId });
+      if (err) throw err;
+      setBackfillResult({
+        loads_processed: Number(data?.loads_processed ?? 0),
+        total_recovered_gallons: Number(data?.total_recovered_gallons ?? 0),
+      });
+    } catch (e: any) {
+      setError(e?.message ?? String(e));
+    } finally {
+      setBackfilling(false);
+    }
   }
 
   async function handleSave() {
@@ -242,6 +269,26 @@ export default function IncentiveSettingsModal({ open, onClose, companyId }: Pro
               >
                 + Add a benchmark product
               </button>
+
+              <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.5)", marginBottom: 6 }}>HISTORICAL DATA</div>
+                <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginBottom: 10, lineHeight: 1.5 }}>
+                  Points now calculate automatically for every new load, whether or not this is enabled. Loads completed before that started need one backfill pass to catch up.
+                </div>
+                <button
+                  type="button"
+                  onClick={handleBackfill}
+                  disabled={backfilling}
+                  style={{ width: "100%", padding: "10px 12px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.16)", background: "rgba(255,255,255,0.03)", color: "rgba(255,255,255,0.75)", fontSize: 13, fontWeight: 700, cursor: backfilling ? "default" : "pointer", opacity: backfilling ? 0.6 : 1 }}
+                >
+                  {backfilling ? "Calculating…" : "Backfill Historical Loads"}
+                </button>
+                {backfillResult && (
+                  <div style={{ marginTop: 8, fontSize: 12, color: "#4ade80" }}>
+                    Done — {backfillResult.loads_processed} load{backfillResult.loads_processed === 1 ? "" : "s"} processed, {backfillResult.total_recovered_gallons.toFixed(1)} total recovered gallons.
+                  </div>
+                )}
+              </div>
 
               {error && <div style={{ marginTop: 12, fontSize: 12, color: "#ef4444" }}>{error}</div>}
             </>
