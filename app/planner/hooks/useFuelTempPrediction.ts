@@ -109,8 +109,25 @@ export function useFuelTempPrediction(input: Input): Output {
     }
 
     run();
+
+    // Periodic re-fetch -- previously this effect only ever ran again when
+    // city/state/terminal changed, so a driver who left the app open for
+    // hours (temp genuinely drifting the whole time) kept seeing whatever
+    // was predicted at mount, e.g. an early-morning reading well into the
+    // afternoon. Re-triggers run() on a timer without waiting for a real
+    // input change -- resets the throttle bookkeeping first so the 30s
+    // "tooSoon" guard above (meant to collapse rapid input changes, not to
+    // block an intentional scheduled refresh) doesn't skip it.
+    const REFRESH_INTERVAL_MS = 10 * 60 * 1000;
+    const intervalId = setInterval(() => {
+      lastSigRef.current = "";
+      lastCallAtRef.current = 0;
+      run();
+    }, REFRESH_INTERVAL_MS);
+
     return () => {
       cancelled = true;
+      clearInterval(intervalId);
     };
   }, [normalized, terminalId]);
 

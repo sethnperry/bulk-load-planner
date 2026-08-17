@@ -45,7 +45,7 @@ type ComboRow = {
   active: boolean | null;
   claimed_by: string | null;
 };
-type UnitServiceDue = {
+export type UnitServiceDue = {
   unitLabel: "Truck" | "Trailer";
   typeName: string | null; // null only when the unit has no service records at all
   display: string;         // "Due at 295,300 mi" / "Due 07/30/2026" / "Last serviced 07/18/2026" / "No service recorded"
@@ -235,9 +235,9 @@ function fmtDate(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { month: "2-digit", day: "2-digit", year: "numeric" });
 }
 
-type ServiceRecordLite = { service_type_id: string; date: string; reading_value: number | null; created_at: string };
+export type ServiceRecordLite = { service_type_id: string; date: string; reading_value: number | null; created_at: string };
 
-function computeUnitServiceDue(
+export function computeUnitServiceDue(
   unitLabel: "Truck" | "Trailer",
   records: ServiceRecordLite[],
   types: ServiceType[],

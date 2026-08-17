@@ -514,6 +514,12 @@ try {
         plan_slot: activeSlotLetter ?? null,
       });
       setLoadingOpen(false);
+      // activeLoadId was previously only ever cleared in cancelActiveLoad
+      // (Update Card/Back to Planner) -- never on a genuine successful
+      // completion, so the LOAD button stayed stuck reading "Load started"
+      // until a full page reload. Clear it here too so loadLabel correctly
+      // falls back to RELOAD/LOAD immediately after a real completed load.
+      setActiveLoadId(null);
 
       // ── Post-load refresh (don't reset loadReport — it's set above) ─────────
       // Fire in parallel — neither touches loadReport state

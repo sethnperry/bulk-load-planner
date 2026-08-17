@@ -3513,6 +3513,190 @@ but don't assume that stays true if someone wires it in later.)
   never `trucks`/`trailers`) — flagged here rather than chased further,
   since it's outside this pass's scope.
 
+## 2026-08-17 glitch/feature batch (Planner + Admin + Reports)
+
+User compiled a list of glitches and feature requests from a real day of
+using the app: refresh/stale-state bugs, an incentive-system UX pass, an
+admin page layout redesign, and a Reports page overhaul. Planned via a full
+Plan Mode pass (3 research agents + 1 design agent, cross-checked directly
+against the real files before writing anything) — approved plan preserved
+at the time in `wild-discovering-plum.md`. Nine items, done in dependency
+order (isolated bug fixes first, then the interacting planner-flow fixes,
+then layout, then the two bigger feature builds last). `tsc --noEmit`
+clean after every item.
+
+**1. Load button stuck on "Load started"** — `useLoadWorkflow.ts`'s
+`activeLoadId` was set at load-begin but only ever cleared inside
+`cancelActiveLoad`, never in the successful-completion path
+(`onLoadedFromLoadingModal`). Added `setActiveLoadId(null)` right after
+`setLoadingOpen(false)` in that success path — the button now correctly
+falls back to RELOAD/LOAD immediately after a real completed load instead
+of sticking until a full page reload.
+
+**2. Removed the 🎉 emoji** from the driver-facing "you earned X points on
+this load" confirmation line (`app/planner/page.tsx`) — text/styling/
+conditional otherwise unchanged; item 7 below adds a separate persistent
+card alongside it.
+
+**3. Credentials card dark-on-dark color bug** — `app/planner/reports/page.tsx`'s
+`credSummary` was using `cardTheme.ts`'s `EXP_COLOR`, a palette designed
+for a light "pearl card-wallet" background (that file's own doc comment
+says so) — `valid`/`not_set` were both near-black, effectively invisible
+on this page's dark graphite surface. Fixed with the same `DARK_EXP_COLOR`
+override pattern already used in `FleetCardsModal.tsx`/
+`FleetCredentialsModal.tsx`/`dispatch/page.tsx` for the identical class of
+bug.
+
+**4. Preset dial restoring the wrong letter on refresh** — real root cause,
+distinct from the earlier preset-corruption bug fixed the same week
+(see the `usePlanSlots.ts` timestamp-comparison fix elsewhere in this
+history): `PresetDial.tsx` fires `onActiveChange` on *every* dial change,
+including pure scroll-centering, not just an explicit tap-to-load — and
+`page.tsx` wired that same value straight into `load_log.plan_slot` at
+load-begin and `loadReport.plan_slot` at completion. So a driver merely
+scroll-previewing a different letter before tapping LOAD could tag the
+completed load with the wrong slot, even though the submitted plan
+content was correct — on the next refresh, the dial then highlighted the
+wrong letter. Fixed by separating "cosmetic dial position"
+(`activeSlotLetter`, still drives the Save-plan button, unchanged) from
+"the preset a real load action actually applied" (new `lastLoadedSlot`
+state, set only inside `PresetDial`'s/`PresetActionSheet`'s `onLoad`
+callbacks, never inside `onActiveChange`) — `useLoadWorkflow`'s
+`activeSlotLetter` argument now receives `lastLoadedSlot`, and the
+restore-on-refresh resync effect's guard changed from the fragile
+`activeSlotLetter === 1` to `lastLoadedSlot == null`.
+
+**5. Fuel temp could go stale while the app sat open** — two real bugs in
+`page.tsx` plus one gap in `useFuelTempPrediction.ts`:
+- The "mark as user-adjusted" effect only checked whether
+  `predAppliedForRef.current` was non-empty, which was already true right
+  after any auto-apply — so the auto-apply's own `setTempF` call
+  immediately, incorrectly flagged itself as a manual edit on the very
+  next render, permanently blocking any later re-application of a fresher
+  prediction. Fixed by comparing the new `tempF` against
+  `predictedFuelTempF` itself before flagging it as user-adjusted.
+- The auto-apply effect's guard (`predAppliedForRef.current === key`)
+  never re-fired once applied for a given city/state, even if a later
+  fetch returned a genuinely different number. Changed to check the
+  *value* (`Math.abs(tempF - predictedFuelTempF) < 0.1`), not just the key.
+- No polling existed at all — `useFuelTempPrediction.ts` only re-ran on
+  location changes. Added a 10-minute `setInterval` inside the existing
+  fetch effect that resets the dedup refs and re-runs, so a driver who
+  leaves the app open all day gets a fresh temp automatically instead of
+  loading on a stale morning reading. Not addressed: a LOAD tapped in the
+  brief window between mount and the first prediction resolving could
+  still use the stale localStorage-hydrated value — accepted, not a hard
+  gate, since the ask was "keep it fresh automatically," not "block
+  loading during a fetch."
+
+**6. Admin header redesign** — `app/admin/page.tsx`'s action buttons were a
+mobile-only horizontal-scroll pill strip that ran off the right edge on
+narrow screens; `NavMenu` was a trailing sibling instead of sitting next
+to the company name. Replaced with a universal (not mobile-only) 3-column
+CSS grid (`.admin-header-tile`, `aspect-ratio: 1`, square large tap
+targets) and moved `NavMenu` inline with the company name on the header's
+left side.
+
+**7. Incentive system: renamed away from "payroll," new averaging-period
+setting + Planner card.** Per explicit direction: "don't relate anything
+to pay anywhere... just periods," while keeping the existing feature
+fully functional (rename copy only, same precedent as the `/calculator`→
+`/planner` rename — internal files/symbols/DB columns unchanged):
+- `app/admin/page.tsx`: button label `Payroll` → `Period Report`.
+- `app/admin/PayrollReportModal.tsx`: modal title → `Period Report`, CSV
+  filename `payroll_...csv` → `period_report_...csv`. Component/file name,
+  state vars (`payPeriodType`/`payPeriodAnchorDate`), and the
+  `pay_period_type`/`pay_period_anchor_date` DB columns are all
+  deliberately unchanged.
+- `app/admin/IncentiveSettingsModal.tsx`: `PAY PERIOD` → `REPORT PERIOD`,
+  `ANCHOR DATE` → `PERIOD ANCHOR DATE`, helper text updated to say
+  "Period Report."
+- **New, fully independent "averaging period"** — drives a live
+  running-average stat on the driver's own Planner, deliberately
+  decoupled from the report-period concept above (no anchor date needed
+  for any of daily/weekly/monthly/quarterly/annually — all calendar-
+  aligned, week starts Sunday). New column
+  `incentive_settings.averaging_period_type`
+  (`supabase/migrations/20260818000000_incentive_averaging_period.sql`,
+  **not yet applied** — needs to be run in the Supabase SQL editor before
+  this feature goes live) + new pure date-math module
+  `app/planner/utils/incentiveAveragingPeriod.ts`
+  (`averagingPeriodStart()`), with a new dropdown in
+  `IncentiveSettingsModal.tsx`.
+- New card on the Planner (`app/planner/page.tsx`), directly after the
+  existing Load Summary card, visible only when
+  `incentive_settings.enabled`: left side shows this load's points
+  (`loadReport.recovered_points`), right side shows the running average
+  for the admin-configured period (queries `load_points` filtered by
+  driver/company/period start, grouped by `load_id` and averaged — same
+  pattern `PayrollReportModal.tsx` already uses for its own totals).
+
+**8. Product catalog picker reused for benchmark entry** —
+`IncentiveSettingsModal.tsx`'s old benchmark search was a bare `<input>`
+with client-side filtering, nothing shown until you typed ("kinda hard to
+use," per the user). `ManageTerminalProductsModal.tsx` gained an optional
+`mode: "rack" | "pick"` prop (defaults `"rack"`, existing rack-curation
+behavior untouched) — in `"pick"` mode it skips the `rack_product_status`
+fetch entirely (no rack context needed) and tapping a product calls
+`onPick(product)` instead of toggling `active`, with the existing
+"✓ Active"/"+ Add" styling reused via a `pickedProductIds` set. Modal
+stays open across multiple picks (most companies only benchmark a
+handful of products) with a Done button to close.
+`IncentiveSettingsModal.tsx` now opens this in pick mode via a
+"+ Add a benchmark product" button; since the shared modal's
+`CatalogProduct` type deliberately doesn't carry `api_60`/`alpha_per_f`
+(incentive-only columns, kept out of the shared modal on purpose), its
+`onPick` handler re-looks-up the full row from the already-fetched
+`productById` map before calling the existing `addProduct()`.
+
+**9. Reports page overhaul** (`app/planner/reports/page.tsx`):
+- **Role-aware Loads + driver picker.** `canViewOthers = role === "admin"
+  || role === "dispatch"` — matches the existing "other drivers' loads"
+  permission-matrix precedent exactly (dispatch+admin, not lead). New
+  `viewedUserId` state (defaults to `effectiveUserId`, resets whenever it
+  changes) drives `useLoadHistory`; a new switcher pill above the Loads
+  section (reuses the existing `DriverPicker.tsx` component, wrapped in a
+  `FullscreenModal` here since it's normally rendered inline on the
+  Dispatch tab) lets admin/dispatch pick any company member, including
+  themselves. Section/tile title reads "My Loads" whenever
+  `viewedUserId === effectiveUserId`, else "Loads."
+- **Compliance moved up**, now directly after Loads (was last). Its
+  Credentials fetch (profile/license/medical/twic) is now scoped to
+  `viewedUserId` instead of `effectiveUserId`, so an admin viewing another
+  driver's loads sees that same driver's credentials. Terminal Cards
+  needed no change — already company-wide, no per-user scoping.
+- **New equipment selector**, admin/dispatch/lead only
+  (`canPickEquipment` — deliberately a *wider* set than
+  `canViewOthers`, and a narrower read-only carve-out from the general
+  equipment-edit permission matrix, per explicit user instruction for
+  this specific feature). New `app/planner/components/EquipmentComboPicker.tsx`
+  — no existing lightweight "pick any combo" component existed
+  (`EquipmentModal`/`SoloEquipmentModal`/admin's `CoupleModal` are all
+  coupled to claim/couple RPCs); this is a pure read-only picker over the
+  already-fetched `equipment.combos` array, no RPCs. A privileged role's
+  pick (`reportComboId`) overrides which combo Scale/Service/Wash History
+  reports on; everyone else keeps seeing their own Planner-selected
+  equipment, unchanged.
+- **Differentiated sub-labels**, replacing one shared generic
+  "equipment label" string across all three history tiles: Scale History
+  now shows tare weight (`Tare {tare_lbs} lbs`, straight off the resolved
+  combo); Service History shows next service due, computed via
+  `SoloEquipmentModal.tsx`'s existing `computeUnitServiceDue` (now
+  exported, along with its `UnitServiceDue`/`ServiceRecordLite` types,
+  rather than reimplemented — same due-computation the driver's own
+  equipment modal report line already uses); Wash History shows the most
+  recent `wash_records.washed_at` for the combo's truck (or trailer, if
+  the combo has no truck).
+
+**Not live-verified this pass** — same category of gap this project has
+flagged repeatedly for role-matrix work: no real dispatch/lead-role login
+was available to exercise the Reports page's driver/equipment pickers
+end-to-end, and the new `averaging_period_type` migration hasn't been
+applied yet, so the Planner's new running-average card can't show real
+numbers until the user runs it. Everything else in this batch (items 1-6,
+8, and the rename half of 7) is verifiable against the existing demo/QA
+company without any new migration.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.

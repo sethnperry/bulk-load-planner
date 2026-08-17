@@ -63,6 +63,7 @@ import { addDaysISO_, daysUntilISO_, formatMDYWithCountdown_, formatMDYWithTime_
 import { themeFill, themeTextOnFill } from "./theme";
 import { normState } from "./utils/normalize";
 import { cgSliderToBias, bestLbsPerGallon, planForGallons, CG_NEUTRAL } from "./utils/planMath";
+import { averagingPeriodStart, AVERAGING_PERIOD_LABELS, type AveragingPeriodType } from "./utils/incentiveAveragingPeriod";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 import type { ActiveComp, CompPlanInput, CompRow, ProductRow } from "./types";
@@ -310,6 +311,20 @@ export default function CalculatorPage() {
   // instead of opening the product picker directly -- the picker only opens
   // via the "Edit Comp N Product" action button, per the design handoff).
   const [activeSlotLetter, setActiveSlotLetter] = useState(1);
+  // Separate from activeSlotLetter on purpose. activeSlotLetter mirrors
+  // PresetDial's own scroll-centered position -- it changes on a mere
+  // swipe/preview, with no real load involved (PresetDial's own comment:
+  // scrolling "deliberately does NOT itself trigger any action"). But it
+  // used to ALSO be what got tagged onto load_log.plan_slot at load time,
+  // so a driver who previewed a different letter without tapping it could
+  // get a completed load tagged with the wrong preset -- confirmed live,
+  // this is why refresh sometimes highlighted the wrong letter even though
+  // the restored compPlan content itself was correct. lastLoadedSlot only
+  // ever changes inside a genuine load action (PresetDial's onLoad,
+  // PresetActionSheet's onLoad, or the mount-time resync below) and is
+  // what actually gets tagged to the load -- activeSlotLetter still drives
+  // "Save plan {letter}" unchanged.
+  const [lastLoadedSlot, setLastLoadedSlot] = useState<number | null>(null);
   const [selectedComp, setSelectedComp] = useState<number | null>(null);
   // One-shot sync target for PresetDial -- set once the last-completed
   // load's own plan_slot resolves after mount, so the dial's highlighted
@@ -659,17 +674,27 @@ export default function CalculatorPage() {
   const predAppliedForRef = useRef<string>("");
   const userAdjustedTempRef = useRef<boolean>(false);
 
-  // Mark as user-adjusted whenever tempF changes AFTER a prediction has been applied
+  // Mark as user-adjusted whenever tempF changes AFTER a prediction has been
+  // applied. Real bug fixed here: this used to check only whether
+  // predAppliedForRef was non-empty -- but the auto-apply effect below sets
+  // that ref in the SAME tick it calls setTempF, so this effect's own next
+  // run (triggered by that very auto-apply) always saw a non-empty ref and
+  // incorrectly marked the auto-apply's own change as a manual edit. That
+  // permanently blocked ANY future re-application of a fresh prediction for
+  // that city/state -- confirmed live, this is why the modal could show a
+  // newer number than the button/load payload ever received. Now compares
+  // the new value against the prediction itself: only a change that doesn't
+  // match the last-known prediction counts as a genuine manual edit.
   const prevTempFRef = useRef<number>(tempF);
   useEffect(() => {
     if (Math.abs(tempF - prevTempFRef.current) > 0.1) {
-      // Only mark as user-adjusted if a prediction has already been applied
-      if (predAppliedForRef.current !== "") {
+      const matchesPrediction = predictedFuelTempF != null && Math.abs(tempF - predictedFuelTempF) < 0.1;
+      if (predAppliedForRef.current !== "" && !matchesPrediction) {
         userAdjustedTempRef.current = true;
       }
     }
     prevTempFRef.current = tempF;
-  }, [tempF]);
+  }, [tempF, predictedFuelTempF]);
 
   // Reset on city/state change
   useEffect(() => {
@@ -678,15 +703,23 @@ export default function CalculatorPage() {
     prevTempFRef.current = tempF;
   }, [location.selectedCity, location.selectedState]);
 
-  // Apply prediction to slider when it arrives — skip if user already adjusted
+  // Apply prediction to slider when it arrives -- skip if the driver has
+  // genuinely adjusted it since. Previously this stopped re-applying the
+  // instant predAppliedForRef matched the current city/state key, even if
+  // a LATER fetch (e.g. the periodic refresh in useFuelTempPrediction.ts)
+  // returned a materially different number -- meaning a driver who left
+  // the app open all day could keep seeing a temp from hours earlier even
+  // though the modal's own banner (which reads predictedFuelTempF
+  // directly, bypassing this effect) had already moved on. Now re-checks
+  // the actual value each time, so any later fetch with a real delta still
+  // lands on the button/load payload, not just the modal.
   useEffect(() => {
     if (predictedFuelTempF == null) return;
-    const key = `${location.selectedCity}|${location.selectedState}`;
-    if (predAppliedForRef.current === key) return;
     if (userAdjustedTempRef.current) return;
+    if (Math.abs(tempF - predictedFuelTempF) < 0.1) return;
     setTempF(predictedFuelTempF);
-    predAppliedForRef.current = key;
-  }, [predictedFuelTempF, location.selectedCity, location.selectedState]);
+    predAppliedForRef.current = `${location.selectedCity}|${location.selectedState}`;
+  }, [predictedFuelTempF, location.selectedCity, location.selectedState, tempF]);
 
   // Initialize compPlan entries when compartments change
   // Merges with hydratedCompPlanRef so saved products survive even if
@@ -1010,8 +1043,74 @@ export default function CalculatorPage() {
     onPostLoadComplete: planSlots.refreshLastLoad,
     predictedTempF: predictedFuelTempF,
     trainingTraineeId: traineeId || null,
-    activeSlotLetter,
+    // Pass lastLoadedSlot (the preset actually loaded via a real tap), not
+    // activeSlotLetter (the dial's cosmetic scroll position) -- see the
+    // comment on lastLoadedSlot's declaration above for why. The hook's own
+    // "activeSlotLetter" arg name/doc comment ("which named preset was
+    // active when LOAD was tapped") already describes this value's real
+    // meaning; left as-is inside useLoadWorkflow.ts to keep this a
+    // page.tsx-only fix.
+    activeSlotLetter: lastLoadedSlot,
   });
+
+  // ── Incentive running-average card ────────────────────────────────────────
+  // Left side of the new card is this load's own points (same value the
+  // "You earned X points" line above already shows); right side is the
+  // average recovered points per load across the admin-configured
+  // averaging period (see IncentiveSettingsModal.tsx / CLAUDE.md's
+  // "Incentive system" -- Sunday-start weeks, calendar month/quarter/year
+  // to date, no anchor date). Whole card only renders once
+  // incentive_settings.enabled is confirmed true for this company.
+  const [incentiveEnabled, setIncentiveEnabled] = useState(false);
+  const [averagingPeriodType, setAveragingPeriodType] = useState<AveragingPeriodType>("weekly");
+  const [avgRecoveredPoints, setAvgRecoveredPoints] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!shell.companyId) { setIncentiveEnabled(false); return; }
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from("incentive_settings")
+        .select("enabled, averaging_period_type")
+        .eq("company_id", shell.companyId)
+        .maybeSingle();
+      if (cancelled) return;
+      setIncentiveEnabled(Boolean(data?.enabled));
+      setAveragingPeriodType((data?.averaging_period_type as AveragingPeriodType) ?? "weekly");
+    })();
+    return () => { cancelled = true; };
+  }, [shell.companyId]);
+
+  // Refetches whenever a load actually completes (loadWorkflow.loadReport
+  // changes) so the average reflects the just-finished load immediately,
+  // not just on next mount -- same trigger the "You earned X points" line
+  // above already relies on.
+  useEffect(() => {
+    if (!incentiveEnabled || !effectiveUserId || !shell.companyId) { setAvgRecoveredPoints(null); return; }
+    let cancelled = false;
+    (async () => {
+      const periodStart = averagingPeriodStart(averagingPeriodType, new Date());
+      const { data } = await supabase
+        .from("load_points")
+        .select("load_id, recovered_points")
+        .eq("driver_id", effectiveUserId)
+        .eq("company_id", shell.companyId)
+        .gte("created_at", `${periodStart}T00:00:00Z`);
+      if (cancelled) return;
+      if (!data || data.length === 0) { setAvgRecoveredPoints(null); return; }
+      // Sum per load first (a split load has one load_points row per
+      // compartment), then average across distinct loads -- mirrors
+      // PayrollReportModal.tsx's own totalPoints / loadIds.size pattern.
+      const byLoad = new Map<string, number>();
+      for (const row of data as any[]) {
+        byLoad.set(row.load_id, (byLoad.get(row.load_id) ?? 0) + Number(row.recovered_points ?? 0));
+      }
+      const totals = Array.from(byLoad.values());
+      const avg = totals.reduce((a, b) => a + b, 0) / totals.length;
+      setAvgRecoveredPoints(avg);
+    })();
+    return () => { cancelled = true; };
+  }, [incentiveEnabled, averagingPeriodType, effectiveUserId, shell.companyId, loadWorkflow.loadReport]);
 
   // "Back to Planner" -- per explicit follow-up, this must genuinely undo
   // everything: no load logged AND the terminal card reverted to whatever
@@ -1046,11 +1145,16 @@ export default function CalculatorPage() {
     }
     // Sync the preset dial's highlighted letter to match whichever preset
     // the just-restored plan actually came from. Guarded to fire once and
-    // only while the dial is still sitting at its untouched default, so a
-    // preset the driver has already manually tapped (in the narrow window
-    // before this DB round trip resolves) is never clobbered.
-    if (planSlots.lastLoadReport?.plan_slot && !presetDialSyncedRef.current && activeSlotLetter === 1) {
+    // only while no genuine load action has happened yet this session
+    // (lastLoadedSlot == null) -- previously gated on activeSlotLetter === 1,
+    // which assumed an untouched dial always reads exactly 1, but a mere
+    // scroll-preview (no tap) moves activeSlotLetter without loading
+    // anything, silently breaking this guard before the DB round trip even
+    // resolved. lastLoadedSlot is immune to scroll, so this fires reliably
+    // regardless of dial timing.
+    if (planSlots.lastLoadReport?.plan_slot && !presetDialSyncedRef.current && lastLoadedSlot == null) {
       presetDialSyncedRef.current = true;
+      setLastLoadedSlot(planSlots.lastLoadReport.plan_slot);
       setActiveSlotLetter(planSlots.lastLoadReport.plan_slot);
       setPresetDialSyncTo(planSlots.lastLoadReport.plan_slot);
     }
@@ -1295,6 +1399,7 @@ const lastProductInfoById = useMemo(() => {
           disabledReason={!location.selectedTerminalId ? "Select a terminal first" : "Syncing presets…"}
           onLoad={(n) => {
             planSlots.loadFromSlot(n);
+            setLastLoadedSlot(n);
             setCaptureBaselineNext(true);
             setCheckAvailabilityNext(true);
           }}
@@ -1312,6 +1417,7 @@ const lastProductInfoById = useMemo(() => {
         onLoad={() => {
           if (presetSheetSlot != null) {
             planSlots.loadFromSlot(presetSheetSlot);
+            setLastLoadedSlot(presetSheetSlot);
             setCaptureBaselineNext(true);
             setCheckAvailabilityNext(true);
           }
@@ -1743,10 +1849,33 @@ const lastProductInfoById = useMemo(() => {
               )}
               {loadReport?.recovered_points != null && loadReport.recovered_points > 0 && (
                 <div style={{ fontSize: 12, fontWeight: 700, color: "#4ade80", marginTop: 6 }}>
-                  🎉 You earned {loadReport.recovered_points.toFixed(1)} points on this load
+                  You earned {loadReport.recovered_points.toFixed(1)} points on this load
                 </div>
               )}
             </div>
+
+            {/* Incentive running-average card -- see the effects that
+                compute incentiveEnabled/averagingPeriodType/avgRecoveredPoints
+                above. Only rendered once the company has actually turned
+                the incentive system on. */}
+            {incentiveEnabled && (
+              <div style={{ borderRadius: 16, background: "rgba(255,255,255,0.03)", padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.4)", textTransform: "uppercase" as const, letterSpacing: 0.4 }}>This Load</div>
+                  <div style={{ fontSize: 20, fontWeight: 700, color: "#4ade80" }}>
+                    {loadReport?.recovered_points != null ? loadReport.recovered_points.toFixed(1) : "—"} pts
+                  </div>
+                </div>
+                <div style={{ textAlign: "right" as const }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.4)", textTransform: "uppercase" as const, letterSpacing: 0.4 }}>
+                    {AVERAGING_PERIOD_LABELS[averagingPeriodType]} Avg
+                  </div>
+                  <div style={{ fontSize: 20, fontWeight: 700, color: "#fff" }}>
+                    {avgRecoveredPoints != null ? `${avgRecoveredPoints.toFixed(1)} pts` : "—"}
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Footnote */}
             <div style={{ fontSize: 10, color: "rgba(255,255,255,0.32)", textAlign: "center" as const, lineHeight: 1.4 }}>

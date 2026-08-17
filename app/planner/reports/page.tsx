@@ -11,13 +11,16 @@
 // Deliberately reuses the existing report modals as-is (MyLoadsModal,
 // ScaleHistoryModal, RecordHistoryModal, ExpirationModal) rather than
 // rebuilding their data/UI here -- this page is just a front door that
-// wires them up. Scale/Service/Wash History are scoped to whichever
-// equipment combo is currently selected on the Planner (shared via
-// CalculatorShellContext, so it's the same selection, not a second picker);
-// Expiring Items reuses the ExpirationModal ShellChrome already mounts
-// globally, so it doesn't even need a second instance here. Terminal Cards
-// and Credentials already have full pages of their own (the Cards tab), so
-// their tiles just navigate there.
+// wires them up. Terminal Cards and Credentials already have full pages of
+// their own (the Cards tab), so their tiles just navigate there.
+//
+// 2026-08-17 overhaul: admin/dispatch can now switch whose Loads/Credentials
+// they're viewing (matches the existing "other drivers' loads" permission
+// matrix in CLAUDE.md -- dispatch+admin, not lead), and admin/dispatch/lead
+// get an equipment picker to scope Scale/Service/Wash History to any
+// company combo, not just their own currently-selected Planner equipment.
+// Plain drivers see none of this -- unchanged, still their own identity and
+// their own Planner-selected equipment throughout.
 
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
@@ -29,12 +32,35 @@ import RecordHistoryModal from "../modals/RecordHistoryModal";
 import TerminalCardsPickerModal from "../modals/TerminalCardsPickerModal";
 import TerminalCardsReportModal from "../modals/TerminalCardsReportModal";
 import CredentialsReportModal, { type LicenseData, type MedicalData, type TwicData } from "../modals/CredentialsReportModal";
-import { cardStateFor, EXP_COLOR } from "../cards/cardTheme";
+import DriverPicker from "../components/DriverPicker";
+import EquipmentComboPicker from "../components/EquipmentComboPicker";
+import { FullscreenModal } from "@/lib/ui/FullscreenModal";
+import { fetchServiceTypes } from "../modals/ServiceTypeManager";
+import { computeUnitServiceDue } from "../modals/SoloEquipmentModal";
+import { cardStateFor, type CardState } from "../cards/cardTheme";
 import { daysUntilISO_ } from "../utils/dates";
 import { GRAPHITE, GRAPHITE_DARKER } from "../theme";
 import { buildTerminalCardsReportBody, type TerminalCardsScope, type TerminalStatusItem } from "./buildTerminalCardsReport";
 
 type EquipRow = { truck_id?: string; trailer_id?: string; truck_name?: string; trailer_name?: string; active: boolean | null };
+
+// cardTheme.ts's own EXP_COLOR assumes a light "pearl card-wallet"
+// background (its own doc comment says so) -- ReportTile below renders on
+// a dark graphite gradient, so EXP_COLOR's near-black "valid"/"not_set"
+// colors were invisible there. Same fix already applied in
+// FleetCardsModal.tsx/FleetCredentialsModal.tsx/dispatch/page.tsx for the
+// identical reason -- same state names, colors re-picked for a dark surface.
+const DARK_EXP_COLOR: Record<CardState, string> = {
+  not_set: "rgba(255,255,255,0.35)",
+  valid: "rgba(255,255,255,0.85)",
+  expiring: "#f59e0b",
+  expired: "#ef4444",
+  inactive: "rgba(255,255,255,0.35)",
+};
+
+function fmtDate(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, { month: "2-digit", day: "2-digit", year: "numeric" });
+}
 
 // ── Section label + tile ─────────────────────────────────────────────────────
 
@@ -43,6 +69,23 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
     <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase" as const, color: "rgba(255,255,255,0.35)", marginBottom: 8 }}>
       {children}
     </div>
+  );
+}
+
+function SwitcherPill({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        display: "flex", alignItems: "center", gap: 6, padding: "7px 12px", borderRadius: 999,
+        border: "1px solid rgba(255,255,255,0.14)", background: "rgba(255,255,255,0.04)",
+        color: "rgba(255,255,255,0.75)", fontSize: 12, fontWeight: 700, cursor: "pointer", marginBottom: 10,
+      }}
+    >
+      {label}
+      <span style={{ color: "rgba(255,255,255,0.4)" }}>›</span>
+    </button>
   );
 }
 
@@ -80,27 +123,27 @@ function ReportTile({ title, sub, stat, statColor, onClick, disabled }: {
 
 export default function ReportsPage() {
   const shell = useCalculatorShell();
-  const { effectiveUserId, equipment, terminals, expirations } = shell;
+  const { effectiveUserId, equipment, terminals, expirations, role } = shell;
 
-  const loadHistory = useLoadHistory(effectiveUserId);
-  useEffect(() => { loadHistory.fetch(null); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // Other drivers' loads/credentials are dispatch+admin only, matching the
+  // permission matrix already documented in CLAUDE.md ("Other drivers'
+  // loads" -- dispatch, admin; lead does NOT get this). Equipment picking
+  // below is deliberately a wider set (admin/dispatch/lead) -- a separate,
+  // narrower read-only carve-out for this specific reports view, not a
+  // change to the general equipment-edit permission matrix.
+  const canViewOthers = role === "admin" || role === "dispatch";
+  const canPickEquipment = role === "admin" || role === "dispatch" || role === "lead";
+
+  const [viewedUserId, setViewedUserId] = useState(effectiveUserId);
+  const [viewedUserName, setViewedUserName] = useState("");
+  useEffect(() => { setViewedUserId(effectiveUserId); setViewedUserName(""); }, [effectiveUserId]);
+
+  const loadHistory = useLoadHistory(viewedUserId);
+  useEffect(() => { loadHistory.fetch(null); }, [viewedUserId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [companyId, setCompanyId] = useState<string | null>(null);
   const [trucks, setTrucks] = useState<EquipRow[]>([]);
   const [trailers, setTrailers] = useState<EquipRow[]>([]);
-  const [driverName, setDriverName] = useState("");
-  const [license, setLicense] = useState<LicenseData>(null);
-  const [medical, setMedical] = useState<MedicalData>(null);
-  const [twic, setTwic] = useState<TwicData>(null);
-
-  const credSummary = useMemo(() => {
-    const dates = [license?.expiration_date, medical?.expiration_date, twic?.expiration_date].filter(Boolean) as string[];
-    if (dates.length === 0) return { label: "Not on file", color: "rgba(0,0,0,0.4)" };
-    const soonestDays = Math.min(...dates.map((d) => daysUntilISO_(d) ?? 99999));
-    const soonestIso = dates[dates.map((d) => daysUntilISO_(d) ?? 99999).indexOf(soonestDays)];
-    const state = cardStateFor(soonestIso);
-    return { label: `${soonestDays}d to next exp.`, color: EXP_COLOR[state] };
-  }, [license, medical, twic]);
 
   useEffect(() => {
     if (!effectiveUserId) return;
@@ -116,19 +159,41 @@ export default function ReportsPage() {
         setTrucks((t ?? []) as EquipRow[]);
         setTrailers((tr ?? []) as EquipRow[]);
       }
+    })();
+  }, [effectiveUserId]);
 
+  const [driverName, setDriverName] = useState("");
+  const [license, setLicense] = useState<LicenseData>(null);
+  const [medical, setMedical] = useState<MedicalData>(null);
+  const [twic, setTwic] = useState<TwicData>(null);
+
+  const credSummary = useMemo(() => {
+    const dates = [license?.expiration_date, medical?.expiration_date, twic?.expiration_date].filter(Boolean) as string[];
+    if (dates.length === 0) return { label: "Not on file", color: DARK_EXP_COLOR.not_set };
+    const soonestDays = Math.min(...dates.map((d) => daysUntilISO_(d) ?? 99999));
+    const soonestIso = dates[dates.map((d) => daysUntilISO_(d) ?? 99999).indexOf(soonestDays)];
+    const state = cardStateFor(soonestIso);
+    return { label: `${soonestDays}d to next exp.`, color: DARK_EXP_COLOR[state] };
+  }, [license, medical, twic]);
+
+  // Credentials are scoped to whichever driver is currently picked (same as
+  // Loads) -- not effectiveUserId, so an admin viewing another driver's
+  // loads sees that same driver's credentials, not their own.
+  useEffect(() => {
+    if (!viewedUserId) return;
+    (async () => {
       const [{ data: profile }, { data: lic }, { data: med }, { data: tw }] = await Promise.all([
-        supabase.from("profiles").select("display_name").eq("user_id", effectiveUserId).maybeSingle(),
-        supabase.from("driver_licenses").select("*").eq("user_id", effectiveUserId).maybeSingle(),
-        supabase.from("driver_medical_cards").select("*").eq("user_id", effectiveUserId).maybeSingle(),
-        supabase.from("driver_twic_cards").select("*").eq("user_id", effectiveUserId).maybeSingle(),
+        supabase.from("profiles").select("display_name").eq("user_id", viewedUserId).maybeSingle(),
+        supabase.from("driver_licenses").select("*").eq("user_id", viewedUserId).maybeSingle(),
+        supabase.from("driver_medical_cards").select("*").eq("user_id", viewedUserId).maybeSingle(),
+        supabase.from("driver_twic_cards").select("*").eq("user_id", viewedUserId).maybeSingle(),
       ]);
       setDriverName((profile?.display_name as string | null) ?? "");
       setLicense((lic as LicenseData) ?? null);
       setMedical((med as MedicalData) ?? null);
       setTwic((tw as TwicData) ?? null);
     })();
-  }, [effectiveUserId]);
+  }, [viewedUserId]);
 
   const [myLoadsOpen, setMyLoadsOpen] = useState(false);
   const [scaleHistoryOpen, setScaleHistoryOpen] = useState(false);
@@ -137,10 +202,75 @@ export default function ReportsPage() {
   const [cityPickerOpen, setCityPickerOpen] = useState(false);
   const [terminalReport, setTerminalReport] = useState<{ title: string; body: string } | null>(null);
   const [credentialsReportOpen, setCredentialsReportOpen] = useState(false);
+  const [driverPickerOpen, setDriverPickerOpen] = useState(false);
+  const [equipPickerOpen, setEquipPickerOpen] = useState(false);
+  const [reportComboId, setReportComboId] = useState<string | null>(null);
 
-  const combo = equipment.selectedCombo;
-  const hasEquipment = !!combo;
-  const equipmentSub = hasEquipment ? (equipment.equipmentLabel ?? "Selected equipment") : "Select equipment on the Planner first";
+  const isViewingOther = viewedUserId !== effectiveUserId;
+  const loadsTitle = canViewOthers && isViewingOther ? "Loads" : "My Loads";
+
+  // Privileged roles can override which combo Scale/Service/Wash History
+  // reports on; everyone else always sees their own Planner-selected
+  // equipment, unchanged.
+  const resolvedCombo = useMemo(() => {
+    if (canPickEquipment && reportComboId) {
+      return (equipment.combos ?? []).find((c) => String(c.combo_id) === String(reportComboId)) ?? null;
+    }
+    return equipment.selectedCombo;
+  }, [canPickEquipment, reportComboId, equipment.combos, equipment.selectedCombo]);
+
+  const resolvedLabel = useMemo(() => {
+    if (!resolvedCombo) return null;
+    const name = String(resolvedCombo.combo_name ?? "").trim();
+    if (name) return name;
+    const t = equipment.truckNameById[resolvedCombo.truck_id ?? ""] ?? resolvedCombo.truck_id ?? "?";
+    const tr = equipment.trailerNameById[resolvedCombo.trailer_id ?? ""] ?? resolvedCombo.trailer_id ?? "?";
+    return `Truck ${t} / Trailer ${tr}`;
+  }, [resolvedCombo, equipment.truckNameById, equipment.trailerNameById]);
+
+  const hasEquipment = !!resolvedCombo;
+  const equipmentFallbackSub = hasEquipment
+    ? (resolvedLabel ?? "Selected equipment")
+    : (canPickEquipment ? "Tap Select Equipment above" : "Select equipment on the Planner first");
+
+  // Differentiated sub-labels (2026-08-17): tare weight for Scale, next
+  // service due for Service, last wash date for Wash -- previously all
+  // three shared one identical "equipmentSub" unit-number label.
+  const [serviceSub, setServiceSub] = useState<string | null>(null);
+  const [washSub, setWashSub] = useState<string | null>(null);
+
+  useEffect(() => {
+    setServiceSub(null);
+    setWashSub(null);
+    if (!companyId || !resolvedCombo) return;
+    const truckId = resolvedCombo.truck_id ?? "";
+    const trailerId = resolvedCombo.trailer_id ?? "";
+    if (!truckId && !trailerId) return;
+    let cancelled = false;
+    (async () => {
+      const types = await fetchServiceTypes(companyId);
+      if (cancelled) return;
+      const unitLabel: "Truck" | "Trailer" = truckId ? "Truck" : "Trailer";
+      const idField = truckId ? "truck_id" : "trailer_id";
+      const idValue = truckId || trailerId;
+      const [{ data: records }, { data: washes }] = await Promise.all([
+        supabase.from("service_records").select("service_type_id, date, reading_value, created_at").eq(idField, idValue),
+        supabase.from("wash_records").select("washed_at").eq(idField, idValue).order("washed_at", { ascending: false }).limit(1),
+      ]);
+      if (cancelled) return;
+      const due = computeUnitServiceDue(unitLabel, (records ?? []) as any, types);
+      setServiceSub(due.display);
+      const washedAt = (washes ?? [])[0]?.washed_at ?? null;
+      setWashSub(washedAt ? `Last washed ${fmtDate(washedAt)}` : "No wash recorded");
+    })();
+    return () => { cancelled = true; };
+  }, [companyId, resolvedCombo?.combo_id, resolvedCombo?.truck_id, resolvedCombo?.trailer_id]);
+
+  const scaleSub = hasEquipment && resolvedCombo?.tare_lbs != null
+    ? `Tare ${resolvedCombo.tare_lbs.toLocaleString()} lbs`
+    : equipmentFallbackSub;
+  const serviceSubFinal = hasEquipment && serviceSub ? serviceSub : equipmentFallbackSub;
+  const washSubFinal = hasEquipment && washSub ? washSub : equipmentFallbackSub;
 
   const terminalsExpiringSoon = useMemo(() => {
     let count = 0;
@@ -190,44 +320,19 @@ export default function ReportsPage() {
       <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
 
         <div>
-          <SectionLabel>Loads</SectionLabel>
+          {canViewOthers && (
+            <SwitcherPill
+              label={isViewingOther ? `Viewing ${viewedUserName || "driver"}` : "Viewing myself"}
+              onClick={() => setDriverPickerOpen(true)}
+            />
+          )}
+          <SectionLabel>{loadsTitle}</SectionLabel>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             <ReportTile
-              title="My Loads"
+              title={loadsTitle}
               sub="Completed and planned loads across all equipment"
               stat={loadHistory.loading ? undefined : `${loadHistory.rows.length}`}
               onClick={() => setMyLoadsOpen(true)}
-            />
-          </div>
-        </div>
-
-        <div>
-          <SectionLabel>Equipment</SectionLabel>
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <ReportTile
-              title="Scale History"
-              sub={equipmentSub}
-              onClick={() => setScaleHistoryOpen(true)}
-              disabled={!hasEquipment}
-            />
-            <ReportTile
-              title="Service History"
-              sub={equipmentSub}
-              onClick={() => setServiceHistoryOpen(true)}
-              disabled={!hasEquipment}
-            />
-            <ReportTile
-              title="Wash History"
-              sub={equipmentSub}
-              onClick={() => setWashHistoryOpen(true)}
-              disabled={!hasEquipment}
-            />
-            <ReportTile
-              title="Expiring Items"
-              sub="Truck & trailer permits, terminal card renewals"
-              stat={expiringCount > 0 ? `${expiringCount}` : "None"}
-              statColor={expiringCount > 0 ? "#b91c1c" : undefined}
-              onClick={() => shell.setExpModalOpen(true)}
             />
           </div>
         </div>
@@ -252,11 +357,48 @@ export default function ReportsPage() {
           </div>
         </div>
 
+        <div>
+          <SectionLabel>Equipment</SectionLabel>
+          {canPickEquipment && (
+            <SwitcherPill
+              label={resolvedLabel ?? "Select Equipment"}
+              onClick={() => setEquipPickerOpen(true)}
+            />
+          )}
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <ReportTile
+              title="Scale History"
+              sub={scaleSub}
+              onClick={() => setScaleHistoryOpen(true)}
+              disabled={!hasEquipment}
+            />
+            <ReportTile
+              title="Service History"
+              sub={serviceSubFinal}
+              onClick={() => setServiceHistoryOpen(true)}
+              disabled={!hasEquipment}
+            />
+            <ReportTile
+              title="Wash History"
+              sub={washSubFinal}
+              onClick={() => setWashHistoryOpen(true)}
+              disabled={!hasEquipment}
+            />
+            <ReportTile
+              title="Expiring Items"
+              sub="Truck & trailer permits, terminal card renewals"
+              stat={expiringCount > 0 ? `${expiringCount}` : "None"}
+              statColor={expiringCount > 0 ? "#b91c1c" : undefined}
+              onClick={() => shell.setExpModalOpen(true)}
+            />
+          </div>
+        </div>
+
       </div>
 
       <MyLoadsModal
         open={myLoadsOpen} onClose={() => setMyLoadsOpen(false)}
-        authUserId={effectiveUserId}
+        authUserId={viewedUserId}
         rows={loadHistory.rows}
         loading={loadHistory.loading}
         error={loadHistory.error}
@@ -274,16 +416,16 @@ export default function ReportsPage() {
           <ScaleHistoryModal
             open={scaleHistoryOpen} onClose={() => setScaleHistoryOpen(false)}
             companyId={companyId}
-            comboId={combo!.combo_id}
-            truckName={equipment.truckNameById[combo!.truck_id ?? ""]}
-            trailerName={equipment.trailerNameById[combo!.trailer_id ?? ""]}
+            comboId={resolvedCombo!.combo_id}
+            truckName={equipment.truckNameById[resolvedCombo!.truck_id ?? ""]}
+            trailerName={equipment.trailerNameById[resolvedCombo!.trailer_id ?? ""]}
           />
           <RecordHistoryModal
             open={serviceHistoryOpen} onClose={() => setServiceHistoryOpen(false)}
             kind="service" title="Service History"
             companyId={companyId}
-            truckId={combo!.truck_id ?? ""}
-            trailerId={combo!.trailer_id ?? ""}
+            truckId={resolvedCombo!.truck_id ?? ""}
+            trailerId={resolvedCombo!.trailer_id ?? ""}
             trucks={trucks as any}
             trailers={trailers as any}
           />
@@ -291,8 +433,8 @@ export default function ReportsPage() {
             open={washHistoryOpen} onClose={() => setWashHistoryOpen(false)}
             kind="wash" title="Wash History"
             companyId={companyId}
-            truckId={combo!.truck_id ?? ""}
-            trailerId={combo!.trailer_id ?? ""}
+            truckId={resolvedCombo!.truck_id ?? ""}
+            trailerId={resolvedCombo!.trailer_id ?? ""}
             trucks={trucks as any}
             trailers={trailers as any}
           />
@@ -312,6 +454,26 @@ export default function ReportsPage() {
         open={credentialsReportOpen} onClose={() => setCredentialsReportOpen(false)}
         driverName={driverName} license={license} medical={medical} twic={twic}
       />
+
+      {canViewOthers && (
+        <FullscreenModal open={driverPickerOpen} title="View Whose Reports?" onClose={() => setDriverPickerOpen(false)}>
+          <DriverPicker
+            companyId={companyId}
+            onPick={(id, name) => { setViewedUserId(id); setViewedUserName(name); setDriverPickerOpen(false); }}
+          />
+        </FullscreenModal>
+      )}
+
+      {canPickEquipment && (
+        <EquipmentComboPicker
+          open={equipPickerOpen}
+          onClose={() => setEquipPickerOpen(false)}
+          combos={equipment.combos ?? []}
+          truckNameById={equipment.truckNameById}
+          trailerNameById={equipment.trailerNameById}
+          onPick={(comboId) => { setReportComboId(comboId); setEquipPickerOpen(false); }}
+        />
+      )}
     </div>
   );
 }
