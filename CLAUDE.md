@@ -3789,6 +3789,58 @@ inspect webmail rendering from this session) — `tsc --noEmit` and `next
 build` both clean; worth a real re-test of the invite flow with a
 disposable second account before considering this fully closed.
 
+**Follow-up same day: incentive points now calculate unconditionally,
+`enabled` only gates display.** User asked whether turning on Incentives
+retroactively calculates existing loads or only starts from that moment
+(only from that moment — `calculate_load_points` no-op'd entirely whenever
+`incentive_settings.enabled` was false, so any load completed before the
+toggle flips on never gets a `load_points` row, permanently). Backfilling
+that gap was technically straightforward (the density math it needs,
+`actual_lbs / actual_gallons`, is already stored per compartment on every
+historical load — nothing live-sensor-dependent), but the existing RPC is
+owner-gated (`v_user_id != auth.uid()` raises `unauthorized`), so a real
+bulk backfill would've needed a new admin-triggered variant, plus real
+product decisions (how far back, one-shot vs. automatic, whether it
+retroactively flags already-exported Period Reports as stale).
+
+User's own follow-up proposal sidesteps needing a backfill mechanism at
+all: **always run the calculation, and let `enabled` control only whether
+the data is surfaced.** Migration
+`supabase/migrations/20260817010000_incentive_calc_always_runs.sql`
+(**not yet applied** — Supabase SQL editor, as always) replaces
+`calculate_load_points`'s early-exit guard from `if not found or not
+v_enabled` to just `if not found` — it still requires an
+`incentive_settings` row to exist at all (so `weight_cap_lbs` has a real
+value to calculate against; a company that's never opened Incentive
+Settings still has nothing to compute), but no longer skips calculation
+just because the driver-facing toggle is off. The function's own returned
+`enabled` field was changed from a hardcoded `true` to the real
+`v_enabled` value, since `useLoadWorkflow.ts` already reads exactly that
+field (`if (pointsRes?.enabled) recoveredPoints = ...`) to decide whether
+to populate `loadReport.recovered_points` at all — this one-line change is
+what keeps the driver-facing "You earned X points" banner correctly gated
+even though `load_points` itself is now always kept current underneath.
+Every other display surface was already independently gating on
+`incentive_settings.enabled` rather than inferring it from data presence
+(`UnderloadingDashboardModal.tsx`'s own `incentivesEnabled` check, the
+Planner's running-average card's `incentiveEnabled` state) — confirmed via
+code read across all four `recovered_points`/`load_points` consumers
+(`app/planner/page.tsx`, `app/admin/PayrollReportModal.tsx` — deliberately
+ungated, an admin tool that should show real numbers whenever they exist,
+`app/admin/UnderloadingDashboardModal.tsx`, `app/admin/IncentiveSettingsModal.tsx`
+— doesn't display point data at all), so no client-side changes were
+needed anywhere else.
+
+**Explicitly does not backfill loads that completed before this migration
+ships** — `calculate_load_points` only ever runs once, right after
+`complete_load` succeeds; a load that already finished in the past already
+had its one and only chance to call it. This change only makes future
+gaps impossible (an admin can now configure benchmarks/weight cap with the
+toggle off and have real data waiting the moment they flip it on) — a true
+historical backfill for loads that already happened before today would
+still need the separate admin-triggered RPC described above, and wasn't
+built since the user's simplified proposal covers the actual ask.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.
