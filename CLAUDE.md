@@ -3700,6 +3700,26 @@ end-to-end. No new migration is needed for item 7 after the same-day
 simplification above, so the Planner's running-average card is verifiable
 against the existing demo/QA company like everything else in this batch.
 
+**Follow-up same day: removed the admin header's "Credentials" (Fleet
+Credentials) button entirely.** User live-tested it and hit a display bug
+(a second company member's name rendered as literal "Unknown" instead of
+their real name) and, in the same breath, pointed out `MemberCard.tsx`'s
+existing expanded per-member view already covers this — and covers it
+better: real license class/number/state/endorsements, examiner name, TWIC
+card number, Port IDs, and terminal groups with attachments, not just a
+flat expiry-date list. Confirmed via code read before removing anything:
+`FleetCredentialsModal.tsx` was only ever imported by `app/admin/page.tsx`
+(the two other file hits were doc-comment references in
+`app/planner/reports/page.tsx`/`app/planner/dispatch/page.tsx`, not real
+usages) — safe to delete outright rather than leave as unreachable dead
+code. Removed the button, its `fleetCredsOpen` state, the import, and the
+modal render call from `app/admin/page.tsx`; deleted
+`app/admin/FleetCredentialsModal.tsx`. The admin+dispatch RLS read grant
+those credential tables got in `20260806000000_dispatch_credential_visibility.sql`
+is untouched and still needed — `app/planner/dispatch/page.tsx`'s own
+Credentials section reads the same tables under the same grant,
+independent of this modal.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.

@@ -18,7 +18,6 @@ import type { Member } from "@/lib/ui/driver/types";
 import type { Role } from "@/lib/ui/driver/role";
 import AdminLoadsModal from "./AdminLoadsModal";
 import FleetCardsModal from "./FleetCardsModal";
-import FleetCredentialsModal from "./FleetCredentialsModal";
 import IncentiveSettingsModal from "./IncentiveSettingsModal";
 import PayrollReportModal from "./PayrollReportModal";
 import UnderloadingDashboardModal from "./UnderloadingDashboardModal";
@@ -1154,7 +1153,6 @@ export default function AdminPage() {
   const [profileModal, setProfileModal] = useState<{ member: Member; onSaved: (u: Partial<Member>) => void } | null>(null);
   const [loadsModal, setLoadsModal] = useState<{ userId: string; displayName: string } | null>(null);
   const [fleetCardsOpen, setFleetCardsOpen] = useState(false);
-  const [fleetCredsOpen, setFleetCredsOpen] = useState(false);
   const [incentiveSettingsOpen, setIncentiveSettingsOpen] = useState(false);
   const [payrollReportOpen, setPayrollReportOpen] = useState(false);
   const [underloadingOpen, setUnderloadingOpen] = useState(false);
@@ -1444,16 +1442,11 @@ export default function AdminPage() {
           universal (not a mobile-only breakpoint) -- "no more than three
           wide" is a fixed layout choice regardless of viewport, not a
           responsive fallback, and it already scales cleanly to more
-          buttons than the 5 here today (extra ones just start a new row). */}
+          buttons than the 4 here today (extra ones just start a new row). */}
       <div className="admin-header-btns" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginBottom: 28 }}>
         {(myRole === "admin" || myRole === "dispatch") && (
           <button type="button" className="admin-header-tile" onClick={() => setFleetCardsOpen(true)}>
             Fleet Cards
-          </button>
-        )}
-        {(myRole === "admin" || myRole === "dispatch") && (
-          <button type="button" className="admin-header-tile" onClick={() => setFleetCredsOpen(true)}>
-            Credentials
           </button>
         )}
         {myRole === "admin" && (
@@ -1824,7 +1817,6 @@ export default function AdminPage() {
         />
       )}
       <FleetCardsModal open={fleetCardsOpen} onClose={() => setFleetCardsOpen(false)} companyId={companyId!} />
-      <FleetCredentialsModal open={fleetCredsOpen} onClose={() => setFleetCredsOpen(false)} companyId={companyId!} />
       <IncentiveSettingsModal open={incentiveSettingsOpen} onClose={() => setIncentiveSettingsOpen(false)} companyId={companyId!} />
       <PayrollReportModal open={payrollReportOpen} onClose={() => setPayrollReportOpen(false)} companyId={companyId!} />
       <UnderloadingDashboardModal open={underloadingOpen} onClose={() => setUnderloadingOpen(false)} companyId={companyId!} />
