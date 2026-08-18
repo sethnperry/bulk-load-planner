@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
 import { ROLE_LABELS, type Role } from "./driver/role";
@@ -236,14 +237,24 @@ function NavLink({ href, icon, label, onClick, danger }: {
   onClick?: (e: React.MouseEvent<HTMLAnchorElement>) => void;
   danger?: boolean;
 }) {
+  // A plain <a href> here forces a full page reload on every nav-menu tap
+  // (Reports, Company Admin, Back to Planner, etc.) -- unlike the tab bar,
+  // which already navigates client-side via router.push. A full reload
+  // re-renders on the server first, which has no access to localStorage
+  // (where dark mode/accent color live), so the shared header briefly (or
+  // persistently, depending on hydration timing) paints its light default
+  // before client JS corrects it -- exactly the "reverts to light mode but
+  // Settings still says it's on" report. next/link fixes this the same way
+  // the tab bar already avoids it -- real client-side transition, no
+  // remount of CalculatorShellProvider for routes sharing its layout.
   return (
-    <a href={href} onClick={onClick}
+    <Link href={href} onClick={onClick}
       style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 10px", borderRadius: 6, fontSize: 13, fontWeight: 500, color: danger ? "#e05555" : "rgba(255,255,255,0.75)", textDecoration: "none", cursor: "pointer", transition: "background 100ms" }}
       onMouseEnter={e => (e.currentTarget.style.background = "rgba(255,255,255,0.05)")}
       onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
     >
       <span style={{ fontSize: 14, opacity: 0.7, width: 18, textAlign: "center" as const }}>{icon}</span>
       {label}
-    </a>
+    </Link>
   );
 }

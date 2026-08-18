@@ -3913,12 +3913,53 @@ by the client, in this doc's own "Fuel temp prediction system
 in this app has `status = 'loaded'`, never `'completed'` — a status value
 that, per this discovery, is essentially unused by the live system.
 
-Fixed in `20260818020000_incentive_backfill_status_fix.sql` (**not yet
-applied**) — only the status filter changed, same loop/core/diagnostics
-otherwise. `calculate_load_points`/`_calculate_load_points_core` were
-never affected by this bug — neither filters by status at all, since the
-normal per-load path is only ever called by `useLoadWorkflow.ts` right
-after a real `complete_load` success, with no need to re-check status.
+Fixed in `20260818020000_incentive_backfill_status_fix.sql` — only the
+status filter changed, same loop/core/diagnostics otherwise.
+`calculate_load_points`/`_calculate_load_points_core` were never affected
+by this bug — neither filters by status at all, since the normal per-load
+path is only ever called by `useLoadWorkflow.ts` right after a real
+`complete_load` success, with no need to re-check status. **Applied and
+live-verified 2026-08-18** — user re-ran the backfill against the same
+real company and confirmed it now processes real loads instead of
+returning zero.
+
+### Nav menu links caused a full page reload, breaking dark mode on non-tab destinations (2026-08-18)
+
+User report: turning on Dark Mode, then tapping a hamburger-menu
+destination (Reports, Company Admin, "anything") made the shared in-app
+header band (behind the hamburger/bell/gear icons) revert to its light
+default — while Settings' own Dark Mode toggle still correctly showed
+"on." Confirmed via `AskUserQuestion` that this was specifically the
+in-app header band, not the OS status bar strip (a different, already-
+fixed class of theme-color bug from 2026-08-06 — see "Terminal tab:
+clickable location header" section above).
+
+**Root cause**: `NavMenu.tsx`'s `NavLink` (used for every hamburger-menu
+item — Reports, Company Admin, Back to Planner, Super Admin, Learn, Sign
+Out) rendered a plain `<a href>` tag, not Next.js's `<Link>` or
+`router.push()` — unlike the tab bar (`TabBar` in
+`CalculatorLayoutClient.tsx`), which already navigates via `router.push`.
+A plain `<a href>` triggers a full browser page reload rather than a
+client-side transition. On a full reload, the page is server-rendered
+first — and the server has no access to `localStorage` (where
+`useTheme.ts` persists dark mode/accent color) — so the fresh HTML always
+paints the light default; client-side hydration is what's supposed to
+correct it afterward, but this is exactly the same "flash of default"
+mechanism this project already fixed once for the *status bar* specifically
+(the 2026-08-06 `theme-color` work) — this was the same underlying class
+of bug in a different, still-unfixed spot (the in-app header itself,
+reached via a different navigation path that fix never touched).
+
+**Fixed**: `NavLink` now renders Next.js's `<Link>` instead of a plain
+`<a>` — real client-side navigation, no full reload, no server-render-
+without-localStorage flash. For routes sharing the Planner's layout
+(Reports, in particular — a `/planner/reports` sub-route under the same
+`app/planner/layout.tsx`), this also means `CalculatorShellProvider`
+never unmounts/remounts at all when navigating there via the hamburger
+menu, matching how tab-bar navigation already behaved.
+
+Not live-verified this pass (no authenticated session available from this
+side) — `tsc --noEmit` and `next build` both clean.
 
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
