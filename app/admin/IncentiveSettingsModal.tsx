@@ -60,7 +60,10 @@ export default function IncentiveSettingsModal({ open, onClose, companyId }: Pro
   const [removedProductIds, setRemovedProductIds] = useState<Set<string>>(new Set());
   const [pickerOpen, setPickerOpen] = useState(false);
   const [backfilling, setBackfilling] = useState(false);
-  const [backfillResult, setBackfillResult] = useState<{ loads_processed: number; total_recovered_gallons: number } | null>(null);
+  const [backfillResult, setBackfillResult] = useState<{
+    loads_processed: number; total_recovered_gallons: number;
+    company_members?: number; member_loads_any_status?: number;
+  } | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -138,6 +141,8 @@ export default function IncentiveSettingsModal({ open, onClose, companyId }: Pro
       setBackfillResult({
         loads_processed: Number(data?.loads_processed ?? 0),
         total_recovered_gallons: Number(data?.total_recovered_gallons ?? 0),
+        company_members: data?.company_members != null ? Number(data.company_members) : undefined,
+        member_loads_any_status: data?.member_loads_any_status != null ? Number(data.member_loads_any_status) : undefined,
       });
     } catch (e: any) {
       setError(e?.message ?? String(e));
@@ -286,6 +291,14 @@ export default function IncentiveSettingsModal({ open, onClose, companyId }: Pro
                 {backfillResult && (
                   <div style={{ marginTop: 8, fontSize: 12, color: "#4ade80" }}>
                     Done — {backfillResult.loads_processed} load{backfillResult.loads_processed === 1 ? "" : "s"} processed, {backfillResult.total_recovered_gallons.toFixed(1)} total recovered gallons.
+                  </div>
+                )}
+                {backfillResult && backfillResult.loads_processed === 0 && (
+                  <div style={{ marginTop: 6, fontSize: 11, color: "rgba(255,255,255,0.4)", lineHeight: 1.5 }}>
+                    Diagnostic: {backfillResult.company_members ?? "?"} member(s) on this company, {backfillResult.member_loads_any_status ?? "?"} load(s) total for those members regardless of status.
+                    {backfillResult.member_loads_any_status === 0
+                      ? " None of them have any load history at all under this company."
+                      : " None of those loads are in \"completed\" status yet."}
                   </div>
                 )}
               </div>
