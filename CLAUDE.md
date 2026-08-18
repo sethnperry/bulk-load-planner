@@ -3884,6 +3884,42 @@ and `20260817020000_incentive_backfill.sql` need to be applied, in that
 order, before either the always-calculate behavior or the backfill button
 work against live data.
 
+**Applied 2026-08-18** (`20260817010000`/`20260817020000`, via the DB
+password the user shared this session — same `pg`-npm-package approach
+documented in this session's own memory, pooler host
+`aws-1-us-east-1.pooler.supabase.com` / user
+`postgres.oqeucfiyrgbymmtkiatg`; confirmed live via `pg_proc` and
+`pg_get_functiondef` matching exactly what was pushed) — but the very
+first real-world tap of "Backfill Historical Loads" against a company
+with genuine load history came back "0 loads processed," a real bug, not
+a data problem.
+
+Added `20260818010000_incentive_backfill_diagnostics.sql` (applied by the
+user directly via the SQL editor) to `backfill_incentive_points`'s own
+return payload (`company_members`, `member_loads_any_status`) rather than
+guess blind, since this session had no live DB access at that specific
+point to inspect directly — surfaced in `IncentiveSettingsModal.tsx` as a
+diagnostic line whenever `loads_processed` comes back 0. Re-running it
+confirmed real load history existed for the company's members, just none
+matching the filter — pointing straight at the actual root cause: the
+backfill's `load_log.status = 'completed'` filter was copied from the
+**dead** 4-arg `complete_load(p_load_id, p_completed_at, p_lines,
+p_product_updates)` overload (already flagged as dead code, never called
+by the client, in this doc's own "Fuel temp prediction system
+(architecture)" section) — not the overload the app actually calls
+(`lib/supabase/load.ts`'s `complete_load({ payload })`), which sets
+`status = 'loaded'`, confirmed directly against its live definition in
+`20260722000000_product_canonical_grouping.sql`. Every real finished load
+in this app has `status = 'loaded'`, never `'completed'` — a status value
+that, per this discovery, is essentially unused by the live system.
+
+Fixed in `20260818020000_incentive_backfill_status_fix.sql` (**not yet
+applied**) — only the status filter changed, same loop/core/diagnostics
+otherwise. `calculate_load_points`/`_calculate_load_points_core` were
+never affected by this bug — neither filters by status at all, since the
+normal per-load path is only ever called by `useLoadWorkflow.ts` right
+after a real `complete_load` success, with no need to re-check status.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.
