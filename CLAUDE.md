@@ -4066,6 +4066,50 @@ waiting for another live report — found two real, concrete bugs from the
 Not live-verified (no authenticated session available from this side).
 `tsc --noEmit` and `next build` both clean.
 
+### Backfilled loads all got today's date, breaking period sorting (2026-08-19)
+
+User report: after running the historical backfill, every backfilled load
+showed up with today's date, so period-based sorting (the Planner's
+running-average card, Period Report's period filter) didn't work.
+
+**Real bug, present since `_calculate_load_points_core` was first
+written** (not something the backfill introduced on its own): the
+`insert into load_points (...)` column list never included `created_at`
+at all, so it silently fell through to the table's `default now()`. Every
+period-based read in the app keys off `load_points.created_at` as "when
+did this load happen" — the Planner's average card's `.gte("created_at",
+...)` filter, and Period Report's own `.gte(...)/.lte(...)` filtering
+*and* the date it displays per load line (`PayrollReportModal.tsx`:
+`date: lines[0]?.created_at`). For a live load this bug was invisible,
+since `calculate_load_points` fires right after `complete_load` succeeds
+— "now" already approximated the load's own date closely enough not to
+notice. Running the backfill against weeks of historical loads all at
+once is what finally made it visible: every one of them got stamped with
+the *backfill's own run time*, not its real date.
+
+**Fixed** in `supabase/migrations/20260819000000_incentive_backfill_created_at_fix.sql`
+(**not yet applied**) — `_calculate_load_points_core` gained a new
+`p_load_date timestamptz` parameter (required dropping and recreating it,
+since Postgres treats a changed parameter list as a different function
+signature, not a replaceable one — the old 4-arg overload is dropped
+explicitly so it doesn't linger as an orphaned, still-callable
+duplicate), and both `created_at` and `updated_at` are now set explicitly
+on **both** the insert and the `on conflict ... do update` path — not
+just insert, since simply re-running the (already idempotent) backfill is
+exactly how this migration corrects the already-wrong rows the previous
+run created, not just prevents new ones. `calculate_load_points` now
+reads `load_log.completed_at` (falling back to `now()` only if somehow
+null) and passes it through; `backfill_incentive_points` does the same,
+falling back to `created_at` and then `now()` in that order. Both
+callers' own public signatures are unchanged — this is purely internal
+plumbing.
+
+Not live-verified this pass (no live DB access from this session at the
+time of writing — same as every other migration in this batch). Once
+applied, re-running "Backfill Historical Loads" should be enough to
+correct the existing wrong-dated rows, since the fix applies on update
+too.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.
