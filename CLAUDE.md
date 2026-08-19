@@ -4208,6 +4208,25 @@ block, not inline props with access to the `GRAPHITE` JS constant).
 Not live-verified this pass (no authenticated session available from this
 side) — `tsc --noEmit` and `next build` both clean.
 
+**Follow-up same day: the Terminal tab's STUD button ignored dark
+mode/accent entirely.** `app/planner/terminal/page.tsx`'s STUD button
+(opens the rack-level Product Status Update modal) had a hardcoded
+`background: "#fff", color: "#111"` — never wired to
+`shell.theme.darkMode`/`accentColor` at all, unlike the Planner's Load
+button (`theme.ts`'s own documented rule: dark mode/a custom accent
+overrides the fill on "the Load button, compartment handles, and CG
+puck" — this button belongs in that same themed-fill category and was
+just missed when it was originally built). Fixed by applying the exact
+same pattern the Load button already uses —
+`themeFill(shell.theme.darkMode, shell.theme.accentColor, "#ffffff")` for
+the background, `themeTextOnFill(shell.theme.darkMode)` for the text
+color. Grepped the rest of `app/planner/terminal/` for the same
+hardcoded-`"#fff"`-background pattern — no other hits, this was the only
+one.
+
+Not live-verified this pass (no authenticated session available from this
+side) — `tsc --noEmit` and `next build` both clean.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.

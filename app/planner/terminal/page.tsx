@@ -18,6 +18,7 @@ import RackProductStatusModal from "./RackProductStatusModal";
 import EditTerminalModal from "./EditTerminalModal";
 import type { TerminalRack, RackArm, RackLane, RackProductStatusRow, ProductLite } from "./types";
 import { displayLabel } from "./labels";
+import { themeFill, themeTextOnFill } from "../theme";
 
 function PlaceholderPanel({ title, note }: { title: string; note: string }) {
   return (
@@ -229,7 +230,12 @@ export default function TerminalPage() {
           <button
             type="button"
             onClick={() => setProductStatusOpen(true)}
-            style={{ width: "100%", padding: "12px", borderRadius: 12, border: "1px solid rgba(255,255,255,0.15)", background: "#fff", color: "#111", fontWeight: 800, cursor: "pointer", marginBottom: 10 }}
+            style={{
+              width: "100%", padding: "12px", borderRadius: 12, border: "1px solid rgba(255,255,255,0.15)",
+              background: themeFill(shell.theme.darkMode, shell.theme.accentColor, "#ffffff"),
+              color: themeTextOnFill(shell.theme.darkMode),
+              fontWeight: 800, cursor: "pointer", marginBottom: 10,
+            }}
           >
             STUD
           </button>
