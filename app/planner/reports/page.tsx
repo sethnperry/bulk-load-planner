@@ -250,18 +250,32 @@ export default function ReportsPage() {
     (async () => {
       const types = await fetchServiceTypes(companyId);
       if (cancelled) return;
-      const unitLabel: "Truck" | "Trailer" = truckId ? "Truck" : "Trailer";
-      const idField = truckId ? "truck_id" : "trailer_id";
-      const idValue = truckId || trailerId;
-      const [{ data: records }, { data: washes }] = await Promise.all([
-        supabase.from("service_records").select("service_type_id, date, reading_value, created_at").eq(idField, idValue),
-        supabase.from("wash_records").select("washed_at").eq(idField, idValue).order("washed_at", { ascending: false }).limit(1),
-      ]);
+
+      // Service due: truck's own due status when a truck exists (matches
+      // "next truck service due" per the original spec), else trailer's.
+      const serviceUnitLabel: "Truck" | "Trailer" = truckId ? "Truck" : "Trailer";
+      const serviceIdField = truckId ? "truck_id" : "trailer_id";
+      const serviceIdValue = truckId || trailerId;
+      const { data: records } = await supabase
+        .from("service_records").select("service_type_id, date, reading_value, created_at")
+        .eq(serviceIdField, serviceIdValue);
       if (cancelled) return;
-      const due = computeUnitServiceDue(unitLabel, (records ?? []) as any, types);
+      const due = computeUnitServiceDue(serviceUnitLabel, (records ?? []) as any, types);
       setServiceSub(due.display);
-      const washedAt = (washes ?? [])[0]?.washed_at ?? null;
-      setWashSub(washedAt ? `Last washed ${fmtDate(washedAt)}` : "No wash recorded");
+
+      // Wash: most recent across BOTH truck and trailer, not truck-only --
+      // a combo's trailer can have real wash history even when its truck
+      // doesn't (or vice versa), and only checking one silently hid the
+      // other, misreporting "No wash recorded" when one genuinely existed.
+      const washQueries = [
+        truckId ? supabase.from("wash_records").select("washed_at").eq("truck_id", truckId).order("washed_at", { ascending: false }).limit(1) : null,
+        trailerId ? supabase.from("wash_records").select("washed_at").eq("trailer_id", trailerId).order("washed_at", { ascending: false }).limit(1) : null,
+      ].filter((q): q is NonNullable<typeof q> => q !== null);
+      const washResults = await Promise.all(washQueries);
+      if (cancelled) return;
+      const washDates = washResults.map((r) => r.data?.[0]?.washed_at as string | undefined).filter((d): d is string => !!d);
+      const latestWash = washDates.length ? washDates.reduce((a, b) => (b > a ? b : a)) : null;
+      setWashSub(latestWash ? `Last washed ${fmtDate(latestWash)}` : "No wash recorded");
     })();
     return () => { cancelled = true; };
   }, [companyId, resolvedCombo?.combo_id, resolvedCombo?.truck_id, resolvedCombo?.trailer_id]);
@@ -408,7 +422,14 @@ export default function ReportsPage() {
         onFetchRange={loadHistory.fetch}
         terminalCatalog={terminals.terminalCatalog ?? []}
         combos={equipment.combos ?? []}
-        onDeleteLoad={loadHistory.deleteLoad}
+        // Delete is owner-checked server-side (delete_load's auth.uid()
+        // must match) -- an admin/dispatch viewing another driver's loads
+        // would see a working-looking Delete button that always fails,
+        // same reason AdminLoadsModal.tsx omits it entirely. headerOverride
+        // similarly avoids a modal titled "My Loads" while actually
+        // showing someone else's history.
+        onDeleteLoad={isViewingOther ? undefined : loadHistory.deleteLoad}
+        headerOverride={isViewingOther ? `${viewedUserName || "Driver"}'s Loads` : undefined}
       />
 
       {hasEquipment && companyId && (

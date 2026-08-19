@@ -4028,6 +4028,44 @@ change — cheap and idempotent when the color hasn't actually changed.
 Not live-verified this pass (same reason as the two fixes above). `tsc
 --noEmit` and `next build` both clean.
 
+### Reports page overhaul: two real bugs found on a follow-up review pass (2026-08-19)
+
+User asked for a general check of the Reports page after the dark-mode
+fixes above. Read through `app/planner/reports/page.tsx` and its newer
+supporting pieces (`EquipmentComboPicker.tsx`) end to end rather than
+waiting for another live report — found two real, concrete bugs from the
+2026-08-17 overhaul itself, not the dark-mode work:
+
+1. **Wash History's preview subtitle silently ignored the trailer.** The
+   sub-label effect resolved a single `idField`/`idValue` (`truckId ?
+   "truck_id" : "trailer_id"`) and used it for BOTH the service-due query
+   and the wash query — correct for Service (the original spec explicitly
+   asked for "next **truck** service due"), wrong for Wash, which has no
+   such truck-only carve-out. A combo whose trailer has real wash history
+   but whose truck has none would show "No wash recorded" — flatly wrong,
+   not just incomplete. The full Wash History modal itself was never
+   affected (`RecordHistoryModal.tsx` already queries both `truck_id` and
+   `trailer_id` for wash/service records — confirmed by reading it) — only
+   this page's quick-preview text was broken. Fixed by querying wash
+   records for both units when both exist and taking the most recent.
+2. **Admin/dispatch viewing another driver's Loads got a working-looking
+   Delete button that always fails, and a modal titled "My Loads" showing
+   someone else's history.** `MyLoadsModal.tsx`'s own prop comment already
+   documents exactly why this combination is wrong — `delete_load`'s RPC
+   is owner-checked server-side (`user_id = auth.uid()`, no admin bypass
+   at all, confirmed by reading `20260727000000_delete_load.sql`) and
+   there's a separate `AdminLoadsModal.tsx` that deliberately omits both
+   `onDeleteLoad` and `onRestoreLoad` for this reason — a precedent this
+   page's initial build should have followed but reused `MyLoadsModal`
+   unconditionally instead. Fixed without swapping components: `onDeleteLoad`
+   is now only passed when `!isViewingOther`, and the already-existing
+   (previously unused here) `headerOverride` prop is now set to
+   `"{name}'s Loads"` when viewing someone else, so the modal's own title
+   stops claiming "My Loads" while displaying another driver's data.
+
+Not live-verified (no authenticated session available from this side).
+`tsc --noEmit` and `next build` both clean.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.
