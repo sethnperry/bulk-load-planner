@@ -15,8 +15,9 @@ import { formatMDY, formatMDYWithCountdown_ } from "../../utils/dates";
 import CardsSubTabs from "../CardsSubTabs";
 import FlippableCard from "../FlippableCard";
 import {
-  toneFor, cardStateFor, EXP_COLOR,
+  cardStateFor, DARK_EXP_COLOR,
   fieldLabel, fieldInput, btnDanger,
+  CARD_BG, CARD_BORDER,
 } from "../cardTheme";
 
 type LicenseRow = {
@@ -43,17 +44,16 @@ const emptyTwic: TwicRow = { card_number: "", issue_date: null, expiration_date:
 
 // ── Landscape card shell (front + back share this frame) ────────────────────
 
-function LandscapeFrame({ title, tone, children }: { title: string; tone: [string, string]; children: React.ReactNode }) {
-  const [base, shade] = tone;
+function LandscapeFrame({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div style={{
       height: "100%", borderRadius: 10, padding: 16, boxSizing: "border-box",
-      background: `radial-gradient(circle at 20% 15%, rgba(255,255,255,0.7), transparent 55%), linear-gradient(135deg, ${base} 0%, ${shade} 100%)`,
-      border: "1px solid rgba(0,0,0,0.08)",
-      boxShadow: "0 6px 14px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.55)",
+      background: CARD_BG,
+      border: CARD_BORDER,
+      boxShadow: "0 6px 14px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.06)",
       minHeight: 118,
     }}>
-      <div style={{ fontSize: 10, fontWeight: 800, color: "rgba(0,0,0,0.4)", textTransform: "uppercase" as const, letterSpacing: 0.6, marginBottom: 8 }}>
+      <div style={{ fontSize: 10, fontWeight: 800, color: "rgba(255,255,255,0.45)", textTransform: "uppercase" as const, letterSpacing: 0.6, marginBottom: 8 }}>
         {title}
       </div>
       {children}
@@ -61,16 +61,15 @@ function LandscapeFrame({ title, tone, children }: { title: string; tone: [strin
   );
 }
 
-function BackFrame({ title, tone, onDone, children }: { title: string; tone: [string, string]; onDone: () => void; children: React.ReactNode }) {
-  const [base, shade] = tone;
+function BackFrame({ title, onDone, children }: { title: string; onDone: () => void; children: React.ReactNode }) {
   return (
     <div style={{
       height: "100%", borderRadius: 10, overflow: "hidden", boxSizing: "border-box",
-      background: `linear-gradient(135deg, ${base} 0%, ${shade} 100%)`,
-      border: "1px solid rgba(0,0,0,0.08)",
-      boxShadow: "0 6px 14px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.55)",
+      background: CARD_BG,
+      border: CARD_BORDER,
+      boxShadow: "0 6px 14px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.06)",
     }}>
-      <div style={{ background: "rgba(0,0,0,0.85)", padding: "9px 12px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+      <div style={{ background: "rgba(0,0,0,0.35)", padding: "9px 12px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ fontSize: 12, fontWeight: 800, color: "#fff" }}>{title}</div>
         <button type="button" onClick={onDone} style={{ border: "none", background: "none", color: "rgba(255,255,255,0.7)", fontSize: 12, fontWeight: 700, cursor: "pointer", padding: "4px 6px" }}>Done</button>
       </div>
@@ -83,7 +82,7 @@ function BackFrame({ title, tone, onDone, children }: { title: string; tone: [st
 
 const row2: React.CSSProperties = { display: "flex", gap: 8 };
 const col: React.CSSProperties = { flex: 1, minWidth: 0 };
-const checkboxRow: React.CSSProperties = { display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 700, color: "rgba(0,0,0,0.6)" };
+const checkboxRow: React.CSSProperties = { display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.7)" };
 
 // ── License card ─────────────────────────────────────────────────────────────
 
@@ -91,7 +90,6 @@ function LicenseCard({ value, onSave, onRemove }: { value: LicenseRow | null; on
   const [flipped, setFlipped] = useState(false);
   const [draft, setDraft] = useState<LicenseRow>(value ?? emptyLicense);
   const [confirmRemove, setConfirmRemove] = useState(false);
-  const tone = toneFor("license");
 
   useEffect(() => { if (flipped) { setDraft(value ?? emptyLicense); setConfirmRemove(false); } }, [flipped, value]);
 
@@ -99,33 +97,33 @@ function LicenseCard({ value, onSave, onRemove }: { value: LicenseRow | null; on
   const handleDone = () => { onSave(draft); setFlipped(false); };
 
   const front = (
-    <LandscapeFrame title="Driver's License" tone={tone}>
+    <LandscapeFrame title="Driver's License">
       {value ? (
         <>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
             <div>
-              <div style={{ fontSize: 20, fontWeight: 800, color: "#161616" }}>Class {value.license_class || "—"}</div>
-              <div style={{ fontSize: 12, color: "rgba(0,0,0,0.5)", marginTop: 2 }}>{value.state_code || "—"} · {value.license_number || "—"}</div>
+              <div style={{ fontSize: 20, fontWeight: 800, color: "rgba(255,255,255,0.92)" }}>Class {value.license_class || "—"}</div>
+              <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", marginTop: 2 }}>{value.state_code || "—"} · {value.license_number || "—"}</div>
             </div>
             <div style={{ textAlign: "right" as const }}>
-              <div style={{ fontSize: 9, fontWeight: 700, color: "rgba(0,0,0,0.4)", textTransform: "uppercase" as const }}>Exp</div>
-              <div style={{ fontSize: 13, fontWeight: 800, color: EXP_COLOR[state] }}>{value.expiration_date ? formatMDY(value.expiration_date) : "—"}</div>
+              <div style={{ fontSize: 9, fontWeight: 700, color: "rgba(255,255,255,0.4)", textTransform: "uppercase" as const }}>Exp</div>
+              <div style={{ fontSize: 13, fontWeight: 800, color: DARK_EXP_COLOR[state] }}>{value.expiration_date ? formatMDY(value.expiration_date) : "—"}</div>
             </div>
           </div>
           {value.hazmat_linked_to_license && (
-            <div style={{ marginTop: 8, fontSize: 9, fontWeight: 800, color: "rgba(0,0,0,0.5)", background: "rgba(0,0,0,0.07)", borderRadius: 999, padding: "2px 8px", display: "inline-block", textTransform: "uppercase" as const }}>
+            <div style={{ marginTop: 8, fontSize: 9, fontWeight: 800, color: "rgba(255,255,255,0.5)", background: "rgba(255,255,255,0.08)", borderRadius: 999, padding: "2px 8px", display: "inline-block", textTransform: "uppercase" as const }}>
               Hazmat endorsed
             </div>
           )}
         </>
       ) : (
-        <div style={{ fontSize: 13, color: "rgba(0,0,0,0.4)", fontWeight: 600 }}>Not on file — tap to add</div>
+        <div style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", fontWeight: 600 }}>Not on file — tap to add</div>
       )}
     </LandscapeFrame>
   );
 
   const back = (
-    <BackFrame title="Edit Driver's License" tone={tone} onDone={handleDone}>
+    <BackFrame title="Edit Driver's License" onDone={handleDone}>
       <div style={row2}>
         <div style={col}><div style={fieldLabel}>Class</div><input type="text" value={draft.license_class} onChange={(e) => setDraft((d) => ({ ...d, license_class: e.target.value }))} style={fieldInput} /></div>
         <div style={col}><div style={fieldLabel}>State</div><input type="text" value={draft.state_code} onChange={(e) => setDraft((d) => ({ ...d, state_code: e.target.value.toUpperCase().slice(0, 2) }))} style={fieldInput} /></div>
@@ -150,11 +148,11 @@ function LicenseCard({ value, onSave, onRemove }: { value: LicenseRow | null; on
       {value && (!confirmRemove ? (
         <button type="button" onClick={() => setConfirmRemove(true)} style={btnDanger}>Remove</button>
       ) : (
-        <div style={{ padding: 8, borderRadius: 6, border: "1px solid rgba(153,27,27,0.25)", background: "rgba(153,27,27,0.06)" }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: "#3a1414", marginBottom: 6 }}>Remove this license record?</div>
+        <div style={{ padding: 8, borderRadius: 6, border: "1px solid rgba(239,68,68,0.25)", background: "rgba(239,68,68,0.08)" }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: "rgba(255,255,255,0.85)", marginBottom: 6 }}>Remove this license record?</div>
           <div style={{ display: "flex", gap: 6 }}>
             <button type="button" onClick={() => { onRemove(); setFlipped(false); }} style={{ ...btnDanger, flex: 1 }}>Yes</button>
-            <button type="button" onClick={() => setConfirmRemove(false)} style={{ flex: 1, padding: "8px 0", borderRadius: 6, border: "1px solid rgba(0,0,0,0.15)", background: "rgba(0,0,0,0.04)", color: "#111", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>Cancel</button>
+            <button type="button" onClick={() => setConfirmRemove(false)} style={{ flex: 1, padding: "8px 0", borderRadius: 6, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.75)", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>Cancel</button>
           </div>
         </div>
       ))}
@@ -170,7 +168,6 @@ function MedicalCard({ value, onSave, onRemove }: { value: MedicalRow | null; on
   const [flipped, setFlipped] = useState(false);
   const [draft, setDraft] = useState<MedicalRow>(value ?? emptyMedical);
   const [confirmRemove, setConfirmRemove] = useState(false);
-  const tone = toneFor("medical");
 
   useEffect(() => { if (flipped) { setDraft(value ?? emptyMedical); setConfirmRemove(false); } }, [flipped, value]);
 
@@ -178,26 +175,26 @@ function MedicalCard({ value, onSave, onRemove }: { value: MedicalRow | null; on
   const handleDone = () => { onSave(draft); setFlipped(false); };
 
   const front = (
-    <LandscapeFrame title="Medical Card" tone={tone}>
+    <LandscapeFrame title="Medical Card">
       {value ? (
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
           <div>
-            <div style={{ fontSize: 16, fontWeight: 800, color: "#161616" }}>{value.examiner_name || "—"}</div>
-            {value.attached_to_license && <div style={{ fontSize: 11, color: "rgba(0,0,0,0.45)", marginTop: 2 }}>Attached to license</div>}
+            <div style={{ fontSize: 16, fontWeight: 800, color: "rgba(255,255,255,0.92)" }}>{value.examiner_name || "—"}</div>
+            {value.attached_to_license && <div style={{ fontSize: 11, color: "rgba(255,255,255,0.45)", marginTop: 2 }}>Attached to license</div>}
           </div>
           <div style={{ textAlign: "right" as const }}>
-            <div style={{ fontSize: 9, fontWeight: 700, color: "rgba(0,0,0,0.4)", textTransform: "uppercase" as const }}>Exp</div>
-            <div style={{ fontSize: 13, fontWeight: 800, color: EXP_COLOR[state] }}>{value.expiration_date ? formatMDY(value.expiration_date) : "—"}</div>
+            <div style={{ fontSize: 9, fontWeight: 700, color: "rgba(255,255,255,0.4)", textTransform: "uppercase" as const }}>Exp</div>
+            <div style={{ fontSize: 13, fontWeight: 800, color: DARK_EXP_COLOR[state] }}>{value.expiration_date ? formatMDY(value.expiration_date) : "—"}</div>
           </div>
         </div>
       ) : (
-        <div style={{ fontSize: 13, color: "rgba(0,0,0,0.4)", fontWeight: 600 }}>Not on file — tap to add</div>
+        <div style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", fontWeight: 600 }}>Not on file — tap to add</div>
       )}
     </LandscapeFrame>
   );
 
   const back = (
-    <BackFrame title="Edit Medical Card" tone={tone} onDone={handleDone}>
+    <BackFrame title="Edit Medical Card" onDone={handleDone}>
       <div><div style={fieldLabel}>Examiner Name</div><input type="text" value={draft.examiner_name} onChange={(e) => setDraft((d) => ({ ...d, examiner_name: e.target.value }))} style={fieldInput} /></div>
       <div style={row2}>
         <div style={col}><div style={fieldLabel}>Issue Date</div><input type="date" value={draft.issue_date ?? ""} onChange={(e) => setDraft((d) => ({ ...d, issue_date: e.target.value || null }))} style={fieldInput} /></div>
@@ -210,11 +207,11 @@ function MedicalCard({ value, onSave, onRemove }: { value: MedicalRow | null; on
       {value && (!confirmRemove ? (
         <button type="button" onClick={() => setConfirmRemove(true)} style={btnDanger}>Remove</button>
       ) : (
-        <div style={{ padding: 8, borderRadius: 6, border: "1px solid rgba(153,27,27,0.25)", background: "rgba(153,27,27,0.06)" }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: "#3a1414", marginBottom: 6 }}>Remove this medical card record?</div>
+        <div style={{ padding: 8, borderRadius: 6, border: "1px solid rgba(239,68,68,0.25)", background: "rgba(239,68,68,0.08)" }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: "rgba(255,255,255,0.85)", marginBottom: 6 }}>Remove this medical card record?</div>
           <div style={{ display: "flex", gap: 6 }}>
             <button type="button" onClick={() => { onRemove(); setFlipped(false); }} style={{ ...btnDanger, flex: 1 }}>Yes</button>
-            <button type="button" onClick={() => setConfirmRemove(false)} style={{ flex: 1, padding: "8px 0", borderRadius: 6, border: "1px solid rgba(0,0,0,0.15)", background: "rgba(0,0,0,0.04)", color: "#111", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>Cancel</button>
+            <button type="button" onClick={() => setConfirmRemove(false)} style={{ flex: 1, padding: "8px 0", borderRadius: 6, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.75)", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>Cancel</button>
           </div>
         </div>
       ))}
@@ -230,7 +227,6 @@ function TwicCard({ value, onSave, onRemove }: { value: TwicRow | null; onSave: 
   const [flipped, setFlipped] = useState(false);
   const [draft, setDraft] = useState<TwicRow>(value ?? emptyTwic);
   const [confirmRemove, setConfirmRemove] = useState(false);
-  const tone = toneFor("twic");
 
   useEffect(() => { if (flipped) { setDraft(value ?? emptyTwic); setConfirmRemove(false); } }, [flipped, value]);
 
@@ -238,23 +234,23 @@ function TwicCard({ value, onSave, onRemove }: { value: TwicRow | null; onSave: 
   const handleDone = () => { onSave(draft); setFlipped(false); };
 
   const front = (
-    <LandscapeFrame title="TWIC" tone={tone}>
+    <LandscapeFrame title="TWIC">
       {value ? (
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
-          <div style={{ fontSize: 15, fontWeight: 800, color: "#161616", fontFamily: "monospace", letterSpacing: 1 }}>{value.card_number || "—"}</div>
+          <div style={{ fontSize: 15, fontWeight: 800, color: "rgba(255,255,255,0.92)", fontFamily: "monospace", letterSpacing: 1 }}>{value.card_number || "—"}</div>
           <div style={{ textAlign: "right" as const }}>
-            <div style={{ fontSize: 9, fontWeight: 700, color: "rgba(0,0,0,0.4)", textTransform: "uppercase" as const }}>Exp</div>
-            <div style={{ fontSize: 13, fontWeight: 800, color: EXP_COLOR[state] }}>{value.expiration_date ? formatMDY(value.expiration_date) : "—"}</div>
+            <div style={{ fontSize: 9, fontWeight: 700, color: "rgba(255,255,255,0.4)", textTransform: "uppercase" as const }}>Exp</div>
+            <div style={{ fontSize: 13, fontWeight: 800, color: DARK_EXP_COLOR[state] }}>{value.expiration_date ? formatMDY(value.expiration_date) : "—"}</div>
           </div>
         </div>
       ) : (
-        <div style={{ fontSize: 13, color: "rgba(0,0,0,0.4)", fontWeight: 600 }}>Not on file — tap to add</div>
+        <div style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", fontWeight: 600 }}>Not on file — tap to add</div>
       )}
     </LandscapeFrame>
   );
 
   const back = (
-    <BackFrame title="Edit TWIC" tone={tone} onDone={handleDone}>
+    <BackFrame title="Edit TWIC" onDone={handleDone}>
       <div><div style={fieldLabel}>Card Number</div><input type="text" value={draft.card_number} onChange={(e) => setDraft((d) => ({ ...d, card_number: e.target.value }))} style={fieldInput} /></div>
       <div style={row2}>
         <div style={col}><div style={fieldLabel}>Issue Date</div><input type="date" value={draft.issue_date ?? ""} onChange={(e) => setDraft((d) => ({ ...d, issue_date: e.target.value || null }))} style={fieldInput} /></div>
@@ -263,11 +259,11 @@ function TwicCard({ value, onSave, onRemove }: { value: TwicRow | null; onSave: 
       {value && (!confirmRemove ? (
         <button type="button" onClick={() => setConfirmRemove(true)} style={btnDanger}>Remove</button>
       ) : (
-        <div style={{ padding: 8, borderRadius: 6, border: "1px solid rgba(153,27,27,0.25)", background: "rgba(153,27,27,0.06)" }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: "#3a1414", marginBottom: 6 }}>Remove this TWIC record?</div>
+        <div style={{ padding: 8, borderRadius: 6, border: "1px solid rgba(239,68,68,0.25)", background: "rgba(239,68,68,0.08)" }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: "rgba(255,255,255,0.85)", marginBottom: 6 }}>Remove this TWIC record?</div>
           <div style={{ display: "flex", gap: 6 }}>
             <button type="button" onClick={() => { onRemove(); setFlipped(false); }} style={{ ...btnDanger, flex: 1 }}>Yes</button>
-            <button type="button" onClick={() => setConfirmRemove(false)} style={{ flex: 1, padding: "8px 0", borderRadius: 6, border: "1px solid rgba(0,0,0,0.15)", background: "rgba(0,0,0,0.04)", color: "#111", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>Cancel</button>
+            <button type="button" onClick={() => setConfirmRemove(false)} style={{ flex: 1, padding: "8px 0", borderRadius: 6, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.75)", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>Cancel</button>
           </div>
         </div>
       ))}

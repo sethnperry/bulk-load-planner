@@ -4160,6 +4160,54 @@ summaries, totals, or CSV export.
 Not live-verified this pass (no authenticated session available from this
 side). `tsc --noEmit` and `next build` both clean.
 
+### Visual polish: Cards tab + Admin header tiles now match the dark graphite theme (2026-08-19)
+
+User feedback: the Reports page's tiles (`ReportTile`'s graphite gradient
++ border + colors) looked right; Admin's square header buttons and the
+Cards tab's Terminals/Badges/Credentials "wallet card" tiles didn't —
+"those ivory cards don't look like they belong."
+
+**Cards tab redesign** (`cardTheme.ts`, `cards/page.tsx`,
+`cards/badges/page.tsx`, `cards/credentials/page.tsx`) — this was a real
+design call, not a quick color swap: the light "pearl card-wallet" look
+(`TONES`/`toneFor`, a deterministic pastel color per terminal/badge name,
+radial-gradient sheen) was a deliberate, well-built physical-card-in-a-
+wallet metaphor, not an oversight. Replaced with the same
+`GRAPHITE`/`GRAPHITE_DARKER` gradient used everywhere else in the app
+(now exported from `cardTheme.ts` as `CARD_BG`/`CARD_BORDER`/
+`CARD_BORDER_SELECTED`/`CARD_SHADOW`, matching `ReportTile`'s exact
+values) — `TONES`/`toneFor` removed entirely, confirmed via grep that
+nothing else referenced them. Every front/back card face across all three
+sub-tabs (Terminals' `TerminalCard`, Badges' `BadgeCard`, Credentials'
+`LicenseCard`/`MedicalCard`/`TwicCard`) had its dark-on-light inline
+colors flipped to light-on-dark (name/number/labels, inactive badges,
+category pills, confirm-remove boxes, Cancel buttons).
+
+**`cardTheme.ts`'s shared tokens** (`fieldLabel`/`fieldInput`/
+`btnPrimary`/`btnSecondary`/`btnDanger`) were also flipped to dark-
+background versions, so every back-of-card edit form across all three
+sub-tabs updated automatically from one place. `EXP_COLOR` (light-
+calibrated) was deliberately left **unchanged** — `CredentialsReportModal.tsx`
+genuinely renders a white printable page (hands off to the browser's
+print dialog) and still needs dark-on-light text there, confirmed by
+reading it before touching anything. Added a new `DARK_EXP_COLOR` export
+alongside it instead — the same values that were already independently
+redeclared as local consts in `FleetCardsModal.tsx`/`dispatch/page.tsx`/
+`reports/page.tsx` for this exact reason; those weren't migrated to
+import the new shared constant (out of scope for this pass, since they
+already worked correctly), but could be in a future cleanup pass to
+remove the duplication.
+
+**Admin header tiles** (`app/admin/page.tsx`'s `.admin-header-tile` CSS) —
+was already a flat dark fill (`rgba(255,255,255,0.06)`), not literally
+ivory, but lacked the graphite gradient + shadow depth the user wanted to
+match. Updated to the identical gradient/border/shadow values as
+`ReportTile` (hardcoded hex since this is a plain `<style jsx global>`
+block, not inline props with access to the `GRAPHITE` JS constant).
+
+Not live-verified this pass (no authenticated session available from this
+side) — `tsc --noEmit` and `next build` both clean.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.

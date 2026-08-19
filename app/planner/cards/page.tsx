@@ -24,8 +24,9 @@ import SourcingModal from "../modals/SourcingModal";
 import { FullscreenModal } from "@/lib/ui/FullscreenModal";
 import { CustomSelect } from "@/lib/ui/CustomSelect";
 import {
-  toneFor, formatCardNumber, cardStateFor, matchesFilter, FILTERS, EXP_COLOR,
+  formatCardNumber, cardStateFor, matchesFilter, FILTERS, DARK_EXP_COLOR,
   fieldLabel, fieldInput, btnPrimary, btnSecondary, btnDanger,
+  CARD_BG, CARD_BORDER, CARD_BORDER_SELECTED, CARD_SHADOW,
   type CardState, type FilterKey,
 } from "./cardTheme";
 
@@ -54,39 +55,37 @@ function TerminalCard({
   walletLabel?: string;
 }) {
   const name = String(t.terminal_name ?? "Terminal");
-  const [base, shade] = toneFor(name);
   const inactive = state === "inactive";
-  const cardBg = `radial-gradient(circle at 25% 15%, rgba(255,255,255,0.7), transparent 55%), linear-gradient(135deg, ${base} 0%, ${shade} 100%)`;
 
   const front = (
     <div style={{
       height: "100%", borderRadius: 8, padding: "12px 14px", boxSizing: "border-box",
-      background: cardBg,
-      border: isSelected ? "1px solid rgba(0,0,0,0.35)" : "1px solid rgba(0,0,0,0.08)",
-      boxShadow: "0 6px 14px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.55)",
+      background: CARD_BG,
+      border: isSelected ? CARD_BORDER_SELECTED : CARD_BORDER,
+      boxShadow: CARD_SHADOW,
       opacity: inactive ? 0.55 : 1,
       filter: inactive ? "grayscale(0.5)" : "none",
     }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-        <div style={{ fontSize: 15, fontWeight: 800, color: "#161616", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        <div style={{ fontSize: 15, fontWeight: 800, color: "rgba(255,255,255,0.92)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {name}
         </div>
         {inactive && (
-          <div style={{ fontSize: 9, fontWeight: 800, color: "rgba(0,0,0,0.45)", background: "rgba(0,0,0,0.08)", borderRadius: 4, padding: "2px 6px", letterSpacing: 0.4, textTransform: "uppercase", flexShrink: 0 }}>
+          <div style={{ fontSize: 9, fontWeight: 800, color: "rgba(255,255,255,0.5)", background: "rgba(255,255,255,0.08)", borderRadius: 4, padding: "2px 6px", letterSpacing: 0.4, textTransform: "uppercase", flexShrink: 0 }}>
             Inactive
           </div>
         )}
       </div>
-      <div style={{ fontSize: 11, color: "rgba(0,0,0,0.45)", marginTop: 1 }}>
+      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.45)", marginTop: 1 }}>
         {t.city}{t.state ? `, ${t.state}` : ""}
       </div>
       <div style={{ marginTop: 10, display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 8 }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: "#1a1a1a", letterSpacing: 1, fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: "rgba(255,255,255,0.85)", letterSpacing: 1, fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {draft.cardNumber ? formatCardNumber(draft.cardNumber) : "No card on file"}
         </div>
         <div style={{ textAlign: "right", flexShrink: 0 }}>
-          <div style={{ fontSize: 9, fontWeight: 700, color: "rgba(0,0,0,0.4)", textTransform: "uppercase", letterSpacing: 0.4 }}>Exp</div>
-          <div style={{ fontSize: 12, fontWeight: 800, color: EXP_COLOR[state] }}>
+          <div style={{ fontSize: 9, fontWeight: 700, color: "rgba(255,255,255,0.4)", textTransform: "uppercase", letterSpacing: 0.4 }}>Exp</div>
+          <div style={{ fontSize: 12, fontWeight: 800, color: DARK_EXP_COLOR[state] }}>
             {expiresISO ? formatMDY(expiresISO) : "Not carded"}
           </div>
         </div>
@@ -97,11 +96,11 @@ function TerminalCard({
   const back = (
     <div style={{
       height: "100%", borderRadius: 8, overflow: "hidden", boxSizing: "border-box",
-      background: cardBg,
-      border: "1px solid rgba(0,0,0,0.08)",
-      boxShadow: "0 6px 14px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.55)",
+      background: CARD_BG,
+      border: CARD_BORDER,
+      boxShadow: CARD_SHADOW,
     }}>
-      <div style={{ background: "rgba(0,0,0,0.85)", padding: "9px 12px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+      <div style={{ background: "rgba(0,0,0,0.35)", padding: "9px 12px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ fontSize: 13, fontWeight: 800, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {name}
         </div>
@@ -117,7 +116,7 @@ function TerminalCard({
             <input type="date" value={lastVisitISO} onChange={(e) => onSetAccessDate(e.target.value)} style={{ ...fieldInput, flex: 1 }} />
             <button type="button" onClick={() => onSetAccessDate(new Date().toISOString().slice(0, 10))} style={btnSecondary}>Today</button>
           </div>
-          <div style={{ marginTop: 4, fontSize: 11, fontWeight: 700, color: EXP_COLOR[state] }}>
+          <div style={{ marginTop: 4, fontSize: 11, fontWeight: 700, color: DARK_EXP_COLOR[state] }}>
             {expiresISO ? `Expires ${formatMDYWithCountdown_(expiresISO)}` : "Not yet carded"}
           </div>
         </div>
@@ -150,8 +149,8 @@ function TerminalCard({
           </div>
         )}
         {confirmAction === "deactivate" && (
-          <div style={{ padding: "10px 12px", borderRadius: 6, border: "1px solid rgba(153,27,27,0.25)", background: "rgba(153,27,27,0.06)" }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: "#3a1414", marginBottom: 8 }}>
+          <div style={{ padding: "10px 12px", borderRadius: 6, border: "1px solid rgba(239,68,68,0.25)", background: "rgba(239,68,68,0.08)" }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: "rgba(255,255,255,0.85)", marginBottom: 8 }}>
               Remove last visit date and mark as not carded?
             </div>
             <div style={{ display: "flex", gap: 8 }}>
@@ -161,8 +160,8 @@ function TerminalCard({
           </div>
         )}
         {confirmAction === "remove" && (
-          <div style={{ padding: "10px 12px", borderRadius: 6, border: "1px solid rgba(153,27,27,0.25)", background: "rgba(153,27,27,0.06)" }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: "#3a1414", marginBottom: 8 }}>
+          <div style={{ padding: "10px 12px", borderRadius: 6, border: "1px solid rgba(239,68,68,0.25)", background: "rgba(239,68,68,0.08)" }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: "rgba(255,255,255,0.85)", marginBottom: 8 }}>
               Remove this card from {walletLabel}? Card number, PIN, and notes stay saved if you add it back later.
             </div>
             <div style={{ display: "flex", gap: 8 }}>

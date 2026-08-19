@@ -1485,12 +1485,13 @@ export default function AdminPage() {
           font-size: 13px;
           font-weight: 800;
           border-radius: 12px;
-          border: 1px solid rgba(255,255,255,0.15);
-          background: rgba(255,255,255,0.06);
-          color: rgba(255,255,255,0.75);
+          border: 1px solid rgba(255,255,255,0.10);
+          background: linear-gradient(135deg, #2a2a2c 0%, #1c1c1e 100%);
+          box-shadow: 0 6px 14px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.06);
+          color: rgba(255,255,255,0.92);
           cursor: pointer;
         }
-        .admin-header-tile:hover { background: rgba(255,255,255,0.1); }
+        .admin-header-tile:hover { border-color: rgba(255,255,255,0.20); }
         @media (max-width: 768px) {
           .admin-page-root input,
           .admin-page-root select,

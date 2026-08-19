@@ -1,27 +1,32 @@
 // app/planner/cards/cardTheme.ts
 //
-// Shared monochrome card look + expiration-state rules for every Cards
-// sub-tab (Terminals, Badges, Credentials) so the three don't drift --
-// same pearl/ivory/silver tone set, same 7-day-orange/expired-red/7+days-
-// inactive rule, same back-of-card field styles.
+// Shared card look + expiration-state rules for every Cards sub-tab
+// (Terminals, Badges, Credentials) so the three don't drift -- same
+// graphite-gradient tile look as the rest of the dark app theme (Reports
+// page's ReportTile, Admin's header tiles), same 7-day-orange/expired-red/
+// 7+days-inactive rule, same back-of-card field styles.
+//
+// 2026-08-19: previously each card rendered in a light "pearl card-wallet"
+// tone (a per-terminal/badge pastel color via toneFor/TONES below) -- a
+// deliberate physical-card-in-a-wallet metaphor, but one the user felt
+// didn't belong next to the rest of the app's dark graphite theme ("those
+// ivory cards don't look like they belong"). Replaced with the same
+// GRAPHITE/GRAPHITE_DARKER gradient used everywhere else; TONES/toneFor
+// removed entirely since nothing else referenced them.
+//
+// EXP_COLOR stays LIGHT-calibrated and unchanged -- CredentialsReportModal.tsx
+// deliberately renders a genuine white printable page (hands off to the
+// browser's print dialog) and needs dark-on-light text, not a bug to fix.
+// DARK_EXP_COLOR is the new canonical dark-background version, used by
+// every other consumer of this file.
 
 import { daysUntilISO_ } from "../utils/dates";
+import { GRAPHITE, GRAPHITE_DARKER } from "../theme";
 
-export const TONES: [string, string][] = [
-  ["#f7f5f0", "#e8e4da"], // pearl
-  ["#f2ecdd", "#e3dcc8"], // ivory
-  ["#ece8e2", "#d9d4cb"], // warm grey
-  ["#eef0f1", "#dadde0"], // cool silver
-  ["#f0e6d2", "#ddd0b3"], // champagne
-  ["#e9e5df", "#d6d0c6"], // greige
-  ["#f5f3ee", "#e6e1d8"], // alabaster
-];
-
-export function toneFor(name: string): [string, string] {
-  let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) & 0xffffffff;
-  return TONES[Math.abs(h) % TONES.length];
-}
+export const CARD_BG = `linear-gradient(135deg, ${GRAPHITE} 0%, ${GRAPHITE_DARKER} 100%)`;
+export const CARD_BORDER = "1px solid rgba(255,255,255,0.10)";
+export const CARD_BORDER_SELECTED = "1px solid rgba(255,255,255,0.30)";
+export const CARD_SHADOW = "0 6px 14px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.06)";
 
 export function formatCardNumber(num: string): string {
   const digits = num.replace(/\s+/g, "");
@@ -63,6 +68,9 @@ export function matchesFilter(state: CardState, filter: FilterKey): boolean {
   return true;
 }
 
+// Light-calibrated -- ONLY for a genuine light/print background
+// (CredentialsReportModal.tsx's white printable page). Everything else in
+// the app should use DARK_EXP_COLOR below.
 export const EXP_COLOR: Record<CardState, string> = {
   not_set: "rgba(0,0,0,0.4)",
   valid: "#1a1a1a",
@@ -71,10 +79,22 @@ export const EXP_COLOR: Record<CardState, string> = {
   inactive: "rgba(0,0,0,0.4)",
 };
 
-// ── Shared field styles (back-of-card form, light card background) ─────────
+// Dark-background version -- the canonical one for every consumer that
+// isn't rendering on white paper. Was previously redeclared locally (and
+// separately) in FleetCardsModal.tsx/dispatch/page.tsx/reports/page.tsx;
+// this is now the single source of truth those could migrate to.
+export const DARK_EXP_COLOR: Record<CardState, string> = {
+  not_set: "rgba(255,255,255,0.35)",
+  valid: "rgba(255,255,255,0.85)",
+  expiring: "#f59e0b",
+  expired: "#ef4444",
+  inactive: "rgba(255,255,255,0.35)",
+};
 
-export const fieldLabel: React.CSSProperties = { fontSize: 10, fontWeight: 700, color: "rgba(0,0,0,0.45)", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 };
-export const fieldInput: React.CSSProperties = { width: "100%", borderRadius: 6, border: "1px solid rgba(0,0,0,0.18)", background: "rgba(0,0,0,0.04)", padding: "7px 9px", fontSize: 13, color: "#111", boxSizing: "border-box" };
-export const btnPrimary: React.CSSProperties = { flex: 1, padding: "11px 0", borderRadius: 6, border: "1px solid rgba(0,0,0,0.15)", background: "rgba(0,0,0,0.85)", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" };
-export const btnSecondary: React.CSSProperties = { padding: "11px 14px", borderRadius: 6, border: "1px solid rgba(0,0,0,0.15)", background: "rgba(0,0,0,0.05)", color: "#111", fontSize: 12, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" };
-export const btnDanger: React.CSSProperties = { padding: "11px 14px", borderRadius: 6, border: "1px solid rgba(153,27,27,0.35)", background: "rgba(153,27,27,0.08)", color: "#8f1d1d", fontSize: 12, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" };
+// ── Shared field styles (back-of-card form, dark graphite card background) ─
+
+export const fieldLabel: React.CSSProperties = { fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.45)", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 };
+export const fieldInput: React.CSSProperties = { width: "100%", borderRadius: 6, border: "1px solid rgba(255,255,255,0.16)", background: "rgba(0,0,0,0.3)", padding: "7px 9px", fontSize: 13, color: "#fff", boxSizing: "border-box" };
+export const btnPrimary: React.CSSProperties = { flex: 1, padding: "11px 0", borderRadius: 6, border: "1px solid rgba(255,255,255,0.18)", background: "rgba(255,255,255,0.92)", color: "#111", fontSize: 13, fontWeight: 700, cursor: "pointer" };
+export const btnSecondary: React.CSSProperties = { padding: "11px 14px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.8)", fontSize: 12, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" };
+export const btnDanger: React.CSSProperties = { padding: "11px 14px", borderRadius: 6, border: "1px solid rgba(239,68,68,0.35)", background: "rgba(239,68,68,0.10)", color: "#ef4444", fontSize: 12, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" };

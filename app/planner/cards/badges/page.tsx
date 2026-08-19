@@ -19,8 +19,9 @@ import FlippableCard from "../FlippableCard";
 import { FullscreenModal } from "@/lib/ui/FullscreenModal";
 import { CustomSelect } from "@/lib/ui/CustomSelect";
 import {
-  toneFor, cardStateFor, matchesFilter, FILTERS, EXP_COLOR,
+  cardStateFor, matchesFilter, FILTERS, DARK_EXP_COLOR,
   fieldLabel, fieldInput, btnDanger,
+  CARD_BG, CARD_BORDER,
   type FilterKey,
 } from "../cardTheme";
 
@@ -67,9 +68,7 @@ function BadgeCard({
   }, [isFlipped, badge]);
 
   const state = cardStateFor(badge.expiration_date);
-  const [base, shade] = toneFor(badge.port_name || badge.id);
   const inactive = state === "inactive";
-  const cardBg = `radial-gradient(circle at 30% 20%, rgba(255,255,255,0.7), transparent 55%), linear-gradient(160deg, ${base} 0%, ${shade} 100%)`;
 
   const handleDone = () => {
     onSave({ port_name: name.trim() || badge.port_name, category: category.trim() || null, expiration_date: expiration || null });
@@ -79,34 +78,34 @@ function BadgeCard({
   const front = (
     <div style={{
       height: "100%", borderRadius: 10, padding: 14, boxSizing: "border-box",
-      background: cardBg, border: "1px solid rgba(0,0,0,0.08)",
-      boxShadow: "0 6px 14px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.55)",
+      background: CARD_BG, border: CARD_BORDER,
+      boxShadow: "0 6px 14px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.06)",
       display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center" as const,
       aspectRatio: "3 / 4",
       opacity: inactive ? 0.55 : 1, filter: inactive ? "grayscale(0.5)" : "none",
     }}>
       <div style={{
-        width: 52, height: 52, borderRadius: "50%", background: "rgba(0,0,0,0.10)",
-        border: "1px solid rgba(0,0,0,0.15)", display: "flex", alignItems: "center", justifyContent: "center",
-        fontSize: 18, fontWeight: 800, color: "rgba(0,0,0,0.55)", marginTop: 6,
+        width: 52, height: 52, borderRadius: "50%", background: "rgba(255,255,255,0.08)",
+        border: "1px solid rgba(255,255,255,0.15)", display: "flex", alignItems: "center", justifyContent: "center",
+        fontSize: 18, fontWeight: 800, color: "rgba(255,255,255,0.7)", marginTop: 6,
       }}>
         {initialsFor(badge.port_name)}
       </div>
-      <div style={{ fontSize: 14, fontWeight: 800, color: "#161616", marginTop: 10, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const, width: "100%" }}>
+      <div style={{ fontSize: 14, fontWeight: 800, color: "rgba(255,255,255,0.92)", marginTop: 10, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const, width: "100%" }}>
         {badge.port_name}
       </div>
       {badge.category && (
-        <div style={{ fontSize: 9, fontWeight: 700, color: "rgba(0,0,0,0.5)", background: "rgba(0,0,0,0.07)", borderRadius: 999, padding: "2px 8px", marginTop: 6, textTransform: "uppercase" as const, letterSpacing: 0.4 }}>
+        <div style={{ fontSize: 9, fontWeight: 700, color: "rgba(255,255,255,0.6)", background: "rgba(255,255,255,0.08)", borderRadius: 999, padding: "2px 8px", marginTop: 6, textTransform: "uppercase" as const, letterSpacing: 0.4 }}>
           {badge.category}
         </div>
       )}
       <div style={{ flex: 1 }} />
       {inactive && (
-        <div style={{ fontSize: 9, fontWeight: 800, color: "rgba(0,0,0,0.45)", background: "rgba(0,0,0,0.08)", borderRadius: 4, padding: "2px 6px", textTransform: "uppercase" as const, letterSpacing: 0.4, marginBottom: 6 }}>
+        <div style={{ fontSize: 9, fontWeight: 800, color: "rgba(255,255,255,0.5)", background: "rgba(255,255,255,0.08)", borderRadius: 4, padding: "2px 6px", textTransform: "uppercase" as const, letterSpacing: 0.4, marginBottom: 6 }}>
           Inactive
         </div>
       )}
-      <div style={{ fontSize: 11, fontWeight: 800, color: EXP_COLOR[state] }}>
+      <div style={{ fontSize: 11, fontWeight: 800, color: DARK_EXP_COLOR[state] }}>
         {badge.expiration_date ? formatMDY(badge.expiration_date) : "No expiration"}
       </div>
     </div>
@@ -115,10 +114,10 @@ function BadgeCard({
   const back = (
     <div style={{
       height: "100%", borderRadius: 10, overflow: "hidden", boxSizing: "border-box",
-      background: cardBg, border: "1px solid rgba(0,0,0,0.08)",
-      boxShadow: "0 6px 14px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.55)",
+      background: CARD_BG, border: CARD_BORDER,
+      boxShadow: "0 6px 14px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.06)",
     }}>
-      <div style={{ background: "rgba(0,0,0,0.85)", padding: "8px 10px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+      <div style={{ background: "rgba(0,0,0,0.35)", padding: "8px 10px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ fontSize: 12, fontWeight: 800, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>Edit Badge</div>
         <button type="button" onClick={handleDone} style={{ border: "none", background: "none", color: "rgba(255,255,255,0.7)", fontSize: 11, fontWeight: 700, cursor: "pointer", padding: "3px 5px" }}>Done</button>
       </div>
@@ -132,7 +131,7 @@ function BadgeCard({
           <input type="text" value={category} onChange={(e) => setCategory(e.target.value)} placeholder="Port, Rail Yard…" style={fieldInput} />
           <div style={{ display: "flex", gap: 4, flexWrap: "wrap" as const, marginTop: 5 }}>
             {CATEGORY_SUGGESTIONS.map((c) => (
-              <button key={c} type="button" onClick={() => setCategory(c)} style={{ fontSize: 10, fontWeight: 700, padding: "3px 7px", borderRadius: 999, border: "1px solid rgba(0,0,0,0.15)", background: category === c ? "rgba(0,0,0,0.12)" : "rgba(0,0,0,0.03)", color: "rgba(0,0,0,0.6)", cursor: "pointer" }}>
+              <button key={c} type="button" onClick={() => setCategory(c)} style={{ fontSize: 10, fontWeight: 700, padding: "3px 7px", borderRadius: 999, border: "1px solid rgba(255,255,255,0.15)", background: category === c ? "rgba(255,255,255,0.15)" : "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.7)", cursor: "pointer" }}>
                 {c}
               </button>
             ))}
@@ -145,11 +144,11 @@ function BadgeCard({
         {!confirmRemove ? (
           <button type="button" onClick={() => setConfirmRemove(true)} style={{ ...btnDanger, width: "100%", marginTop: 2 }}>Remove</button>
         ) : (
-          <div style={{ padding: 8, borderRadius: 6, border: "1px solid rgba(153,27,27,0.25)", background: "rgba(153,27,27,0.06)" }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: "#3a1414", marginBottom: 6 }}>Remove this badge?</div>
+          <div style={{ padding: 8, borderRadius: 6, border: "1px solid rgba(239,68,68,0.25)", background: "rgba(239,68,68,0.08)" }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: "rgba(255,255,255,0.85)", marginBottom: 6 }}>Remove this badge?</div>
             <div style={{ display: "flex", gap: 6 }}>
               <button type="button" onClick={onRemove} style={{ ...btnDanger, flex: 1, padding: "8px 0" }}>Yes</button>
-              <button type="button" onClick={() => setConfirmRemove(false)} style={{ flex: 1, padding: "8px 0", borderRadius: 6, border: "1px solid rgba(0,0,0,0.15)", background: "rgba(0,0,0,0.04)", color: "#111", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>Cancel</button>
+              <button type="button" onClick={() => setConfirmRemove(false)} style={{ flex: 1, padding: "8px 0", borderRadius: 6, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.75)", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>Cancel</button>
             </div>
           </div>
         )}
