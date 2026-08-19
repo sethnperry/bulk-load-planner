@@ -3961,6 +3961,40 @@ menu, matching how tab-bar navigation already behaved.
 Not live-verified this pass (no authenticated session available from this
 side) — `tsc --noEmit` and `next build` both clean.
 
+**Follow-up same day: dark mode/accent didn't survive closing and
+reopening the app at all** — the `<Link>` fix above covers in-app
+navigation, but the user's next report was about a genuinely cold load
+(closing and reopening the app entirely): Settings' Dark Mode toggle
+still correctly showed "on," but the header stayed permanently light —
+not a brief flash, stuck.
+
+**Real root cause**: `useTheme.ts`'s own 2026-08-06 fix (reading
+`DEVICE_KEY` **synchronously inside its `useState` lazy initializer**, to
+avoid a flash on in-app navigation) is exactly what breaks a fresh page
+load. That hook also runs during SSR, where `localStorage` doesn't
+exist, so the server always renders `darkMode=false`. Reading it
+synchronously in the client's own lazy initializer then produces a
+*different* value on the client's first (hydration) render than what the
+server sent — a genuine hydration mismatch, not just a flash — and
+depending on how React resolves it, the already-painted server DOM
+(light) can end up stuck rather than reliably patched to match the
+(correct) client state, which is exactly "the toggle says on but the
+header stays light."
+
+**Fixed** (`app/planner/hooks/useTheme.ts`) using the same pattern this
+codebase already established for an identical SSR/client mismatch in
+`useNow()`: `darkMode`/`accentColor` now both start at the neutral
+default (identical on server and the client's first render — nothing to
+mismatch), and get resolved for real in a client-only `useEffect` that
+never runs during SSR. This reintroduces a brief flash of the default on
+a genuinely cold load — the same tradeoff already accepted for the
+status-bar `theme-color` meta tag — but guarantees the header eventually
+lands on the *correct* value instead of being able to get permanently
+stuck disagreeing with what Settings shows.
+
+Not live-verified this pass either (same reason). `tsc --noEmit` and
+`next build` both clean.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.
