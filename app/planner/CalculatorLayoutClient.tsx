@@ -204,6 +204,7 @@ function Header({ onOpenSettings }: { onOpenSettings: () => void }) {
   const shell = useCalculatorShell();
   const { darkMode, accentColor } = shell.theme;
   const iconStroke = themeIconStroke(darkMode);
+  const pathname = usePathname();
 
   // The OS status bar / PWA chrome strip above this header is drawn by the
   // browser from <meta name="theme-color">, not from any CSS on the page --
@@ -215,16 +216,25 @@ function Header({ onOpenSettings }: { onOpenSettings: () => void }) {
   // on every darkMode/accentColor change), not just on Header's true
   // unmount -- a real, needless "flash white, then set the real color"
   // write pattern that lines up with the reported "dark mode flashes back
-  // to white then corrects" glitch. There's nothing to clean up here: Next's
-  // own per-route metadata already re-applies whatever static
+  // to white then corrects" glitch. That pass's reasoning was: Next's own
+  // per-route metadata already re-applies whatever static
   // `viewport.themeColor` a *different* layout declares once the user
   // actually navigates away from /planner entirely, so this effect only
-  // needs to keep the tag in sync while Header is mounted, never reset it
-  // itself.
+  // needs to keep the tag in sync while Header is mounted, never reset it.
+  //
+  // 2026-08-19: that reasoning missed a case -- Next re-applies the
+  // CURRENT route segment's own static metadata on every client-side
+  // navigation, including navigation between two routes that share this
+  // SAME layout (e.g. /planner -> /planner/reports). Since Header never
+  // unmounts for that transition, its effect doesn't re-run on its own
+  // (darkMode/accentColor didn't change) -- so Next's re-applied static
+  // white default sat there uncorrected. `pathname` in the dependency
+  // array makes this effect re-assert the real color on every route
+  // change too, not just every theme change.
   useEffect(() => {
     const meta = document.querySelector('meta[name="theme-color"]');
     if (meta) meta.setAttribute("content", themeFill(darkMode, accentColor, "#ffffff"));
-  }, [darkMode, accentColor]);
+  }, [darkMode, accentColor, pathname]);
 
   return (
     <div style={{

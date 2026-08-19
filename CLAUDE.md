@@ -3995,6 +3995,39 @@ stuck disagreeing with what Settings shows.
 Not live-verified this pass either (same reason). `tsc --noEmit` and
 `next build` both clean.
 
+**Follow-up same day: a third, related bug, this time the status bar
+specifically.** With the previous two fixed, the user's next report was
+narrower and specific: navigating (via the now-client-side hamburger
+menu) to Reports left the strip *behind the clock/status bar* white while
+the in-app header band itself was correctly dark — and a pull-to-refresh
+while already on Reports fixed it.
+
+**Root cause**: the Header's `theme-color`-sync effect
+(`CalculatorLayoutClient.tsx`) only re-ran when `darkMode`/`accentColor`
+*changed value* (`useEffect(..., [darkMode, accentColor])`). That was
+deliberate — the 2026-08-06 pass reasoned "Next's own per-route metadata
+already re-applies whatever static `viewport.themeColor` a *different*
+layout declares once the user navigates away from `/planner`," so the
+effect only needed to stay in sync while mounted, never reset itself. That
+reasoning had a real gap: Next re-applies the **current route segment's**
+own static metadata on *every* client-side navigation — including
+navigation between two routes that share the *same* layout, like
+`/planner` → `/planner/reports`. Since `Header` never unmounts for that
+transition (confirmed in the previous fix — same shared layout, no
+remount), its effect had no reason to re-run (dependencies unchanged),
+so Next's freshly-reapplied static white default (`app/planner/layout.tsx`'s
+own declared baseline) sat there uncorrected. A pull-to-refresh is a full
+reload — a brand new `Header` mount, whose effect runs fresh regardless of
+dependency comparison — which is exactly why that "fixed" it.
+
+**Fixed**: added `pathname` (via `usePathname()`, already imported in this
+file for `TabBar`) to the effect's dependency array, so it re-asserts the
+real theme-color on every route change too, not just every theme-value
+change — cheap and idempotent when the color hasn't actually changed.
+
+Not live-verified this pass (same reason as the two fixes above). `tsc
+--noEmit` and `next build` both clean.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.
