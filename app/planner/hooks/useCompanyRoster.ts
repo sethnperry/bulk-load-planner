@@ -10,7 +10,12 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 
-export type RosterMember = { user_id: string; display_name: string };
+// `region` added 2026-08-19 for the Period Report/Underloading Dashboard
+// driver-group filter (region-grouped checkbox picker) -- per CLAUDE.md,
+// get_display_names_full already returns region/local_area/division/
+// employee_number alongside display_name, so this is just widening the
+// existing mapping, not a new query.
+export type RosterMember = { user_id: string; display_name: string; region: string | null };
 
 export function useCompanyRoster(companyId: string | null, opts?: { excludeUserId?: string }) {
   const [members, setMembers] = useState<RosterMember[]>([]);
@@ -27,7 +32,7 @@ export function useCompanyRoster(companyId: string | null, opts?: { excludeUserI
       const { data: nameRows } = await supabase.rpc("get_display_names_full", { p_user_ids: memberIds });
       if (cancelled) return;
       const list = ((nameRows ?? []) as any[])
-        .map((r) => ({ user_id: r.user_id, display_name: r.display_name ?? "Unknown" }))
+        .map((r) => ({ user_id: r.user_id, display_name: r.display_name ?? "Unknown", region: r.region ?? null }))
         .filter((d) => d.user_id !== opts?.excludeUserId)
         .sort((a, b) => a.display_name.localeCompare(b.display_name));
       setMembers(list);

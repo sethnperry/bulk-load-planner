@@ -4104,11 +4104,61 @@ falling back to `created_at` and then `now()` in that order. Both
 callers' own public signatures are unchanged — this is purely internal
 plumbing.
 
-Not live-verified this pass (no live DB access from this session at the
-time of writing — same as every other migration in this batch). Once
-applied, re-running "Backfill Historical Loads" should be enough to
-correct the existing wrong-dated rows, since the fix applies on update
-too.
+**Applied and live-verified 2026-08-19** — user pasted the migration into
+the SQL editor themselves, then re-ran "Backfill Historical Loads" (safe
+to repeat — same idempotent upsert), which corrected the existing
+wrong-dated rows in place per the fix's own design, and confirmed period
+sorting now works.
+
+### Departed drivers still showing up in Period Report / Underloading Dashboard, plus a region-grouped driver filter (2026-08-19)
+
+Two related asks in one message: (1) a load kept showing up for a driver
+who'd been removed from the company, and (2) a way to narrow both reports
+down to a subset of drivers, grouped by region.
+
+**Root cause of (1), confirmed by reading both modals**: removing a
+driver only deletes their `user_companies` row — `load_points`/`load_log`
+are never touched — and both `PayrollReportModal.tsx` (Period Report) and
+`UnderloadingDashboardModal.tsx` (Underloading) queried `load_points`
+filtered only by `company_id`, with no check against *current* roster
+membership at all. A departed driver's historical rows persist forever
+and keep showing up, correctly attributed by name (their `profiles` row
+isn't deleted either), in every period regardless of whether they still
+work there.
+
+This is a real tradeoff, not an obvious bug fix — for Period Report
+specifically (payroll-adjacent), a driver who worked and was owed pay for
+a past period arguably *should* still show up there even after leaving,
+the way real payroll reports work. Asked rather than assumed: user chose
+**hide from both reports** — simplest, matches "get rid of that" literally.
+
+**Shipped**: both modals now fetch the current roster via
+`useCompanyRoster` (widened, see below) and filter `load_points` rows to
+`currentMemberIds` before computing any driver summary, CSV export, or
+totals — a departed driver's data is now excluded from both reports
+entirely, without touching the underlying `load_points` data itself (nothing
+is deleted; the row just isn't surfaced by these two specific reports).
+
+**(2) New `app/admin/DriverGroupPicker.tsx`** — shared by both modals
+(built once rather than copied twice, matching this project's own
+established "duplicating this is how the bug creeps back in" precedent).
+Region-grouped checkbox picker: `useCompanyRoster` widened to also return
+`region` (already returned by `get_display_names_full` per this doc's own
+earlier notes — just wasn't being read before), grouped with an
+"Unassigned"/"No Region" bucket for anyone without one, each region has
+its own select-all/indeterminate checkbox, plus top-level Select All/None.
+Selection model: `null` means "everyone currently on the roster" (the
+default — no filter), narrowing to an explicit `Set<string>` only once the
+admin actually unchecks someone. Since the picker sources from
+`useCompanyRoster` (current membership only), a departed driver isn't even
+pickable — consistent with (1) above by construction, not a separate rule.
+Both modals gained a "{N of M} Drivers" / "All Drivers" chip that opens
+the picker; `driverFilter` is applied as an additional layer on top of the
+roster-membership filter everywhere `load_points` rows feed into driver
+summaries, totals, or CSV export.
+
+Not live-verified this pass (no authenticated session available from this
+side). `tsc --noEmit` and `next build` both clean.
 
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.

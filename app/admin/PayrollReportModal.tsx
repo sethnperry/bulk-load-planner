@@ -15,6 +15,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { generatePayPeriods, type PayPeriod, type PayPeriodType } from "./payPeriods";
+import { useCompanyRoster } from "@/app/planner/hooks/useCompanyRoster";
+import DriverGroupPicker from "./DriverGroupPicker";
 
 type LoadPointRow = {
   load_id: string;
@@ -78,6 +80,16 @@ export default function PayrollReportModal({ open, onClose, companyId }: Props) 
   const [lineEdits, setLineEdits] = useState<Record<number, { actual_gallons: string; actual_lbs: string; densityCorrection: boolean }>>({});
   const [loadLines, setLoadLines] = useState<LoadLineRow[]>([]);
   const [savingComp, setSavingComp] = useState<number | null>(null);
+
+  // Current roster -- load_points is never cleaned up when a driver is
+  // removed from the company, so without this a departed driver's past
+  // pay-period data would keep showing up here indefinitely. `null`
+  // driverFilter means "everyone currently on the roster" (the default);
+  // narrower selections via DriverGroupPicker are an explicit opt-in.
+  const { members: rosterMembers } = useCompanyRoster(companyId);
+  const currentMemberIds = useMemo(() => new Set(rosterMembers.map((m) => m.user_id)), [rosterMembers]);
+  const [driverFilter, setDriverFilter] = useState<Set<string> | null>(null);
+  const [driverPickerOpen, setDriverPickerOpen] = useState(false);
 
   // ── Load pay-period settings + generate periods ───────────────────────────
   useEffect(() => {
@@ -144,9 +156,17 @@ export default function PayrollReportModal({ open, onClose, companyId }: Props) 
     return () => { cancelled = true; };
   }, [open, selectedPeriod, companyId]);
 
+  // Departed drivers (no longer in currentMemberIds) are excluded
+  // unconditionally; driverFilter narrows further within the current
+  // roster when the admin has picked a subset.
+  const visiblePoints = useMemo(
+    () => points.filter((r) => currentMemberIds.has(r.driver_id) && (driverFilter === null || driverFilter.has(r.driver_id))),
+    [points, currentMemberIds, driverFilter]
+  );
+
   const driverSummaries = useMemo<DriverSummary[]>(() => {
     const byDriver: Record<string, DriverSummary> = {};
-    for (const r of points) {
+    for (const r of visiblePoints) {
       const s = (byDriver[r.driver_id] ??= {
         driver_id: r.driver_id,
         display_name: nameById[r.driver_id] ?? "Unknown",
@@ -160,12 +180,12 @@ export default function PayrollReportModal({ open, onClose, companyId }: Props) 
       s.totalPoints += Number(r.recovered_points) || 0;
     }
     return Object.values(byDriver).sort((a, b) => a.display_name.localeCompare(b.display_name));
-  }, [points, nameById, employeeNumberById]);
+  }, [visiblePoints, nameById, employeeNumberById]);
 
   const loadsForDriver = useMemo(() => {
     if (!expandedDriverId) return [];
     const byLoad: Record<string, LoadPointRow[]> = {};
-    for (const r of points) {
+    for (const r of visiblePoints) {
       if (r.driver_id !== expandedDriverId) continue;
       (byLoad[r.load_id] ??= []).push(r);
     }
@@ -174,7 +194,7 @@ export default function PayrollReportModal({ open, onClose, companyId }: Props) 
       date: lines[0]?.created_at ?? "",
       totalPoints: lines.reduce((s, l) => s + (Number(l.recovered_points) || 0), 0),
     })).sort((a, b) => (a.date < b.date ? 1 : -1));
-  }, [points, expandedDriverId]);
+  }, [visiblePoints, expandedDriverId]);
 
   async function expandLoad(loadId: string) {
     if (expandedLoadId === loadId) { setExpandedLoadId(null); return; }
@@ -267,19 +287,23 @@ export default function PayrollReportModal({ open, onClose, companyId }: Props) 
           <button onClick={onClose} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.85)", fontSize: 20, fontWeight: 900, cursor: "pointer", lineHeight: 1, padding: "0 2px", flexShrink: 0 }}>×</button>
         </div>
 
-        <div style={{ padding: "12px 18px", borderBottom: "1px solid rgba(255,255,255,0.06)", display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ padding: "12px 18px", borderBottom: "1px solid rgba(255,255,255,0.06)", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" as const }}>
           <select
             value={selectedPeriod ? `${selectedPeriod.start}|${selectedPeriod.end}` : ""}
             onChange={(e) => {
               const [start, end] = e.target.value.split("|");
               setSelectedPeriod(periods.find((p) => p.start === start && p.end === end) ?? null);
             }}
-            style={{ ...INPUT, flex: 1 }}
+            style={{ ...INPUT, flex: 1, minWidth: 140 }}
           >
             {periods.map((p) => (
               <option key={`${p.start}|${p.end}`} value={`${p.start}|${p.end}`}>{p.label}</option>
             ))}
           </select>
+          <button type="button" onClick={() => setDriverPickerOpen(true)}
+            style={{ padding: "8px 14px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.15)", background: driverFilter !== null ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.85)", fontSize: 13, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" as const }}>
+            {driverFilter === null ? "All Drivers" : `${driverFilter.size} of ${currentMemberIds.size} Drivers`}
+          </button>
           <button type="button" onClick={handleExportCsv} disabled={loading || driverSummaries.length === 0}
             style={{ padding: "8px 14px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.85)", fontSize: 13, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" as const }}>
             Export CSV
@@ -367,6 +391,14 @@ export default function PayrollReportModal({ open, onClose, companyId }: Props) 
           {error && <div style={{ marginTop: 12, fontSize: 12, color: "#ef4444" }}>{error}</div>}
         </div>
       </div>
+
+      <DriverGroupPicker
+        open={driverPickerOpen}
+        onClose={() => setDriverPickerOpen(false)}
+        companyId={companyId}
+        selectedIds={driverFilter}
+        onChange={setDriverFilter}
+      />
     </div>
   );
 }

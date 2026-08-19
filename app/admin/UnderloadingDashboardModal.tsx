@@ -31,6 +31,8 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
+import { useCompanyRoster } from "@/app/planner/hooks/useCompanyRoster";
+import DriverGroupPicker from "./DriverGroupPicker";
 
 type LoadPointRow = {
   load_id: string;
@@ -75,6 +77,17 @@ export default function UnderloadingDashboardModal({ open, onClose, companyId }:
   const [rangeDays, setRangeDays] = useState<number | null>(30);
   const [points, setPoints] = useState<LoadPointRow[]>([]);
   const [nameById, setNameById] = useState<Record<string, string>>({});
+
+  // Current roster -- load_points is never cleaned up when a driver is
+  // removed from the company, so without this a departed driver's old
+  // loads would keep showing up here indefinitely. Also the source
+  // DriverGroupPicker filters against, so a removed driver isn't pickable
+  // either. `null` driverFilter means "everyone currently on the roster",
+  // the default -- narrower selections are an explicit opt-in.
+  const { members: rosterMembers } = useCompanyRoster(companyId);
+  const currentMemberIds = useMemo(() => new Set(rosterMembers.map((m) => m.user_id)), [rosterMembers]);
+  const [driverFilter, setDriverFilter] = useState<Set<string> | null>(null);
+  const [driverPickerOpen, setDriverPickerOpen] = useState(false);
 
   // Whether the company has Incentives enabled -- if not, benchmark
   // gallons were never set and load_points will always be empty, so the
@@ -128,9 +141,17 @@ export default function UnderloadingDashboardModal({ open, onClose, companyId }:
     return () => { cancelled = true; };
   }, [open, companyId, rangeDays]);
 
+  // Departed drivers (no longer in currentMemberIds) are excluded
+  // unconditionally; driverFilter narrows further within the current
+  // roster when the admin has picked a subset.
+  const visiblePoints = useMemo(
+    () => points.filter((r) => currentMemberIds.has(r.driver_id) && (driverFilter === null || driverFilter.has(r.driver_id))),
+    [points, currentMemberIds, driverFilter]
+  );
+
   const driverSummaries = useMemo<DriverSummary[]>(() => {
     const byDriver: Record<string, DriverSummary> = {};
-    for (const r of points) {
+    for (const r of visiblePoints) {
       const s = (byDriver[r.driver_id] ??= {
         driver_id: r.driver_id,
         display_name: nameById[r.driver_id] ?? "Unknown",
@@ -141,10 +162,10 @@ export default function UnderloadingDashboardModal({ open, onClose, companyId }:
       s.totalGallons += Number(r.recovered_gallons) || 0;
     }
     return Object.values(byDriver).sort((a, b) => b.totalGallons - a.totalGallons);
-  }, [points, nameById]);
+  }, [visiblePoints, nameById]);
 
-  const totalGallons = useMemo(() => points.reduce((s, r) => s + (Number(r.recovered_gallons) || 0), 0), [points]);
-  const totalLoads = useMemo(() => new Set(points.map((r) => r.load_id)).size, [points]);
+  const totalGallons = useMemo(() => visiblePoints.reduce((s, r) => s + (Number(r.recovered_gallons) || 0), 0), [visiblePoints]);
+  const totalLoads = useMemo(() => new Set(visiblePoints.map((r) => r.load_id)).size, [visiblePoints]);
   const avgPerLoad = totalLoads > 0 ? totalGallons / totalLoads : 0;
 
   if (!open) return null;
@@ -167,12 +188,15 @@ export default function UnderloadingDashboardModal({ open, onClose, companyId }:
           </div>
         ) : (
           <>
-            <div style={{ padding: "12px 18px", borderBottom: "1px solid rgba(255,255,255,0.06)", display: "flex", gap: 8 }}>
+            <div style={{ padding: "12px 18px", borderBottom: "1px solid rgba(255,255,255,0.06)", display: "flex", gap: 8, flexWrap: "wrap" as const }}>
               {RANGES.map((r) => (
                 <button key={r.label} type="button" onClick={() => setRangeDays(r.days)} style={chipStyle(rangeDays === r.days)}>
                   {r.label}
                 </button>
               ))}
+              <button type="button" onClick={() => setDriverPickerOpen(true)} style={{ ...chipStyle(driverFilter !== null), marginLeft: "auto" }}>
+                {driverFilter === null ? "All Drivers" : `${driverFilter.size} of ${currentMemberIds.size} Drivers`}
+              </button>
             </div>
 
             <div style={{ padding: "18px", borderBottom: "1px solid rgba(255,255,255,0.06)", display: "flex", gap: 18, flexWrap: "wrap" as const }}>
@@ -219,6 +243,14 @@ export default function UnderloadingDashboardModal({ open, onClose, companyId }:
           </>
         )}
       </div>
+
+      <DriverGroupPicker
+        open={driverPickerOpen}
+        onClose={() => setDriverPickerOpen(false)}
+        companyId={companyId}
+        selectedIds={driverFilter}
+        onChange={setDriverFilter}
+      />
     </div>
   );
 }
