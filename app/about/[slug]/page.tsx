@@ -9,7 +9,7 @@ import { useParams, notFound } from "next/navigation";
 import Link from "next/link";
 import SiteHeader from "../../marketing/SiteHeader";
 import FitHeading from "../../marketing/FitHeading";
-import { getLearnTopic, Icon, type LearnBlock } from "@/lib/content/learnTopics";
+import { getLearnTopic, LEARN_TOPICS, Icon, type LearnBlock } from "@/lib/content/learnTopics";
 
 function Section({ emoji, title, children }: { emoji: string; title: string; children: React.ReactNode }) {
   return (
@@ -53,6 +53,16 @@ export default function AboutTopicPage() {
     return null;
   }
 
+  // Lets a reader move straight from one topic to the next without
+  // bouncing back to the /about grid and scrolling to find their place --
+  // the exact friction reported. Order follows LEARN_TOPICS' own order
+  // (the same order the About grid renders cards in). Last topic loops
+  // back to the overview rather than wrapping to the first -- "you've
+  // read them all" reads as a natural stopping point, not a dead end.
+  const topicIndex = LEARN_TOPICS.findIndex((t) => t.slug === topic.slug);
+  const prevTopic = topicIndex > 0 ? LEARN_TOPICS[topicIndex - 1] : null;
+  const nextTopic = topicIndex >= 0 && topicIndex < LEARN_TOPICS.length - 1 ? LEARN_TOPICS[topicIndex + 1] : null;
+
   return (
     <div className="page">
       <SiteHeader active="about" />
@@ -77,6 +87,26 @@ export default function AboutTopicPage() {
           <Link href="/get-the-app" className="cta-link">
             Request Early Access <span>&rarr;</span>
           </Link>
+
+          <div className="continue-nav">
+            {prevTopic && (
+              <Link href={`/about/${prevTopic.slug}`} className="continue-card continue-prev">
+                <span className="continue-label">&larr; Previous</span>
+                <span className="continue-title"><Icon value={prevTopic.emoji} size={18} />{prevTopic.shortName}</span>
+              </Link>
+            )}
+            {nextTopic ? (
+              <Link href={`/about/${nextTopic.slug}`} className="continue-card continue-next">
+                <span className="continue-label">Keep Reading</span>
+                <span className="continue-title">{nextTopic.shortName}<Icon value={nextTopic.emoji} size={18} /></span>
+              </Link>
+            ) : (
+              <Link href="/about" className="continue-card continue-next">
+                <span className="continue-label">You've read them all</span>
+                <span className="continue-title">Back to Overview &rarr;</span>
+              </Link>
+            )}
+          </div>
         </div>
       </section>
 
@@ -169,6 +199,46 @@ export default function AboutTopicPage() {
           text-decoration: none;
         }
         .cta-link:hover { opacity: 0.85; }
+
+        .continue-nav {
+          display: flex;
+          gap: 12px;
+          margin-top: 40px;
+          padding-top: 28px;
+          border-top: 1px solid rgba(0,0,0,0.08);
+        }
+        .continue-card {
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+          padding: 16px 18px;
+          border-radius: 14px;
+          border: 1px solid rgba(0,0,0,0.08);
+          background: #f6f6f5;
+          text-decoration: none;
+          transition: background 150ms ease, border-color 150ms ease;
+        }
+        .continue-card:hover { background: #efefed; border-color: rgba(0,0,0,0.14); }
+        .continue-prev { flex: 1; align-items: flex-start; }
+        .continue-next { flex: 1; align-items: flex-end; text-align: right; margin-left: auto; }
+        .continue-label {
+          font: 800 10px var(--font);
+          letter-spacing: 0.1em;
+          text-transform: uppercase;
+          color: rgba(0,0,0,0.4);
+        }
+        .continue-title {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font: 700 15px var(--font);
+          color: #111;
+        }
+
+        @media (max-width: 560px) {
+          .continue-nav { flex-direction: column; }
+          .continue-next { margin-left: 0; align-items: flex-start; text-align: left; }
+        }
 
         @media (max-width: 760px) {
           .hero { padding: 28px 24px 0; }

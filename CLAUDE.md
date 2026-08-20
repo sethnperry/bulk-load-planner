@@ -4227,6 +4227,32 @@ one.
 Not live-verified this pass (no authenticated session available from this
 side) — `tsc --noEmit` and `next build` both clean.
 
+### About page: sequential "keep reading" navigation between topics (2026-08-20)
+
+User feedback: finishing a topic's deep-dive page (`/about/[slug]`) was a
+dead end — back to `/about`, scroll to find where you left off, click the
+next card. No way to move through topics in sequence.
+
+Added prev/next navigation at the bottom of `app/about/[slug]/page.tsx`,
+below the existing "Request Early Access" CTA (kept in its prime
+position — the site's actual conversion goal — with "keep reading" as a
+secondary path underneath, not competing for the same attention).
+Position in `LEARN_TOPICS` (shared with the in-app Learn page and the
+`/about` card grid — same file, same order) drives both links: a
+"← Previous" card when not on the first topic, and either a "Keep
+Reading" card to the next topic's `shortName`, or — on the last topic —
+a "You've read them all → Back to Overview" link, closing the loop back
+to `/about` rather than wrapping around to the first topic again (a
+deliberate stopping point, not a forced loop).
+
+Live-verified locally across all three states: first topic
+(`equipment-setup`) shows only "Keep Reading → Temperature Prediction";
+middle topic (`temperature-prediction`) shows both "← Previous →
+Equipment Setup" and "Keep Reading → Weight Plan"; last topic
+(`over-under`) shows "← Previous → Self-Correcting Network" and "You've
+read them all → Back to Overview". `tsc --noEmit` and `next build` both
+clean.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.
