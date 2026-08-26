@@ -4404,6 +4404,22 @@ the finalized per-compartment values → correct one compartment's API on a
 shared-product pair and confirm the "heavier" one wins in
 `rack_product_status` afterward.
 
+**Follow-up same day: direct "Back to Planner" exit on both phases.** User
+feedback: getting out of the flow required tapping Complete first to reach
+CancelLoadSheet's own Back to Planner row -- not discoverable, and "we
+always want a way out regardless of the screen." Both `LoadingModal.tsx`
+(Plan Review) and `VerifyAgainstBolModal.tsx` (Verify Against BOL) gained a
+new required `onBackToPlanner` prop, rendered as a quiet text button below
+the primary Complete/Confirm button. Both wire to the exact same
+`handleBackToPlannerNoUpdate` in `page.tsx` that CancelLoadSheet's own row
+already used (genuinely undoes the load + re-card, not just a dismiss) --
+for the Verify Against BOL wiring, wrapped to also close `verifyBolOpen`
+first, since that modal has its own open state separate from
+`loadWorkflow.loadingOpen`. The existing paths (backdrop-click/Escape/
+Complete → CancelLoadSheet) are untouched -- this adds a direct route, not
+a replacement. `tsc --noEmit` and `next build` both clean; not live-
+verified this pass, same reason as above.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.

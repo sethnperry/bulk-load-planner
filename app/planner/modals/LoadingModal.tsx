@@ -117,6 +117,14 @@ export default function LoadingModal(props: {
   // silent header Close button plus a separate submit button.
   onLoaded: () => void;
 
+  // A direct, always-visible way out -- per explicit user direction ("we
+  // always want a way out regardless of the screen"), not buried behind
+  // tapping Complete first to reach CancelLoadSheet's own Back to Planner
+  // row (that path still exists too, via backdrop-click/Escape/Complete).
+  // Genuinely undoes the load + re-card, same as CancelLoadSheet's own
+  // button -- see handleBackToPlannerNoUpdate in page.tsx.
+  onBackToPlanner: () => void;
+
   loadedDisabled?: boolean;
   loadedLabel?: string;
 
@@ -144,6 +152,7 @@ export default function LoadingModal(props: {
     targetWeight,
     onOpenTempDial,
     onLoaded,
+    onBackToPlanner,
     loadedDisabled,
     loadedLabel,
     lastProductInfoById,
@@ -425,6 +434,18 @@ useEffect(() => {
               {loadedLabel ?? "Complete"}
             </button>
           </div>
+
+          <button
+            type="button"
+            onClick={onBackToPlanner}
+            style={{
+              width: "100%", padding: "10px 0",
+              borderRadius: 6, border: "none", background: "transparent",
+              color: "rgba(255,255,255,0.40)", fontSize: 13, fontWeight: 700, cursor: "pointer",
+            }}
+          >
+            Back to Planner
+          </button>
         </div>
       </div>
 

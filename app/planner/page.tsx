@@ -1995,6 +1995,7 @@ const lastProductInfoById = useMemo(() => {
         livePreviewDiffLbs={livePreviewDiffLbs}
         targetWeight={targetWeight}
         onLoaded={() => setCancelLoadConfirmOpen(true)}
+        onBackToPlanner={handleBackToPlannerNoUpdate}
         loadedDisabled={loadWorkflow.completeBusy}
         loadedLabel={loadWorkflow.completeBusy ? "Saving…" : "Complete"}
       />
@@ -2020,6 +2021,7 @@ const lastProductInfoById = useMemo(() => {
           setVerifyBolOpen(false);
           loadWorkflow.onLoadedFromLoadingModal(verifiedByComp);
         }}
+        onBackToPlanner={() => { setVerifyBolOpen(false); handleBackToPlannerNoUpdate(); }}
       />
 
       <ProductTempModal

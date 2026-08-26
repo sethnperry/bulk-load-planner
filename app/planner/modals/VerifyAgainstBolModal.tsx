@@ -36,9 +36,14 @@ export default function VerifyAgainstBolModal(props: {
   productInputs: ProductInputs;
 
   onConfirm: (verifiedByComp: Record<number, VerifiedLoadLine>) => void;
+  // Always-visible way out from this screen too -- per explicit user
+  // direction ("we always want a way out regardless of the screen").
+  // Genuinely undoes the load + re-card, same handler LoadingModal's own
+  // Back to Planner button and CancelLoadSheet's row both use.
+  onBackToPlanner: () => void;
   busy?: boolean;
 }) {
-  const { open, onClose, styles, planRows, productNameById, productHexCodeById, productInputs, onConfirm, busy } = props;
+  const { open, onClose, styles, planRows, productNameById, productHexCodeById, productInputs, onConfirm, onBackToPlanner, busy } = props;
 
   const compLines = useMemo(() => {
     return (planRows ?? [])
@@ -188,6 +193,20 @@ export default function VerifyAgainstBolModal(props: {
             {busy ? "Saving…" : "Confirm & Log Load"}
           </button>
         </div>
+
+        <button
+          type="button"
+          onClick={onBackToPlanner}
+          disabled={Boolean(busy)}
+          style={{
+            width: "100%", padding: "10px 0",
+            borderRadius: 6, border: "none", background: "transparent",
+            color: "rgba(255,255,255,0.40)", fontSize: 13, fontWeight: 700, cursor: "pointer",
+            opacity: busy ? 0.5 : 1,
+          }}
+        >
+          Back to Planner
+        </button>
       </div>
 
       <ValueEntryOverlay
