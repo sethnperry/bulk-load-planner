@@ -1058,9 +1058,10 @@ export default function CalculatorPage() {
   });
 
   // ── Incentive running-average card ────────────────────────────────────────
-  // Left side of the new card is this load's own points (same value the
-  // "You earned X points" line above already shows); right side is the
-  // average recovered points per load across the admin-configured
+  // Left side is this load's own recovered points; right side is the
+  // average recovered points per load across the current report period.
+  // The old separate "You earned X points" confirmation line was removed
+  // 2026-08-20 as redundant with this card's own "This Load" figure.
   // Running average uses the SAME report period the admin already
   // configures for the Period Report (pay_period_type/pay_period_anchor_date)
   // -- no separate averaging-period concept. Simplified 2026-08-17 per
@@ -1093,8 +1094,7 @@ export default function CalculatorPage() {
 
   // Refetches whenever a load actually completes (loadWorkflow.loadReport
   // changes) so the average reflects the just-finished load immediately,
-  // not just on next mount -- same trigger the "You earned X points" line
-  // above already relies on.
+  // not just on next mount.
   useEffect(() => {
     if (!incentiveEnabled || !effectiveUserId || !shell.companyId || !payPeriodAnchorDate) { setAvgRecoveredPoints(null); return; }
     let cancelled = false;
@@ -1857,11 +1857,6 @@ const lastProductInfoById = useMemo(() => {
               </div>
               {planUsesReferenceApi && planRows.length > 0 && (
                 <div style={{ fontSize: 10, fontWeight: 700, color: "#fb923c", marginTop: 4 }}>⚠ using ref API</div>
-              )}
-              {loadReport?.recovered_points != null && loadReport.recovered_points > 0 && (
-                <div style={{ fontSize: 12, fontWeight: 700, color: "#4ade80", marginTop: 6 }}>
-                  You earned {loadReport.recovered_points.toFixed(1)} points on this load
-                </div>
               )}
             </div>
 
