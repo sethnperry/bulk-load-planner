@@ -31,6 +31,15 @@ export default function FlippableCard({
   const backFaceRef = useRef<HTMLDivElement>(null);
   const [frontH, setFrontH] = useState(0);
   const [backH, setBackH] = useState(0);
+  // Whether we've applied a real (non-zero) measured height at least once.
+  // The very first measurement on mount should snap into place instantly,
+  // not animate -- some cards mount while the page is still busy (many
+  // cards laying out at once, terminal/card data still loading), and if
+  // that busy period interrupts the CSS height transition partway, the
+  // card is left visibly stuck at a shorter height until something else
+  // (e.g. tapping it) forces a clean remeasurement. Confirmed live: exactly
+  // this symptom, only on some cards, always fixed by one flip-and-back.
+  const settledRef = useRef(false);
 
   useEffect(() => {
     const fEl = frontMeasureRef.current;
@@ -41,10 +50,15 @@ export default function FlippableCard({
       setBackH(bEl.offsetHeight);
     };
     measure();
+    // Defensive second pass: catches layout that hadn't fully settled yet
+    // at the moment of the synchronous measure() above (e.g. a web font
+    // still swapping in), which the ResizeObserver won't always catch if
+    // the resulting size change happens between its own observation ticks.
+    const raf = requestAnimationFrame(measure);
     const ro = new ResizeObserver(measure);
     ro.observe(fEl);
     ro.observe(bEl);
-    return () => ro.disconnect();
+    return () => { cancelAnimationFrame(raf); ro.disconnect(); };
   }, [front, back]);
 
   // Chromium sometimes fails to paint text nodes the first time a face is
@@ -62,6 +76,11 @@ export default function FlippableCard({
   }, [flipped]);
 
   const height = flipped ? backH : frontH;
+  // First real measurement applies instantly (no transition to interrupt);
+  // every height change after that (an actual flip, or content changing
+  // size) animates normally.
+  const isFirstSettle = !settledRef.current && height > 0;
+  if (isFirstSettle) settledRef.current = true;
 
   return (
     <div style={{ position: "relative", perspective: 1400 }}>
@@ -69,7 +88,7 @@ export default function FlippableCard({
         style={{
           position: "relative",
           height: height || undefined,
-          transition: "height 360ms cubic-bezier(0.4,0.15,0.2,1)",
+          transition: isFirstSettle ? "none" : "height 360ms cubic-bezier(0.4,0.15,0.2,1)",
         }}
       >
         <div

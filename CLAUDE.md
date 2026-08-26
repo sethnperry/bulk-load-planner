@@ -4253,6 +4253,41 @@ Equipment Setup" and "Keep Reading → Weight Plan"; last topic
 read them all → Back to Overview". `tsc --noEmit` and `next build` both
 clean.
 
+### Cards tab: some flip-cards render stuck at half height on first load (2026-08-20)
+
+User report (screenshot from a real device): on the Terminals sub-tab,
+some cards showed only their top half (name/city, with the card-number/
+expiration row missing) — tapping the card to flip it always fixed it,
+and flipping back left it rendering correctly from then on.
+
+**Root cause**: `FlippableCard.tsx` (shared by Terminals/Badges/
+Credentials — front and back are absolutely positioned for the 3D flip,
+so neither can report its own height; a pair of off-screen clones measure
+it instead) applies the measured height through
+`transition: "height 360ms ..."` unconditionally, including the very
+first time a real height is measured on mount. If that initial
+measurement lands while the page is still busy — many cards laying out
+at once, terminal/card data still streaming in — the CSS transition can
+get interrupted partway, leaving the card's container visibly stuck at a
+shorter height than its content actually needs. A user-driven flip
+(`flipped` toggling true then false) always fixes it because it forces a
+clean, deliberate height transition to a value that's stable by then (the
+back face, already fully measured).
+
+**Fixed**: the first non-zero height measurement now applies with
+`transition: "none"` (snaps instantly, nothing to interrupt); every
+height change after that — an actual flip, or the content itself
+changing size — still animates normally via a `settledRef` flag. Also
+added a defensive `requestAnimationFrame`-deferred second measurement
+pass on mount, in case the very first synchronous read happened before
+layout had fully settled (e.g. a web font still swapping in) in a way
+the `ResizeObserver` didn't independently catch.
+
+Not live-verified this pass (no authenticated session available from this
+side to reproduce the original race) — `tsc --noEmit` and `next build`
+both clean. Worth a real check on a real device before considering this
+fully closed.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.
