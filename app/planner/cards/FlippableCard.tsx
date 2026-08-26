@@ -12,7 +12,7 @@
 // the visible faces are absolutely positioned (required for the 3D flip)
 // and can't report their own height directly.
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 export default function FlippableCard({
   flipped,
@@ -39,9 +39,26 @@ export default function FlippableCard({
   // card is left visibly stuck at a shorter height until something else
   // (e.g. tapping it) forces a clean remeasurement. Confirmed live: exactly
   // this symptom, only on some cards, always fixed by one flip-and-back.
-  const settledRef = useRef(false);
+  //
+  // Deliberately REAL React state, not a ref mutated during render (an
+  // earlier version of this fix did that, e.g. `if (isFirstSettle)
+  // settledRef.current = true;` inline in the render body) -- React can
+  // invoke a component's render function more than once for the same
+  // commit (e.g. an interrupted/restarted render pass under contention,
+  // more likely on a slower real device with many cards mounting at once,
+  // which matches exactly when this bug was reported as still happening).
+  // Mutating a ref during render is against React's own rules for exactly
+  // this reason: an earlier, discarded render pass could flip the ref to
+  // "settled" before the render that actually commits ever runs, silently
+  // reintroducing the animated (interruptible) transition on what is, from
+  // the user's screen, still the very first paint.
+  const [hasSettled, setHasSettled] = useState(false);
 
-  useEffect(() => {
+  // Layout effect, not a plain effect -- runs synchronously after the DOM
+  // commits but before the browser paints, so the very first real
+  // measurement is applied before the user ever sees an intermediate
+  // (zero/wrong) height, rather than racing a paint that already happened.
+  useLayoutEffect(() => {
     const fEl = frontMeasureRef.current;
     const bEl = backMeasureRef.current;
     if (!fEl || !bEl) return;
@@ -76,11 +93,18 @@ export default function FlippableCard({
   }, [flipped]);
 
   const height = flipped ? backH : frontH;
+
   // First real measurement applies instantly (no transition to interrupt);
   // every height change after that (an actual flip, or content changing
-  // size) animates normally.
-  const isFirstSettle = !settledRef.current && height > 0;
-  if (isFirstSettle) settledRef.current = true;
+  // size) animates normally. Marking "settled" happens in an effect (a
+  // real side effect, after commit), not during render itself -- see the
+  // comment on hasSettled's declaration above for why that distinction
+  // matters here.
+  useEffect(() => {
+    if (hasSettled || height <= 0) return;
+    const raf = requestAnimationFrame(() => setHasSettled(true));
+    return () => cancelAnimationFrame(raf);
+  }, [hasSettled, height]);
 
   return (
     <div style={{ position: "relative", perspective: 1400 }}>
@@ -88,7 +112,7 @@ export default function FlippableCard({
         style={{
           position: "relative",
           height: height || undefined,
-          transition: isFirstSettle ? "none" : "height 360ms cubic-bezier(0.4,0.15,0.2,1)",
+          transition: hasSettled ? "height 360ms cubic-bezier(0.4,0.15,0.2,1)" : "none",
         }}
       >
         <div

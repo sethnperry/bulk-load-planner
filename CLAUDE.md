@@ -4288,6 +4288,43 @@ side to reproduce the original race) — `tsc --noEmit` and `next build`
 both clean. Worth a real check on a real device before considering this
 fully closed.
 
+**Follow-up 2026-08-26 — user reported this still happening ("reverted, or
+never got fully fixed").** The `transition: "none"` idea from the first
+pass was right, but its implementation had a real bug: whether the first
+settle counted as "settled" was tracked with `settledRef.current = true`
+mutated **during render** (`if (isFirstSettle) settledRef.current = true;`
+directly in the component body), which is against React's own rules —
+React can invoke a component's render function more than once for the
+same eventual commit (an interrupted/restarted render pass under
+contention), and that's more likely on exactly the conditions this bug was
+reported under: a slower real device with many cards laying out at once.
+If a discarded render pass flipped the ref to "settled" before the render
+that actually commits ever ran, the *real* first-paint render would see
+`settledRef.current` already true and apply the animated (interruptible)
+transition anyway — silently reintroducing the original bug on what was,
+from the screen, still the very first paint. This fully explains "still
+happens, but only sometimes, only on some devices."
+
+**Fixed for real** in `app/planner/cards/FlippableCard.tsx`:
+- `settledRef` (a ref mutated inline during render) replaced with
+  `hasSettled`, genuine React state, flipped to `true` only from inside a
+  proper `useEffect` (a real side effect, guaranteed to run only for
+  commits that actually happened) via a `requestAnimationFrame` callback —
+  never during render itself.
+- The measurement effect itself changed from `useEffect` to
+  `useLayoutEffect` — runs synchronously after the DOM commits but before
+  the browser paints, so the very first real measurement is applied before
+  the user can ever see an intermediate (zero or stale) height, rather
+  than racing an already-happened paint. (`useLayoutEffect` already has
+  one other precedent in this codebase, `app/marketing/FitHeading.tsx`, so
+  this isn't a new pattern for the project.)
+
+Not live-verified this pass either (same reason as above) — `tsc --noEmit`
+and `next build` both clean. This is a stronger fix than the first pass
+(the render-time ref mutation was a genuine bug, not just an unproven
+theory), but still worth a real check on a real device, ideally the exact
+one/scenario that showed the bug again, before calling this fully closed.
+
 ### Loading modal split into Plan Review + Verify Against BOL (2026-08-26)
 
 Multi-turn design conversation with the user, planned via Plan Mode
