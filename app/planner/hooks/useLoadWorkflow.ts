@@ -5,10 +5,16 @@
 import { useCallback, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { beginLoad, completeLoad, deleteLoad } from "@/lib/supabase/load";
-import { lbsPerGallonAtTemp } from "../utils/planMath";
+import { computeActualLbsForLine } from "../utils/planMath";
 import type { LoadReport, PlanRow, ProductRow } from "../types";
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
+
+// One compartment's BOL-corrected values, from the Verify Against BOL step
+// (VerifyAgainstBolModal.tsx) -- passed into onLoadedFromLoadingModal as an
+// override once the driver has confirmed/corrected the plan against the
+// real paperwork after physically loading.
+export type VerifiedLoadLine = { gallons: number; tempF: number; api: number };
 
 type Props = {
   authUserId: string | null;
@@ -29,6 +35,11 @@ type Props = {
   productNameById: Map<string, string>;
   productInputs: Record<string, { api?: string; tempF?: number }>;
   setProductInputs: (v: Record<string, { api?: string; tempF?: number }>) => void;
+  // Resets the Loading modal's Plan Review gallons override (page.tsx state)
+  // on every fresh LOAD tap -- same trigger/place setProductInputs already
+  // resets for the identical reason. Optional only so this hook doesn't
+  // break if ever constructed without it (defensive, not expected in practice).
+  setLoadingGallonsOverride?: (v: Record<number, number>) => void;
   // Post-load refresh callbacks
   onRefreshTerminalProducts?: () => Promise<void>;  // re-fetch last_api, last_temp_f
   onRefreshTerminalAccess?: () => Promise<void>;    // re-fetch terminal expiry dates
@@ -45,6 +56,7 @@ export function useLoadWorkflow({
   planRows, plannedGallonsTotal, plannedWeightLbs,
   terminalProducts, productNameById,
   productInputs, setProductInputs,
+  setLoadingGallonsOverride,
   onRefreshTerminalProducts,
   onRefreshTerminalAccess,
   onPostLoadComplete,
@@ -234,6 +246,7 @@ export function useLoadWorkflow({
         }
       }
       setProductInputs(nextInputs);
+      setLoadingGallonsOverride?.({});
       setLoadingOpen(true);
       setLoadingModalError(null);
     } catch (err: any) {
@@ -245,7 +258,7 @@ export function useLoadWorkflow({
   }, [
     beginLoadBusy, selectedComboId, selectedTerminalId, selectedRackId, selectedState, selectedCity,
     selectedCityId, planRows, plannedGallonsTotal, plannedWeightLbs,
-    tare, cgBias, ambientTempF, tempF, setProductInputs, onRefreshTerminalAccess, authUserId,
+    tare, cgBias, ambientTempF, tempF, setProductInputs, setLoadingGallonsOverride, onRefreshTerminalAccess, authUserId,
     trainingTraineeId, activeSlotLetter,
   ]);
 
@@ -274,7 +287,7 @@ export function useLoadWorkflow({
 
   // ── On loaded (from loading modal) ────────────────────────────────────────
 
-  const onLoadedFromLoadingModal = useCallback(async () => {
+  const onLoadedFromLoadingModal = useCallback(async (verifiedByComp?: Record<number, VerifiedLoadLine>) => {
     if (!activeLoadId) return;
 
     const requiredProductIds = Array.from(new Set(
@@ -283,46 +296,69 @@ export function useLoadWorkflow({
         .map((r) => String(r.productId))
     ));
 
-    for (const pid of requiredProductIds) {
-      const apiStr = String(productInputs[pid]?.api ?? "").trim();
-      const tempVal = productInputs[pid]?.tempF;
-      if (!apiStr || !Number.isFinite(Number(apiStr))) {
-        alert(`Enter API for ${productNameById.get(pid) ?? pid}`); return;
-      }
-      if (tempVal == null || !Number.isFinite(Number(tempVal))) {
-        alert(`Enter Temp for ${productNameById.get(pid) ?? pid}`); return;
+    // Phase-2 (Verify Against BOL) already validates every compartment has a
+    // real value before ever calling this with verifiedByComp -- this
+    // legacy per-product check only guards the (kept-as-fallback) direct
+    // no-arg path below.
+    if (!verifiedByComp) {
+      for (const pid of requiredProductIds) {
+        const apiStr = String(productInputs[pid]?.api ?? "").trim();
+        const tempVal = productInputs[pid]?.tempF;
+        if (!apiStr || !Number.isFinite(Number(apiStr))) {
+          alert(`Enter API for ${productNameById.get(pid) ?? pid}`); return;
+        }
+        if (tempVal == null || !Number.isFinite(Number(tempVal))) {
+          alert(`Enter Temp for ${productNameById.get(pid) ?? pid}`); return;
+        }
       }
     }
 
     const nextActualByComp: Record<number, { actual_gallons: number | null; actual_lbs: number | null; temp_f: number | null }> = {};
     let actualPayloadLbs = 0;
 
-    for (const r of planRows as any[]) {
-      const comp = Number(r?.comp_number ?? 0);
-      const gallons = Number(r?.planned_gallons ?? 0);
-      const pid = r?.productId ? String(r.productId) : null;
-      if (!Number.isFinite(comp) || comp <= 0 || !pid || !Number.isFinite(gallons) || gallons <= 0) continue;
-
-      const apiNum = Number(String(productInputs[pid]?.api ?? "").trim());
-      const tempVal = Number(productInputs[pid]?.tempF);
-      const alpha = alphaPerFForProductId(pid);
-
-      if (!Number.isFinite(apiNum) || !Number.isFinite(tempVal) || alpha == null) {
-        const lpgPlanned = Number(r?.lbsPerGal ?? 0);
-        const lbsPlanned = gallons * (Number.isFinite(lpgPlanned) ? lpgPlanned : 0);
-        nextActualByComp[comp] = { actual_gallons: gallons, actual_lbs: Number.isFinite(lbsPlanned) ? lbsPlanned : null, temp_f: tempVal };
-        actualPayloadLbs += Number.isFinite(lbsPlanned) ? lbsPlanned : 0;
-        continue;
+    if (verifiedByComp) {
+      // Phase-2 path: per-compartment BOL-corrected values are authoritative
+      // -- gallons/temp/api can each differ from the plan, and two
+      // compartments of the same product are allowed to disagree (verified
+      // independently against the real paperwork).
+      for (const r of planRows as any[]) {
+        const comp = Number(r?.comp_number ?? 0);
+        const pid = r?.productId ? String(r.productId) : null;
+        const v = verifiedByComp[comp];
+        if (!Number.isFinite(comp) || comp <= 0 || !pid || !v) continue;
+        const alpha = alphaPerFForProductId(pid);
+        const lbs = alpha != null
+          ? computeActualLbsForLine(v.gallons, v.api, v.tempF, alpha)
+          : v.gallons * Number(r?.lbsPerGal ?? 0);
+        nextActualByComp[comp] = { actual_gallons: v.gallons, actual_lbs: Number.isFinite(lbs) ? lbs : null, temp_f: v.tempF };
+        if (Number.isFinite(lbs)) actualPayloadLbs += lbs;
       }
+    } else {
+      for (const r of planRows as any[]) {
+        const comp = Number(r?.comp_number ?? 0);
+        const gallons = Number(r?.planned_gallons ?? 0);
+        const pid = r?.productId ? String(r.productId) : null;
+        if (!Number.isFinite(comp) || comp <= 0 || !pid || !Number.isFinite(gallons) || gallons <= 0) continue;
 
-      // Back-correct observed API to 60°F before computing lbs/gal —
-      // matches bestLbsPerGallon used in planning. Without this, plan and
-      // actual use different effective API60 causing a phantom diff.
-      const api60 = apiNum + alpha * (tempVal - 60);
-      const lpg = lbsPerGallonAtTemp(api60, alpha, tempVal);
-      const lbs = gallons * lpg;
-      nextActualByComp[comp] = { actual_gallons: gallons, actual_lbs: Number.isFinite(lbs) ? lbs : null, temp_f: tempVal };
-      if (Number.isFinite(lbs)) actualPayloadLbs += lbs;
+        const apiNum = Number(String(productInputs[pid]?.api ?? "").trim());
+        const tempVal = Number(productInputs[pid]?.tempF);
+        const alpha = alphaPerFForProductId(pid);
+
+        if (!Number.isFinite(apiNum) || !Number.isFinite(tempVal) || alpha == null) {
+          const lpgPlanned = Number(r?.lbsPerGal ?? 0);
+          const lbsPlanned = gallons * (Number.isFinite(lpgPlanned) ? lpgPlanned : 0);
+          nextActualByComp[comp] = { actual_gallons: gallons, actual_lbs: Number.isFinite(lbsPlanned) ? lbsPlanned : null, temp_f: tempVal };
+          actualPayloadLbs += Number.isFinite(lbsPlanned) ? lbsPlanned : 0;
+          continue;
+        }
+
+        // Back-correct observed API to 60°F before computing lbs/gal —
+        // matches bestLbsPerGallon used in planning. Without this, plan and
+        // actual use different effective API60 causing a phantom diff.
+        const lbs = computeActualLbsForLine(gallons, apiNum, tempVal, alpha);
+        nextActualByComp[comp] = { actual_gallons: gallons, actual_lbs: Number.isFinite(lbs) ? lbs : null, temp_f: tempVal };
+        if (Number.isFinite(lbs)) actualPayloadLbs += lbs;
+      }
     }
 
     setActualByComp(nextActualByComp);
@@ -338,11 +374,41 @@ export function useLoadWorkflow({
         temp_f: a.temp_f ?? null,
       }));
 
-      const product_updates = requiredProductIds.map((pid) => ({
-        product_id: pid,
-        api: Number(String(productInputs[pid]?.api ?? "").trim()),
-        temp_f: (productInputs[pid]?.tempF ?? null) as number | null,
-      }));
+      // product_updates feeds rack_product_status's shared "last observed"
+      // terminal reading -- keyed by product, so when Phase 2 lets two
+      // compartments of the same product diverge, collapse them here per
+      // explicit product direction ("err cold and heavy", matching this
+      // app's own established safety principle -- see the Over/Under Learn
+      // topic: "we'd rather predict the product is colder and denser than
+      // it turns out to be"): take whichever (api, tempF) pair yields the
+      // HEAVIER/denser result, never an average, never plain last-write-wins.
+      let product_updates: Array<{ product_id: string; api: number; temp_f: number | null }>;
+      if (verifiedByComp) {
+        const heaviestByProduct = new Map<string, { api: number; tempF: number; density: number }>();
+        for (const r of planRows as any[]) {
+          const comp = Number(r?.comp_number ?? 0);
+          const pid = r?.productId ? String(r.productId) : null;
+          const v = verifiedByComp[comp];
+          if (!pid || !v) continue;
+          const alpha = alphaPerFForProductId(pid);
+          if (alpha == null) continue;
+          // computeActualLbsForLine(1, ...) = lbs for exactly 1 gallon = density.
+          const density = computeActualLbsForLine(1, v.api, v.tempF, alpha);
+          const existing = heaviestByProduct.get(pid);
+          if (!existing || density > existing.density) {
+            heaviestByProduct.set(pid, { api: v.api, tempF: v.tempF, density });
+          }
+        }
+        product_updates = Array.from(heaviestByProduct.entries()).map(([product_id, w]) => ({
+          product_id, api: w.api, temp_f: w.tempF,
+        }));
+      } else {
+        product_updates = requiredProductIds.map((pid) => ({
+          product_id: pid,
+          api: Number(String(productInputs[pid]?.api ?? "").trim()),
+          temp_f: (productInputs[pid]?.tempF ?? null) as number | null,
+        }));
+      }
 
       const res = await completeLoad({
         load_id: activeLoadId,
@@ -500,9 +566,15 @@ try {
       const actualGross =
         Number.isFinite(tare) && Number.isFinite(actualPayloadLbs)
           ? tare + actualPayloadLbs : null;
-      const diff = Number.isFinite(Number(res?.diff_lbs))
-        ? Number(res.diff_lbs)
-        : plannedGross != null && actualGross != null ? actualGross - plannedGross : null;
+      // Always compute client-side now, never prefer res.diff_lbs -- the
+      // server's figure is derived from load_log's begin_load-time frozen
+      // snapshot, which the Loading modal's Plan Review phase can now
+      // legitimately move away from (a Phase-1 gallons override). Using the
+      // server's stale number here would silently disagree with
+      // planned_gross_lbs right next to it, which already reflects the
+      // live, possibly-adjusted plan (computePlannedGrossLbs() reads the
+      // effective props passed into this hook, not the DB row).
+      const diff = plannedGross != null && actualGross != null ? actualGross - plannedGross : null;
 
       setLoadReport({
         planned_total_gal: Number(plannedGallonsTotal),

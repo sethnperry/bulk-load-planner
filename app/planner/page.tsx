@@ -51,6 +51,7 @@ import DriverTrainingModal from "./components/DriverTrainingModal";
 // (CalculatorLayoutClient.tsx) -- see the render-site comment further down.
 import TerminalCatalogModal from "./modals/TerminalCatalogModal";
 import LoadingModal from "./modals/LoadingModal";
+import VerifyAgainstBolModal from "./modals/VerifyAgainstBolModal";
 import CancelLoadSheet from "./components/CancelLoadSheet";
 import ProductTempModal from "./modals/ProductTempModal";
 import CompartmentModal from "./modals/CompartmentModal";
@@ -62,7 +63,7 @@ import { styles } from "./ui/styles";
 import { addDaysISO_, daysUntilISO_, formatMDYWithCountdown_, formatMDYWithTime_, isPastISO_ } from "./utils/dates";
 import { themeFill, themeTextOnFill } from "./theme";
 import { normState } from "./utils/normalize";
-import { cgSliderToBias, bestLbsPerGallon, planForGallons, CG_NEUTRAL } from "./utils/planMath";
+import { cgSliderToBias, bestLbsPerGallon, planForGallons, CG_NEUTRAL, computeActualLbsForLine } from "./utils/planMath";
 import { generatePayPeriods, type PayPeriodType } from "@/app/admin/payPeriods";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -302,6 +303,11 @@ export default function CalculatorPage() {
   // already re-cards the terminal on LOAD tap, before this modal ever
   // opens.
   const [cancelLoadConfirmOpen, setCancelLoadConfirmOpen] = useState(false);
+  // Phase 2 -- opened only when "Log the Load" is tapped in CancelLoadSheet
+  // (see plan doc). Only this modal's own Confirm button actually submits
+  // (onLoadedFromLoadingModal(verifiedByComp)); backing out (Escape/backdrop)
+  // just closes it and returns to Plan Review with nothing submitted.
+  const [verifyBolOpen, setVerifyBolOpen] = useState(false);
   // Captured the instant LOAD/RELOAD is tapped -- whatever this terminal's
   // access date was *before* begin_load's silent re-card, so "Back to
   // Planner" can genuinely undo it (see handleBackToPlannerNoUpdate below).
@@ -877,6 +883,64 @@ export default function CalculatorPage() {
 
   const plannedGallonsTotal = planRows.reduce((s, r) => s + r.planned_gallons, 0);
 
+  // ── Loading modal: Plan Review gallons override ─────────────────────────────
+  // Isolated per-compartment override, applied AFTER planRows is already
+  // computed -- deliberately NOT compPlan.capOverride, which feeds INTO
+  // usePlanRows'/planForGallons's binary-search allocation and can cause
+  // OTHER compartments to gain gallons to compensate (confirmed by reading
+  // usePlanRows.ts -- it always maximizes total gallons under the weight
+  // budget). Editing one compartment here changes only that compartment;
+  // every other row is mathematically guaranteed untouched, even if that
+  // leaves legal weight capacity unused (explicit product decision -- e.g.
+  // reacting to a stale API by intentionally loading light on just that
+  // compartment, not redistributing the "missing" gallons elsewhere).
+  // Reset to {} on every fresh LOAD tap (see beginLoadToSupabase); never
+  // persisted to compPlan or presets -- more ephemeral than capOverride
+  // even (which is itself already excluded from saved presets).
+  const [loadingGallonsOverride, setLoadingGallonsOverride] = useState<Record<number, number>>({});
+
+  const effectivePlanRows = useMemo(() => {
+    if (Object.keys(loadingGallonsOverride).length === 0) return planRows;
+    return planRows.map((r) =>
+      loadingGallonsOverride[r.comp_number] != null
+        ? { ...r, planned_gallons: loadingGallonsOverride[r.comp_number] }
+        : r
+    );
+  }, [planRows, loadingGallonsOverride]);
+
+  const effectivePlannedWeightLbs = useMemo(
+    () => effectivePlanRows.reduce((sum, r: any) => sum + Number(r.planned_gallons ?? 0) * Number(r.lbsPerGal ?? 0), 0),
+    [effectivePlanRows]
+  );
+  const effectivePlannedGallonsTotal = effectivePlanRows.reduce((s, r) => s + r.planned_gallons, 0);
+
+  // Live weight/diff preview for the Loading modal's Plan Review phase --
+  // reuses computeActualLbsForLine, the exact same formula the final
+  // complete_load submission uses (see useLoadWorkflow.ts), so this preview
+  // can never disagree with what actually gets submitted. Falls back to
+  // planned density for any line whose product doesn't have a valid
+  // API+Temp entered yet (matches how the plan's own weight calc already
+  // treats an unentered product).
+  const livePreviewTotalLbs = useMemo(() => {
+    let sum = 0;
+    for (const r of effectivePlanRows as any[]) {
+      const pid = r.productId as string | undefined;
+      const gallons = Number(r.planned_gallons ?? 0);
+      const prod = pid ? terminalProducts.find((p) => p.product_id === pid) : null;
+      const apiNum = pid ? Number(String(productInputs[pid]?.api ?? "").trim()) : NaN;
+      const tempVal = pid ? Number(productInputs[pid]?.tempF) : NaN;
+      const alpha = prod?.alpha_per_f != null ? Number(prod.alpha_per_f) : null;
+      if (alpha != null && Number.isFinite(apiNum) && Number.isFinite(tempVal)) {
+        sum += computeActualLbsForLine(gallons, apiNum, tempVal, alpha);
+      } else {
+        sum += gallons * Number(r.lbsPerGal ?? 0);
+      }
+    }
+    return sum;
+  }, [effectivePlanRows, productInputs, terminalProducts]);
+
+  const livePreviewGrossLbs = Number.isFinite(tare) ? tare + livePreviewTotalLbs : null;
+  const livePreviewDiffLbs = livePreviewGrossLbs != null && targetWeight > 0 ? livePreviewGrossLbs - targetWeight : null;
 
   // ── Plan slots ─────────────────────────────────────────────────────────────
   // Must be declared BEFORE loadWorkflow so planSlots.refreshLastLoad is defined
@@ -1039,9 +1103,10 @@ export default function CalculatorPage() {
     selectedCityId: location.selectedCityId,
     tare, cgBias,
     ambientTempF: location.ambientTempF,
-    tempF, planRows, plannedGallonsTotal, plannedWeightLbs,
+    tempF, planRows: effectivePlanRows, plannedGallonsTotal: effectivePlannedGallonsTotal, plannedWeightLbs: effectivePlannedWeightLbs,
     terminalProducts, productNameById,
     productInputs, setProductInputs,
+    setLoadingGallonsOverride,
     onRefreshTerminalProducts: fetchTerminalProducts,
     onRefreshTerminalAccess: terminals.refreshTerminalAccessForUser,
     onPostLoadComplete: planSlots.refreshLastLoad,
@@ -1916,7 +1981,7 @@ const lastProductInfoById = useMemo(() => {
       <LoadingModal
         open={loadWorkflow.loadingOpen} onClose={() => setCancelLoadConfirmOpen(true)}
         styles={styles}
-        planRows={planRows as any[]}
+        planRows={effectivePlanRows as any[]}
         productNameById={productNameById}
         productHexCodeById={productHexCodeById}
         productInputs={productInputs}
@@ -1924,6 +1989,11 @@ const lastProductInfoById = useMemo(() => {
         lastProductInfoById={lastProductInfoById}
         setProductApi={(productId, api) => setProductInputs((prev) => ({ ...prev, [productId]: { ...(prev[productId] ?? {}), api } }))}
         setProductTemp={(productId, tempF) => setProductInputs((prev) => ({ ...prev, [productId]: { ...(prev[productId] ?? {}), tempF } }))}
+        onSetCompartmentGallons={(comp, gallons) => setLoadingGallonsOverride((prev) => ({ ...prev, [comp]: gallons }))}
+        persistedCapForComp={persistedCapForComp}
+        livePreviewGrossLbs={livePreviewGrossLbs}
+        livePreviewDiffLbs={livePreviewDiffLbs}
+        targetWeight={targetWeight}
         onLoaded={() => setCancelLoadConfirmOpen(true)}
         loadedDisabled={loadWorkflow.completeBusy}
         loadedLabel={loadWorkflow.completeBusy ? "Saving…" : "Complete"}
@@ -1933,8 +2003,23 @@ const lastProductInfoById = useMemo(() => {
         open={cancelLoadConfirmOpen}
         onDismiss={() => setCancelLoadConfirmOpen(false)}
         onBackToPlanner={handleBackToPlannerNoUpdate}
-        onLogTheLoad={() => { setCancelLoadConfirmOpen(false); loadWorkflow.onLoadedFromLoadingModal(); }}
+        onLogTheLoad={() => { setCancelLoadConfirmOpen(false); setVerifyBolOpen(true); }}
         onUpdateCardOnly={() => { setCancelLoadConfirmOpen(false); loadWorkflow.cancelActiveLoad(); }}
+      />
+
+      <VerifyAgainstBolModal
+        open={verifyBolOpen}
+        onClose={() => setVerifyBolOpen(false)}
+        styles={styles}
+        planRows={effectivePlanRows as any[]}
+        productNameById={productNameById}
+        productHexCodeById={productHexCodeById}
+        productInputs={productInputs}
+        busy={loadWorkflow.completeBusy}
+        onConfirm={(verifiedByComp) => {
+          setVerifyBolOpen(false);
+          loadWorkflow.onLoadedFromLoadingModal(verifiedByComp);
+        }}
       />
 
       <ProductTempModal

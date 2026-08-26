@@ -4288,6 +4288,122 @@ side to reproduce the original race) — `tsc --noEmit` and `next build`
 both clean. Worth a real check on a real device before considering this
 fully closed.
 
+### Loading modal split into Plan Review + Verify Against BOL (2026-08-26)
+
+Multi-turn design conversation with the user, planned via Plan Mode
+(approved plan preserved at `wild-discovering-plum.md`). Real workflow
+described by the user: pulling up to a rack, seeing a stale-API warning,
+walking over to another driver loading nearby, reading a fresher API/temp
+off their BOL, and wanting to react to it *before* committing to load —
+previously required backing out to the Planner entirely or submitting
+blind, since `LoadingModal`'s API/Temp inputs had zero visible effect
+until final submission and "Planned Compartments" gallons were read-only.
+
+**Two mechanics were corrected/confirmed mid-planning, not assumed:**
+- Compartment gallons edits inside the Loading modal must be **isolated**
+  — editing one compartment must never cause siblings to gain gallons to
+  compensate. Confirmed via reading `usePlanRows.ts`/`planMath.ts` that
+  this is genuinely NOT what the existing compartment-cap-slider/
+  `capOverride` path does (it triggers a binary-search reallocation across
+  every compartment) — so this needed to be a **new**, separate mechanism,
+  applied as a post-hoc override on top of already-computed `planRows`,
+  never fed back into `planForGallons`'s allocation.
+- The completion flow's `diff_lbs` previously preferred the server's
+  number (`res.diff_lbs`, computed from `load_log`'s `begin_load`-time
+  frozen DB snapshot) — since Phase 1 can now legitimately move the plan
+  away from that snapshot, this would have silently disagreed with the
+  recap's already-client-computed `planned_gross_lbs` right next to it.
+  Fixed to always compute `actualGross - plannedGross` client-side.
+
+**`app/planner/utils/planMath.ts`** — new `computeActualLbsForLine(gallons,
+api, tempF, alphaPerF)`, extracted verbatim from `useLoadWorkflow.ts`'s own
+submission-time math so the Loading modal's live weight preview and the
+final `complete_load` submission can never drift apart — same function,
+one call site each.
+
+**`app/planner/components/ValueEntryOverlay.tsx`** (new) — generalizes
+`PlannerControls.tsx`'s inline `capInput` overlay (centered card, 40px
+bold input, Cancel/Set) into a shared 1-3-field component. `capInput`
+itself now delegates to it (behavior unchanged). Reused for: Phase 1's
+compartment-gallons tap (1 field), Phase 1's product API+Temp tap (2
+fields), and Phase 2's per-compartment Gallons+Temp+API tap (3 fields).
+
+**`app/planner/page.tsx`** — new `loadingGallonsOverride` state
+(`Record<compNumber, gallons>`), applied as a post-hoc override producing
+`effectivePlanRows`/`effectivePlannedGallonsTotal`/
+`effectivePlannedWeightLbs`, which now feed `useLoadWorkflow` (replacing
+the raw `planRows`/`plannedGallonsTotal`/`plannedWeightLbs`) — this alone
+makes the recap card (already 100% client-computed) reflect Phase-1
+overrides with no other change needed there. Reset to `{}` on every fresh
+LOAD tap (`useLoadWorkflow.ts` calls `setLoadingGallonsOverride?.({})`
+right after `setProductInputs`, same place/reason). Never persisted to
+`compPlan` or presets — more ephemeral than `capOverride`. New
+`livePreviewTotalLbs`/`livePreviewGrossLbs`/`livePreviewDiffLbs`, using
+`computeActualLbsForLine` + `effectivePlanRows` + `productInputs` — same
+math the final submission uses, passed into `LoadingModal` as plain props.
+New `verifyBolOpen` state; `CancelLoadSheet`'s `onLogTheLoad` now opens
+`VerifyAgainstBolModal` instead of calling `onLoadedFromLoadingModal()`
+directly.
+
+**`app/planner/modals/LoadingModal.tsx`** — reframed as a pure pre-loading
+"Plan Review" phase (title changed accordingly). "Planned Compartments"
+cards are now tappable buttons opening a 1-field gallons overlay, bounded
+to `persistedCapForComp(comp)` (the compartment's real configured
+ceiling — same "max" precedent `capInput` already used); the live preview
+is the non-blocking feedback if an edit pushes gross weight over target.
+"API + Temperature" rows restyled to match — tappable cards (no more
+always-visible stacked `<input>`s) opening a 2-field API+Temp overlay,
+same `setProductApi`/`setProductTemp` underneath. New live weight/diff-
+vs-target display block above the Complete button.
+
+**`app/planner/modals/VerifyAgainstBolModal.tsx`** (new) — Phase 2, opened
+only via "Log the Load". Keyed **per compartment**, not per product
+(confirmed: two compartments of the same product can end up with
+genuinely different BOL-corrected values). One row per filled
+compartment, tap-to-blow-up via the 3-field overlay (Gallons, Temp, API),
+pre-filled from the finalized `effectivePlanRows`/`productInputs` — re-
+seeded fresh every time the modal opens, not once at mount, so backing out
+via Keep Editing and reopening always reflects the current plan. Confirm
+button disabled until every compartment has valid values; calls
+`loadWorkflow.onLoadedFromLoadingModal(verifiedByComp)`.
+
+**`app/planner/hooks/useLoadWorkflow.ts`** — `onLoadedFromLoadingModal`
+gained an optional `verifiedByComp?: Record<number, VerifiedLoadLine>`
+parameter (`VerifiedLoadLine = { gallons, tempF, api }`, now exported).
+When present, per-compartment BOL-corrected values are authoritative for
+`actual_gallons`/`actual_lbs`/`temp_f` via `computeActualLbsForLine` —
+the pre-existing no-arg path (legacy, reading `planRows`+`productInputs`
+directly) stays intact as a fallback, not deleted, though `page.tsx` now
+always routes through Phase 2 first. **Shared-reading resolution** for
+`rack_product_status`'s per-product "last observed" write, when Phase 2
+lets two compartments of the same product diverge: computes density
+(`computeActualLbsForLine(1, api, tempF, alpha)`) per compartment and
+keeps whichever pair is **heavier/denser** — never an average, never
+last-write-wins. Confirmed with user as "err cold and heavy," matching
+this app's own established safety principle (see the Over/Under Learn
+topic: "we'd rather predict the product is colder and denser than it
+turns out to be").
+
+**Not in scope for this pass** (flagged, not silently decided): the DB's
+raw `load_log.planned_gallons`/`planned_snapshot` stay frozen at whatever
+was true the instant LOAD was tapped — `complete_load`'s payload has no
+path to update them, and neither is ever surfaced in any current UI (the
+recap is 100% client-computed). Treated as an acceptable immutable audit
+trail ("what was true at LOAD-tap time"), not a gap to fix here.
+
+**Not live-verified this pass** — this is an authenticated, deeply
+stateful flow (equipment + terminal + plan + live `begin_load`/
+`complete_load` RPCs) that can't be meaningfully exercised without a real
+logged-in session, consistent with this project's own established
+practice. `tsc --noEmit` and `next build` both clean throughout. Worth a
+real device walkthrough before considering this fully closed: tap LOAD →
+adjust one compartment's gallons in Phase 1 and confirm siblings don't
+move → adjust a product's API/Temp and confirm the live weight preview
+updates instantly → tap Complete → Log the Load → confirm Phase 2 shows
+the finalized per-compartment values → correct one compartment's API on a
+shared-product pair and confirm the "heavier" one wins in
+`rack_product_status` afterward.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.

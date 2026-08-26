@@ -90,6 +90,29 @@ export function bestLbsPerGallon(
   return lbsPerGallonAtTemp(api60Ref, alphaPerF, tempF);
 }
 
+/**
+ * Actual weight for one compartment/line, given the driver-entered (or
+ * BOL-corrected) API and temperature at load time.
+ *
+ * Extracted verbatim from useLoadWorkflow.ts's own submission-time math
+ * (previously inlined there) so the Loading modal's live weight preview
+ * and the final complete_load submission can never drift apart — same
+ * function, one call site each. Back-corrects the entered API to 60°F
+ * first (same as bestLbsPerGallon) before re-deriving density at tempF,
+ * matching how planning's own density calc works so plan vs. actual use
+ * the same effective API_60 and never show a phantom diff from that alone.
+ */
+export function computeActualLbsForLine(
+  gallons: number,
+  api: number,
+  tempF: number,
+  alphaPerF: number
+): number {
+  const api60 = api + alphaPerF * (tempF - 60);
+  const lpg = lbsPerGallonAtTemp(api60, alphaPerF, tempF);
+  return gallons * lpg;
+}
+
 // ─── CG bias ──────────────────────────────────────────────────────────────────
 
 /**

@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import { useCalculatorShell } from "../CalculatorShellContext";
 import { themeFill } from "../theme";
+import ValueEntryOverlay from "../components/ValueEntryOverlay";
 
 /**
  * PlannerControls - compartment strip.
@@ -297,77 +298,23 @@ export default function PlannerControls(props: any) {
         <div style={styles.help}>No compartments found for this trailer.</div>
       )}
 
-      {/* Precise cap entry -- centered overlay, device numeric keypad
-          (inputMode="numeric"), same value/bounds the drag handle sets. */}
-      {capInput && (
-        <div
-          onClick={() => setCapInput(null)}
-          style={{
-            position: "fixed", inset: 0, zIndex: 500,
-            background: "rgba(0,0,0,0.6)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            padding: 24,
-          }}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              width: "100%", maxWidth: 280,
-              background: "#161616", border: "1px solid rgba(255,255,255,0.12)",
-              borderRadius: 4, padding: 20,
-              display: "flex", flexDirection: "column", alignItems: "center", gap: 14,
-            }}
-          >
-            <div style={{ fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.45)", letterSpacing: 0.4, textTransform: "uppercase" as const }}>
-              Comp {capInput.comp} cap
-            </div>
-            <input
-              type="text"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              autoFocus
-              value={capInput.value}
-              onChange={(e) => {
-                const digits = e.target.value.replace(/[^0-9]/g, "");
-                setCapInput((prev) => (prev ? { ...prev, value: digits } : prev));
-              }}
-              onKeyDown={(e) => { if (e.key === "Enter") commitCapInput(); }}
-              style={{
-                width: "100%", textAlign: "center" as const,
-                background: "transparent", border: "none", borderBottom: "1px solid rgba(255,255,255,0.20)",
-                color: "#fff", fontSize: 40, fontWeight: 700, padding: "4px 0",
-              }}
-            />
-            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)" }}>
-              max {capInput.max.toLocaleString()} gal
-            </div>
-            <div style={{ display: "flex", gap: 10, width: "100%", marginTop: 4 }}>
-              <button
-                type="button"
-                onClick={() => setCapInput(null)}
-                style={{
-                  flex: 1, padding: "12px 0", borderRadius: 4,
-                  border: "1px solid rgba(255,255,255,0.15)", background: "transparent",
-                  color: "rgba(255,255,255,0.65)", fontSize: 14, fontWeight: 600, cursor: "pointer",
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={commitCapInput}
-                style={{
-                  flex: 1, padding: "12px 0", borderRadius: 4,
-                  border: "none", background: "#fff",
-                  color: "#000", fontSize: 14, fontWeight: 700, cursor: "pointer",
-                }}
-              >
-                Set
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Precise cap entry -- device numeric keypad, same value/bounds the
+          drag handle sets. Shared overlay component (ValueEntryOverlay) so
+          the Loading modal's Plan Review / Verify Against BOL phases can
+          reuse the exact same interaction pattern. */}
+      <ValueEntryOverlay
+        open={!!capInput}
+        title={capInput ? `Comp ${capInput.comp} cap` : ""}
+        hint={capInput ? `max ${capInput.max.toLocaleString()} gal` : undefined}
+        fields={capInput ? [{
+          key: "cap",
+          label: "Gallons",
+          value: capInput.value,
+          onChange: (v) => setCapInput((prev) => (prev ? { ...prev, value: v } : prev)),
+        }] : []}
+        onCancel={() => setCapInput(null)}
+        onSubmit={commitCapInput}
+      />
     </section>
   );
 }

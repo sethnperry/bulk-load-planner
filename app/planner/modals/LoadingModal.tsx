@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useMemo, useEffect } from "react";
+import React, { useMemo, useEffect, useState } from "react";
 import { FullscreenModal } from "@/lib/ui/FullscreenModal";
+import ValueEntryOverlay from "../components/ValueEntryOverlay";
 
 type PlanRowLike = {
   comp_number: number;
@@ -21,34 +22,6 @@ type LastProductInfo = {
   last_api?: number | null;
   last_api_updated_at?: string | null; // timestamptz string from Supabase
 };
-
-function fmtUpdatedOnLine(args: { updatedAt?: string | null; timeZone?: string | null }): string | null {
-  const ts = args.updatedAt;
-  if (!ts) return null;
-
-  const d = new Date(ts);
-  if (Number.isNaN(d.getTime())) return null;
-
-  const tz = args.timeZone || "UTC";
-
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: tz,
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).formatToParts(d);
-
-  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
-  const mm = get("month");
-  const dd = get("day");
-  const hh = get("hour");
-  const mi = get("minute");
-
-  if (mm && dd && hh && mi) return `Updated on ${mm}/${dd} at ${hh}:${mi} hrs`;
-  return null;
-}
 
 function fmtLastApiLine_(args: {
   lastApi?: number | null;
@@ -96,12 +69,21 @@ function isApiStale(lastApiUpdatedAt?: string | null, thresholdDays = 7): boolea
   return (Date.now() - d.getTime()) > thresholdDays * 24 * 60 * 60 * 1000;
 }
 
+function fmtSignedLbs(v: number): string {
+  const rounded = Math.round(v);
+  return rounded > 0 ? `+${rounded}` : String(rounded);
+}
+
 export default function LoadingModal(props: {
   open: boolean;
   onClose: () => void;
 
   styles: any;
 
+  // Reflects any Phase-1 gallons overrides already applied -- this modal is
+  // a pure "Plan Review" phase now, so what's shown here IS the plan that
+  // begin_load already snapshotted, adjusted live by whatever's been tapped
+  // in this session.
   planRows: PlanRowLike[];
   productNameById: Map<string, string>;
 
@@ -111,6 +93,21 @@ export default function LoadingModal(props: {
   productInputs: ProductInputs;
   setProductApi: (productId: string, api: string) => void;
   setProductTemp: (productId: string, tempF: number) => void;
+
+  // Commits an isolated Phase-1 gallons override for one compartment --
+  // never redistributes to siblings (see CLAUDE.md / plan doc: this is
+  // deliberately NOT the compartment-cap-slider's binary-search reallocation).
+  onSetCompartmentGallons: (comp: number, gallons: number) => void;
+  // The compartment's real configured ceiling (same bound the cap-slider's
+  // own blown-up entry uses) -- null/undefined means no cap is known, in
+  // which case the override is left unbounded.
+  persistedCapForComp?: (comp: number) => number | null;
+
+  // Live weight preview -- same math complete_load will actually submit
+  // (computeActualLbsForLine), so this can never disagree with the recap.
+  livePreviewGrossLbs?: number | null;
+  livePreviewDiffLbs?: number | null;
+  targetWeight?: number;
 
   onOpenTempDial?: (productId: string) => void;
   // Fired by the bottom button (and, via FullscreenModal's onClose, by
@@ -140,6 +137,11 @@ export default function LoadingModal(props: {
     productInputs,
     setProductApi,
     setProductTemp,
+    onSetCompartmentGallons,
+    persistedCapForComp,
+    livePreviewGrossLbs,
+    livePreviewDiffLbs,
+    targetWeight,
     onOpenTempDial,
     onLoaded,
     loadedDisabled,
@@ -191,10 +193,51 @@ useEffect(() => {
   }
 }, [open, productGroups, lastProductInfoById, productInputs, setProductApi]);
 
+  // ── Phase-1 tap-to-adjust overlays ──────────────────────────────────────
+  const [gallonsTarget, setGallonsTarget] = useState<{ comp: number; productId: string } | null>(null);
+  const [gallonsInput, setGallonsInput] = useState("");
+  const gallonsCap = gallonsTarget ? persistedCapForComp?.(gallonsTarget.comp) ?? null : null;
+
+  const [apiTempTarget, setApiTempTarget] = useState<string | null>(null); // productId
+  const [apiInput, setApiInput] = useState("");
+  const [tempInput, setTempInput] = useState("");
+
+  function openGallonsOverlay(comp: number, productId: string, currentGallons: number) {
+    setGallonsTarget({ comp, productId });
+    setGallonsInput(String(Math.round(currentGallons)));
+  }
+  function commitGallonsOverlay() {
+    if (!gallonsTarget) return;
+    const n = parseInt(gallonsInput, 10);
+    if (Number.isFinite(n)) {
+      const clamped = gallonsCap != null ? Math.max(0, Math.min(gallonsCap, n)) : Math.max(0, n);
+      onSetCompartmentGallons(gallonsTarget.comp, clamped);
+    }
+    setGallonsTarget(null);
+  }
+
+  function openApiTempOverlay(productId: string, currentApi: string, currentTemp?: number) {
+    setApiTempTarget(productId);
+    setApiInput(currentApi ?? "");
+    setTempInput(currentTemp == null ? "" : currentTemp.toFixed(1));
+  }
+  function commitApiTempOverlay() {
+    if (!apiTempTarget) return;
+    const apiN = parseFloat(apiInput);
+    if (Number.isFinite(apiN)) setProductApi(apiTempTarget, apiN.toFixed(1));
+    const tempN = parseFloat(tempInput);
+    if (Number.isFinite(tempN)) setProductTemp(apiTempTarget, parseFloat(tempN.toFixed(1)));
+    setApiTempTarget(null);
+  }
+
+  const showLivePreview = livePreviewGrossLbs != null;
+  const overTarget = livePreviewDiffLbs != null && livePreviewDiffLbs > 0;
+
   return (
-    <FullscreenModal open={open} title="Loading" onClose={onClose} footer={null} hideCloseButton>
+    <FullscreenModal open={open} title="Plan Review" onClose={onClose} footer={null} hideCloseButton>
       <div style={{ display: "flex", flexDirection: "column", gap: 12, maxWidth: "100%", boxSizing: "border-box" }}>
-        {/* A) Compartments */}
+        {/* A) Compartments -- tap a card to adjust just that compartment's
+            gallons in isolation (siblings never move). */}
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <div style={{ fontWeight: 800, fontSize: 13, letterSpacing: 0.2, opacity: 0.7, textTransform: "uppercase" }}>Planned compartments</div>
 
@@ -205,8 +248,10 @@ useEffect(() => {
               {plannedLines.map((x) => {
                 const dotColor = (productHexCodeById?.[x.productId] && String(productHexCodeById[x.productId]).trim()) || "rgba(255,255,255,0.5)";
                 return (
-                  <div
+                  <button
+                    type="button"
                     key={`${x.comp}-${x.productId}`}
+                    onClick={() => openGallonsOverlay(x.comp, x.productId, x.gallons)}
                     style={{
                       display: "flex",
                       justifyContent: "space-between",
@@ -216,6 +261,9 @@ useEffect(() => {
                       borderRadius: 6,
                       border: "1px solid rgba(255,255,255,0.10)",
                       background: "rgba(255,255,255,0.04)",
+                      cursor: "pointer",
+                      width: "100%",
+                      textAlign: "left" as const,
                     }}
                   >
                     <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
@@ -227,7 +275,7 @@ useEffect(() => {
                     <div style={{ color: "#fff", fontWeight: 800, fontSize: 16, flexShrink: 0 }}>
                       {Math.round(x.gallons)}
                     </div>
-                  </div>
+                  </button>
                 );
               })}
             </div>
@@ -237,7 +285,7 @@ useEffect(() => {
         {/* Ghost line */}
         <div style={{ height: 1, background: "rgba(255,255,255,0.10)", margin: "6px 0" }} />
 
-        {/* B) Product groups */}
+        {/* B) Product groups -- tap a card to adjust its API/Temp together. */}
         <div style={{ display: "grid", gap: 10 }}>
           <div style={{ fontWeight: 800, fontSize: 13, letterSpacing: 0.2, opacity: 0.7, textTransform: "uppercase" }}>API + Temperature</div>
 
@@ -278,8 +326,10 @@ useEffect(() => {
                 const warn = stale || missing;
 
                 return (
-                  <div
+                  <button
+                    type="button"
                     key={g.productId}
+                    onClick={() => openApiTempOverlay(g.productId, apiVal, tempVal)}
                     style={{
                       padding: "10px 12px",
                       borderRadius: 6,
@@ -288,6 +338,9 @@ useEffect(() => {
                       display: "flex",
                       flexDirection: "column",
                       gap: 8,
+                      cursor: "pointer",
+                      width: "100%",
+                      textAlign: "left" as const,
                     }}
                   >
                     {/* Top row: dot + name + gallons */}
@@ -310,65 +363,51 @@ useEffect(() => {
                         border: `1px solid ${missing ? "rgba(248,113,113,0.40)" : "rgba(251,146,60,0.45)"}`,
                       }}>
                         <span style={{ fontSize: 13, fontWeight: 800, color: missing ? "#f87171" : "#fb923c", lineHeight: 1.3 }}>
-                          ⚠ {missing ? "No API recorded — enter manually" : `${apiLine} — may be stale`}
+                          ⚠ {missing ? "No API recorded — tap to enter" : `${apiLine} — may be stale, tap to correct`}
                         </span>
                       </div>
                     ) : apiLine ? (
                       <div style={{ fontSize: 11, color: "rgba(255,255,255,0.45)" }}>{apiLine}</div>
                     ) : null}
 
-                    {/* Stacked inputs — uncontrolled while typing, normalized on blur */}
-                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                      {/* API */}
-                      <div style={{ position: "relative" }}>
-                        <input
-                          key={`api-${g.productId}-${open ? "open" : "closed"}`}
-                          defaultValue={apiVal}
-                          onChange={(e) => {
-                            let v = e.target.value.replace(/[^0-9.]/g, "");
-                            const parts = v.split(".");
-                            if (parts.length > 2) v = parts[0] + "." + parts.slice(1).join("");
-                            e.target.value = v;
-                          }}
-                          onFocus={(e) => e.target.select()}
-                          onBlur={(e) => {
-                            const n = parseFloat(e.target.value);
-                            if (Number.isFinite(n)) setProductApi(g.productId, n.toFixed(1));
-                            else setProductApi(g.productId, apiVal);
-                          }}
-                          inputMode="decimal"
-                          placeholder="37.9"
-                          style={{ ...styles.input, width: "100%", height: 48, borderRadius: 6, fontWeight: 800, fontSize: 18, textAlign: "center", boxSizing: "border-box" as const }}
-                        />
-                        <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.25)", pointerEvents: "none" }}>API</span>
+                    {/* Current values, read-only display -- tap the whole
+                        card to open the blown-up entry overlay. */}
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <div style={{ flex: 1, padding: "8px 0", borderRadius: 6, background: "rgba(255,255,255,0.05)", textAlign: "center" as const }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.35)", letterSpacing: 0.4 }}>API</div>
+                        <div style={{ fontSize: 18, fontWeight: 800, color: apiVal ? "#fff" : "rgba(255,255,255,0.30)" }}>{apiVal || "—"}</div>
                       </div>
-                      {/* Temp */}
-                      <div style={{ position: "relative" }}>
-                        <input
-                          key={`temp-${g.productId}-${open ? "open" : "closed"}`}
-                          defaultValue={tempVal == null ? "" : tempVal.toFixed(1)}
-                          onChange={(e) => {
-                            let v = e.target.value.replace(/[^0-9.]/g, "");
-                            const parts = v.split(".");
-                            if (parts.length > 2) v = parts[0] + "." + parts.slice(1).join("");
-                            e.target.value = v;
-                          }}
-                          onFocus={(e) => e.target.select()}
-                          onBlur={(e) => {
-                            const n = parseFloat(e.target.value);
-                            if (Number.isFinite(n)) setProductTemp(g.productId, parseFloat(n.toFixed(1)));
-                          }}
-                          inputMode="decimal"
-                          placeholder="79.0"
-                          style={{ ...styles.input, width: "100%", height: 48, borderRadius: 6, fontWeight: 800, fontSize: 18, textAlign: "center", boxSizing: "border-box" as const }}
-                        />
-                        <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.25)", pointerEvents: "none" }}>TEMP</span>
-                        <span style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", fontSize: 13, fontWeight: 700, color: "rgba(255,255,255,0.30)", pointerEvents: "none" }}>°F</span>
+                      <div style={{ flex: 1, padding: "8px 0", borderRadius: 6, background: "rgba(255,255,255,0.05)", textAlign: "center" as const }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.35)", letterSpacing: 0.4 }}>TEMP °F</div>
+                        <div style={{ fontSize: 18, fontWeight: 800, color: tempVal != null ? "#fff" : "rgba(255,255,255,0.30)" }}>{tempVal != null ? tempVal.toFixed(1) : "—"}</div>
                       </div>
                     </div>
-                  </div>
+                  </button>
                 );
               })}
+            </div>
+          )}
+
+          {/* C) Live weight / diff-vs-target preview -- same math the final
+              submission uses, so this can never disagree with the recap. */}
+          {showLivePreview && (
+            <div style={{
+              display: "flex", justifyContent: "space-between", alignItems: "center",
+              padding: "10px 12px", borderRadius: 6,
+              border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)",
+            }}>
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.4)", letterSpacing: 0.4, textTransform: "uppercase" as const }}>Live Weight</div>
+                <div style={{ fontSize: 20, fontWeight: 800, color: "#fff" }}>{Math.round(livePreviewGrossLbs!).toLocaleString()} lbs</div>
+              </div>
+              {livePreviewDiffLbs != null && (
+                <div style={{ textAlign: "right" as const }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.4)", letterSpacing: 0.4, textTransform: "uppercase" as const }}>vs. Target</div>
+                  <div style={{ fontSize: 20, fontWeight: 800, color: overTarget ? "#f87171" : "#4ade80" }}>
+                    {fmtSignedLbs(livePreviewDiffLbs)} lbs
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -388,6 +427,26 @@ useEffect(() => {
           </div>
         </div>
       </div>
+
+      <ValueEntryOverlay
+        open={gallonsTarget != null}
+        title={gallonsTarget ? `C${gallonsTarget.comp} Gallons` : "Gallons"}
+        fields={[{ key: "gallons", label: "Gallons", value: gallonsInput, onChange: setGallonsInput, suffix: "gal" }]}
+        hint={gallonsCap != null ? `Max ${Math.round(gallonsCap)} gal` : undefined}
+        onCancel={() => setGallonsTarget(null)}
+        onSubmit={commitGallonsOverlay}
+      />
+
+      <ValueEntryOverlay
+        open={apiTempTarget != null}
+        title={apiTempTarget ? productNameById.get(apiTempTarget) ?? "Product" : "Product"}
+        fields={[
+          { key: "api", label: "API", value: apiInput, onChange: setApiInput, decimal: true },
+          { key: "temp", label: "Temp", value: tempInput, onChange: setTempInput, suffix: "°F", decimal: true },
+        ]}
+        onCancel={() => setApiTempTarget(null)}
+        onSubmit={commitApiTempOverlay}
+      />
     </FullscreenModal>
   );
 }
