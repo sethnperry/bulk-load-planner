@@ -26,8 +26,22 @@
 // no-op that just returns to the Loading modal -- instead of reusing
 // onBackToPlanner. A stray tap outside the sheet shouldn't carry the same
 // weight as the labeled button.
+//
+// Restyled 2026-08-27 -- per explicit feedback ("the theme of this window
+// is generic and not exactly matching our app theme"): the flat
+// translucent-white row buttons (a plain "system dialog" look, shared
+// verbatim with PresetActionSheet.tsx before this pass) are replaced with
+// the graphite-gradient card treatment already established everywhere
+// else in the app (Cards tab, Reports tiles, Admin header tiles -- see
+// cardTheme.ts's CARD_BG/CARD_BORDER/CARD_SHADOW). "Log the Load" -- the
+// primary, most-common action here -- also picks up the same accent-
+// color/dark-mode theme fill the Load and STUD buttons already use
+// (themeFill/themeTextOnFill), so a driver's chosen accent color shows up
+// here too, not just on the Planner's own controls.
 
 import React from "react";
+import { GRAPHITE, GRAPHITE_DARKER, themeFill, themeTextOnFill } from "../theme";
+import { CARD_BG, CARD_BORDER, CARD_SHADOW } from "../cards/cardTheme";
 
 type Props = {
   open: boolean;
@@ -35,11 +49,14 @@ type Props = {
   onBackToPlanner: () => void;
   onLogTheLoad: () => void;
   onUpdateCardOnly: () => void;
+  darkMode: boolean;
+  accentColor: string | null;
 };
 
-const rowStyle: React.CSSProperties = {
-  width: "100%", padding: "14px 16px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)",
-  background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.90)", fontSize: 15, fontWeight: 700,
+const secondaryRowStyle: React.CSSProperties = {
+  width: "100%", padding: "14px 16px", borderRadius: 10,
+  border: CARD_BORDER, background: CARD_BG, boxShadow: CARD_SHADOW,
+  color: "rgba(255,255,255,0.90)", fontSize: 15, fontWeight: 700,
   cursor: "pointer", textAlign: "left" as const, marginBottom: 8,
 };
 const cancelStyle: React.CSSProperties = {
@@ -47,8 +64,16 @@ const cancelStyle: React.CSSProperties = {
   background: "transparent", color: "rgba(255,255,255,0.45)", fontSize: 14, fontWeight: 700, cursor: "pointer",
 };
 
-export default function CancelLoadSheet({ open, onDismiss, onBackToPlanner, onLogTheLoad, onUpdateCardOnly }: Props) {
+export default function CancelLoadSheet({ open, onDismiss, onBackToPlanner, onLogTheLoad, onUpdateCardOnly, darkMode, accentColor }: Props) {
   if (!open) return null;
+
+  const primaryRowStyle: React.CSSProperties = {
+    width: "100%", padding: "14px 16px", borderRadius: 10,
+    border: CARD_BORDER, boxShadow: CARD_SHADOW,
+    background: themeFill(darkMode, accentColor, "#fff"),
+    color: themeTextOnFill(darkMode),
+    fontSize: 15, fontWeight: 700, cursor: "pointer", textAlign: "left" as const, marginBottom: 8,
+  };
 
   return (
     <div
@@ -57,7 +82,12 @@ export default function CancelLoadSheet({ open, onDismiss, onBackToPlanner, onLo
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        style={{ width: "100%", maxWidth: 480, background: "#111518", borderRadius: "16px 16px 0 0", border: "1px solid rgba(255,255,255,0.1)", padding: "18px 16px calc(18px + env(safe-area-inset-bottom))" }}
+        style={{
+          width: "100%", maxWidth: 480,
+          background: `linear-gradient(180deg, ${GRAPHITE} 0%, ${GRAPHITE_DARKER} 100%)`,
+          borderRadius: "16px 16px 0 0", border: "1px solid rgba(255,255,255,0.1)",
+          padding: "18px 16px calc(18px + env(safe-area-inset-bottom))",
+        }}
       >
         <div style={{ fontSize: 15, fontWeight: 700, color: "rgba(255,255,255,0.90)", marginBottom: 4 }}>
           What do you want to do?
@@ -65,8 +95,8 @@ export default function CancelLoadSheet({ open, onDismiss, onBackToPlanner, onLo
         <div style={{ fontSize: 13, color: "rgba(255,255,255,0.45)", marginBottom: 14 }}>
           Logging or updating your card keeps today's terminal access. Going back to the planner undoes it.
         </div>
-        <button type="button" style={rowStyle} onClick={onLogTheLoad}>Log the Load</button>
-        <button type="button" style={rowStyle} onClick={onUpdateCardOnly}>Update Card, No Load</button>
+        <button type="button" style={primaryRowStyle} onClick={onLogTheLoad}>Log the Load</button>
+        <button type="button" style={secondaryRowStyle} onClick={onUpdateCardOnly}>Update Card, No Load</button>
         <button type="button" style={cancelStyle} onClick={onBackToPlanner}>Back to Planner</button>
       </div>
     </div>

@@ -2000,6 +2000,8 @@ const lastProductInfoById = useMemo(() => {
         onBackToPlanner={handleBackToPlannerNoUpdate}
         onLogTheLoad={() => { setCancelLoadConfirmOpen(false); loadWorkflow.onLoadedFromLoadingModal(); }}
         onUpdateCardOnly={() => { setCancelLoadConfirmOpen(false); loadWorkflow.cancelActiveLoad(); }}
+        darkMode={shell.theme.darkMode}
+        accentColor={shell.theme.accentColor}
       />
 
       <ProductTempModal
