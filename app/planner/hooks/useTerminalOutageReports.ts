@@ -4,8 +4,10 @@
 // Owns: posting Out of Product / Out of Allocation reports
 // (submitOutageReport, called from page.tsx's onSubmitOutageReport, which
 // CancelLoadSheet.tsx's new "Report Terminal Issue" flow calls into), and
-// reading back the currently-active ones as one composed banner string
-// (useActiveOutageBanner, used by the shared TerminalOutageBanner.tsx).
+// reading back the currently-active ones as two separate per-type message
+// lists (useActiveOutageBanner, used by the shared TerminalOutageBanner.tsx
+// -- one MessageTicker.tsx row for Out of Product, another for Out of
+// Allocation).
 //
 // Out of Product also reuses the Terminal tab's existing
 // rack_product_status.is_out flag (see RackProductStatusModal.tsx) so the
@@ -117,11 +119,22 @@ export async function clearOutageReport(reportId: string): Promise<{ error: stri
 /**
  * Polls (30s, matching the existing trainee-banner precedent in page.tsx)
  * for currently-active outage reports at `terminalId` and composes them
- * both into one joined ticker string (`message`) and a structured per-report
- * list (`reports`, for the detail view's expiry/Clear-Issue UI). RLS on
- * terminal_outage_reports already narrows "out_of_allocation" rows to the
- * caller's own active company -- no client-side company filtering needed
- * here on top of that.
+ * into per-report-type message lists (`productMessages`/
+ * `allocationMessages`, one MessageTicker.tsx row each -- per explicit
+ * follow-up putting Out of Product and Out of Allocation on their own
+ * separate banner rows rather than one mixed ticker) plus a structured
+ * per-report list (`reports`, for the detail view's expiry/Clear-Issue UI).
+ * RLS on terminal_outage_reports already narrows "out_of_allocation" rows
+ * to the caller's own active company -- no client-side company filtering
+ * needed here on top of that.
+ *
+ * Deduped to the most recent report per (report_type, product_id) --
+ * per explicit follow-up ("multiple entries should resolve to the most
+ * recent... same for allocation"): if several drivers (or one driver
+ * twice) report the same product out at the same terminal, only the
+ * latest one shows. Older superseded reports are left in the table
+ * untouched (still real history, just not displayed) -- this is a
+ * display-layer collapse, not a write-time dedup.
  *
  * Resolves the terminal's own timezone internally (rather than depending on
  * whichever tab's own useTerminals() instance happens to be mounted) since
@@ -133,13 +146,15 @@ export async function clearOutageReport(reportId: string): Promise<{ error: stri
  * this."
  */
 export function useActiveOutageBanner(terminalId: string | null, effectiveUserId: string | null): {
-  message: string | null;
+  productMessages: string[];
+  allocationMessages: string[];
   reports: ComposedOutageReport[];
   timeZone: string;
   refresh: () => void;
 } {
   const [timeZone, setTimeZone] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
+  const [productMessages, setProductMessages] = useState<string[]>([]);
+  const [allocationMessages, setAllocationMessages] = useState<string[]>([]);
   const [reports, setReports] = useState<ComposedOutageReport[]>([]);
 
   useEffect(() => {
@@ -153,7 +168,7 @@ export function useActiveOutageBanner(terminalId: string | null, effectiveUserId
   }, [terminalId]);
 
   const fetchAndCompose = useCallback(async () => {
-    if (!terminalId) { setMessage(null); setReports([]); return; }
+    if (!terminalId) { setProductMessages([]); setAllocationMessages([]); setReports([]); return; }
     const tz = timeZone || "America/New_York";
     const cutoffMs = mostRecentClearingCheckpoint(Date.now(), tz);
 
@@ -164,8 +179,19 @@ export function useActiveOutageBanner(terminalId: string | null, effectiveUserId
       .gte("created_at", new Date(cutoffMs).toISOString())
       .order("created_at", { ascending: false });
 
-    if (error || !data || data.length === 0) { setMessage(null); setReports([]); return; }
-    const rows = data as OutageRow[];
+    if (error || !data || data.length === 0) { setProductMessages([]); setAllocationMessages([]); setReports([]); return; }
+
+    // Rows already come back newest-first -- keeping only the first row
+    // seen per (report_type, product_id) is exactly "resolve to the most
+    // recent."
+    const seen = new Set<string>();
+    const rows: OutageRow[] = [];
+    for (const r of data as OutageRow[]) {
+      const key = `${r.report_type}:${r.product_id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      rows.push(r);
+    }
 
     const productIds = Array.from(new Set(rows.map((r) => r.product_id)));
     const companyIds = Array.from(new Set(rows.filter((r) => r.report_type === "out_of_product").map((r) => r.company_id)));
@@ -199,7 +225,8 @@ export function useActiveOutageBanner(terminalId: string | null, effectiveUserId
     });
 
     setReports(composed);
-    setMessage(composed.length ? composed.map((c) => c.text).join("   •   ") : null);
+    setProductMessages(composed.filter((c) => c.reportType === "out_of_product").map((c) => c.text));
+    setAllocationMessages(composed.filter((c) => c.reportType === "out_of_allocation").map((c) => c.text));
   }, [terminalId, timeZone, effectiveUserId]);
 
   useEffect(() => {
@@ -208,5 +235,5 @@ export function useActiveOutageBanner(terminalId: string | null, effectiveUserId
     return () => clearInterval(id);
   }, [fetchAndCompose]);
 
-  return { message, reports, timeZone: timeZone || "America/New_York", refresh: fetchAndCompose };
+  return { productMessages, allocationMessages, reports, timeZone: timeZone || "America/New_York", refresh: fetchAndCompose };
 }

@@ -4824,6 +4824,58 @@ guessing what happens to the terminal card on Out of Product.** Two asks:
 Not live-verified this pass either -- `tsc --noEmit` and `next build`
 both clean.
 
+**Follow-up same day: ticker rework -- constant speed, per-message pause,
+most-recent-only dedup, split into two rows.** Real feedback after
+watching it scroll: speed visibly changed mid-animation (fast while
+entering, slow during the exit stretch, since both phases traveled very
+different container-relative percentage distances in the same fixed
+18s), multiple reports for the same terminal all got crammed into one
+joined string with no natural read-then-continue rhythm, and Out of
+Product/Out of Allocation messages were visually mixed together despite
+being semantically different (cross-company vs. company-only). Also
+asked, and answered directly rather than guessed: "multiple entries
+should resolve to the most recent" -- if several drivers report the same
+product out, only the latest report shows, not a growing list of
+duplicates.
+
+**`MessageTicker.tsx`** (new, generic, reusable) replaces the old CSS
+`@keyframes`-based scroll entirely -- percentage keyframes can't express
+"constant pixels/second regardless of message length" or "cycle through
+N messages, each with its own enter → pause → exit," without hardcoding
+a message count into the animation itself. Runs one
+`requestAnimationFrame` loop per mount that writes `transform:
+translateX(...)` directly to the DOM (not React state, so it isn't
+re-rendering 60x/sec) -- each message enters from fully off-screen-right
+at a fixed `SPEED_PX_PER_SEC`, pauses for `PAUSE_MS` once its beginning
+reaches a fixed left inset (the literal "pause at the beginning of each
+message" ask), then continues at the SAME speed until fully off-screen
+left, then starts the next message (looping back to the first, including
+correctly re-looping a single message forever -- the loop restarts
+itself internally rather than depending on React re-triggering the
+effect on an unchanged message).
+
+**`useTerminalOutageReports.ts`**'s `useActiveOutageBanner` now dedupes
+fetched rows to the most recent per `(report_type, product_id)` before
+composing anything (rows already come back newest-first, so "keep the
+first one seen per key" is exactly "resolve to the most recent") --
+applies identically to Out of Product (cross-company) and Out of
+Allocation (company-scoped via RLS), matching the explicit "same for
+allocation" follow-up. Returns two separate message arrays
+(`productMessages`/`allocationMessages`) instead of one joined string.
+
+**`TerminalOutageBanner.tsx`** now renders two independent `MessageTicker`
+rows stacked vertically -- Out of Product on top, Out of Allocation below
+-- per explicit direction ("we could put product on its own banner above
+and below") instead of trying to visually space out a single mixed
+ticker. Either row is still tappable (same trailing "›" chevron) and both
+open the same shared detail modal. `TerminalOutageDetailModal.tsx` split
+its flat report list into two labeled sections ("Out of Product" / "Out
+of Allocation") to match.
+
+Not live-verified this pass (the animation timing/feel in particular
+wants a real device look, not just a typecheck) -- `tsc --noEmit` and
+`next build` both clean.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.
