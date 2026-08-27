@@ -87,3 +87,49 @@ export function isPastISO_(iso: string | null | undefined) {
   // Lexicographic compare works for YYYY-MM-DD
   return iso < isoToday_();
 }
+
+// ─── Timezone-aware helpers (terminal outage banner clearing schedule) ────────
+// Same Intl.DateTimeFormat-with-timeZone approach useTerminals.ts's
+// isoTodayInTimeZone and LoadingModal.tsx's fmtLastApiLine_ already use
+// elsewhere in this codebase.
+
+function tzPartsAt(dateMs: number, timeZone: string) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone, hourCycle: "h23",
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit",
+  }).formatToParts(new Date(dateMs));
+  const get = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? 0);
+  return { year: get("year"), month: get("month"), day: get("day"), hour: get("hour"), minute: get("minute"), second: get("second") };
+}
+
+// Converts a wall-clock date/time in the given IANA timezone to a real UTC
+// instant (ms) -- JS has no native zonedTimeToUtc, so this uses the
+// standard "format a guess, measure its offset, correct" trick. Accurate
+// except within a couple hours of a DST transition, which is an acceptable
+// approximation for a banner clearing schedule, not a safety-critical value.
+function zonedWallTimeToUtcMs(year: number, month: number, day: number, hour: number, timeZone: string): number {
+  const naiveUTC = Date.UTC(year, month - 1, day, hour, 0, 0);
+  const asIfUTCParts = tzPartsAt(naiveUTC, timeZone);
+  const asIfUTC = Date.UTC(asIfUTCParts.year, asIfUTCParts.month - 1, asIfUTCParts.day, asIfUTCParts.hour, asIfUTCParts.minute, asIfUTCParts.second);
+  const offsetMs = asIfUTC - naiveUTC;
+  return naiveUTC - offsetMs;
+}
+
+/**
+ * The most recent 6:00/12:00/18:00/24:00 (terminal-local) boundary that has
+ * already passed, as a UTC timestamp (ms). Both the Out-of-Product and
+ * Out-of-Allocation outage banners clear on this same 4x/day schedule
+ * (confirmed with the user -- not a rolling "N hours since posted" expiry).
+ */
+export function mostRecentClearingCheckpoint(nowMs: number, timeZone: string): number {
+  const { year, month, day, hour } = tzPartsAt(nowMs, timeZone);
+  const checkpointHour = Math.floor(hour / 6) * 6;
+  return zonedWallTimeToUtcMs(year, month, day, checkpointHour, timeZone);
+}
+
+/** "1355" style terminal-local time, for the outage banner's message timestamp. */
+export function hhmmInTimeZone(dateMs: number, timeZone: string): string {
+  const { hour, minute } = tzPartsAt(dateMs, timeZone);
+  return `${String(hour).padStart(2, "0")}${String(minute).padStart(2, "0")}`;
+}

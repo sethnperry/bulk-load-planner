@@ -6,6 +6,7 @@ import { useCallback, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { beginLoad, completeLoad, deleteLoad } from "@/lib/supabase/load";
 import { computeActualLbsForLine } from "../utils/planMath";
+import { resolveEffectiveRackId } from "../utils/rack";
 import type { LoadReport, PlanRow, ProductRow } from "../types";
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
@@ -410,27 +411,10 @@ try {
 // product list and reference reading, so there's no separate terminal-wide
 // store left to keep in sync. (Non-fatal if RLS blocks it.)
 try {
-  // Fall back to resolving the terminal's own rack when none was selected
-  // at load time -- confirmed live (2026-08-13) this genuinely happens: a
-  // completed load's load_log.rack_id came back null even though the
-  // terminal has exactly one real rack, silently skipping this whole
-  // block and leaving rack_product_status stuck on whatever a manual STUD
-  // last set, potentially days stale, while terminal_products (written by
-  // the complete_load RPC itself, unconditionally) had the fresh reading
-  // the whole time. Root cause of why selectedRackId was empty in that
-  // specific case wasn't pinned down, but a terminal with more than one
-  // rack still can't be safely guessed here -- that's exactly the
-  // ambiguity chooseTerminal()'s own rack-picker prompt exists to force a
-  // real choice on, so this only ever resolves the 0/1-rack case, never a
-  // silent guess among several.
-  let effectiveRackId = selectedRackId || null;
-  if (!effectiveRackId && selectedTerminalId) {
-    const { data: racks } = await supabase
-      .from("terminal_racks")
-      .select("rack_id")
-      .eq("terminal_id", selectedTerminalId);
-    if (racks && racks.length === 1) effectiveRackId = racks[0].rack_id;
-  }
+  // Resolves the terminal's own rack when none was selected at load time --
+  // see resolveEffectiveRackId's own doc comment (now shared with
+  // useTerminalOutageReports.ts's Out-of-Product report path).
+  const effectiveRackId = await resolveEffectiveRackId(selectedRackId, selectedTerminalId);
 
   if (effectiveRackId && product_updates.length > 0) {
     const now = new Date().toISOString();

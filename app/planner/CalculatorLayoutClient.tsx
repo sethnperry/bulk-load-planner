@@ -27,6 +27,7 @@ import SettingsModal from "./modals/SettingsModal";
 import LocationModal from "./modals/LocationModal";
 import MyTerminalsModal from "./modals/MyTerminalsModal";
 import RackSelectSheet from "./components/RackSelectSheet";
+import TerminalOutageBanner from "./components/TerminalOutageBanner";
 import { CalculatorShellProvider, useCalculatorShell } from "./CalculatorShellContext";
 import { addDaysISO_, isPastISO_, formatMDYWithCountdown_ } from "./utils/dates";
 import { normState } from "./utils/normalize";
@@ -266,6 +267,7 @@ function ShellChrome({ children }: { children: React.ReactNode }) {
   return (
     <div style={{ height: "100dvh", background: "#0b0b0b", color: "#fff", display: "flex", flexDirection: "column", overflow: "hidden" }}>
       <Header onOpenSettings={() => setSettingsOpen(true)} />
+      <TerminalOutageBanner />
       <div className="pt-tabscroll" style={{ flex: 1, overflowY: "auto", padding: "0px 12px 12px", background: "#0b0b0b" }}>
         {children}
       </div>

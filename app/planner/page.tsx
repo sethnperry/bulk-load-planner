@@ -52,6 +52,7 @@ import DriverTrainingModal from "./components/DriverTrainingModal";
 import TerminalCatalogModal from "./modals/TerminalCatalogModal";
 import LoadingModal from "./modals/LoadingModal";
 import CancelLoadSheet from "./components/CancelLoadSheet";
+import { submitOutageReport, type OutageReportType } from "./hooks/useTerminalOutageReports";
 import ProductTempModal from "./modals/ProductTempModal";
 import CompartmentModal from "./modals/CompartmentModal";
 
@@ -1203,6 +1204,28 @@ export default function CalculatorPage() {
     }
   }, [loadWorkflow, terminals]);
 
+  // Wired into CancelLoadSheet's new "Report Terminal Issue" flow -- see
+  // CLAUDE.md "Terminal outage banners." Stays a thin call-through to the
+  // actual write logic in useTerminalOutageReports.ts, matching how
+  // handleBackToPlannerNoUpdate above is the only place that touches
+  // loadWorkflow/terminals for its own concern.
+  const handleSubmitOutageReport = useCallback(
+    async (reportType: OutageReportType, productIds: string[]) => {
+      const truckId = equipment.selectedCombo?.truck_id ?? "";
+      const truckLabel = equipment.truckNameById[truckId] ?? truckId;
+      return submitOutageReport({
+        terminalId: String(location.selectedTerminalId || ""),
+        selectedRackId: location.selectedRackId ? String(location.selectedRackId) : null,
+        productIds,
+        reportType,
+        companyId: shell.companyId || "",
+        userId: effectiveUserId || "",
+        truckLabel,
+      });
+    },
+    [equipment.selectedCombo, equipment.truckNameById, location.selectedTerminalId, location.selectedRackId, shell.companyId, effectiveUserId]
+  );
+
   // Seed the Target/Actual/Diff summary from the last *completed* load for
   // this combo as soon as it's available (mount, or switching equipment) --
   // there's no "My Loads" button on this page anymore, so this is the only
@@ -2002,6 +2025,9 @@ const lastProductInfoById = useMemo(() => {
         onUpdateCardOnly={() => { setCancelLoadConfirmOpen(false); loadWorkflow.cancelActiveLoad(); }}
         darkMode={shell.theme.darkMode}
         accentColor={shell.theme.accentColor}
+        planRows={effectivePlanRows as any[]}
+        productNameById={productNameById}
+        onSubmitOutageReport={handleSubmitOutageReport}
       />
 
       <ProductTempModal

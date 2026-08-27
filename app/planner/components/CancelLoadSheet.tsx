@@ -36,12 +36,26 @@
 // cardTheme.ts's CARD_BG/CARD_BORDER/CARD_SHADOW). "Log the Load" -- the
 // primary, most-common action here -- also picks up the same accent-
 // color/dark-mode theme fill the Load and STUD buttons already use
-// (themeFill/themeTextOnFill), so a driver's chosen accent color shows up
-// here too, not just on the Planner's own controls.
+// (themeFill/themeTextOnFill).
+//
+// Extended same day with "Report Terminal Issue" -- Out of Product /
+// Out of Allocation, see CLAUDE.md "Terminal outage banners." Turned this
+// component stateful (mode), same multi-step pattern PresetActionSheet.tsx
+// already established ("menu" | "confirmEdit" | "confirmClear"). Stays
+// presentational -- no direct Supabase calls -- the actual write happens
+// via the new onSubmitOutageReport prop, owned by page.tsx /
+// useTerminalOutageReports.ts.
 
-import React from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { GRAPHITE, GRAPHITE_DARKER, themeFill, themeTextOnFill } from "../theme";
 import { CARD_BG, CARD_BORDER, CARD_SHADOW } from "../cards/cardTheme";
+import type { OutageReportType } from "../hooks/useTerminalOutageReports";
+
+type PlanRowLike = {
+  comp_number: number;
+  planned_gallons?: number | null;
+  productId?: string | null;
+};
 
 type Props = {
   open: boolean;
@@ -51,6 +65,13 @@ type Props = {
   onUpdateCardOnly: () => void;
   darkMode: boolean;
   accentColor: string | null;
+
+  // For the "Report Terminal Issue" product picker -- this load's own
+  // planned products, deduped by product (same grouping LoadingModal.tsx's
+  // own productGroups already does).
+  planRows: PlanRowLike[];
+  productNameById: Map<string, string>;
+  onSubmitOutageReport: (reportType: OutageReportType, productIds: string[]) => Promise<{ error: string | null }>;
 };
 
 const secondaryRowStyle: React.CSSProperties = {
@@ -64,8 +85,72 @@ const cancelStyle: React.CSSProperties = {
   background: "transparent", color: "rgba(255,255,255,0.45)", fontSize: 14, fontWeight: 700, cursor: "pointer",
 };
 
-export default function CancelLoadSheet({ open, onDismiss, onBackToPlanner, onLogTheLoad, onUpdateCardOnly, darkMode, accentColor }: Props) {
+export default function CancelLoadSheet({
+  open, onDismiss, onBackToPlanner, onLogTheLoad, onUpdateCardOnly, darkMode, accentColor,
+  planRows, productNameById, onSubmitOutageReport,
+}: Props) {
+  const [mode, setMode] = useState<"menu" | "reportType" | "reportProducts">("menu");
+  const [reportType, setReportType] = useState<OutageReportType | null>(null);
+  const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(new Set());
+  const [submitBusy, setSubmitBusy] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  // Fresh state every time this sheet opens for a new load -- it isn't
+  // unmounted between opens, so leftover mode/selections from a previous
+  // pass through this flow must never silently carry over.
+  useEffect(() => {
+    if (open) {
+      setMode("menu");
+      setReportType(null);
+      setSelectedProductIds(new Set());
+      setSubmitBusy(false);
+      setSubmitError(null);
+    }
+  }, [open]);
+
+  const productChoices = useMemo(() => {
+    const seen = new Set<string>();
+    const out: { productId: string; name: string }[] = [];
+    for (const r of planRows) {
+      const pid = r?.productId ? String(r.productId) : "";
+      if (!pid || Number(r?.planned_gallons ?? 0) <= 0 || seen.has(pid)) continue;
+      seen.add(pid);
+      out.push({ productId: pid, name: productNameById.get(pid) ?? pid });
+    }
+    return out.sort((a, b) => a.name.localeCompare(b.name));
+  }, [planRows, productNameById]);
+
   if (!open) return null;
+
+  const dismissAll = () => { setMode("menu"); onDismiss(); };
+
+  function toggleProduct(pid: string) {
+    setSelectedProductIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(pid)) next.delete(pid); else next.add(pid);
+      return next;
+    });
+  }
+
+  async function submitReport() {
+    if (!reportType || selectedProductIds.size === 0) return;
+    setSubmitBusy(true);
+    setSubmitError(null);
+    const { error } = await onSubmitOutageReport(reportType, Array.from(selectedProductIds));
+    setSubmitBusy(false);
+    if (error) { setSubmitError(error); return; }
+    if (reportType === "out_of_product") {
+      // No product to load -- same as tapping Back to Planner directly.
+      setMode("menu");
+      onBackToPlanner();
+    } else {
+      // Out of Allocation: the driver may still have loaded a partial
+      // amount -- return to the normal choices so they can log it.
+      setMode("menu");
+      setReportType(null);
+      setSelectedProductIds(new Set());
+    }
+  }
 
   const primaryRowStyle: React.CSSProperties = {
     width: "100%", padding: "14px 16px", borderRadius: 10,
@@ -77,7 +162,7 @@ export default function CancelLoadSheet({ open, onDismiss, onBackToPlanner, onLo
 
   return (
     <div
-      onClick={onDismiss}
+      onClick={dismissAll}
       style={{ position: "fixed", inset: 0, zIndex: 10400, background: "rgba(0,0,0,0.72)", display: "flex", alignItems: "flex-end", justifyContent: "center" }}
     >
       <div
@@ -89,15 +174,109 @@ export default function CancelLoadSheet({ open, onDismiss, onBackToPlanner, onLo
           padding: "18px 16px calc(18px + env(safe-area-inset-bottom))",
         }}
       >
-        <div style={{ fontSize: 15, fontWeight: 700, color: "rgba(255,255,255,0.90)", marginBottom: 4 }}>
-          What do you want to do?
-        </div>
-        <div style={{ fontSize: 13, color: "rgba(255,255,255,0.45)", marginBottom: 14 }}>
-          Logging or updating your card keeps today's terminal access. Going back to the planner undoes it.
-        </div>
-        <button type="button" style={primaryRowStyle} onClick={onLogTheLoad}>Log the Load</button>
-        <button type="button" style={secondaryRowStyle} onClick={onUpdateCardOnly}>Update Card, No Load</button>
-        <button type="button" style={cancelStyle} onClick={onBackToPlanner}>Back to Planner</button>
+        {mode === "menu" && (
+          <>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "rgba(255,255,255,0.90)", marginBottom: 4 }}>
+              What do you want to do?
+            </div>
+            <div style={{ fontSize: 13, color: "rgba(255,255,255,0.45)", marginBottom: 14 }}>
+              Logging or updating your card keeps today's terminal access. Going back to the planner undoes it.
+            </div>
+            <button type="button" style={primaryRowStyle} onClick={onLogTheLoad}>Log the Load</button>
+            <button type="button" style={secondaryRowStyle} onClick={onUpdateCardOnly}>Update Card, No Load</button>
+            <button type="button" style={secondaryRowStyle} onClick={() => setMode("reportType")}>Report Terminal Issue</button>
+            <button type="button" style={cancelStyle} onClick={onBackToPlanner}>Back to Planner</button>
+          </>
+        )}
+
+        {mode === "reportType" && (
+          <>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "rgba(255,255,255,0.90)", marginBottom: 4 }}>
+              What's the issue?
+            </div>
+            <div style={{ fontSize: 13, color: "rgba(255,255,255,0.45)", marginBottom: 14 }}>
+              This posts a heads-up banner for other drivers heading to this terminal.
+            </div>
+            <button
+              type="button" style={secondaryRowStyle}
+              onClick={() => { setReportType("out_of_product"); setSelectedProductIds(new Set()); setMode("reportProducts"); }}
+            >
+              Out of Product
+            </button>
+            <button
+              type="button" style={secondaryRowStyle}
+              onClick={() => { setReportType("out_of_allocation"); setSelectedProductIds(new Set()); setMode("reportProducts"); }}
+            >
+              Out of Allocation
+            </button>
+            <button type="button" style={cancelStyle} onClick={() => setMode("menu")}>Back</button>
+          </>
+        )}
+
+        {mode === "reportProducts" && (
+          <>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "rgba(255,255,255,0.90)", marginBottom: 4 }}>
+              Which product{productChoices.length > 1 ? "s" : ""}?
+            </div>
+            <div style={{ fontSize: 13, color: "rgba(255,255,255,0.45)", marginBottom: 14 }}>
+              Select only what was actually {reportType === "out_of_product" ? "unavailable" : "allocation-capped"} -- not the whole load.
+            </div>
+
+            {submitError && (
+              <div style={{ fontSize: 12, color: "#f87171", marginBottom: 10 }}>{submitError}</div>
+            )}
+
+            {productChoices.length === 0 ? (
+              <div style={{ fontSize: 13, color: "rgba(255,255,255,0.45)", marginBottom: 14 }}>
+                No planned products found on this load.
+              </div>
+            ) : (
+              <div style={{ display: "grid", gap: 8, marginBottom: 14 }}>
+                {productChoices.map((p) => {
+                  const checked = selectedProductIds.has(p.productId);
+                  return (
+                    <button
+                      type="button"
+                      key={p.productId}
+                      onClick={() => toggleProduct(p.productId)}
+                      style={{
+                        display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
+                        width: "100%", padding: "12px 14px", borderRadius: 10, cursor: "pointer",
+                        border: checked ? "1px solid rgba(255,255,255,0.35)" : CARD_BORDER,
+                        background: CARD_BG, boxShadow: CARD_SHADOW,
+                        color: "rgba(255,255,255,0.90)", fontSize: 14, fontWeight: 600, textAlign: "left" as const,
+                      }}
+                    >
+                      <span>{p.name}</span>
+                      <span style={{
+                        width: 18, height: 18, borderRadius: 4, flexShrink: 0,
+                        border: "1px solid rgba(255,255,255,0.35)",
+                        background: checked ? themeFill(darkMode, accentColor, "#fff") : "transparent",
+                      }} />
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={submitReport}
+              disabled={selectedProductIds.size === 0 || submitBusy}
+              style={{
+                width: "100%", padding: "14px 16px", borderRadius: 10, marginBottom: 8,
+                border: CARD_BORDER, boxShadow: CARD_SHADOW,
+                background: themeFill(darkMode, accentColor, "#fff"),
+                color: themeTextOnFill(darkMode),
+                fontSize: 15, fontWeight: 700, cursor: "pointer",
+                opacity: selectedProductIds.size === 0 || submitBusy ? 0.55 : 1,
+              }}
+            >
+              {submitBusy ? "Submitting…" : "Submit Report"}
+            </button>
+            <button type="button" style={cancelStyle} onClick={() => setMode("reportType")}>Back</button>
+          </>
+        )}
       </div>
     </div>
   );

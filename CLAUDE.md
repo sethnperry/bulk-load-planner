@@ -4596,6 +4596,153 @@ this side, and this specific error only reproduces with a genuinely
 misconfigured device clock) -- `tsc --noEmit` and `next build` both
 clean.
 
+### Terminal outage banners: Out of Product + Out of Allocation (2026-08-27)
+
+Planned via Plan Mode (approved plan preserved at
+`wild-discovering-plum.md`) after a design conversation referencing an
+earlier "terminal flagging/allocation" idea from a different session.
+Real gap: if a driver arrives and the rack is genuinely out of a product,
+or the terminal caps them below their planned gallons, there was no way
+to warn other drivers heading to the same place -- the Terminal tab's
+existing `rack_product_status.is_out` flag (STUD button) is a quiet,
+persistent status a driver has to go looking for, not something that
+surfaces proactively.
+
+Two decisions made with the user before writing the plan (asked, not
+guessed): **reuse `rack_product_status.is_out`** as the real Out-of-
+Product flag rather than a fully separate system (so the Terminal tab
+never disagrees with the banner), and a **split-load safety requirement**
+the user raised unprompted -- a load can carry multiple products across
+compartments, so tapping "Out of Product" must never blindly flag every
+planned product just because one was actually unavailable. Both report
+types open a checkbox picker over the load's own planned products instead
+of a single blind action.
+
+**Out of Product**: terminal-wide, visible to any driver at any company
+heading to that terminal. Reuses `rack_product_status.is_out` (keeps the
+Terminal tab in sync) plus a new lightweight report log for banner
+attribution/timing that table doesn't carry. Behaves like "Back to
+Planner" once submitted -- the driver got nothing, so the load is undone
+and the terminal card reverted.
+
+**Out of Allocation**: the terminal capped the driver below their planned
+amount -- company-scoped (only same-company drivers heading to that
+terminal see it). Posts its report but leaves the sheet's normal choices
+(Log the Load / Update Card) available afterward, since the driver can
+still adjust actual gallons in Plan Review and log what they did get.
+
+Both clear on the same schedule: 6am/12pm/6pm/12am terminal-local
+(confirmed with the user -- not a rolling 6-hours-from-post expiry, even
+though "every 6 hours" and "4 fixed times a day" describe the same
+interval).
+
+**New migration** (not yet applied --
+`supabase/migrations/20260828000000_terminal_outage_reports.sql`):
+`terminal_outage_reports` (terminal_id, rack_id nullable, product_id,
+report_type check-constrained to `'out_of_product'|'out_of_allocation'`,
+company_id, reporter_user_id, truck_label snapshot, created_at). RLS:
+Out-of-Product rows readable by anyone (matches `rack_product_status`'s
+own wide-open precedent); Out-of-Allocation rows only by
+`company_id = get_active_company_id()`. Insert is self-attributed only
+(`reporter_user_id = auth.uid()`, `company_id = get_active_company_id()`)
+-- can't spoof another user or company. No update/delete policy --
+"clearing" is done by filtering `created_at` against the clearing
+checkpoint in the read query, not by deleting rows (same pattern as the
+still-unapplied orphaned-`load_log` cleanup migration already in this
+repo); a periodic sweep to actually remove old rows is a reasonable later
+addition, not needed now since the table stays small. Deliberately
+doesn't store the composed message text, company prefix, or driver
+initials -- only IDs + a `truck_label` snapshot; the banner resolves
+`company_id`→name and `reporter_user_id`→display name at read time,
+matching this app's existing "resolve names after finding IDs" pattern
+(e.g. the trainee banner).
+
+**`app/planner/utils/rack.ts`** (new) -- `resolveEffectiveRackId`,
+extracted verbatim from `useLoadWorkflow.ts`'s own inline rack-fallback
+snippet (2026-08-13's rack_product_status write-through fix) so it has
+one implementation instead of being copied a second time for the new
+Out-of-Product report path. `useLoadWorkflow.ts` now calls the shared
+helper instead of its own inline copy -- behavior unchanged.
+
+**`app/planner/utils/dates.ts`** gained `mostRecentClearingCheckpoint`
+and `hhmmInTimeZone` -- both timezone-aware (same
+`Intl.DateTimeFormat`-with-`timeZone` approach `useTerminals.ts`'s
+`isoTodayInTimeZone` and `LoadingModal.tsx`'s `fmtLastApiLine_` already
+use), converting a terminal's wall-clock local time to/from a real UTC
+instant via the standard "format a guess, measure its offset, correct"
+trick (JS has no native zoned-time conversion) -- accurate except within
+a couple hours of a DST transition, an acceptable approximation for a
+banner clearing schedule.
+
+**`app/planner/hooks/useTerminalOutageReports.ts`** (new) --
+`submitOutageReport(...)` (plain async function, not a hook -- called
+from `page.tsx`'s new `handleSubmitOutageReport`, itself wired into
+`CancelLoadSheet`'s new flow) does the `rack_product_status` upsert (Out
+of Product only) + `terminal_outage_reports` insert, one row per selected
+product. `useActiveOutageBanner(terminalId)` polls every 30s (matching
+the existing trainee-banner precedent in `page.tsx`), resolves the
+terminal's own timezone directly (rather than depending on whichever
+tab's `useTerminals()` instance happens to be mounted, since this banner
+renders in the shared header across every tab, not just the Planner),
+filters to reports newer than the current clearing checkpoint, resolves
+product/company/reporter names, and composes one joined ticker string.
+RLS alone narrows Out-of-Allocation rows to the caller's own company, so
+no extra client-side company filtering was needed on top of that --
+simpler than the plan's original `activeOutageBanner(terminalId,
+companyId)` signature.
+
+**`app/planner/components/CancelLoadSheet.tsx`** reworked into a
+stateful, multi-mode sheet (`"menu" | "reportType" | "reportProducts"`),
+same pattern `PresetActionSheet.tsx` already established. New "Report
+Terminal Issue" row on the main menu leads to an Out of Product / Out of
+Allocation choice, then a checkbox picker over the load's own planned
+products (deduped, same grouping `LoadingModal.tsx`'s own `productGroups`
+already does), a "Submit Report" button gated on at least one selection,
+and inline busy/error states matching `RackProductStatusModal.tsx`'s own
+pattern. Stays presentational -- no direct Supabase calls -- calls the
+new `onSubmitOutageReport` prop and branches on the result exactly as
+decided: Out of Product closes the sheet and fires `onBackToPlanner()`;
+Out of Allocation returns to the normal 3-choice menu.
+
+**`app/planner/components/TerminalOutageBanner.tsx`** (new) -- mounted in
+`CalculatorLayoutClient.tsx`'s `ShellChrome`, between `<Header/>` (nav
+menu + tab bar) and the scrollable tab content, so it's visible across
+every tab, not just the Planner. Renders nothing when there's no active
+report for the current terminal. Scroll uses `left` (percentages relative
+to the containing block's width) on an absolutely-positioned child rather
+than `transform: translateX` (whose percentages are relative to the
+element's own width, which would make "start fully off-screen" unreliable
+for a short message) -- a CSS `@keyframes` animation with a held-flat
+stretch partway through for the "scroll, pause, continue" behavior asked
+for, looping continuously. Multiple simultaneously-active reports for the
+same terminal join into one ticker string (not a rotating carousel).
+
+**Message formats** -- Out of Product: `{company3} {truckLabel} - Out of
+{productName} @ {hhmm}hr` (drops the literal word "Terminal" per the
+user's own "maybe unnecessary" call -- easy one-line revert if wanted
+back). Out of Allocation: `{driverInitials} {truckLabel} OOA {productName}
+@ {hhmm}hr`.
+
+**Not in scope for this pass** (flagged, not guessed): no entry point for
+reporting an outage before ever tapping LOAD (a driver who finds zero
+product and never starts a load at all) -- the user scoped this
+explicitly to the post-Complete sheet; no periodic DB row deletion; no
+rate-limiting/dedup of repeated/overlapping reports for the same
+terminal/product.
+
+Not live-verified this pass -- migration not yet applied, and this is an
+authenticated, cross-account flow (posting from one driver, reading from
+another) that can't be meaningfully exercised without two real logged-in
+sessions at different companies, consistent with this project's own
+established practice for this class of change. `tsc --noEmit` and `next
+build` both clean throughout. Manual walkthrough once shipped: complete a
+load → tap Complete → Report Terminal Issue → Out of Product → pick one
+product → Submit → confirm the load is canceled/card reverted AND the
+banner appears for that terminal; separately confirm a same-company Out
+of Allocation report shows for a teammate but an Out of Product report
+from a different company still shows too (cross-company), while a
+different company's Out of Allocation report does not.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.
