@@ -133,3 +133,14 @@ export function hhmmInTimeZone(dateMs: number, timeZone: string): string {
   const { hour, minute } = tzPartsAt(dateMs, timeZone);
   return `${String(hour).padStart(2, "0")}${String(minute).padStart(2, "0")}`;
 }
+
+/**
+ * The next 6:00/12:00/18:00/24:00 (terminal-local) checkpoint at or after
+ * `atMs` -- i.e. when a report created at `atMs` will actually clear, for
+ * the outage banner's detail view ("Expires ~5:00pm"). Always exactly the
+ * checkpoint that comes after mostRecentClearingCheckpoint(atMs, ...),
+ * since checkpoints are evenly spaced every 6h.
+ */
+export function nextClearingCheckpoint(atMs: number, timeZone: string): number {
+  return mostRecentClearingCheckpoint(atMs, timeZone) + 6 * 60 * 60 * 1000;
+}

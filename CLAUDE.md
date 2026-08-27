@@ -4743,6 +4743,51 @@ of Allocation report shows for a teammate but an Out of Product report
 from a different company still shows too (cross-company), while a
 different company's Out of Allocation report does not.
 
+**Live-verified 2026-08-28**: user applied the migration and confirmed
+the report flow works end-to-end (product picker → submit → error
+surfaced correctly the one time the table didn't exist yet, then worked
+once applied).
+
+**Follow-up same day -- placement, styling, tap-to-detail + Clear
+Issue.** Three asks: move the banner from between Header and the tab
+content up into Header itself (above the tab bar, below the icon row);
+restyle from a bordered/backgrounded strip to plain red text on the
+header's own gradient; make it tappable (a trailing "›" chevron, the same
+affordance this app already uses everywhere else for "this row opens
+something" -- `SettingsModal.tsx`, `EquipmentModal.tsx`, etc.) to open a
+detail view with each report's expiry time and a way to resolve it early.
+
+- `TerminalOutageBanner` moved from `ShellChrome` (between `<Header/>`
+  and the scrollable content) to inside `Header` itself, between the
+  icon row and `<TabBar/>` -- no longer takes vertical space away from
+  the page content area, sits in the header band instead.
+- Ticker restyled: no background/border chip, `#f87171` text directly on
+  the gradient, wrapped in a `<button>` (ticker area + trailing chevron)
+  that opens the new `app/planner/modals/TerminalOutageDetailModal.tsx`.
+- **`useActiveOutageBanner`** now also returns a structured `reports:
+  ComposedOutageReport[]` (not just the joined ticker string) plus the
+  resolved `timeZone` and a `refresh()` -- each report carries its own
+  `expiresAtMs` (via new `nextClearingCheckpoint` in `dates.ts`, the
+  checkpoint *after* `created_at` rather than the most-recent one before
+  now) and `canClear` (`reporter_user_id === effectiveUserId` -- the same
+  identity `submitOutageReport` wrote the row under, so it stays correct
+  under admin impersonation).
+- **New `clearOutageReport(reportId)`** — a plain delete, letting a
+  driver resolve their own report early instead of waiting for the next
+  checkpoint. New migration
+  `20260829000000_terminal_outage_reports_delete_policy.sql` (**not yet
+  applied**) adds one additive DELETE policy, `reporter_user_id =
+  auth.uid()` -- deliberately reporter-only, not company-staff-wide (a
+  broader "any admin can clear any report" moderation capability is a
+  real, separate product decision, not guessed at here). The detail
+  modal only renders a Clear Issue button on reports where `canClear` is
+  true; a stray delete call against someone else's report would just
+  affect 0 rows under RLS either way.
+
+Not live-verified this specific follow-up (the DELETE migration isn't
+applied yet, and the reposition/restyle wants a real device look) --
+`tsc --noEmit` and `next build` both clean.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.

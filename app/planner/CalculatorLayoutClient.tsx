@@ -256,6 +256,7 @@ function Header({ onOpenSettings }: { onOpenSettings: () => void }) {
           <GearIcon onClick={onOpenSettings} stroke={iconStroke} />
         </div>
       </div>
+      <TerminalOutageBanner />
       <TabBar />
     </div>
   );
@@ -267,7 +268,6 @@ function ShellChrome({ children }: { children: React.ReactNode }) {
   return (
     <div style={{ height: "100dvh", background: "#0b0b0b", color: "#fff", display: "flex", flexDirection: "column", overflow: "hidden" }}>
       <Header onOpenSettings={() => setSettingsOpen(true)} />
-      <TerminalOutageBanner />
       <div className="pt-tabscroll" style={{ flex: 1, overflowY: "auto", padding: "0px 12px 12px", background: "#0b0b0b" }}>
         {children}
       </div>
