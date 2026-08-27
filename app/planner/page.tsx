@@ -51,7 +51,6 @@ import DriverTrainingModal from "./components/DriverTrainingModal";
 // (CalculatorLayoutClient.tsx) -- see the render-site comment further down.
 import TerminalCatalogModal from "./modals/TerminalCatalogModal";
 import LoadingModal from "./modals/LoadingModal";
-import VerifyAgainstBolModal from "./modals/VerifyAgainstBolModal";
 import CancelLoadSheet from "./components/CancelLoadSheet";
 import ProductTempModal from "./modals/ProductTempModal";
 import CompartmentModal from "./modals/CompartmentModal";
@@ -303,11 +302,6 @@ export default function CalculatorPage() {
   // already re-cards the terminal on LOAD tap, before this modal ever
   // opens.
   const [cancelLoadConfirmOpen, setCancelLoadConfirmOpen] = useState(false);
-  // Phase 2 -- opened only when "Log the Load" is tapped in CancelLoadSheet
-  // (see plan doc). Only this modal's own Confirm button actually submits
-  // (onLoadedFromLoadingModal(verifiedByComp)); backing out (Escape/backdrop)
-  // just closes it and returns to Plan Review with nothing submitted.
-  const [verifyBolOpen, setVerifyBolOpen] = useState(false);
   // Captured the instant LOAD/RELOAD is tapped -- whatever this terminal's
   // access date was *before* begin_load's silent re-card, so "Back to
   // Planner" can genuinely undo it (see handleBackToPlannerNoUpdate below).
@@ -2004,24 +1998,8 @@ const lastProductInfoById = useMemo(() => {
         open={cancelLoadConfirmOpen}
         onDismiss={() => setCancelLoadConfirmOpen(false)}
         onBackToPlanner={handleBackToPlannerNoUpdate}
-        onLogTheLoad={() => { setCancelLoadConfirmOpen(false); setVerifyBolOpen(true); }}
+        onLogTheLoad={() => { setCancelLoadConfirmOpen(false); loadWorkflow.onLoadedFromLoadingModal(); }}
         onUpdateCardOnly={() => { setCancelLoadConfirmOpen(false); loadWorkflow.cancelActiveLoad(); }}
-      />
-
-      <VerifyAgainstBolModal
-        open={verifyBolOpen}
-        onClose={() => setVerifyBolOpen(false)}
-        styles={styles}
-        planRows={effectivePlanRows as any[]}
-        productNameById={productNameById}
-        productHexCodeById={productHexCodeById}
-        productInputs={productInputs}
-        busy={loadWorkflow.completeBusy}
-        onConfirm={(verifiedByComp) => {
-          setVerifyBolOpen(false);
-          loadWorkflow.onLoadedFromLoadingModal(verifiedByComp);
-        }}
-        onBackToPlanner={() => { setVerifyBolOpen(false); handleBackToPlannerNoUpdate(); }}
       />
 
       <ProductTempModal

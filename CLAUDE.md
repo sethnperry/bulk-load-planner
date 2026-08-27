@@ -4325,7 +4325,7 @@ and `next build` both clean. This is a stronger fix than the first pass
 theory), but still worth a real check on a real device, ideally the exact
 one/scenario that showed the bug again, before calling this fully closed.
 
-### Loading modal split into Plan Review + Verify Against BOL (2026-08-26)
+### ~~Loading modal split into Plan Review + Verify Against BOL~~ (2026-08-26) — Verify Against BOL step reversed 2026-08-27, see below
 
 Multi-turn design conversation with the user, planned via Plan Mode
 (approved plan preserved at `wild-discovering-plum.md`). Real workflow
@@ -4526,6 +4526,46 @@ transition the original 2026-08-06 presets rework itself went through.
 
 Not live-verified this pass (no authenticated session available from this
 side) -- `tsc --noEmit` and `next build` both clean.
+
+### Verify Against BOL step removed -- "Log the Load" goes back to submitting directly (2026-08-27)
+
+Per explicit user direction, one day after shipping: "I don't know what I
+was thinking. That last verification step is unnecessary. If I set the
+plan and get out and load then jump back in to verify I can just do it in
+the same plan phase so tapping log the load should just do what it did
+before, no extra verify screen." The Plan Review phase's own tap-to-edit
+compartment gallons and product API/Temp (still fully intact, see above)
+already covers the real workflow this whole feature was built for --
+reacting to a fresher BOL reading before committing to load -- so the
+extra confirm-after-the-fact step was solving a problem Plan Review
+already solves, just one screen later than necessary.
+
+**Removed entirely, not just hidden**: `app/planner/modals/VerifyAgainstBolModal.tsx`
+deleted outright (matches this project's own precedent for genuinely
+unreachable code, e.g. `FleetCredentialsModal.tsx`'s removal -- no reason
+to leave a dead modal file around). `page.tsx`'s `verifyBolOpen` state and
+the modal's mount were removed; `CancelLoadSheet`'s `onLogTheLoad` reverted
+to calling `loadWorkflow.onLoadedFromLoadingModal()` directly (no argument)
+-- exactly its pre-Phase-2 behavior. `useLoadWorkflow.ts`'s
+`onLoadedFromLoadingModal` lost its `verifiedByComp` parameter and the
+`VerifiedLoadLine` type entirely -- both branches it introduced (the
+per-compartment BOL-authoritative actual-value path, and the "err cold and
+heavy" heaviest-density collapsing for `product_updates`) were only ever
+reachable from the now-deleted modal, so removed rather than left as dead
+`if (verifiedByComp)` branches that could never actually run.
+
+**Everything from the Plan Review half of the original change stays**:
+tappable compartment gallons and product API/Temp cards (`ValueEntryOverlay`),
+the live weight/diff-vs-target preview, the isolated `loadingGallonsOverride`
+mechanism in `page.tsx`, and the `diff_lbs` client-computation fix (still
+correct and still needed -- unrelated to Phase 2's existence, it was about
+Phase 1 alone being able to move the plan away from `begin_load`'s frozen
+DB snapshot). `computeActualLbsForLine` in `planMath.ts` is also still
+used, by both the live preview and `onLoadedFromLoadingModal`'s own
+(reverted-to-original) submission math.
+
+`tsc --noEmit` and `next build` both clean. Not live-verified this pass
+(same reason as every authenticated-flow change this session).
 
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
