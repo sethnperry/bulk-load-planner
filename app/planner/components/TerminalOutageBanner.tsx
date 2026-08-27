@@ -59,14 +59,14 @@ export default function TerminalOutageBanner() {
               display: "flex", alignItems: "center",
               whiteSpace: "nowrap",
               fontSize: 12, fontWeight: 800, letterSpacing: 0.3,
-              color: "#f87171",
+              color: "#ff3b30",
               animation: "outageTicker 18s linear infinite",
             }}
           >
             {message}
           </div>
         </div>
-        <span style={{ fontSize: 16, color: "#f87171", flexShrink: 0, lineHeight: 1 }}>›</span>
+        <span style={{ fontSize: 16, color: "#ff3b30", flexShrink: 0, lineHeight: 1 }}>›</span>
         <style jsx>{`
           @keyframes outageTicker {
             0%   { left: 100%; }

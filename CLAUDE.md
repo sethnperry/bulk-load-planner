@@ -4788,6 +4788,42 @@ Not live-verified this specific follow-up (the DELETE migration isn't
 applied yet, and the reposition/restyle wants a real device look) --
 `tsc --noEmit` and `next build` both clean.
 
+**Follow-up same day: brighter ticker color + a real question instead of
+guessing what happens to the terminal card on Out of Product.** Two asks:
+
+- Ticker text/chevron went from `#f87171` to a brighter `#ff3b30`.
+- **The real one**: Out of Product's product picker used to submit
+  straight into `onBackToPlanner` (cancels the load AND reverts today's
+  terminal access date to whatever it was before this LOAD tap) the
+  instant the report posted. Per explicit direction ("it is safe to
+  assume I didn't get loaded... after selecting the products to report
+  on, the next question is did my access card get renewed when I carded
+  in or is this one of the terminals that requires a BOL") -- the load
+  being canceled is certain, but whether the card ALSO reverts genuinely
+  isn't: some terminals renew access the instant a driver checks in,
+  others only renew it once a BOL is presented, which a driver who never
+  loaded doesn't have. Guessing either way would be wrong for real
+  terminals on the other branch.
+
+  New `"cardRenewal"` mode in `CancelLoadSheet.tsx`, shown after a
+  successful Out of Product report instead of closing immediately: "Did
+  your card renew?" / "Some terminals renew your access the moment you
+  check in. Others only renew it once you present a BOL -- which you
+  won't have today." -- two buttons, "Yes, It Renewed" and "No, This
+  Terminal Requires a BOL". Both route to props that **already existed**
+  and already encoded exactly these two outcomes -- "Yes" reuses
+  `onUpdateCardOnly` (cancels the load, leaves today's re-card alone,
+  identical to tapping that row from the main menu), "No" reuses
+  `onBackToPlanner` (cancels the load AND reverts the card) -- so no new
+  page.tsx wiring was needed, just a new question routing to logic that
+  was already correct for each case. Out of Allocation's own flow
+  (return to the normal 3-choice menu) is untouched -- a capped-but-
+  partial load is a different situation, the driver likely got something
+  and may still want to log it.
+
+Not live-verified this pass either -- `tsc --noEmit` and `next build`
+both clean.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.

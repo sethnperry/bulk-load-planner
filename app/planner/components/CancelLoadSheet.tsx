@@ -45,6 +45,24 @@
 // presentational -- no direct Supabase calls -- the actual write happens
 // via the new onSubmitOutageReport prop, owned by page.tsx /
 // useTerminalOutageReports.ts.
+//
+// Follow-up same day: Out of Product no longer closes straight back to
+// Back to Planner after the product picker -- per explicit direction
+// ("it is safe to assume I didn't get loaded"), the load is always
+// canceled from here, but whether today's terminal card ALSO reverts is
+// genuinely unknown without asking: some terminals renew access the
+// instant a driver checks in, others only renew it once a BOL is
+// presented (which a driver who never loaded doesn't have). New
+// "cardRenewal" mode asks that directly and routes to the two EXISTING
+// props that already encode each outcome -- "Yes, It Renewed" reuses
+// onUpdateCardOnly (cancels the load, leaves today's re-card alone,
+// same as tapping that row from the main menu), "No, Requires a BOL"
+// reuses onBackToPlanner (cancels the load AND reverts the card) -- no
+// new page.tsx wiring needed for this, both behaviors already existed.
+// Out of Allocation is untouched (still returns to the normal 3-choice
+// menu) since a capped-but-partial load is a genuinely different
+// situation -- the driver likely did load something and may still want
+// to log it.
 
 import React, { useEffect, useMemo, useState } from "react";
 import { GRAPHITE, GRAPHITE_DARKER, themeFill, themeTextOnFill } from "../theme";
@@ -89,7 +107,7 @@ export default function CancelLoadSheet({
   open, onDismiss, onBackToPlanner, onLogTheLoad, onUpdateCardOnly, darkMode, accentColor,
   planRows, productNameById, onSubmitOutageReport,
 }: Props) {
-  const [mode, setMode] = useState<"menu" | "reportType" | "reportProducts">("menu");
+  const [mode, setMode] = useState<"menu" | "reportType" | "reportProducts" | "cardRenewal">("menu");
   const [reportType, setReportType] = useState<OutageReportType | null>(null);
   const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(new Set());
   const [submitBusy, setSubmitBusy] = useState(false);
@@ -140,9 +158,13 @@ export default function CancelLoadSheet({
     setSubmitBusy(false);
     if (error) { setSubmitError(error); return; }
     if (reportType === "out_of_product") {
-      // No product to load -- same as tapping Back to Planner directly.
-      setMode("menu");
-      onBackToPlanner();
+      // No product means no load -- that part's certain, so the load
+      // itself is always canceled from here on. What's NOT certain is
+      // whether the terminal card still renewed anyway (some terminals
+      // renew on check-in; others only renew once you present a BOL,
+      // which a driver who didn't load never gets) -- ask before deciding
+      // what happens to today's access date, instead of guessing.
+      setMode("cardRenewal");
     } else {
       // Out of Allocation: the driver may still have loaded a partial
       // amount -- return to the normal choices so they can log it.
@@ -275,6 +297,19 @@ export default function CancelLoadSheet({
               {submitBusy ? "Submitting…" : "Submit Report"}
             </button>
             <button type="button" style={cancelStyle} onClick={() => setMode("reportType")}>Back</button>
+          </>
+        )}
+
+        {mode === "cardRenewal" && (
+          <>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "rgba(255,255,255,0.90)", marginBottom: 4 }}>
+              Did your card renew?
+            </div>
+            <div style={{ fontSize: 13, color: "rgba(255,255,255,0.45)", marginBottom: 14 }}>
+              Some terminals renew your access the moment you check in. Others only renew it once you present a BOL -- which you won't have today.
+            </div>
+            <button type="button" style={secondaryRowStyle} onClick={onUpdateCardOnly}>Yes, It Renewed</button>
+            <button type="button" style={secondaryRowStyle} onClick={onBackToPlanner}>No, This Terminal Requires a BOL</button>
           </>
         )}
       </div>
