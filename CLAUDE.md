@@ -4457,6 +4457,76 @@ Complete → CancelLoadSheet) are untouched -- this adds a direct route, not
 a replacement. `tsc --noEmit` and `next build` both clean; not live-
 verified this pass, same reason as above.
 
+### Plan slots: presets stopped saving cap overrides, and switching terminals wiped the live plan (2026-08-27)
+
+Two related bugs reported after switching trailers and building out
+presets A-E: (1) a cap override set on a compartment inside a preset
+didn't survive tapping away to a different preset and back -- the product
+selection was right, the cap wasn't; (2) the driver had to reconfigure
+their whole plan again at every terminal, despite the 2026-08-06 rework
+already making named presets (1-5) terminal-independent by design. Per
+explicit direction: extend that same "one setup persists across all
+terminals" decision to the live/autosave plan too, not just the named
+presets -- "if that ever does really come up [different terminals needing
+different products] the driver can do a temporary plan for just that one
+terminal... I want to make the onboarding process as simple and
+straightforward as possible."
+
+**Bug 1, straightforward**: `buildSnapshot`'s `stripFillLevel` option
+(added in the original 2026-08-06 rework, "presets store only the product
+selection") dropped `capOverride` from every compartment before saving a
+named preset -- a deliberate call at the time, but directly contradicted
+by this new ask, and inconsistent with the CG reversal that had already
+walked back the same "presets are lean" philosophy once (2026-08-04, see
+"Presets rework" above). Removed `stripFillLevel` entirely --
+`buildSnapshot` now always saves the full `compPlan` (product + cap
+override), for every slot.
+
+**Bug 2, a real architecture gap, not a config toggle**: named presets
+(1-5) were already combo-scoped/terminal-independent in
+`usePlanSlots.ts`, but slot 0 (the "live" plan -- what's actually on
+screen, autosaved every 350ms) was still terminal-scoped, exactly as it
+had been since before that rework. Two effects in `usePlanSlots.ts` react
+to `selectedTerminalId` changing by re-reading and force-applying
+whatever slot 0 draft was saved *for that specific terminal* -- often
+empty, or old unrelated content from an earlier session at that terminal
+-- silently overwriting whatever was currently on screen, including a
+preset the driver had just tapped moments before. This is what actually
+produced "I have to save them all over again at every terminal": it was
+never that presets forgot their content, it's that switching terminals
+kept swapping the live plan out from under them via this separate,
+terminal-scoped slot-0 mechanism.
+
+**Fixed** by extending the same combo-only scoping presets already had to
+slot 0: `planScopeKey` (previously `user:terminal`) is now
+`user:combo`, and `planStoreKey`, `scopeFor`, `serverFetchSlots`,
+`canUseSlot`, and `loadFromSlot` were all simplified to treat every slot
+(0 through 5) identically -- terminal_id pinned to the same
+`UNIVERSAL_SCOPE` sentinel presets already used, combo_id real. The
+"restore slot 0" effect's dependency changed from
+`[selectedTerminalId, planScopeKey]` to `[selectedComboId, planScopeKey]`
+(now combo-based) and its `raw.terminalId === selectedTerminalId` gate
+was removed entirely -- it now only fires on a genuine combo change (or
+fresh mount), never on a terminal switch, so tapping between terminals
+mid-session no longer touches the live plan at all. `serverFetchSlots`
+collapsed from two separate queries (slot 0 by real terminal+combo,
+presets 1-5 by combo) into one query covering all six slots at
+`terminal_id = UNIVERSAL_SCOPE`. The `selectedTerminalId`/`terminalId`
+that remain in the file (autosave gate, snapshot metadata field,
+`parsePlanPayload` fallback) are all now purely informational or
+readiness gates, not scope-determining.
+
+**Known, accepted one-time transition**: existing users' current
+terminal-scoped slot-0 local/DB rows become orphaned by this change (never
+read again) -- their in-progress live plan may appear empty once after
+this ships, then behave correctly (combo-scoped) from then on. Nothing
+structurally important is lost (an in-progress, uncommitted draft, not
+completed load data), and this mirrors the same kind of one-time
+transition the original 2026-08-06 presets rework itself went through.
+
+Not live-verified this pass (no authenticated session available from this
+side) -- `tsc --noEmit` and `next build` both clean.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.

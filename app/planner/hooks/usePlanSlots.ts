@@ -40,13 +40,14 @@ function compareSavedAt(a: any, b: any): number {
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
 
-// Sentinel scope used for named presets (slots 1-5) so they're stored
-// terminal/combo-independent -- user_plan_slots.terminal_id/combo_id are
-// NOT NULL text and part of the unique key, so a constant, non-null value
-// here needs no schema migration and dedupes correctly (unlike NULL, which
-// Postgres never treats as equal to itself for uniqueness). Slot 0 (the
-// autosave/last-load draft, not a driver-facing "preset") keeps using the
-// real terminal/combo exactly as before.
+// Sentinel scope used for every plan slot (0 through 5) so they're stored
+// terminal-independent -- user_plan_slots.terminal_id/combo_id are NOT NULL
+// text and part of the unique key, so a constant, non-null value here needs
+// no schema migration and dedupes correctly (unlike NULL, which Postgres
+// never treats as equal to itself for uniqueness). Originally only slots
+// 1-5 (named presets) used this; slot 0 (the "live"/autosave plan) joined
+// them 2026-08-27 ("one setup persists across all terminals" -- see
+// planScopeKey's own comment below for the full story).
 const UNIVERSAL_SCOPE = "__universal__";
 
 type Props = {
@@ -107,28 +108,29 @@ export function usePlanSlots({
 
   // ── Scope key ─────────────────────────────────────────────────────────────
 
+  // Every plan slot -- slot 0 (the "live"/autosave plan) AND slots 1-5
+  // (named A-E presets) -- is keyed per-user *and* per-equipment-combo,
+  // deliberately WITHOUT a terminal component. Combo (not terminal) is what
+  // actually determines compartment layout, so that's what a "plan" is
+  // really scoped to. Slot 0 used to also include the terminal (see git
+  // history) until explicit 2026-08-27 follow-up ("one setup persists
+  // across all terminals," same decision already made for presets in the
+  // original 2026-08-06 rework, now extended to the live plan too) -- the
+  // old terminal-scoped design meant switching terminals silently swapped
+  // in whatever THAT terminal's own separate old autosave draft happened to
+  // be, discarding whatever the driver had just set up (including a preset
+  // they'd just loaded). Falls back to "c:none" when combo hasn't resolved
+  // yet (matches every other guard in this file that treats an unresolved
+  // combo as "nothing to scope to yet").
   const planScopeKey = useMemo(() => {
     const who = authUserId ? `u:${authUserId}` : "anon";
-    const term = selectedTerminalId ? `t:${selectedTerminalId}` : "t:none";
-    return `proTankr:${who}:${term}`;
-  }, [authUserId, selectedTerminalId]);
+    const combo = selectedComboId ? `c:${selectedComboId}` : "c:none";
+    return `proTankr:${who}:${combo}`;
+  }, [authUserId, selectedComboId]);
 
-  // Slot 0 (autosave/last-load draft) stays keyed per-terminal, exactly as
-  // before. Slots 1-5 (named A-E presets) are keyed per-user *and*
-  // per-equipment-combo -- no terminal component -- so the same preset
-  // shows up and loads regardless of which terminal is currently selected,
-  // but different trucks/trailers (different compartment layouts) get
-  // independent presets. Requires selectedComboId to resolve; falls back to
-  // "c:none" when it hasn't yet (matches every other guard in this file
-  // that treats an unresolved combo as "nothing to scope to yet").
   const planStoreKey = useCallback(
-    (slot: number) => {
-      if (slot === 0) return `${planScopeKey}:plan:slot:0`;
-      const who = authUserId ? `u:${authUserId}` : "anon";
-      const combo = selectedComboId ? `c:${selectedComboId}` : "c:none";
-      return `proTankr:${who}:${combo}:preset:slot:${slot}`;
-    },
-    [planScopeKey, authUserId, selectedComboId]
+    (slot: number) => `${planScopeKey}:${slot === 0 ? "plan" : "preset"}:slot:${slot}`,
+    [planScopeKey]
   );
 
   // Pre-equipment-scoping key (every preset used to live here, user-only,
@@ -237,54 +239,44 @@ export function usePlanSlots({
   }, [slotBump]);
 
   // ── Supabase server sync ──────────────────────────────────────────────────
-  // Slot 0 stays scoped to the real terminal/combo. Slots 1-5 (presets) use
-  // terminal_id = UNIVERSAL_SCOPE (loadable from any terminal) but a real
-  // combo_id -- different equipment (different compartment layouts) gets
-  // independent presets. Requires a resolved combo to write to at all,
-  // same as slot 0 requires a resolved terminal+combo.
+  // Every slot (0 through 5) uses terminal_id = UNIVERSAL_SCOPE with a real
+  // combo_id -- loadable/saveable from any terminal, but different equipment
+  // (different compartment layouts) gets independent slots. Requires a
+  // resolved combo to write to at all. See planScopeKey's own comment above
+  // for why slot 0 joined slots 1-5 in dropping the terminal dimension
+  // entirely (2026-08-27).
 
   function scopeFor(slot: number): { terminalId: string; comboId: string } | null {
-    if (slot === 0) {
-      if (!selectedTerminalId || !selectedComboId) return null;
-      return { terminalId: String(selectedTerminalId), comboId: String(selectedComboId) };
-    }
     if (!selectedComboId) return null;
     return { terminalId: UNIVERSAL_SCOPE, comboId: String(selectedComboId) };
   }
 
-  // Returns both the combo-scoped preset rows (preferred, post-rework) and
-  // the pre-equipment-scoping legacy rows (terminal_id AND combo_id both
-  // UNIVERSAL_SCOPE -- every preset lived here before this rework). The
-  // pull effect below writes each into its own local cache; readSlot
-  // prefers the combo-scoped one and only falls back to legacy for a combo
-  // that's never had that slot saved under the new scheme.
+  // Returns both the combo-scoped rows (preferred, post-rework -- covers
+  // slot 0 and presets 1-5 in one query, since both now share the exact
+  // same terminal_id=UNIVERSAL_SCOPE/combo_id shape) and the pre-equipment-
+  // scoping legacy preset rows (terminal_id AND combo_id both
+  // UNIVERSAL_SCOPE -- every preset lived here before the original
+  // 2026-08-06 rework; slot 0 never had an equivalent legacy shape, since it
+  // was always terminal+combo scoped until this same 2026-08-27 change, so
+  // there's nothing to fall back to for it). The pull effect below writes
+  // each into its own local cache; readSlot prefers the combo-scoped one and
+  // only falls back to legacy (slots 1-5 only) for a combo that's never had
+  // that slot saved under the new scheme.
   async function serverFetchSlots(): Promise<{ scoped: Record<number, any>; legacy: Record<number, any> }> {
     if (!authUserId) return { scoped: {}, legacy: {} };
     const scoped: Record<number, any> = {};
     const legacy: Record<number, any> = {};
 
-    if (selectedTerminalId && selectedComboId) {
-      const { data, error } = await supabase
-        .from("user_plan_slots")
-        .select("slot,payload,updated_at")
-        .eq("user_id", authUserId)
-        .eq("terminal_id", String(selectedTerminalId))
-        .eq("combo_id", String(selectedComboId))
-        .eq("slot", 0);
-      if (error) console.warn("serverFetchSlots (slot 0) error:", error.message);
-      else (data || []).forEach((r: any) => { scoped[Number(r.slot)] = r.payload ?? null; });
-    }
-
     if (selectedComboId) {
-      const { data: presetRows, error: presetErr } = await supabase
+      const { data, error } = await supabase
         .from("user_plan_slots")
         .select("slot,payload,updated_at")
         .eq("user_id", authUserId)
         .eq("terminal_id", UNIVERSAL_SCOPE)
         .eq("combo_id", String(selectedComboId))
-        .in("slot", [1, 2, 3, 4, 5]);
-      if (presetErr) console.warn("serverFetchSlots (presets, combo-scoped) error:", presetErr.message);
-      else (presetRows || []).forEach((r: any) => { scoped[Number(r.slot)] = r.payload ?? null; });
+        .in("slot", [0, 1, 2, 3, 4, 5]);
+      if (error) console.warn("serverFetchSlots (combo-scoped) error:", error.message);
+      else (data || []).forEach((r: any) => { scoped[Number(r.slot)] = r.payload ?? null; });
     }
 
     const { data: legacyRows, error: legacyErr } = await supabase
@@ -455,24 +447,23 @@ export function usePlanSlots({
 
   // ── Snapshot build/apply ──────────────────────────────────────────────────
 
-  // stripFillLevel drops capOverride from every compartment -- used for named
-  // presets (slots 1-5), which store only the product selection + CG (per
-  // explicit 2026-08-04 direction: CG is saved with the preset and restored
-  // when the driver taps it, reversing the original "CG never lives in a
-  // preset" call). Slot 0 (the autosave/last-load draft) keeps full
-  // fidelity, since it's plan continuity, not a driver-facing "preset" --
-  // its cgSlider is still saved (harmless) but never restored, see
-  // applySnapshot below.
+  // Named presets (slots 1-5) store the FULL compPlan -- product selection,
+  // cgSlider (per explicit 2026-08-04 direction), AND each compartment's own
+  // capOverride. capOverride used to be deliberately stripped here (the
+  // original 2026-08-06 rework's "presets store only the product selection"
+  // call), but per explicit 2026-08-27 follow-up ("my cap override should
+  // also save") that's reversed too, same as the CG reversal before it --
+  // a driver setting up a preset with a reduced fill level (e.g. for a
+  // stale-API terminal) expects that cap to still be there next time they
+  // tap that preset, not just the product. Slot 0 (the autosave/last-load
+  // draft) already had full fidelity.
   const buildSnapshot = useCallback(
-    (terminalId: string, opts?: { stripFillLevel?: boolean }): PlanSnapshot => {
-      const plan = opts?.stripFillLevel
-        ? Object.fromEntries(Object.entries(compPlan).map(([k, v]) => [k, { empty: v.empty, productId: v.productId }]))
-        : compPlan;
+    (terminalId: string): PlanSnapshot => {
       return {
         v: 1, savedAt: Date.now(), terminalId,
         tempF: Number(tempF) || 60,
         cgSlider: Number(cgSlider),
-        compPlan: plan,
+        compPlan,
       };
     },
     [tempF, cgSlider, compPlan]
@@ -634,17 +625,27 @@ export function usePlanSlots({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedComboId, authUserId]);
 
-  // ── Restore slot 0 on terminal change ─────────────────────────────────────
+  // ── Restore the live plan on combo change ─────────────────────────────────
   // A genuine fresh mount/refresh never resumes an unfinalized in-progress
   // plan -- any local WIP draft for this real (signed-in) scope gets cleared
   // exactly once, the first time it's seen after mount, so the combo-claim
   // effect above sees an empty slot 0 and only the last *completed* load's
-  // slip-seat data (if any) can pre-fill compPlan. Later terminal switches
-  // within the same session still restore each terminal's own local draft
-  // normally -- this only guards the very first resolution after a reload.
+  // slip-seat data (if any) can pre-fill compPlan.
+  //
+  // Runs on COMBO change, not terminal change -- see planScopeKey's own
+  // comment above. This used to re-run (and re-apply whatever local draft
+  // was saved) on every terminal switch, which is exactly what silently
+  // discarded a driver's current plan the moment they picked a different
+  // terminal, since that terminal's own separately-scoped old draft (often
+  // empty, or from unrelated earlier driving) would get force-applied over
+  // it. Fixed 2026-08-27 by dropping terminal from this effect's scope
+  // entirely, along with the terminalId-match guard that used to gate
+  // whether `raw` applied at all -- slot 0 is combo-scoped now, so any real
+  // saved draft for this combo is valid regardless of which terminal is
+  // currently selected.
 
   useEffect(() => {
-    if (!selectedTerminalId) return;
+    if (!selectedComboId) return;
     const raw = safeRead(planStoreKey(0)) as PlanSnapshot | null;
     planRestoreReadyRef.current = planScopeKey;
 
@@ -655,7 +656,7 @@ export function usePlanSlots({
     if (skipLocalRestore) {
       safeDelete(planStoreKey(0));
       setCompPlan({});
-    } else if (raw && raw.v === 1 && String(raw.terminalId) === String(selectedTerminalId)) {
+    } else if (raw && raw.v === 1) {
       applySnapshot(raw);
     }
 
@@ -664,7 +665,7 @@ export function usePlanSlots({
     });
     refreshSlotHas();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedTerminalId, planScopeKey]);
+  }, [selectedComboId, planScopeKey]);
 
   // ── Mark dirty on plan changes ────────────────────────────────────────────
 
@@ -714,15 +715,16 @@ export function usePlanSlots({
 
   // ── Public save/load ──────────────────────────────────────────────────────
 
-  // Slot 0 needs a resolved terminal (it's per-terminal); presets (1-5) need
-  // a resolved equipment combo instead (terminal-independent, combo-specific).
-  function canUseSlot(slot: number): boolean {
-    return slot === 0 ? !!selectedTerminalId : !!selectedComboId;
+  // Every slot -- the live plan (0) and named presets (1-5) alike -- needs
+  // only a resolved equipment combo now, not a terminal (see planScopeKey's
+  // own comment above).
+  function canUseSlot(_slot: number): boolean {
+    return !!selectedComboId;
   }
 
   const saveToSlot = useCallback((slot: number) => {
     if (!canUseSlot(slot)) return;
-    const snap = buildSnapshot(String(selectedTerminalId), { stripFillLevel: slot !== 0 });
+    const snap = buildSnapshot(String(selectedTerminalId));
     safeWrite(planStoreKey(slot), snap);
     refreshSlotHas();
     afterLocalSlotWrite(slot);
@@ -752,10 +754,9 @@ export function usePlanSlots({
     if (!canUseSlot(slot)) return;
     const raw = readSlot(slot) as PlanSnapshot | null;
     if (!raw || raw.v !== 1) return;
-    // Terminal-match is only meaningful for slot 0 (the real per-terminal
-    // draft) -- named presets (1-5) are terminal-independent by design, so
-    // they load regardless of which terminal is currently selected.
-    if (slot === 0 && String(raw.terminalId) !== String(selectedTerminalId)) return;
+    // No terminal-match check -- every slot (0 through 5) is
+    // terminal-independent by design (see planScopeKey's own comment), so
+    // it loads regardless of which terminal is currently selected.
     planRestoreReadyRef.current = planScopeKey;
     // Named presets (1-5) snap the CG slider to whatever was saved with them;
     // slot 0 (autosave/last-load draft) never restores CG -- see applySnapshot.
@@ -763,7 +764,7 @@ export function usePlanSlots({
     queueMicrotask(() => {
       if (planRestoreReadyRef.current === planScopeKey) planRestoreReadyRef.current = null;
     });
-  }, [selectedTerminalId, selectedComboId, readSlot, applySnapshot, planScopeKey]);
+  }, [selectedComboId, readSlot, applySnapshot, planScopeKey]);
 
   // Read-only peek at a slot's saved compPlan, for showing a real summary
   // (e.g. "Load Diesel, Regular") in the action sheet before committing to
