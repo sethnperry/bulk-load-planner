@@ -306,7 +306,7 @@ export default function CancelLoadSheet({
               Did your card renew?
             </div>
             <div style={{ fontSize: 13, color: "rgba(255,255,255,0.45)", marginBottom: 14 }}>
-              Some terminals renew your access the moment you check in. Others only renew it once you present a BOL -- which you won't have today.
+              Some terminals renew your access the moment you card in. Others only renew it once you print a BOL -- which you won't have.
             </div>
             <button type="button" style={secondaryRowStyle} onClick={onUpdateCardOnly}>Yes, It Renewed</button>
             <button type="button" style={secondaryRowStyle} onClick={onBackToPlanner}>No, This Terminal Requires a BOL</button>
