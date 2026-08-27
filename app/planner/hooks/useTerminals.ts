@@ -50,6 +50,24 @@ function normalizeTerminalRow(raw: any): TerminalRow {
   };
 }
 
+// Maps a handful of known raw Supabase/PostgREST/GoTrue error strings to
+// something a driver can actually act on -- these bubble straight into
+// termError/catalogError and render verbatim as a plain red banner in
+// MyTerminalsModal.tsx, so a raw string like "JWT issued at future" (a
+// GoTrue auth rejection caused by the device's own clock being set wrong,
+// not anything server-side) read as unintelligible internals instead of
+// an actionable message. Falls back to the original message for anything
+// unrecognized -- better an unfamiliar-but-real error surfaced than one
+// silently swallowed.
+function friendlyErrorMessage(raw: string | null | undefined, fallback: string): string {
+  const msg = String(raw ?? "").trim();
+  if (!msg) return fallback;
+  if (/issued at future|clock.?skew/i.test(msg)) {
+    return "Your device's clock looks wrong, which is blocking sign-in. Turn on automatic date & time in your phone's settings and try again.";
+  }
+  return msg;
+}
+
 function sortMyTerminals(rows: TerminalRow[]): TerminalRow[] {
   const rank = (s: TerminalRow["status"]) => s === "valid" ? 0 : s === "expired" ? 1 : 2;
   return [...rows].sort((a, b) => {
@@ -93,7 +111,7 @@ export function useTerminals(
         const { terminals: rows } = await getMyTerminals(effectiveUserId);
         setTerminals(sortMyTerminals((rows ?? []).map(normalizeTerminalRow)));
       } catch (e: any) {
-        setTermError(e?.message ?? "Failed to load terminals.");
+        setTermError(friendlyErrorMessage(e?.message, "Failed to load terminals."));
         setTerminals([]);
       }
     } else {
@@ -105,7 +123,7 @@ export function useTerminals(
         .order("city",          { ascending: true })
         .order("terminal_name", { ascending: true });
       if (error) {
-        setTermError(error.message);
+        setTermError(friendlyErrorMessage(error.message, "Failed to load terminals."));
         setTerminals([]);
       } else {
         setTerminals(sortMyTerminals((data ?? []).map(normalizeTerminalRow)));
@@ -127,7 +145,7 @@ export function useTerminals(
       .order("terminal_name", { ascending: true })
       .returns<TerminalCatalogRow[]>();
     if (error) {
-      setCatalogError(error.message);
+      setCatalogError(friendlyErrorMessage(error.message, "Failed to load terminal catalog."));
       setTerminalCatalog([]);
     } else {
       setTerminalCatalog((data ?? []).filter((t) => t.active !== false));
@@ -256,14 +274,14 @@ export function useTerminals(
           p_terminal_id: terminalId,
           p_carded_on:   cardedOnISO,
         });
-        if (rpcError) { setTermError(rpcError.message); return; }
+        if (rpcError) { setTermError(friendlyErrorMessage(rpcError.message, "Failed to get carded.")); return; }
       }
 
       await loadMyTerminals();
       await refreshTerminalAccessForUser();
       setSelectedTerminalId(String(terminalId));
     } catch (e: any) {
-      setTermError(e?.message ?? "Failed to get carded.");
+      setTermError(friendlyErrorMessage(e?.message, "Failed to get carded."));
     } finally {
       setCardingBusyId(null);
     }
@@ -283,7 +301,7 @@ export function useTerminals(
         if (currentlyStarred) await removeMyTerminal(effectiveUserId, terminalId);
         else                  await setMyTerminal(effectiveUserId, terminalId);
       } catch (e: any) {
-        setTermError(e?.message ?? "Failed to update terminal.");
+        setTermError(friendlyErrorMessage(e?.message, "Failed to update terminal."));
         await loadMyTerminals();
         return;
       }
@@ -291,11 +309,11 @@ export function useTerminals(
       if (currentlyStarred) {
         const { error } = await supabase.from("my_terminals").delete()
           .eq("user_id", effectiveUserId).eq("terminal_id", terminalId);
-        if (error) { setTermError(error.message); await loadMyTerminals(); return; }
+        if (error) { setTermError(friendlyErrorMessage(error.message, "Failed to update terminal.")); await loadMyTerminals(); return; }
       } else {
         const { error } = await supabase.from("my_terminals")
           .upsert({ user_id: effectiveUserId, terminal_id: terminalId, is_starred: true }, { onConflict: "user_id,terminal_id" });
-        if (error) { setTermError(error.message); }
+        if (error) { setTermError(friendlyErrorMessage(error.message, "Failed to update terminal.")); }
       }
     }
     await loadMyTerminals();

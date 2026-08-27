@@ -4567,6 +4567,35 @@ used, by both the live preview and `onLoadedFromLoadingModal`'s own
 `tsc --noEmit` and `next build` both clean. Not live-verified this pass
 (same reason as every authenticated-flow change this session).
 
+### My Terminals modal showed a raw "JWT issued at future" error (2026-08-27)
+
+User screenshot: `MyTerminalsModal.tsx`'s error banner showed the literal
+string "JWT issued at future" -- a raw GoTrue (Supabase Auth) rejection,
+not app copy. Root cause of the underlying error: the device's own clock
+being set ahead of real time, which makes every request's JWT look like
+it was "issued in the future" from the auth server's perspective and get
+rejected -- a device-side problem, not something this app's code can fix
+directly (told the user to enable automatic date & time on their phone).
+
+**But the app-side bug is real and worth fixing regardless**:
+`useTerminals.ts` sets `termError`/`catalogError` directly from
+`error.message`/`e?.message` at every Supabase call site, and
+`MyTerminalsModal.tsx` renders that string verbatim in a red banner --
+any raw Supabase/PostgREST/GoTrue error, not just this one, would leak
+straight to the screen. Added a `friendlyErrorMessage(raw, fallback)`
+helper (matches known patterns like `issued at future`/`clock skew` to a
+plain "your device's clock looks wrong..." message with an actual next
+step, falls back to the original message for anything unrecognized --
+better an unfamiliar-but-real error shown than one silently swallowed)
+and wired it into every `setTermError`/`setCatalogError` call in the
+file. Purely a display-layer fix -- doesn't change what triggers an
+error, only how it reads.
+
+Not live-verified this pass (no authenticated session available from
+this side, and this specific error only reproduces with a genuinely
+misconfigured device clock) -- `tsc --noEmit` and `next build` both
+clean.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.
