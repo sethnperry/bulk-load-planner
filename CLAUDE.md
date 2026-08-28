@@ -4925,6 +4925,44 @@ over the PREVIOUS terminal.
 Not live-verified this pass -- `tsc --noEmit` and `next build` both
 clean.
 
+**Follow-up same day: the fix above didn't actually fix it -- root cause
+was reading the wrong column, plus a second, separate dial-highlight
+bug.** User's next real test: standing on Preset C, tapped Recall Last
+Load -- compartments correctly switched to reflect the recalled load's
+products, but the caps were STILL wiped, and the dial stayed on C
+instead of moving to whichever preset the recalled load actually came
+from.
+
+**Caps, real root cause**: the first pass reconstructed `capOverride`
+from `load_lines.planned_gallons` -- but that column is written once at
+`begin_load` time, BEFORE any Plan Review Phase-1 gallons adjustment a
+driver might have made before tapping Complete. The true final figure
+lives in `actual_gallons`, written separately by `complete_load`. Reading
+`planned_gallons` could reconstruct the WRONG cap (or, whenever it
+happened to equal the natural uncapped allocation, no visible cap at
+all) -- which is exactly why the first fix looked like it did nothing.
+Fixed by selecting `actual_gallons` too and preferring it
+(`actual_gallons ?? planned_gallons`, falling back only for an older load
+from before `complete_load` started writing that column).
+
+**Dial highlight, a second, unrelated bug**: `page.tsx` already had a
+mechanism syncing the preset dial's highlighted letter to
+`loadReport.plan_slot` -- but it was guarded to fire only ONCE per
+session (`presetDialSyncedRef.current`) and only while
+`lastLoadedSlot == null`, i.e. only for the passive fresh-mount restore,
+before any preset had ever been tapped. Once the driver had already
+tapped Preset C earlier in the session, `lastLoadedSlot` was no longer
+null, so that guard silently blocked the sync forever afterward --
+including for the explicit "Recall Last Load" button, which is a
+distinct, deliberate action that should always re-sync the dial,
+independent of that one-time guard. Fixed directly in the button's own
+`onClick`: when `recallLastLoad()` returns a report with a real
+`plan_slot`, it now sets `lastLoadedSlot`/`activeSlotLetter`/
+`presetDialSyncTo` itself, rather than relying on the passive effect.
+
+Not live-verified this pass either -- `tsc --noEmit` and `next build`
+both clean.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.

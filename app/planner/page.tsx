@@ -1918,6 +1918,22 @@ const lastProductInfoById = useMemo(() => {
                     // only ever fires once, on first mount.
                     const report = await planSlots.recallLastLoad();
                     if (report) loadWorkflow.setLoadReport(report);
+                    // Also force the preset dial to reflect whichever
+                    // named preset the recalled load actually came from --
+                    // per explicit follow-up ("plan C stays highlighted").
+                    // The passive mount-time sync effect above only ever
+                    // fires once (lastLoadedSlot == null guard), so it
+                    // can't handle this: a driver who already tapped a
+                    // preset this session (lastLoadedSlot already set,
+                    // e.g. C) and THEN taps Recall Last Load needs the
+                    // dial to move again, deliberately overriding whatever
+                    // was previously active -- this is a second, distinct
+                    // user action, not the same one-time restore.
+                    if (report?.plan_slot) {
+                      setLastLoadedSlot(report.plan_slot);
+                      setActiveSlotLetter(report.plan_slot);
+                      setPresetDialSyncTo(report.plan_slot);
+                    }
                   }}
                   style={{
                     background: "none", border: "none", padding: 0, marginBottom: 6, cursor: "pointer",

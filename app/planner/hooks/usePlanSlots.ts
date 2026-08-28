@@ -397,7 +397,7 @@ export function usePlanSlots({
     // Step 2: get load_lines for that load, joined with products for un_number
     const { data: lineRows, error: lineErr } = await supabase
       .from("load_lines")
-      .select("comp_number, product_id, planned_gallons, products(un_number, product_name, display_name)")
+      .select("comp_number, product_id, planned_gallons, actual_gallons, products(un_number, product_name, display_name)")
       .eq("load_id", resolvedRow.load_id);
 
     if (lineErr || !lineRows) return null;
@@ -408,27 +408,32 @@ export function usePlanSlots({
       un_number: l.products?.un_number ? String(l.products.un_number) : null,
       product_name: l.products?.product_name ?? l.products?.display_name ?? null,
       planned_gallons: Number(l.planned_gallons ?? 0),
+      actual_gallons: l.actual_gallons != null ? Number(l.actual_gallons) : null,
     }));
 
     // capOverride reconstructed from what was ACTUALLY loaded into each
     // compartment -- capOverride itself is a planning-time-only concept
     // (never a stored column; it's baked into the allocation that produces
     // planned_gallons at begin_load time), so there's no literal "was this
-    // capped" field to read back. Pinning the recalled cap to the exact
-    // prior planned_gallons is what actually makes "recall last load"
-    // reproduce the same load again -- without it, this reconstruction
-    // silently dropped any cap the driver had set (confirmed live: caps
-    // reappeared instantly on reloading a named preset, which already
-    // saved capOverride correctly, but never showed up here since this
-    // was the one path that never restored it at all).
+    // capped" field to read back. Prefers actual_gallons (written at
+    // complete_load, the true final figure) over planned_gallons (written
+    // at begin_load, BEFORE any Plan Review Phase-1 gallons adjustment --
+    // confirmed live this was the actual bug in a first attempt at this
+    // fix: planned_gallons can differ from what was truly loaded, so
+    // pinning to it reconstructed the WRONG cap, which looked identical to
+    // "no cap restored at all" whenever it happened to equal the
+    // uncapped natural allocation). Falls back to planned_gallons only if
+    // actual_gallons is somehow null (an older load from before
+    // complete_load started writing it).
     const compPlan: Record<string, { empty: boolean; productId: string; capOverride?: number }> = {};
     for (const line of lines) {
       const n = String(line.comp_number ?? "");
       if (!n || !line.product_id) continue;
+      const loadedGallons = line.actual_gallons ?? line.planned_gallons;
       compPlan[n] = {
         empty: false,
         productId: line.product_id,
-        ...(line.planned_gallons > 0 ? { capOverride: Math.round(line.planned_gallons) } : {}),
+        ...(loadedGallons > 0 ? { capOverride: Math.round(loadedGallons) } : {}),
       };
     }
 
