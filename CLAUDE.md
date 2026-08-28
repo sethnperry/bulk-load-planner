@@ -4963,6 +4963,44 @@ independent of that one-time guard. Fixed directly in the button's own
 Not live-verified this pass either -- `tsc --noEmit` and `next build`
 both clean.
 
+**Follow-up same day: still wrong -- every compartment showed a cap,
+including ones that were never capped.** User's next report: recalled a
+load that used Plan B, which normally only caps compartments 1 and 2 --
+every compartment came back with a cap. Root cause, finally correctly
+diagnosed: reconstructing `capOverride` from `load_lines` gallons AT ALL
+was the wrong approach, not just which column it read from. A natural
+(uncapped) allocation and a real cap produce indistinguishable numbers
+after the fact -- there's no way to tell, from gallons alone, which
+compartments were genuinely capped and which just happened to fill to
+that amount.
+
+**The actual fix**, per the user's own framing ("the idea is to recall
+the last load exactly the way it was loaded using the same plan"):
+`load_log.plan_slot` already records which named preset (1-5) was active
+when the load began, and that preset -- since presets have saved full
+`capOverride` correctly since the 2026-08-27 fix -- IS the exact plan
+that was used. `fetchLastLoadFromLog()` now reads that preset directly
+(`readSlot(presetSlot)`, the same local-cache read `loadFromSlot`/
+`peekSlot` already use) when `plan_slot` points to one with real saved
+content, and uses ITS `compPlan` verbatim instead of reconstructing
+anything from `load_lines`. The `load_lines`-based reconstruction is kept
+as a fallback only for loads with no `plan_slot` at all, or whose preset
+has since been cleared/overwritten -- an approximation, same caveat as
+before, but only reached in that narrower case now. CG/target-actual-diff
+still come from `load_log` itself (the true values for that specific
+load), unaffected by this change -- only the product+cap portion switched
+sources.
+
+**Known limitation, not fixed**: this reads the preset from local cache,
+which could theoretically not be synced yet on a very fresh page load
+(before the server pull effect completes) -- in that narrow race, it
+would silently fall back to the approximate reconstruction. Not expected
+to matter in practice (mid-session use, after presets have already
+synced), flagged rather than built around.
+
+Not live-verified this pass -- `tsc --noEmit` and `next build` both
+clean.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.

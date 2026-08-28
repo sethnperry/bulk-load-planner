@@ -411,30 +411,45 @@ export function usePlanSlots({
       actual_gallons: l.actual_gallons != null ? Number(l.actual_gallons) : null,
     }));
 
-    // capOverride reconstructed from what was ACTUALLY loaded into each
-    // compartment -- capOverride itself is a planning-time-only concept
-    // (never a stored column; it's baked into the allocation that produces
-    // planned_gallons at begin_load time), so there's no literal "was this
-    // capped" field to read back. Prefers actual_gallons (written at
-    // complete_load, the true final figure) over planned_gallons (written
-    // at begin_load, BEFORE any Plan Review Phase-1 gallons adjustment --
-    // confirmed live this was the actual bug in a first attempt at this
-    // fix: planned_gallons can differ from what was truly loaded, so
-    // pinning to it reconstructed the WRONG cap, which looked identical to
-    // "no cap restored at all" whenever it happened to equal the
-    // uncapped natural allocation). Falls back to planned_gallons only if
-    // actual_gallons is somehow null (an older load from before
-    // complete_load started writing it).
-    const compPlan: Record<string, { empty: boolean; productId: string; capOverride?: number }> = {};
+    // Fallback compPlan reconstructed from load_lines, used only when the
+    // load has no named preset attached (or that preset's own saved
+    // content is gone). This is an APPROXIMATION, not the real plan --
+    // pinning capOverride to whatever gallons a compartment actually ended
+    // up with treats every compartment as capped, even ones that just
+    // naturally allocated to that number with no real cap set at all.
+    // Confirmed live: this is exactly what a second follow-up report
+    // caught -- "every compartment has a cap" when Plan B really only
+    // capped compartments 1 and 2. See below for the real fix.
+    const fallbackCompPlan: Record<string, { empty: boolean; productId: string; capOverride?: number }> = {};
     for (const line of lines) {
       const n = String(line.comp_number ?? "");
       if (!n || !line.product_id) continue;
       const loadedGallons = line.actual_gallons ?? line.planned_gallons;
-      compPlan[n] = {
+      fallbackCompPlan[n] = {
         empty: false,
         productId: line.product_id,
         ...(loadedGallons > 0 ? { capOverride: Math.round(loadedGallons) } : {}),
       };
+    }
+
+    // The REAL fix, per explicit follow-up ("the idea is to recall the
+    // last load... exactly the way it was loaded using the same plan"):
+    // load_log.plan_slot already records which named preset (1-5) was
+    // active when this load began, and that preset -- assuming it hasn't
+    // since been overwritten or cleared -- IS the exact plan that was
+    // used, caps included (presets have saved full capOverride since the
+    // 2026-08-27 fix). Reading it directly is exact, not an approximation
+    // -- reconstructing per-compartment guesses from load_lines gallons
+    // was always going to be wrong for any compartment that WASN'T
+    // capped, since a natural allocation and a real cap produce
+    // indistinguishable numbers after the fact.
+    const presetSlot = (resolvedRow as any).plan_slot;
+    let compPlan = fallbackCompPlan;
+    if (typeof presetSlot === "number" && presetSlot >= 1 && presetSlot <= 5) {
+      const presetSnap = readSlot(presetSlot) as PlanSnapshot | null;
+      if (presetSnap && presetSnap.v === 1 && snapshotHasContent(presetSnap)) {
+        compPlan = presetSnap.compPlan as any;
+      }
     }
 
     const plannedGross = resolvedRow.planned_gross_lbs != null ? Number(resolvedRow.planned_gross_lbs) : null;
