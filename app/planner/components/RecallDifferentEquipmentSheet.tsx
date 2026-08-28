@@ -52,7 +52,9 @@ export default function RecallDifferentEquipmentSheet({
           Different equipment
         </div>
         <div style={{ fontSize: 13, color: "rgba(255,255,255,0.45)", marginBottom: 14, lineHeight: 1.4 }}>
-          Your last load at this terminal used {truckLabel} / {trailerLabel}, not your current equipment. Switch to it to recall that load?
+          Your last load at this terminal used{" "}
+          <span style={{ color: "rgba(255,255,255,0.85)", fontWeight: 700 }}>{truckLabel} / {trailerLabel}</span>
+          , not your current equipment. Switch to it to recall that load?
         </div>
 
         {error && <div style={{ fontSize: 12, color: "#f87171", marginBottom: 10 }}>{error}</div>}
@@ -70,7 +72,7 @@ export default function RecallDifferentEquipmentSheet({
             opacity: busy ? 0.6 : 1,
           }}
         >
-          {busy ? "Switching…" : `Switch to ${truckLabel} & Recall`}
+          {busy ? "Switching…" : `Switch to ${truckLabel} / ${trailerLabel} & Recall`}
         </button>
         <button
           type="button"
