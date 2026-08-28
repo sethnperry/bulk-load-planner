@@ -5315,6 +5315,20 @@ picker, which is the whole reason it exists.
 Not live-verified this pass -- `tsc --noEmit` and `next build` both
 clean.
 
+**Follow-up same day: Out of Allocation now matches Out of Product
+exactly.** Per explicit direction ("it still goes back to the previous
+windows to log a load or update card without loading... match the same
+logic as the out of product process. Just report it and go back to the
+planner") -- this reverses the original 2026-08-27 design call that Out
+of Allocation should return to the normal 3-choice menu (reasoning: the
+driver might still want to log a partial load). That distinction is
+gone -- both report types now go straight to the `cardRenewal` question
+after a successful submit and end there, with no path back to Log the
+Load/Update Card for either one anymore.
+
+Not live-verified this pass -- `tsc --noEmit` and `next build` both
+clean.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.

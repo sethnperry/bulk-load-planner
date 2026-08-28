@@ -59,16 +59,23 @@
 // same as tapping that row from the main menu), "No, Requires a BOL"
 // reuses onBackToPlanner (cancels the load AND reverts the card) -- no
 // new page.tsx wiring needed for this, both behaviors already existed.
-// Out of Allocation is untouched (still returns to the normal 3-choice
-// menu) since a capped-but-partial load is a genuinely different
-// situation -- the driver likely did load something and may still want
-// to log it.
+// ~~Out of Allocation is untouched (still returns to the normal 3-choice
+// menu)...~~ -- reversed, see the next follow-up below.
 //
 // Follow-up same day: the product picker is skipped entirely when a load
 // only has one product -- nothing to actually choose between, so making
 // the driver tap it anyway is just friction (see selectReportType). A
 // multi-product load still always goes through the picker, which is the
 // whole reason it exists -- never assume every product was affected.
+//
+// Follow-up same day: Out of Allocation now matches Out of Product exactly
+// instead of returning to the normal 3-choice menu -- per explicit
+// direction ("it still goes back to the previous windows to log a load or
+// update card without loading... just report it and go back to the
+// planner"). The original "the driver might still want to log a partial
+// load" reasoning was real, but in practice that extra stop back at the
+// menu was just unwanted friction, not something actually used -- both
+// report types now go straight to the cardRenewal question and end there.
 
 import React, { useEffect, useMemo, useState } from "react";
 import { GRAPHITE, GRAPHITE_DARKER, themeFill, themeTextOnFill } from "../theme";
@@ -177,21 +184,16 @@ export default function CancelLoadSheet({
       setSubmitError(error);
       return;
     }
-    if (type === "out_of_product") {
-      // No product means no load -- that part's certain, so the load
-      // itself is always canceled from here on. What's NOT certain is
-      // whether the terminal card still renewed anyway (some terminals
-      // renew on check-in; others only renew once you present a BOL,
-      // which a driver who didn't load never gets) -- ask before deciding
-      // what happens to today's access date, instead of guessing.
-      setMode("cardRenewal");
-    } else {
-      // Out of Allocation: the driver may still have loaded a partial
-      // amount -- return to the normal choices so they can log it.
-      setMode("menu");
-      setReportType(null);
-      setSelectedProductIds(new Set());
-    }
+    // Either report type cancels the load from here on -- per explicit
+    // follow-up, Out of Allocation now matches Out of Product exactly
+    // instead of returning to the normal 3-choice menu (the original call
+    // was that a partial load might still be worth logging, but in
+    // practice that just meant an extra, unwanted stop back at the
+    // previous screen). What's still genuinely unknown either way is
+    // whether the terminal card renewed anyway (some terminals renew on
+    // check-in; others only renew once a BOL is presented) -- ask before
+    // deciding what happens to today's access date, instead of guessing.
+    setMode("cardRenewal");
   }
 
   function submitReport() {
