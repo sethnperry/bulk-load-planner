@@ -343,11 +343,11 @@ export default function CalculatorPage() {
   const presetDialSyncedRef = useRef(false);
   // "Recall Last Load" found a completed load at this terminal, but under
   // different equipment than what's currently selected -- per explicit
-  // follow-up. See handleRecallLastLoad/handleSwitchAndRecallEquipment
-  // below.
-  const [altEquipmentPrompt, setAltEquipmentPrompt] = useState<{ comboId: string; truckLabel: string; trailerLabel: string } | null>(null);
-  const [altEquipmentBusy, setAltEquipmentBusy] = useState(false);
-  const [altEquipmentError, setAltEquipmentError] = useState<string | null>(null);
+  // follow-up. See handleRecallLastLoad/handleViewAltLoadInReports below.
+  // Purely informational (links to the load's read-only report view) --
+  // never claims/switches equipment, see handleViewAltLoadInReports' own
+  // comment for why.
+  const [altEquipmentPrompt, setAltEquipmentPrompt] = useState<{ loadId: string; truckLabel: string; trailerLabel: string } | null>(null);
 
   // ── Feature hooks ──────────────────────────────────────────────────────────
   // equipment/location/terminals come from the shared shell context (see above).
@@ -1263,53 +1263,30 @@ export default function CalculatorPage() {
   // "Recall Last Load" -- tries the current equipment first (the common
   // case); if this terminal has no completed load under it, checks
   // whether the driver's own last load HERE used different equipment
-  // before giving up silently, per explicit follow-up ("what happens if
-  // that load was loaded using different equipment? we could show a
-  // warning with an option to proceed and switch the equipment or cancel
-  // and back out").
+  // before giving up silently, per explicit follow-up. Never claims/
+  // switches equipment -- see RecallDifferentEquipmentSheet.tsx's own
+  // comment for why (someone else could genuinely be running it).
   const handleRecallLastLoad = useCallback(async () => {
     const report = await planSlots.recallLastLoad();
     if (report) { applyRecalledReport(report); return; }
     if (!location.selectedTerminalId) return;
     const match = await planSlots.findLastLoadAtTerminalDifferentEquipment(String(location.selectedTerminalId));
-    if (match) { setAltEquipmentError(null); setAltEquipmentPrompt(match); }
+    if (match) setAltEquipmentPrompt(match);
   }, [planSlots, applyRecalledReport, location.selectedTerminalId]);
 
-  // Claims the OTHER combo directly -- same claim_combo RPC
-  // EquipmentModal.tsx's own handleClaim already uses for claiming an
-  // existing combo, reused rather than reimplemented -- then recalls
-  // against it. Passes { comboId } explicitly to recallLastLoad instead
-  // of waiting for a re-render with the new selectedComboId (see that
-  // function's own comment for why).
-  const handleSwitchAndRecallEquipment = useCallback(async () => {
+  // Deliberately does NOT claim/switch equipment -- per explicit follow-up,
+  // someone else could genuinely be running that truck/trailer right now,
+  // and force-claiming it out from under them just to satisfy a "let me
+  // peek at my last load" convenience is a real, disruptive side effect
+  // (an earlier version of this did claim it directly; reversed). Instead
+  // links to the load's own read-only report view -- Reports already
+  // knows how to show a single load's detail without touching any
+  // equipment-claim state at all.
+  const handleViewAltLoadInReports = useCallback(() => {
     if (!altEquipmentPrompt) return;
-    setAltEquipmentBusy(true);
-    setAltEquipmentError(null);
-    try {
-      const { error } = await supabase.rpc("claim_combo", { p_combo_id: altEquipmentPrompt.comboId });
-      if (error) throw error;
-      equipment.setSelectedComboId(altEquipmentPrompt.comboId);
-      await equipment.fetchCombos();
-      const report = await planSlots.recallLastLoad({ comboId: altEquipmentPrompt.comboId });
-      applyRecalledReport(report);
-      setAltEquipmentPrompt(null);
-    } catch (e: any) {
-      // findLastLoadAtTerminalDifferentEquipment already filters out
-      // combos that were inactive at lookup time, but a raw "Combo not
-      // found or not active" (plus a bare UUID) can still surface here in
-      // a genuine race -- decoupled by someone else between the lookup and
-      // this claim attempt. Give an actionable message instead of the raw
-      // RPC error either way.
-      const msg = String(e?.message ?? "");
-      setAltEquipmentError(
-        /not found or not active/i.test(msg)
-          ? "That equipment isn't available anymore -- it may have been reassigned since that load."
-          : (msg || "Failed to switch equipment.")
-      );
-    } finally {
-      setAltEquipmentBusy(false);
-    }
-  }, [altEquipmentPrompt, equipment, planSlots, applyRecalledReport]);
+    router.push(`/planner/reports?loadId=${encodeURIComponent(altEquipmentPrompt.loadId)}`);
+    setAltEquipmentPrompt(null);
+  }, [altEquipmentPrompt, router]);
 
   // Seed the Target/Actual/Diff summary from the last *completed* load for
   // this combo as soon as it's available (mount, or switching equipment) --
@@ -2107,10 +2084,8 @@ const lastProductInfoById = useMemo(() => {
         open={!!altEquipmentPrompt}
         truckLabel={altEquipmentPrompt?.truckLabel ?? ""}
         trailerLabel={altEquipmentPrompt?.trailerLabel ?? ""}
-        busy={altEquipmentBusy}
-        error={altEquipmentError}
-        onConfirm={handleSwitchAndRecallEquipment}
-        onCancel={() => { if (!altEquipmentBusy) setAltEquipmentPrompt(null); }}
+        onViewInReports={handleViewAltLoadInReports}
+        onCancel={() => setAltEquipmentPrompt(null)}
         darkMode={shell.theme.darkMode}
         accentColor={shell.theme.accentColor}
       />

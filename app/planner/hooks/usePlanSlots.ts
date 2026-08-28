@@ -38,22 +38,6 @@ function compareSavedAt(a: any, b: any): number {
   return at - bt;
 }
 
-// Module-level, pure -- the actual local-storage key format for a plan
-// slot, matching planScopeKey/planStoreKey's own composition below
-// exactly. Pulled out to module scope (rather than left inline only in
-// the memoized planStoreKey useCallback) because fetchLastLoadFromLog's
-// optional comboId override needs to build this SAME key for a combo that
-// isn't yet reflected in this hook's own props (the component hasn't
-// re-rendered with the new selection yet) -- one formula, used both ways,
-// instead of two copies that could drift.
-function buildPlanStoreKey(who: string, comboId: string, slot: number): string {
-  const combo = comboId ? `c:${comboId}` : "c:none";
-  return `proTankr:${who}:${combo}:${slot === 0 ? "plan" : "preset"}:slot:${slot}`;
-}
-function buildLegacyPresetKey(who: string, slot: number): string {
-  return `proTankr:${who}:preset:slot:${slot}`;
-}
-
 // ─── Hook ─────────────────────────────────────────────────────────────────────
 
 // Sentinel scope used for every plan slot (0 through 5) so they're stored
@@ -390,18 +374,8 @@ export function usePlanSlots({
   // residue refresh) both call this with no terminalId, unchanged --
   // those exist to answer "what's in this equipment right now," which is
   // legitimately terminal-independent.
-  //
-  // opts.comboId overrides selectedComboId -- used only by recallLastLoad
-  // right after switching to a DIFFERENT equipment combo found via
-  // findLastLoadAtTerminalDifferentEquipment below. Needed because the
-  // component won't have re-rendered with the new selectedComboId yet at
-  // the moment the caller wants to run this -- passing it explicitly
-  // avoids waiting on that render (and the preset lookup below reads its
-  // own local-storage key directly with this same override, rather than
-  // through the closured, current-combo-only readSlot/planStoreKey).
-  async function fetchLastLoadFromLog(opts?: { terminalId?: string; comboId?: string }): Promise<any | null> {
-    const effectiveComboId = opts?.comboId ?? selectedComboId;
-    if (!effectiveComboId) return null;
+  async function fetchLastLoadFromLog(opts?: { terminalId?: string }): Promise<any | null> {
+    if (!selectedComboId) return null;
 
     // Only a genuinely finalized ("loaded") row counts -- an abandoned
     // "planned" row (LOAD tapped but never confirmed LOADED) must never be
@@ -410,7 +384,7 @@ export function usePlanSlots({
     let query = supabase
       .from("load_log")
       .select("load_id, status, started_at, completed_at, terminal_id, planned_total_gal, planned_gross_lbs, diff_lbs, plan_slot, cg_bias")
-      .eq("combo_id", effectiveComboId)
+      .eq("combo_id", selectedComboId)
       .eq("status", "loaded");
     if (opts?.terminalId) query = query.eq("terminal_id", opts.terminalId);
     const { data: comboRows, error: comboErr } = await query
@@ -472,17 +446,7 @@ export function usePlanSlots({
     const presetSlot = (resolvedRow as any).plan_slot;
     let compPlan = fallbackCompPlan;
     if (typeof presetSlot === "number" && presetSlot >= 1 && presetSlot <= 5) {
-      // Reads the preset's local-cache key directly via buildPlanStoreKey
-      // with effectiveComboId, rather than going through readSlot/
-      // planStoreKey (which are memoized against the CURRENT
-      // selectedComboId only, via closure) -- when opts.comboId is an
-      // override for a not-yet-selected combo, those would read the wrong
-      // (or no) preset.
-      const who = authUserId ? `u:${authUserId}` : "anon";
-      const presetSnap = (
-        safeRead(buildPlanStoreKey(who, effectiveComboId, presetSlot)) ??
-        safeRead(buildLegacyPresetKey(who, presetSlot))
-      ) as PlanSnapshot | null;
+      const presetSnap = readSlot(presetSlot) as PlanSnapshot | null;
       if (presetSnap && presetSnap.v === 1 && snapshotHasContent(presetSnap)) {
         compPlan = presetSnap.compPlan as any;
       }
@@ -553,14 +517,23 @@ export function usePlanSlots({
   // history (authUserId, which is effectiveUserId as passed into this
   // hook -- impersonation-safe), not any combo in the company; a "recall"
   // feature staying personal to the driver using it.
+  //
+  // PURELY INFORMATIONAL -- returns the load_id so the caller can link to
+  // its read-only report view, nothing more. An earlier version of this
+  // offered to directly CLAIM the other combo and switch to it -- reversed
+  // per explicit follow-up: someone else could genuinely be running that
+  // equipment right now, and claiming/decoupling it out from under them
+  // just to satisfy a "let me peek at my last load" convenience is a real,
+  // disruptive side effect, not something this feature should ever risk.
+  // Nothing here claims equipment or changes state -- it's a pure read.
   async function findLastLoadAtTerminalDifferentEquipment(
     terminalId: string
-  ): Promise<{ comboId: string; truckLabel: string; trailerLabel: string } | null> {
+  ): Promise<{ loadId: string; truckLabel: string; trailerLabel: string } | null> {
     if (!terminalId || !authUserId) return null;
 
     const { data: rows, error } = await supabase
       .from("load_log")
-      .select("combo_id")
+      .select("load_id, combo_id")
       .eq("user_id", authUserId)
       .eq("terminal_id", terminalId)
       .eq("status", "loaded")
@@ -568,28 +541,18 @@ export function usePlanSlots({
       .limit(1);
     if (error || !rows?.length) return null;
 
+    const loadId = rows[0].load_id ? String(rows[0].load_id) : "";
     const comboId = rows[0].combo_id ? String(rows[0].combo_id) : "";
     // Same equipment as what's already selected -- nothing "different" to
     // report; the normal recall already covers this case.
-    if (!comboId || comboId === selectedComboId) return null;
+    if (!loadId || !comboId || comboId === selectedComboId) return null;
 
     const { data: comboRow } = await supabase
       .from("equipment_combos")
-      .select("truck_id, trailer_id, active")
+      .select("truck_id, trailer_id")
       .eq("combo_id", comboId)
       .maybeSingle();
     if (!comboRow) return null;
-    // The specific combo that load used may have since been decoupled
-    // (e.g. the trailer was swapped) -- confirmed live: claim_combo
-    // correctly rejects a since-inactive combo ("Combo not found or not
-    // active"), which surfaced as a raw RPC error in the warning sheet.
-    // Nothing useful to offer at that point (there's no still-existing
-    // pairing to switch to for that specific old combo_id) -- treat it
-    // the same as "nothing found" rather than showing a switch button
-    // that's guaranteed to fail. Deliberately doesn't search further back
-    // in history for an older, still-active combo -- out of scope for
-    // this pass.
-    if ((comboRow as any).active !== true) return null;
 
     const [truckRes, trailerRes] = await Promise.all([
       (comboRow as any).truck_id
@@ -601,7 +564,7 @@ export function usePlanSlots({
     ]);
 
     return {
-      comboId,
+      loadId,
       truckLabel: (truckRes.data as any)?.truck_name ?? "Truck",
       trailerLabel: (trailerRes.data as any)?.trailer_name ?? "Trailer",
     };
@@ -973,24 +936,12 @@ export function usePlanSlots({
   // this returns null (same silent no-op the caller already handles for
   // "no completed load at all") rather than falling back to some other
   // terminal's load.
-  //
-  // opts.comboId -- see findLastLoadAtTerminalDifferentEquipment above.
-  // page.tsx passes this explicitly right after claiming a DIFFERENT
-  // combo than what was previously selected, since the component won't
-  // have re-rendered with the new selectedComboId (and this hook won't
-  // have been reconstructed with it) at the moment it needs to run --
-  // every local-storage key this function touches is built with
-  // buildPlanStoreKey against effectiveComboId instead of going through
-  // the memoized planStoreKey (which would still read/write the OLD
-  // combo's keys until that re-render happens).
-  const recallLastLoad = useCallback(async (opts?: { comboId?: string }) => {
-    const effectiveComboId = opts?.comboId ?? selectedComboId;
-    const dbPayload = await fetchLastLoadFromLog({ terminalId: selectedTerminalId || undefined, comboId: opts?.comboId });
+  const recallLastLoad = useCallback(async () => {
+    const dbPayload = await fetchLastLoadFromLog({ terminalId: selectedTerminalId || undefined });
     if (!dbPayload) return null;
-    const who = authUserId ? `u:${authUserId}` : "anon";
-    safeWrite(buildPlanStoreKey(who, effectiveComboId, 0), dbPayload);
-    if (effectiveComboId) {
-      const llKey = `proTankr:${who}:combo:${effectiveComboId}:lastLoadLines`;
+    safeWrite(planStoreKey(0), dbPayload);
+    if (selectedComboId) {
+      const llKey = `proTankr:${authUserId ? "u:" + authUserId : "anon"}:combo:${selectedComboId}:lastLoadLines`;
       safeWrite(llKey, { lastLoadLines: dbPayload.lastLoadLines, lastLoadId: dbPayload.lastLoadId });
       setLastLoadLines(dbPayload.lastLoadLines ?? []);
     }
@@ -1008,7 +959,7 @@ export function usePlanSlots({
     // loadWorkflow directly.
     return report;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedComboId, selectedTerminalId, authUserId, safeWrite, applySnapshot, refreshSlotHas]);
+  }, [selectedComboId, selectedTerminalId, authUserId, planStoreKey, safeWrite, applySnapshot, refreshSlotHas]);
 
   return {
     PLAN_SLOTS,

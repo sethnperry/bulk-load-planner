@@ -5,29 +5,33 @@
 // selected terminal, but under DIFFERENT equipment than what's currently
 // selected -- per explicit follow-up: "if I switch to a different
 // terminal, I want to recall the last load at that terminal. What
-// happens if that load was loaded using different equipment? we could
-// show a warning with an option to proceed and switch the equipment or
-// cancel and back out."
+// happens if that load was loaded using different equipment?"
 //
-// "Switch" claims the other combo directly (same claim_combo RPC
-// EquipmentModal.tsx's own handleClaim already uses -- reused, not
-// reimplemented) and then re-runs the recall against it -- see page.tsx's
-// handler and usePlanSlots.ts's findLastLoadAtTerminalDifferentEquipment/
-// recallLastLoad(opts.comboId) for the rest of the flow.
+// Deliberately does NOT offer to claim/switch to that equipment -- an
+// earlier version did (via the same claim_combo RPC EquipmentModal.tsx's
+// own handleClaim uses), reversed per explicit follow-up: someone else
+// could genuinely be running that truck/trailer right now, and
+// claiming/decoupling it out from under them just to satisfy a "let me
+// peek at my last load" convenience is a real, disruptive side effect --
+// "switching or decoupling and recoupling or really anything we do to
+// present the previous load at this terminal would be problematic."
+// Instead, links to the load's own read-only report view -- see
+// page.tsx's handleViewAltLoadInReports (navigates to
+// /planner/reports?loadId=...) and usePlanSlots.ts's
+// findLastLoadAtTerminalDifferentEquipment (a pure read, no equipment
+// state touched at all).
 
 import React from "react";
 import { GRAPHITE, GRAPHITE_DARKER, themeFill, themeTextOnFill } from "../theme";
 import { CARD_BORDER, CARD_SHADOW } from "../cards/cardTheme";
 
 export default function RecallDifferentEquipmentSheet({
-  open, truckLabel, trailerLabel, busy, error, onConfirm, onCancel, darkMode, accentColor,
+  open, truckLabel, trailerLabel, onViewInReports, onCancel, darkMode, accentColor,
 }: {
   open: boolean;
   truckLabel: string;
   trailerLabel: string;
-  busy: boolean;
-  error: string | null;
-  onConfirm: () => void;
+  onViewInReports: () => void;
   onCancel: () => void;
   darkMode: boolean;
   accentColor: string | null;
@@ -36,7 +40,7 @@ export default function RecallDifferentEquipmentSheet({
 
   return (
     <div
-      onClick={busy ? undefined : onCancel}
+      onClick={onCancel}
       style={{ position: "fixed", inset: 0, zIndex: 10500, background: "rgba(0,0,0,0.72)", display: "flex", alignItems: "flex-end", justifyContent: "center" }}
     >
       <div
@@ -54,34 +58,28 @@ export default function RecallDifferentEquipmentSheet({
         <div style={{ fontSize: 13, color: "rgba(255,255,255,0.45)", marginBottom: 14, lineHeight: 1.4 }}>
           Your last load at this terminal used{" "}
           <span style={{ color: "rgba(255,255,255,0.85)", fontWeight: 700 }}>{truckLabel} / {trailerLabel}</span>
-          , not your current equipment. Switch to it to recall that load?
+          , not your current equipment. Someone else may be using it now, so it can't be recalled into the planner here -- view the load details in Reports instead.
         </div>
-
-        {error && <div style={{ fontSize: 12, color: "#f87171", marginBottom: 10 }}>{error}</div>}
 
         <button
           type="button"
-          onClick={onConfirm}
-          disabled={busy}
+          onClick={onViewInReports}
           style={{
             width: "100%", padding: "14px 16px", borderRadius: 10, marginBottom: 8,
             border: CARD_BORDER, boxShadow: CARD_SHADOW,
             background: themeFill(darkMode, accentColor, "#fff"),
             color: themeTextOnFill(darkMode),
             fontSize: 15, fontWeight: 700, cursor: "pointer",
-            opacity: busy ? 0.6 : 1,
           }}
         >
-          {busy ? "Switching…" : `Switch to ${truckLabel} / ${trailerLabel} & Recall`}
+          View This Load in Reports
         </button>
         <button
           type="button"
           onClick={onCancel}
-          disabled={busy}
           style={{
             width: "100%", padding: "14px 16px", borderRadius: 10, border: "none",
             background: "transparent", color: "rgba(255,255,255,0.45)", fontSize: 14, fontWeight: 700, cursor: "pointer",
-            opacity: busy ? 0.6 : 1,
           }}
         >
           Cancel

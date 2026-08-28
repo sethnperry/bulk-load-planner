@@ -432,6 +432,13 @@ type Props = {
   // sense, so those actions just don't render there.
   onDeleteLoad?: (loadId: string) => Promise<void>;
   onRestoreLoad?: (row: LoadHistoryRow) => void;
+  // Deep-link target -- e.g. the Planner's "Recall Last Load" warning
+  // sheet, for a load whose equipment can't safely be switched to (see
+  // RecallDifferentEquipmentSheet.tsx). When set, this modal forces the
+  // date range to "All" (the target load could be arbitrarily old) and
+  // auto-expands it once its row is available, instead of the normal
+  // reset-to-collapsed/7-day-range open behavior.
+  initialExpandLoadId?: string | null;
 };
 
 export default function MyLoadsModal({
@@ -442,6 +449,7 @@ export default function MyLoadsModal({
   terminalCatalog, combos,
   headerOverride,
   onDeleteLoad, onRestoreLoad,
+  initialExpandLoadId,
 }: Props) {
   const [search, setSearch] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -451,17 +459,43 @@ export default function MyLoadsModal({
   const [confirmMode, setConfirmMode] = useState<"delete" | "restore" | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
+  const autoExpandedRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (open) {
       setSearch("");
-      setExpandedId(null);
-      setSelectedId(null);
       setConfirmMode(null);
-      onFetchRange(activeDays);
+      if (initialExpandLoadId) {
+        // The target load could be arbitrarily old -- the normal default
+        // 7-day range would silently exclude it. expandedId/selectedId are
+        // set once its row actually resolves, see the effect below.
+        autoExpandedRef.current = null;
+        setActiveDays(null);
+        onFetchRange(null);
+      } else {
+        setExpandedId(null);
+        setSelectedId(null);
+        onFetchRange(activeDays);
+      }
       setTimeout(() => searchRef.current?.focus(), 180);
     }
   }, [open]);
+
+  // Fires once `rows` actually contains the deep-linked load (after the
+  // forced all-time fetch above resolves) -- deferred to here, rather than
+  // firing blind on open, so it can pass the row's own planned_snapshot/
+  // product_temp_f into onFetchLines, same enrichment a normal manual tap
+  // gets (see handleToggle below).
+  useEffect(() => {
+    if (!open || !initialExpandLoadId) return;
+    if (autoExpandedRef.current === initialExpandLoadId) return;
+    const row = rows.find((r) => r.load_id === initialExpandLoadId);
+    if (!row) return;
+    autoExpandedRef.current = initialExpandLoadId;
+    setExpandedId(initialExpandLoadId);
+    setSelectedId(initialExpandLoadId);
+    onFetchLines(initialExpandLoadId, row.planned_snapshot, row.product_temp_f);
+  }, [open, initialExpandLoadId, rows, onFetchLines]);
 
   function handleRangeChange(days: number | null) {
     setActiveDays(days);

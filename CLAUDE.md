@@ -5210,6 +5210,54 @@ Live-verified the original bug via the user's own screenshot; the fix
 itself not re-verified live this pass -- `tsc --noEmit` and `next build`
 both clean.
 
+### Different-equipment recall reversed: never claims equipment, links to Reports instead (2026-08-28)
+
+User caught a real correctness/safety problem with the whole design one
+step before it would have shipped for real: "someone else could be
+running that equipment now. so switching or decoupling and recoupling or
+really anything we do to present the previous load at this terminal
+would be problematic." The active-combo check from the immediately-
+preceding fix only guarded against a STALE/decoupled combo -- an ACTIVE
+combo currently claimed by a different driver would have sailed straight
+through `claim_combo`, genuinely yanking that equipment away from
+whoever's actually driving it right now, all to satisfy a "let me peek
+at my last load" convenience. Confirmed: this was a real, disruptive side
+effect risk, not a hypothetical -- reversed entirely rather than patched.
+
+**Removed**: all equipment-claiming from this flow.
+`findLastLoadAtTerminalDifferentEquipment` is now a pure read -- no
+`active` check needed either (that was only ever load-bearing for the
+claim path), returns `loadId` instead of `comboId`.
+`recallLastLoad`/`fetchLastLoadFromLog`'s `comboId` override parameter
+(added specifically to let the claim-then-recall race avoid waiting for
+a re-render) is gone along with the module-level `buildPlanStoreKey`/
+`buildLegacyPresetKey` helpers it needed -- both fully reverted back to
+their pre-this-feature form now that nothing calls them with an
+override. `page.tsx`'s `handleSwitchAndRecallEquipment` (the
+`claim_combo` RPC call) is deleted outright, along with the
+`altEquipmentBusy`/`altEquipmentError` state it needed.
+
+**Replaced with**: `RecallDifferentEquipmentSheet.tsx` is now a plain
+informational sheet -- "View This Load in Reports" (navigates to
+`/planner/reports?loadId=...`) or Cancel, nothing else. Reports
+(`app/planner/reports/page.tsx`) reads that query param -- directly via
+`window.location.search`, not `next/navigation`'s `useSearchParams`
+(this repo's own `app/demo/ended/page.tsx` already documents a real
+client/server hydration mismatch from that hook's Suspense-based
+resolution; no reason to reintroduce it here) -- auto-opens `MyLoadsModal`,
+and strips the param via `history.replaceState` once consumed so a later
+reload of the same URL doesn't keep re-triggering it.
+
+`MyLoadsModal.tsx` gained `initialExpandLoadId` -- forces the date range
+to "All" (the target load could be arbitrarily old, the default 7-day
+range would silently exclude it) and auto-expands the load once its row
+actually resolves from that fetch, passing its own `planned_snapshot`/
+`product_temp_f` into `onFetchLines` the same way a normal manual tap
+already does, rather than firing blind before the row exists.
+
+Not live-verified this pass -- `tsc --noEmit` and `next build` both
+clean.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.

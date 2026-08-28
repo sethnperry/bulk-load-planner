@@ -196,6 +196,27 @@ export default function ReportsPage() {
   }, [viewedUserId]);
 
   const [myLoadsOpen, setMyLoadsOpen] = useState(false);
+  // Deep-link target from the Planner's "View This Load in Reports" link
+  // (RecallDifferentEquipmentSheet.tsx, via ?loadId=... -- see
+  // CLAUDE.md "different-equipment recall"). Reads the query string
+  // directly rather than next/navigation's useSearchParams -- this repo's
+  // own app/demo/ended/page.tsx already hit a real client/server hydration
+  // mismatch from that hook's Suspense-based resolution, and this page has
+  // no SSR value worth reconciling for it either. Strips the param via
+  // history.replaceState once consumed, so a later reload of this same
+  // URL doesn't keep re-opening the modal.
+  const [deepLinkLoadId, setDeepLinkLoadId] = useState<string | null>(null);
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const id = params.get("loadId");
+      if (id) {
+        setDeepLinkLoadId(id);
+        setMyLoadsOpen(true);
+        window.history.replaceState(null, "", window.location.pathname);
+      }
+    } catch {}
+  }, []);
   const [scaleHistoryOpen, setScaleHistoryOpen] = useState(false);
   const [serviceHistoryOpen, setServiceHistoryOpen] = useState(false);
   const [washHistoryOpen, setWashHistoryOpen] = useState(false);
@@ -430,6 +451,7 @@ export default function ReportsPage() {
         // showing someone else's history.
         onDeleteLoad={isViewingOther ? undefined : loadHistory.deleteLoad}
         headerOverride={isViewingOther ? `${viewedUserName || "Driver"}'s Loads` : undefined}
+        initialExpandLoadId={deepLinkLoadId}
       />
 
       {hasEquipment && companyId && (
