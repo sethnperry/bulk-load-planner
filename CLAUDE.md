@@ -5001,6 +5001,25 @@ synced), flagged rather than built around.
 Not live-verified this pass -- `tsc --noEmit` and `next build` both
 clean.
 
+**Follow-up same day: recovered points missing from the recalled load's
+running-average card.** With caps/dial both confirmed fixed, one last
+gap: the Planner's "This Load" points figure (bottom-left of the
+incentive running-average card) was blank after a recall.
+`fetchLastLoadFromLog()`'s `loadReport` object never included
+`recovered_points` at all -- not a bug in the caps/dial sense, just a
+field that was never populated for any of this function's three callers,
+since `calculate_load_points` only ever runs live at real completion time
+(`useLoadWorkflow.ts`) and there's no column on `load_log` itself holding
+the result. Fixed by summing `load_points.recovered_points` for the
+load's `load_id` (one row per compartment/product on a split load, same
+"sum per load" pattern `PayrollReportModal.tsx` and the running-average
+card itself already use) -- zero rows (incentives were off, or no
+benchmark matched) stays `null`, not `0`, so a genuine "earned zero
+points" load isn't confused with "never calculated."
+
+Not live-verified this pass -- `tsc --noEmit` and `next build` both
+clean.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.

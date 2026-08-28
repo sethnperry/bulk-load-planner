@@ -452,6 +452,23 @@ export function usePlanSlots({
       }
     }
 
+    // Incentive points for this specific load -- calculate_load_points
+    // only ever runs live, right after a real complete_load succeeds
+    // (useLoadWorkflow.ts), so there's no column on load_log itself to
+    // read this back from; it has to be summed from load_points (one row
+    // per compartment/product on a split load, same "sum per load" pattern
+    // PayrollReportModal.tsx and the Planner's own running-average card
+    // already use). Zero ROWS (never calculated -- company didn't have
+    // incentives on, or no benchmark matched) is null, not 0 -- a real
+    // "earned zero points" load still has real rows, just summing to 0.
+    const { data: pointsRows } = await supabase
+      .from("load_points")
+      .select("recovered_points")
+      .eq("load_id", resolvedRow.load_id);
+    const recoveredPoints = pointsRows && pointsRows.length > 0
+      ? pointsRows.reduce((sum: number, r: any) => sum + Number(r.recovered_points ?? 0), 0)
+      : null;
+
     const plannedGross = resolvedRow.planned_gross_lbs != null ? Number(resolvedRow.planned_gross_lbs) : null;
     const diff = resolvedRow.diff_lbs != null ? Number(resolvedRow.diff_lbs) : null;
     const loadReport = plannedGross != null && diff != null ? {
@@ -459,6 +476,7 @@ export function usePlanSlots({
       planned_gross_lbs: plannedGross,
       actual_gross_lbs: plannedGross + diff,
       diff_lbs: diff,
+      recovered_points: recoveredPoints,
       completed_at: (resolvedRow as any).completed_at ?? null,
       plan_slot: (resolvedRow as any).plan_slot ?? null,
     } : null;
