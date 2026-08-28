@@ -5020,6 +5020,43 @@ points" load isn't confused with "never calculated."
 Not live-verified this pass -- `tsc --noEmit` and `next build` both
 clean.
 
+**Follow-up same day: the dial-highlight fix from earlier in this same
+thread still didn't actually work.** User's next test: recalling a Plan
+B load while on Plan C correctly changed the compartments and now showed
+the right points -- but the dial itself stayed on C.
+
+**Real root cause, one level deeper than the earlier fix**:
+`page.tsx`'s `setActiveSlotLetter(report.plan_slot)` (added in that
+earlier pass) updates page.tsx's OWN bookkeeping state, but
+`PresetDial.tsx`'s visually-highlighted letter is a fully separate,
+internal `active` useState that page.tsx has no direct control over --
+the only channel INTO it is the one-shot `syncTo` prop. That prop was a
+bare `number`, gated by an `appliedSyncRef.current === syncTo` guard
+inside `PresetDial.tsx` meant to stop a redundant re-sync. This broke in
+two compounding ways for a SECOND sync request to the SAME slot number
+(e.g. recalling a load that used the same preset twice in one session,
+or recalling after the passive mount-time sync had already landed on
+that same slot once): (1) if `presetDialSyncTo` was already `2`, calling
+`setPresetDialSyncTo(2)` again is a no-op to React itself -- an
+unchanged primitive value never triggers a re-render for that state, so
+the `syncTo` PROP passed to `PresetDial` never even changes, and the
+child's `useEffect(..., [syncTo])` never re-runs at all; (2) even if it
+had re-run, the `appliedSyncRef` guard would have blocked it a second
+time regardless.
+
+**Fixed** by changing `syncTo` from `number | null` to `{ slot: number }
+| null`, with every setter constructing a **fresh object literal** on
+each call (`setPresetDialSyncTo({ slot: n })`) rather than reusing/
+reconstructing an equal value -- a new object reference is never `===` a
+previous one, so React always re-renders `PresetDial` with a genuinely
+different `syncTo` prop, and the effect's own `[syncTo]` dependency
+always sees it as new. This also makes the `appliedSyncRef` guard
+unnecessary (removed) -- there's nothing left to dedupe once every
+legitimate sync request already arrives as its own unique object.
+
+Not live-verified this pass -- `tsc --noEmit` and `next build` both
+clean.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.

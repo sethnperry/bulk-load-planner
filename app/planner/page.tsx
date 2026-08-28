@@ -338,7 +338,7 @@ export default function CalculatorPage() {
   // preset the restored plan came from). See the effect below and the
   // presetDialSyncedRef guard, which stops this from ever overriding a
   // preset the driver has since manually tapped.
-  const [presetDialSyncTo, setPresetDialSyncTo] = useState<number | null>(null);
+  const [presetDialSyncTo, setPresetDialSyncTo] = useState<{ slot: number } | null>(null);
   const presetDialSyncedRef = useRef(false);
 
   // ── Feature hooks ──────────────────────────────────────────────────────────
@@ -1249,7 +1249,7 @@ export default function CalculatorPage() {
       presetDialSyncedRef.current = true;
       setLastLoadedSlot(planSlots.lastLoadReport.plan_slot);
       setActiveSlotLetter(planSlots.lastLoadReport.plan_slot);
-      setPresetDialSyncTo(planSlots.lastLoadReport.plan_slot);
+      setPresetDialSyncTo({ slot: planSlots.lastLoadReport.plan_slot });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [planSlots.lastLoadReport]);
@@ -1932,7 +1932,12 @@ const lastProductInfoById = useMemo(() => {
                     if (report?.plan_slot) {
                       setLastLoadedSlot(report.plan_slot);
                       setActiveSlotLetter(report.plan_slot);
-                      setPresetDialSyncTo(report.plan_slot);
+                      // A fresh object every call -- see PresetDial.tsx's
+                      // own comment on syncTo for why this can't be a
+                      // bare number: recalling the same preset a second
+                      // time in one session needs to re-trigger the sync
+                      // even though the slot number repeats.
+                      setPresetDialSyncTo({ slot: report.plan_slot });
                     }
                   }}
                   style={{

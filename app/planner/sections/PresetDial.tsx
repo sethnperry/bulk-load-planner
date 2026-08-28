@@ -35,20 +35,31 @@ export default function PresetDial({
   onOpenActions: (n: number) => void;
   onSave: (n: number) => void;
   onActiveChange?: (n: number) => void;
-  // One-shot external sync -- jumps the dial to this slot once, distinct
-  // from normal tap/scroll (which manage `active` locally). Exists so the
-  // highlighted letter can be told "the plan that was just restored into
-  // the compartments actually came from preset B," e.g. right after a
-  // fresh app open restores the last completed load -- without this, the
-  // dial always defaulted to A regardless of which preset's plan had
-  // actually been loaded.
-  syncTo?: number | null;
+  // External sync -- jumps the dial to this slot, distinct from normal
+  // tap/scroll (which manage `active` locally). Exists so the highlighted
+  // letter can be told "the plan that was just restored into the
+  // compartments actually came from preset B" -- both a fresh app open
+  // restoring the last completed load, AND a later explicit "Recall Last
+  // Load" tap -- without this, the dial always defaulted to A (or stayed
+  // wherever it was) regardless of which preset's plan had actually been
+  // loaded.
+  //
+  // MUST be a fresh `{ slot }` object every time the caller wants a
+  // (re-)sync to apply -- a plain number here (an earlier version of this
+  // prop) meant a second sync request for the SAME slot as a previous one
+  // (e.g. recalling a load that used the same preset twice in one
+  // session) was silently swallowed twice over: React skips an effect
+  // whose dependency didn't change value, and this component's own
+  // "already applied this value" ref guard blocked it a second time even
+  // if the effect did run. A new object reference sidesteps both --
+  // useEffect's dependency check treats it as genuinely new regardless of
+  // what `slot` number it carries.
+  syncTo?: { slot: number } | null;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const suppressRef = useRef(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [active, setActive] = useState<number>(slots[0] ?? 1);
-  const appliedSyncRef = useRef<number | null>(null);
 
   // Long-press state -- component-level refs, not per-.map()-iteration
   // local variables. This used to be `let pressTimer`/`let didLongPress`
@@ -87,11 +98,9 @@ export default function PresetDial({
   useEffect(() => { centerSlot(active, false); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (syncTo == null) return;
-    if (appliedSyncRef.current === syncTo) return;
-    appliedSyncRef.current = syncTo;
-    setActive(syncTo);
-    centerSlot(syncTo, true);
+    if (!syncTo) return;
+    setActive(syncTo.slot);
+    centerSlot(syncTo.slot, true);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [syncTo]);
 
