@@ -5291,6 +5291,30 @@ plain white.
 Not live-verified this pass -- `tsc --noEmit` and `next build` both
 clean.
 
+**Follow-up same day: reverted the box redesign, kept a real checkmark
+in it.** Per explicit direction ("go back the way it was and just add a
+check in the black box... make the check more neon blue") -- the teal
+box/border rework above is fully reverted (18x18, `themeFill`-colored
+fill when checked, original white-ish border) -- only real change from
+the pre-teal version is a `#00c2ff` (neon blue) ✓ glyph rendered inside
+when checked, where there was previously no glyph at all.
+
+**Also shipped in the same pass: skip the picker entirely for a
+single-product load.** Per explicit ask -- if `productChoices.length
+=== 1`, there's nothing to actually choose between, so tapping Out of
+Product/Out of Allocation now submits directly for that one product
+instead of opening the picker. New `submitReportFor(type, productIds)`
+takes both explicit rather than reading `reportType`/`selectedProductIds`
+off state, since `selectReportType` needs to submit in the same tick it
+sets them (React state isn't synchronously readable that way). On a
+submit error, still lands on the picker (pre-selected, error shown) so
+there's a normal retry path even though the happy path never shows it.
+Multi-product loads are completely unaffected -- always go through the
+picker, which is the whole reason it exists.
+
+Not live-verified this pass -- `tsc --noEmit` and `next build` both
+clean.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.

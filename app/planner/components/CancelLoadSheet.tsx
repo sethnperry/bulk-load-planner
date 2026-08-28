@@ -63,6 +63,12 @@
 // menu) since a capped-but-partial load is a genuinely different
 // situation -- the driver likely did load something and may still want
 // to log it.
+//
+// Follow-up same day: the product picker is skipped entirely when a load
+// only has one product -- nothing to actually choose between, so making
+// the driver tap it anyway is just friction (see selectReportType). A
+// multi-product load still always goes through the picker, which is the
+// whole reason it exists -- never assume every product was affected.
 
 import React, { useEffect, useMemo, useState } from "react";
 import { GRAPHITE, GRAPHITE_DARKER, themeFill, themeTextOnFill } from "../theme";
@@ -150,14 +156,28 @@ export default function CancelLoadSheet({
     });
   }
 
-  async function submitReport() {
-    if (!reportType || selectedProductIds.size === 0) return;
+  // Takes type/productIds explicitly rather than reading reportType/
+  // selectedProductIds off state -- selectReportType below needs to call
+  // this in the SAME tick it sets those, and React state updates aren't
+  // synchronously readable that way (the closure would still see the
+  // pre-update values).
+  async function submitReportFor(type: OutageReportType, productIds: string[]) {
+    if (productIds.length === 0) return;
     setSubmitBusy(true);
     setSubmitError(null);
-    const { error } = await onSubmitOutageReport(reportType, Array.from(selectedProductIds));
+    const { error } = await onSubmitOutageReport(type, productIds);
     setSubmitBusy(false);
-    if (error) { setSubmitError(error); return; }
-    if (reportType === "out_of_product") {
+    if (error) {
+      // Land on the picker (pre-selected, error visible) so there's a
+      // normal retry path -- matters most for the single-product auto-
+      // submit skip below, which never shows the picker on the happy path.
+      setReportType(type);
+      setSelectedProductIds(new Set(productIds));
+      setMode("reportProducts");
+      setSubmitError(error);
+      return;
+    }
+    if (type === "out_of_product") {
       // No product means no load -- that part's certain, so the load
       // itself is always canceled from here on. What's NOT certain is
       // whether the terminal card still renewed anyway (some terminals
@@ -172,6 +192,29 @@ export default function CancelLoadSheet({
       setReportType(null);
       setSelectedProductIds(new Set());
     }
+  }
+
+  function submitReport() {
+    if (!reportType || selectedProductIds.size === 0) return;
+    submitReportFor(reportType, Array.from(selectedProductIds));
+  }
+
+  // Skips the product picker entirely when there's only one candidate --
+  // per explicit follow-up, nothing to actually choose between, so asking
+  // is just an extra tap. Multi-product loads still go through the picker
+  // as before (the whole reason it exists -- never assume every product
+  // was affected).
+  function selectReportType(type: OutageReportType) {
+    if (productChoices.length === 1) {
+      setReportType(type);
+      const onlyId = productChoices[0].productId;
+      setSelectedProductIds(new Set([onlyId]));
+      submitReportFor(type, [onlyId]);
+      return;
+    }
+    setReportType(type);
+    setSelectedProductIds(new Set());
+    setMode("reportProducts");
   }
 
   const primaryRowStyle: React.CSSProperties = {
@@ -220,18 +263,20 @@ export default function CancelLoadSheet({
               This posts a heads-up banner for other drivers heading to this terminal.
             </div>
             <button
-              type="button" style={secondaryRowStyle}
-              onClick={() => { setReportType("out_of_product"); setSelectedProductIds(new Set()); setMode("reportProducts"); }}
+              type="button" style={{ ...secondaryRowStyle, opacity: submitBusy ? 0.55 : 1 }}
+              disabled={submitBusy}
+              onClick={() => selectReportType("out_of_product")}
             >
-              Out of Product
+              {submitBusy && reportType === "out_of_product" ? "Submitting…" : "Out of Product"}
             </button>
             <button
-              type="button" style={secondaryRowStyle}
-              onClick={() => { setReportType("out_of_allocation"); setSelectedProductIds(new Set()); setMode("reportProducts"); }}
+              type="button" style={{ ...secondaryRowStyle, opacity: submitBusy ? 0.55 : 1 }}
+              disabled={submitBusy}
+              onClick={() => selectReportType("out_of_allocation")}
             >
-              Out of Allocation
+              {submitBusy && reportType === "out_of_allocation" ? "Submitting…" : "Out of Allocation"}
             </button>
-            <button type="button" style={cancelStyle} onClick={() => setMode("menu")}>Back</button>
+            <button type="button" style={cancelStyle} onClick={() => setMode("menu")} disabled={submitBusy}>Back</button>
           </>
         )}
 
@@ -264,21 +309,19 @@ export default function CancelLoadSheet({
                       style={{
                         display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
                         width: "100%", padding: "12px 14px", borderRadius: 10, cursor: "pointer",
-                        border: checked ? "1px solid rgba(45,212,191,0.55)" : CARD_BORDER,
+                        border: checked ? "1px solid rgba(255,255,255,0.35)" : CARD_BORDER,
                         background: CARD_BG, boxShadow: CARD_SHADOW,
                         color: "rgba(255,255,255,0.90)", fontSize: 14, fontWeight: 600, textAlign: "left" as const,
                       }}
                     >
                       <span>{p.name}</span>
                       <span style={{
-                        width: 22, height: 22, borderRadius: 5, flexShrink: 0,
+                        width: 18, height: 18, borderRadius: 4, flexShrink: 0,
                         display: "flex", alignItems: "center", justifyContent: "center",
-                        border: checked ? "1px solid #2dd4bf" : "1px solid rgba(255,255,255,0.35)",
-                        background: checked ? "#2dd4bf" : "transparent",
-                        color: "#0b2a26", fontSize: 14, fontWeight: 900, lineHeight: 1,
-                        transition: "background 120ms ease, border-color 120ms ease",
+                        border: "1px solid rgba(255,255,255,0.35)",
+                        background: checked ? themeFill(darkMode, accentColor, "#fff") : "transparent",
                       }}>
-                        {checked ? "✓" : ""}
+                        {checked && <span style={{ color: "#00c2ff", fontSize: 13, fontWeight: 900, lineHeight: 1 }}>✓</span>}
                       </span>
                     </button>
                   );
