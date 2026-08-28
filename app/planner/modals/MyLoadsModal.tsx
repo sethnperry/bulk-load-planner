@@ -458,6 +458,13 @@ export default function MyLoadsModal({
   const [copied, setCopied] = useState(false);
   const [confirmMode, setConfirmMode] = useState<"delete" | "restore" | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  // While set, the list shows ONLY this one load -- not just auto-expanded
+  // within the full history -- per explicit follow-up ("can the link
+  // filter to the specific load in my loads?"). Separate from
+  // initialExpandLoadId (the prop, fixed for the life of this deep-link
+  // open) so the driver can still escape back to their full history by
+  // typing in search, without page.tsx needing to know or care.
+  const [focusedLoadId, setFocusedLoadId] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const autoExpandedRef = useRef<string | null>(null);
 
@@ -470,11 +477,13 @@ export default function MyLoadsModal({
         // 7-day range would silently exclude it. expandedId/selectedId are
         // set once its row actually resolves, see the effect below.
         autoExpandedRef.current = null;
+        setFocusedLoadId(initialExpandLoadId);
         setActiveDays(null);
         onFetchRange(null);
       } else {
         setExpandedId(null);
         setSelectedId(null);
+        setFocusedLoadId(null);
         onFetchRange(activeDays);
       }
       setTimeout(() => searchRef.current?.focus(), 180);
@@ -551,6 +560,7 @@ export default function MyLoadsModal({
   }
 
   const filtered = useMemo(() => {
+    if (focusedLoadId) return rows.filter((r) => r.load_id === focusedLoadId);
     const q = search.trim().toLowerCase();
     if (!q) return rows;
     return rows.filter((r) =>
@@ -560,7 +570,7 @@ export default function MyLoadsModal({
       (r.state_code ?? "").toLowerCase().includes(q) ||
       (r.status ?? "").toLowerCase().includes(q)
     );
-  }, [rows, search]);
+  }, [rows, search, focusedLoadId]);
 
   if (!open || typeof document === "undefined") return null;
 
@@ -582,6 +592,22 @@ export default function MyLoadsModal({
           <button onClick={onClose} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.85)", fontSize: 22, fontWeight: 900, cursor: "pointer", lineHeight: 1, padding: "0 2px", flexShrink: 0 }}>×</button>
         </div>
 
+        {/* Focused-on-one-load banner -- deep-link mode (see focusedLoadId's
+            own comment). Explicit one-tap escape back to the full history,
+            in addition to the implicit "just start typing to search"
+            escape wired into the search input below. */}
+        {focusedLoadId && (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "0 18px 10px" }}>
+            <span style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", fontWeight: 600 }}>Showing this load only</span>
+            <button
+              onClick={() => setFocusedLoadId(null)}
+              style={{ background: "none", border: "none", color: "rgba(255,255,255,0.6)", fontSize: 12, fontWeight: 700, cursor: "pointer", padding: 0, textDecoration: "underline" }}
+            >
+              Show All Loads
+            </button>
+          </div>
+        )}
+
         {/* Search */}
         <div style={{ padding: "0 18px 10px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: "9px 14px" }}>
@@ -589,7 +615,7 @@ export default function MyLoadsModal({
             <input
               ref={searchRef}
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => { setSearch(e.target.value); if (focusedLoadId) setFocusedLoadId(null); }}
               placeholder="Search terminal, location, or equipment…"
               style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: "rgba(255,255,255,0.85)", fontSize: 15, fontWeight: 500 }}
             />

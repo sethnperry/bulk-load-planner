@@ -5258,6 +5258,23 @@ already does, rather than firing blind before the row exists.
 Not live-verified this pass -- `tsc --noEmit` and `next build` both
 clean.
 
+**Follow-up same day: the deep link now actually filters to that one
+load, not just expands it inside the full history.** Per explicit ask
+("can the link filter to the specific load in my loads?") --
+`initialExpandLoadId` previously only auto-expanded the target row while
+still showing every other load in the list around it. New `focusedLoadId`
+state in `MyLoadsModal.tsx`, seeded from `initialExpandLoadId` on open:
+the `filtered` list shows ONLY that one load while it's set. Two explicit
+escapes back to the full history -- typing anything into search clears
+it immediately, and a "Showing this load only / Show All Loads" banner
+above the search box gives a one-tap exit for a driver who wants to
+browse without typing. Kept as separate state from the `initialExpandLoadId`
+prop (fixed for the life of this deep-link open) specifically so exiting
+focus mode doesn't need page.tsx or the Reports page to know or care.
+
+Not live-verified this pass -- `tsc --noEmit` and `next build` both
+clean.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.
