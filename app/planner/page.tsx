@@ -52,6 +52,7 @@ import DriverTrainingModal from "./components/DriverTrainingModal";
 import TerminalCatalogModal from "./modals/TerminalCatalogModal";
 import LoadingModal from "./modals/LoadingModal";
 import CancelLoadSheet from "./components/CancelLoadSheet";
+import RecallDifferentEquipmentSheet from "./components/RecallDifferentEquipmentSheet";
 import { submitOutageReport, type OutageReportType } from "./hooks/useTerminalOutageReports";
 import ProductTempModal from "./modals/ProductTempModal";
 import CompartmentModal from "./modals/CompartmentModal";
@@ -340,6 +341,13 @@ export default function CalculatorPage() {
   // preset the driver has since manually tapped.
   const [presetDialSyncTo, setPresetDialSyncTo] = useState<{ slot: number } | null>(null);
   const presetDialSyncedRef = useRef(false);
+  // "Recall Last Load" found a completed load at this terminal, but under
+  // different equipment than what's currently selected -- per explicit
+  // follow-up. See handleRecallLastLoad/handleSwitchAndRecallEquipment
+  // below.
+  const [altEquipmentPrompt, setAltEquipmentPrompt] = useState<{ comboId: string; truckLabel: string; trailerLabel: string } | null>(null);
+  const [altEquipmentBusy, setAltEquipmentBusy] = useState(false);
+  const [altEquipmentError, setAltEquipmentError] = useState<string | null>(null);
 
   // ── Feature hooks ──────────────────────────────────────────────────────────
   // equipment/location/terminals come from the shared shell context (see above).
@@ -1226,6 +1234,61 @@ export default function CalculatorPage() {
     [equipment.selectedCombo, equipment.truckNameById, location.selectedTerminalId, location.selectedRackId, shell.companyId, effectiveUserId]
   );
 
+  // Pushes a recalled load's report into loadWorkflow and re-syncs the
+  // preset dial -- shared by the normal "Recall Last Load" tap and the
+  // "switch equipment, then recall" path below, since both end the same
+  // way once a report actually comes back.
+  const applyRecalledReport = useCallback((report: any | null) => {
+    if (report) loadWorkflow.setLoadReport(report);
+    if (report?.plan_slot) {
+      setLastLoadedSlot(report.plan_slot);
+      setActiveSlotLetter(report.plan_slot);
+      // A fresh object every call -- see PresetDial.tsx's own comment on
+      // syncTo for why this can't be a bare number.
+      setPresetDialSyncTo({ slot: report.plan_slot });
+    }
+  }, [loadWorkflow]);
+
+  // "Recall Last Load" -- tries the current equipment first (the common
+  // case); if this terminal has no completed load under it, checks
+  // whether the driver's own last load HERE used different equipment
+  // before giving up silently, per explicit follow-up ("what happens if
+  // that load was loaded using different equipment? we could show a
+  // warning with an option to proceed and switch the equipment or cancel
+  // and back out").
+  const handleRecallLastLoad = useCallback(async () => {
+    const report = await planSlots.recallLastLoad();
+    if (report) { applyRecalledReport(report); return; }
+    if (!location.selectedTerminalId) return;
+    const match = await planSlots.findLastLoadAtTerminalDifferentEquipment(String(location.selectedTerminalId));
+    if (match) { setAltEquipmentError(null); setAltEquipmentPrompt(match); }
+  }, [planSlots, applyRecalledReport, location.selectedTerminalId]);
+
+  // Claims the OTHER combo directly -- same claim_combo RPC
+  // EquipmentModal.tsx's own handleClaim already uses for claiming an
+  // existing combo, reused rather than reimplemented -- then recalls
+  // against it. Passes { comboId } explicitly to recallLastLoad instead
+  // of waiting for a re-render with the new selectedComboId (see that
+  // function's own comment for why).
+  const handleSwitchAndRecallEquipment = useCallback(async () => {
+    if (!altEquipmentPrompt) return;
+    setAltEquipmentBusy(true);
+    setAltEquipmentError(null);
+    try {
+      const { error } = await supabase.rpc("claim_combo", { p_combo_id: altEquipmentPrompt.comboId });
+      if (error) throw error;
+      equipment.setSelectedComboId(altEquipmentPrompt.comboId);
+      await equipment.fetchCombos();
+      const report = await planSlots.recallLastLoad({ comboId: altEquipmentPrompt.comboId });
+      applyRecalledReport(report);
+      setAltEquipmentPrompt(null);
+    } catch (e: any) {
+      setAltEquipmentError(e?.message ?? "Failed to switch equipment.");
+    } finally {
+      setAltEquipmentBusy(false);
+    }
+  }, [altEquipmentPrompt, equipment, planSlots, applyRecalledReport]);
+
   // Seed the Target/Actual/Diff summary from the last *completed* load for
   // this combo as soon as it's available (mount, or switching equipment) --
   // there's no "My Loads" button on this page anymore, so this is the only
@@ -1906,40 +1969,7 @@ const lastProductInfoById = useMemo(() => {
               {recapLabel && (
                 <button
                   type="button"
-                  onClick={async () => {
-                    // planSlots.recallLastLoad() applies the DB snapshot
-                    // live and directly (compPlan + CG), unconditionally --
-                    // see that function's own comment for why a plain
-                    // reload was tried first and found unreliable (races
-                    // against this hook's own mount-time restore effects).
-                    // Its return value has to be pushed into loadWorkflow
-                    // here explicitly -- the effect that normally syncs
-                    // planSlots.lastLoadReport into loadWorkflow.loadReport
-                    // only ever fires once, on first mount.
-                    const report = await planSlots.recallLastLoad();
-                    if (report) loadWorkflow.setLoadReport(report);
-                    // Also force the preset dial to reflect whichever
-                    // named preset the recalled load actually came from --
-                    // per explicit follow-up ("plan C stays highlighted").
-                    // The passive mount-time sync effect above only ever
-                    // fires once (lastLoadedSlot == null guard), so it
-                    // can't handle this: a driver who already tapped a
-                    // preset this session (lastLoadedSlot already set,
-                    // e.g. C) and THEN taps Recall Last Load needs the
-                    // dial to move again, deliberately overriding whatever
-                    // was previously active -- this is a second, distinct
-                    // user action, not the same one-time restore.
-                    if (report?.plan_slot) {
-                      setLastLoadedSlot(report.plan_slot);
-                      setActiveSlotLetter(report.plan_slot);
-                      // A fresh object every call -- see PresetDial.tsx's
-                      // own comment on syncTo for why this can't be a
-                      // bare number: recalling the same preset a second
-                      // time in one session needs to re-trigger the sync
-                      // even though the slot number repeats.
-                      setPresetDialSyncTo({ slot: report.plan_slot });
-                    }
-                  }}
+                  onClick={handleRecallLastLoad}
                   style={{
                     background: "none", border: "none", padding: 0, marginBottom: 6, cursor: "pointer",
                     fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.4)",
@@ -2049,6 +2079,18 @@ const lastProductInfoById = useMemo(() => {
         planRows={effectivePlanRows as any[]}
         productNameById={productNameById}
         onSubmitOutageReport={handleSubmitOutageReport}
+      />
+
+      <RecallDifferentEquipmentSheet
+        open={!!altEquipmentPrompt}
+        truckLabel={altEquipmentPrompt?.truckLabel ?? ""}
+        trailerLabel={altEquipmentPrompt?.trailerLabel ?? ""}
+        busy={altEquipmentBusy}
+        error={altEquipmentError}
+        onConfirm={handleSwitchAndRecallEquipment}
+        onCancel={() => { if (!altEquipmentBusy) setAltEquipmentPrompt(null); }}
+        darkMode={shell.theme.darkMode}
+        accentColor={shell.theme.accentColor}
       />
 
       <ProductTempModal

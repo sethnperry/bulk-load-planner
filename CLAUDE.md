@@ -5057,6 +5057,66 @@ legitimate sync request already arrives as its own unique object.
 Not live-verified this pass -- `tsc --noEmit` and `next build` both
 clean.
 
+### Recall Last Load: handling a terminal's last load done in different equipment (2026-08-28)
+
+User raised a real gap proactively (not a bug report): "Recall Last Load"
+is combo-scoped (see the terminal-scoping fix above), so if the terminal's
+last load was actually done in DIFFERENT equipment than what's currently
+selected, that combo-scoped query correctly finds nothing -- today this
+was a silent no-op, not a wrong result, but also not helpful. Proposed
+fix, confirmed via two quick scope questions before building (asked, not
+guessed, since one of them touches real equipment-claiming semantics):
+search the driver's own load history (not any combo in the company) for
+a match, and if found, show a warning offering to switch equipment and
+recall, or cancel.
+
+**Search scope**: the driver's own `load_log.user_id` history at this
+terminal, not any combo company-wide -- keeps "recall" personal to the
+driver using it, doesn't surface another driver's activity.
+
+**Switch behavior**: claims the other combo directly, no extra
+confirmation step beyond the one warning sheet already asks -- reuses
+`EquipmentModal.tsx`'s own `handleClaim` RPC call verbatim
+(`supabase.rpc("claim_combo", { p_combo_id })`) rather than reinventing
+equipment-claiming logic inline, so this can't leave the backend claim
+state out of sync with what the UI shows.
+
+**`usePlanSlots.ts`**:
+- New `findLastLoadAtTerminalDifferentEquipment(terminalId)` -- looks up
+  this driver's most recent completed load at the terminal (any combo),
+  skips it if it's actually the SAME combo already selected (nothing
+  "different" to report), resolves truck/trailer labels via
+  `equipment_combos`/`trucks`/`trailers`.
+- `recallLastLoad`/`fetchLastLoadFromLog` both gained an optional
+  `comboId` override. Needed because after claiming the other combo,
+  `equipment.setSelectedComboId(...)` hasn't propagated through a
+  re-render yet -- this hook's own memoized `planStoreKey`/`readSlot`
+  (closed over the CURRENT `selectedComboId`) would still read/write the
+  OLD combo's local-storage keys if called immediately afterward. New
+  module-level `buildPlanStoreKey`/`buildLegacyPresetKey` (pulled out of
+  the memoized `planStoreKey` so there's one formula, not two) let both
+  the preset lookup and the slot-0 write target the override combo
+  directly, without waiting on the render.
+
+**New `app/planner/components/RecallDifferentEquipmentSheet.tsx`** --
+same graphite bottom-sheet pattern as `CancelLoadSheet.tsx`/
+`PresetActionSheet.tsx`. "Switch to {truck} & Recall" / "Cancel."
+
+**`page.tsx`**: `handleRecallLastLoad` tries the normal (current-
+equipment) recall first; only on a miss does it check for a different-
+equipment match and show the sheet. `handleSwitchAndRecallEquipment`
+claims the combo, refreshes the equipment list, selects it, then calls
+`recallLastLoad({ comboId })` with the explicit override. Both paths
+converge on a shared `applyRecalledReport` (pushes the report into
+`loadWorkflow` + syncs the preset dial), extracted from the inline
+handler the previous two fixes had built up, since the switch-and-recall
+path needed the exact same "apply the result" logic.
+
+Not live-verified this pass -- this needs a real account with load
+history at the same terminal under two different equipment combos to
+exercise, which isn't available from this side. `tsc --noEmit` and `next
+build` both clean.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.
