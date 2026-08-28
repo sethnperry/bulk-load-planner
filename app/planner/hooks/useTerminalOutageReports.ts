@@ -9,6 +9,14 @@
 // -- one MessageTicker.tsx row for Out of Product, another for Out of
 // Allocation).
 //
+// 2026-08-28: per explicit follow-up, the banner's own ticker text was
+// trimmed down to just "Out of {product}" / "OOA {product}" -- no
+// company/truck/timestamp in the scrolling text itself (that detail moved
+// into the detail modal's cards). ComposedOutageReport now carries the
+// structured fields (productName, personLabel, truckLabel, createdAtMs)
+// TerminalOutageDetailModal.tsx needs to render its own 3-row cards,
+// instead of one pre-formatted `text` string.
+//
 // Out of Product also reuses the Terminal tab's existing
 // rack_product_status.is_out flag (see RackProductStatusModal.tsx) so the
 // Terminal tab's own product list never disagrees with this banner -- see
@@ -17,7 +25,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { resolveEffectiveRackId } from "../utils/rack";
-import { mostRecentClearingCheckpoint, nextClearingCheckpoint, hhmmInTimeZone } from "../utils/dates";
+import { mostRecentClearingCheckpoint, nextClearingCheckpoint } from "../utils/dates";
 
 export type OutageReportType = "out_of_product" | "out_of_allocation";
 
@@ -92,17 +100,19 @@ type OutageRow = {
   created_at: string;
 };
 
-function initialsOf(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "??";
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-}
-
 export type ComposedOutageReport = {
   reportId: string;
   reportType: OutageReportType;
-  text: string;
+  /** Full product name, e.g. "Premium Unleaded E10 93" -- the detail
+   * card's product line, colored per productColorFor(). */
+  productName: string;
+  /** Short banner text, e.g. "Out of Premium 93" / "OOA Premium 93". */
+  tickerText: string;
+  /** Full company name (out_of_product) or full driver name
+   * (out_of_allocation) -- the detail card's top row. */
+  personLabel: string;
+  truckLabel: string;
+  createdAtMs: number;
   expiresAtMs: number;
   canClear: boolean;
 };
@@ -203,30 +213,39 @@ export function useActiveOutageBanner(terminalId: string | null, effectiveUserId
       reporterIds.length ? supabase.rpc("get_display_names_full", { p_user_ids: reporterIds }) : Promise.resolve({ data: [] }),
     ]);
 
-    const productNameById = new Map<string, string>((productsRes.data ?? []).map((p: any) => [p.product_id, p.product_name ?? p.display_name ?? "product"]));
+    // Full name for the detail card's product line; short name (falls
+    // back to full when no shorter display_name is set) for the ticker.
+    const productFullById = new Map<string, string>((productsRes.data ?? []).map((p: any) => [p.product_id, p.product_name ?? p.display_name ?? "product"]));
+    const productShortById = new Map<string, string>((productsRes.data ?? []).map((p: any) => [p.product_id, p.display_name ?? p.product_name ?? "product"]));
     const companyNameById = new Map<string, string>((companiesRes.data ?? []).map((c: any) => [c.company_id, c.company_name ?? ""]));
     const displayNameByUserId = new Map<string, string>((namesRes.data ?? []).map((n: any) => [n.user_id, n.display_name ?? ""]));
 
     const composed: ComposedOutageReport[] = rows.map((r) => {
-      const productName = productNameById.get(r.product_id) ?? "product";
+      const productName = productFullById.get(r.product_id) ?? "product";
+      const shortName = productShortById.get(r.product_id) ?? productName;
       const createdAtMs = new Date(r.created_at).getTime();
-      const hhmm = hhmmInTimeZone(createdAtMs, tz);
       const truck = r.truck_label || "?";
-      const text = r.report_type === "out_of_product"
-        ? `${(companyNameById.get(r.company_id) ?? "").slice(0, 3) || "???"} ${truck} - Out of ${productName} @ ${hhmm}hr`
-        : `${initialsOf(displayNameByUserId.get(r.reporter_user_id) ?? "")} ${truck} OOA ${productName} @ ${hhmm}hr`;
+      const isProduct = r.report_type === "out_of_product";
+      const tickerText = isProduct ? `Out of ${shortName}` : `OOA ${shortName}`;
+      const personLabel = isProduct
+        ? (companyNameById.get(r.company_id) || "Company")
+        : (displayNameByUserId.get(r.reporter_user_id) || "Driver");
       return {
         reportId: r.report_id,
         reportType: r.report_type,
-        text,
+        productName,
+        tickerText,
+        personLabel,
+        truckLabel: truck,
+        createdAtMs,
         expiresAtMs: nextClearingCheckpoint(createdAtMs, tz),
         canClear: !!effectiveUserId && r.reporter_user_id === effectiveUserId,
       };
     });
 
     setReports(composed);
-    setProductMessages(composed.filter((c) => c.reportType === "out_of_product").map((c) => c.text));
-    setAllocationMessages(composed.filter((c) => c.reportType === "out_of_allocation").map((c) => c.text));
+    setProductMessages(composed.filter((c) => c.reportType === "out_of_product").map((c) => c.tickerText));
+    setAllocationMessages(composed.filter((c) => c.reportType === "out_of_allocation").map((c) => c.tickerText));
   }, [terminalId, timeZone, effectiveUserId]);
 
   useEffect(() => {

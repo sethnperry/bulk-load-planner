@@ -5329,6 +5329,75 @@ Load/Update Card for either one anymore.
 Not live-verified this pass -- `tsc --noEmit` and `next build` both
 clean.
 
+### Terminal outage banner: trimmed message text, single-row layout, redesigned detail cards (2026-08-28)
+
+Per explicit follow-up against the banner/modal built 2026-08-27:
+
+- **Ticker text trimmed to just the essentials** -- was
+  `"{co} {truck} - Out of {product} @ {hhmm}hr"` / `"{initials} {truck} OOA
+  {product} @ {hhmm}hr"`; now just `"Out of {product}"` / `"OOA {product}"`,
+  per explicit request ("Just show 'Out of Premium 93' and/or 'OOA
+  Premium 93'"). Company/truck/timestamp moved into the detail modal's
+  cards instead of living in the scrolling text. Uses the product's own
+  `display_name` when set (falling back to `product_name`) for this short
+  form -- `useTerminalOutageReports.ts`'s `productShortById` map, alongside
+  a separate `productFullById` for the detail card's fuller name (prefers
+  `product_name`, falls back to `display_name`).
+- **Multiple simultaneous reports on one row now join into a single
+  hyphen-separated string** ("Out of Premium 93 - Out of Regular 87"),
+  scrolled as one continuous message -- not cycled as separate messages
+  with their own enter/pause/exit, which is what `MessageTicker.tsx`
+  already did for a `messages` array with more than one entry.
+  `TerminalOutageBanner.tsx` now does `messages.join(" - ")` and passes
+  that single joined string as a one-element array, per explicit request
+  ("Separate each report in the banner by a hyphen").
+- **Back to a single-row banner.** The 2026-08-27 version stacked Out of
+  Product above Out of Allocation as two independent rows; per explicit
+  follow-up ("put them back on the same row and remove space below so the
+  banner splits right between the tabs and nav hamburger"), `TickerHalf`
+  now renders both halves side by side in one 22px-tall flex row (a thin
+  vertical divider between them only when both are active), with no extra
+  top/bottom padding on the wrapping div -- the banner is exactly one thin
+  strip between the icon/hamburger row and the tab bar, not two. Whichever
+  half has no active reports isn't rendered at all (not an empty
+  placeholder), so a single active report type naturally takes the full
+  row instead of leaving blank space next to it.
+- **Detail modal cards restyled to the app's own graphite theme, not the
+  red-tinted treatment** -- per explicit request ("the cards should match
+  our app theme instead of that red hue"). `TerminalOutageDetailModal.tsx`'s
+  `ReportRow` now uses `cardTheme.ts`'s `CARD_BG`/`CARD_BORDER`/
+  `CARD_SHADOW` (the same graphite gradient every other card in the app
+  uses), and is restructured into 3 rows: `"{company or driver} Truck
+  {unit}"` (full name, not the old 3-letter/initials abbreviation --
+  e.g. "Gemini Truck 25184" instead of "Gem 25184"), then
+  `"Terminal Out of {product}"` (Out of Product) or `"OOA {product}"` (Out
+  of Allocation) using the fuller product name, and a third row combining
+  "Marked out at {hhmm} hrs, clears at {hhmm} hrs" with the Clear Now
+  button (renamed from "Clear Issue") on the same line via a wrapping flex
+  row -- wraps to its own line on a narrow viewport rather than being
+  forced to fit, since the ask was "if possible."
+- **Product-colored product line, new `app/planner/utils/productColor.ts`**
+  -- per explicit request ("make the product name the product color (red).
+  or yellow if diesel, white for regular etc."). `productColorFor(name)`
+  is a simple substring match against the product's own name (no separate
+  "family" column exists on `products` to key off instead): contains
+  "diesel" → `#eab308` (yellow), contains "premium" → `#ef4444` (red),
+  everything else (regular, mid-grade/plus, and anything unmatched) →
+  white, matching the "white for regular etc." fallback intent. Applied to
+  the detail card's product-name row only -- the ticker text itself stays
+  the existing plain red (`TICKER_COLOR`), which was never part of this
+  complaint.
+- `ComposedOutageReport` (the hook's shared shape) dropped its single
+  pre-formatted `text` field in favor of structured fields the modal now
+  needs directly: `productName` (full), `tickerText` (short), `personLabel`
+  (full company or driver name), `truckLabel`, `createdAtMs`. The now-
+  unused `initialsOf()` helper was removed along with the initials-based
+  ticker format it only existed for.
+
+Not live-verified this pass (no authenticated session available from this
+side, same as every change in this thread) -- `tsc --noEmit` and `next
+build` both clean.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.

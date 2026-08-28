@@ -6,18 +6,26 @@
 // terminal (already deduped to the most recent per product, see
 // useTerminalOutageReports.ts), each with its own expiry time and (only
 // for the report the current effectiveUserId actually posted) a "Clear
-// Issue" button to remove it early instead of waiting for the next
+// Now" button to remove it early instead of waiting for the next
 // 6am/12pm/6pm/12am checkpoint. Split into two labeled sections, matching
 // the banner's own two-row split. See CLAUDE.md "Terminal outage banners"
 // for the full design.
+//
+// 2026-08-28: cards restyled from a red-tinted treatment to the app's own
+// graphite theme (cardTheme.ts's CARD_BG/CARD_BORDER/CARD_SHADOW, same as
+// every other card in the app) per explicit follow-up ("the cards should
+// match our app theme instead of that red hue"). Each card is now 3 rows:
+// "{company or driver} Truck {unit}", then "Terminal Out of {product}" /
+// "OOA {product}" colored per productColorFor() (diesel=yellow,
+// premium=red, else white), then "Marked out at {hhmm} hrs, clears at
+// {hhmm} hrs" with Clear Now on the same row where it fits.
 
 import React, { useState } from "react";
 import { FullscreenModal } from "@/lib/ui/FullscreenModal";
 import { clearOutageReport, type ComposedOutageReport } from "../hooks/useTerminalOutageReports";
-
-function fmtExpiry(ms: number, timeZone: string): string {
-  return new Intl.DateTimeFormat("en-US", { timeZone, hour: "numeric", minute: "2-digit", hour12: true }).format(new Date(ms));
-}
+import { hhmmInTimeZone } from "../utils/dates";
+import { productColorFor } from "../utils/productColor";
+import { CARD_BG, CARD_BORDER, CARD_SHADOW } from "../cards/cardTheme";
 
 function ReportRow({ report, timeZone, onClear, clearing }: {
   report: ComposedOutageReport;
@@ -25,34 +33,45 @@ function ReportRow({ report, timeZone, onClear, clearing }: {
   onClear: (reportId: string) => void;
   clearing: boolean;
 }) {
+  const topLine = `${report.personLabel} Truck ${report.truckLabel}`;
+  const productLine = report.reportType === "out_of_product"
+    ? `Terminal Out of ${report.productName}`
+    : `OOA ${report.productName}`;
+  const productColor = productColorFor(report.productName);
+  const markedHhmm = hhmmInTimeZone(report.createdAtMs, timeZone);
+  const clearsHhmm = hhmmInTimeZone(report.expiresAtMs, timeZone);
+
   return (
     <div
       style={{
         padding: "12px 14px", borderRadius: 10,
-        border: "1px solid rgba(239,68,68,0.30)", background: "rgba(239,68,68,0.08)",
+        background: CARD_BG, border: CARD_BORDER, boxShadow: CARD_SHADOW,
         display: "flex", flexDirection: "column", gap: 6,
       }}
     >
-      <div style={{ fontSize: 13, fontWeight: 700, color: "#fecaca" }}>{report.text}</div>
-      <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)" }}>
-        Clears at {fmtExpiry(report.expiresAtMs, timeZone)}
+      <div style={{ fontSize: 13, fontWeight: 700, color: "rgba(255,255,255,0.90)" }}>{topLine}</div>
+      <div style={{ fontSize: 13, fontWeight: 700, color: productColor }}>{productLine}</div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)" }}>
+          Marked out at {markedHhmm} hrs, clears at {clearsHhmm} hrs
+        </div>
+        {report.canClear && (
+          <button
+            type="button"
+            onClick={() => onClear(report.reportId)}
+            disabled={clearing}
+            style={{
+              flexShrink: 0,
+              padding: "6px 12px", borderRadius: 8,
+              border: "1px solid rgba(255,255,255,0.18)", background: "rgba(255,255,255,0.08)",
+              color: "rgba(255,255,255,0.85)", fontSize: 11, fontWeight: 700, cursor: "pointer",
+              opacity: clearing ? 0.6 : 1,
+            }}
+          >
+            {clearing ? "Clearing…" : "Clear Now"}
+          </button>
+        )}
       </div>
-      {report.canClear && (
-        <button
-          type="button"
-          onClick={() => onClear(report.reportId)}
-          disabled={clearing}
-          style={{
-            marginTop: 4, alignSelf: "flex-start",
-            padding: "8px 14px", borderRadius: 8,
-            border: "1px solid rgba(255,255,255,0.18)", background: "rgba(255,255,255,0.06)",
-            color: "rgba(255,255,255,0.85)", fontSize: 12, fontWeight: 700, cursor: "pointer",
-            opacity: clearing ? 0.6 : 1,
-          }}
-        >
-          {clearing ? "Clearing…" : "Clear Issue"}
-        </button>
-      )}
     </div>
   );
 }

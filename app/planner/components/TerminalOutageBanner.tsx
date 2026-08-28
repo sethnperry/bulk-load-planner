@@ -1,25 +1,31 @@
 "use client";
 // app/planner/components/TerminalOutageBanner.tsx
 //
-// Two independent scrolling rows for active outage reports at whichever
-// terminal is currently selected -- Out of Product on top (any driver at
-// any company heading here sees it), Out of Allocation below it (only
-// same-company drivers) -- per explicit follow-up ("put product on its own
-// banner above and below" instead of one mixed ticker). Mounted in
-// CalculatorLayoutClient.tsx's Header, between the icon row and the tab
-// bar. See CLAUDE.md "Terminal outage banners" for the full design.
+// One thin row for active outage reports at whichever terminal is
+// currently selected -- Out of Product on the left half (any driver at
+// any company heading here sees it), Out of Allocation on the right half
+// (only same-company drivers). Both halves share a single row (per
+// explicit follow-up putting them "back on the same row" so the whole
+// banner is one 22px strip, no stacked second row eating extra height --
+// it sits right between the icon/hamburger row and the tab bar with
+// nothing else in between). Mounted in CalculatorLayoutClient.tsx's
+// Header. See CLAUDE.md "Terminal outage banners" for the full design.
 //
-// Renders nothing when a given row has no active report -- no empty strip
-// taking up space. Each row is tappable (a trailing "›" chevron, same
-// affordance this app already uses everywhere else for "this row opens
-// something") to open TerminalOutageDetailModal.tsx for the per-report
-// expiry time and a Clear Issue option; both rows open the same shared
-// detail view.
+// Renders nothing when there's no active report at all. Whichever half
+// has no reports simply isn't rendered, so a single active report type
+// takes the full row rather than leaving a blank half. Multiple
+// simultaneous reports for the same half are joined into one continuous
+// hyphen-separated string ("Out of Premium 93 - Out of Regular 87") and
+// scrolled as a single message, not cycled one at a time.
+//
+// Each half is tappable (a trailing "›" chevron) to open
+// TerminalOutageDetailModal.tsx for the per-report expiry time and a
+// Clear Now option; both halves open the same shared detail view.
 //
 // The actual scroll behavior (constant speed, pause at each message's
-// arrival, multi-message cycling) lives in MessageTicker.tsx, a generic
-// reusable ticker -- see that file's own header comment for why it's a
-// requestAnimationFrame loop rather than a CSS @keyframes animation.
+// arrival) lives in MessageTicker.tsx -- see that file's own header
+// comment for why it's a requestAnimationFrame loop rather than a CSS
+// @keyframes animation.
 
 import React, { useState } from "react";
 import { useCalculatorShell } from "../CalculatorShellContext";
@@ -29,20 +35,21 @@ import MessageTicker from "./MessageTicker";
 
 const TICKER_COLOR = "#ff3b30";
 
-function TickerRow({ messages, onOpen }: { messages: string[]; onOpen: () => void }) {
+function TickerHalf({ messages, onOpen }: { messages: string[]; onOpen: () => void }) {
   if (messages.length === 0) return null;
+  const joined = messages.join(" - ");
   return (
     <button
       type="button"
       onClick={onOpen}
       style={{
         display: "flex", alignItems: "center", gap: 6,
-        width: "100%", height: 22, padding: "0 14px",
-        background: "transparent", border: "none", cursor: "pointer", flexShrink: 0,
+        flex: 1, minWidth: 0, height: 22, padding: "0 10px",
+        background: "transparent", border: "none", cursor: "pointer",
       }}
     >
-      <MessageTicker messages={messages} color={TICKER_COLOR} />
-      <span style={{ fontSize: 16, color: TICKER_COLOR, flexShrink: 0, lineHeight: 1 }}>›</span>
+      <MessageTicker messages={[joined]} color={TICKER_COLOR} />
+      <span style={{ fontSize: 14, color: TICKER_COLOR, flexShrink: 0, lineHeight: 1 }}>›</span>
     </button>
   );
 }
@@ -53,13 +60,18 @@ export default function TerminalOutageBanner() {
   const { productMessages, allocationMessages, reports, timeZone, refresh } = useActiveOutageBanner(terminalId, shell.effectiveUserId || null);
   const [detailOpen, setDetailOpen] = useState(false);
 
-  if (productMessages.length === 0 && allocationMessages.length === 0) return null;
+  const hasProduct = productMessages.length > 0;
+  const hasAllocation = allocationMessages.length > 0;
+  if (!hasProduct && !hasAllocation) return null;
 
   return (
     <>
-      <div style={{ display: "flex", flexDirection: "column", paddingTop: 2, paddingBottom: 2 }}>
-        <TickerRow messages={productMessages} onOpen={() => setDetailOpen(true)} />
-        <TickerRow messages={allocationMessages} onOpen={() => setDetailOpen(true)} />
+      <div style={{ display: "flex", alignItems: "center", width: "100%", height: 22 }}>
+        <TickerHalf messages={productMessages} onOpen={() => setDetailOpen(true)} />
+        {hasProduct && hasAllocation && (
+          <div style={{ width: 1, alignSelf: "stretch", margin: "4px 0", background: "rgba(255,255,255,0.14)", flexShrink: 0 }} />
+        )}
+        <TickerHalf messages={allocationMessages} onOpen={() => setDetailOpen(true)} />
       </div>
 
       <TerminalOutageDetailModal
