@@ -5275,6 +5275,22 @@ focus mode doesn't need page.tsx or the Reports page to know or care.
 Not live-verified this pass -- `tsc --noEmit` and `next build` both
 clean.
 
+### Report Terminal Issue: product checkbox got a real checkmark (2026-08-28)
+
+Per explicit feedback ("hard to tell you selected it... the box on the
+right should get a check mark, maybe bright teal") -- the product picker
+in `CancelLoadSheet.tsx`'s "Report Terminal Issue" flow (Out of Product /
+Out of Allocation) used a plain filled/unfilled square with no glyph,
+themed via the driver's own accent color -- which could render pale or
+low-contrast depending on that setting, with nothing marking "selected"
+beyond a subtle fill. Now a fixed, always-legible `#2dd4bf` (bright teal,
+independent of accent/dark-mode settings) box with a real ✓ checkmark
+glyph, plus a matching teal-tinted row border when checked instead of
+plain white.
+
+Not live-verified this pass -- `tsc --noEmit` and `next build` both
+clean.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.

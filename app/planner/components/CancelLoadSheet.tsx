@@ -264,17 +264,22 @@ export default function CancelLoadSheet({
                       style={{
                         display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
                         width: "100%", padding: "12px 14px", borderRadius: 10, cursor: "pointer",
-                        border: checked ? "1px solid rgba(255,255,255,0.35)" : CARD_BORDER,
+                        border: checked ? "1px solid rgba(45,212,191,0.55)" : CARD_BORDER,
                         background: CARD_BG, boxShadow: CARD_SHADOW,
                         color: "rgba(255,255,255,0.90)", fontSize: 14, fontWeight: 600, textAlign: "left" as const,
                       }}
                     >
                       <span>{p.name}</span>
                       <span style={{
-                        width: 18, height: 18, borderRadius: 4, flexShrink: 0,
-                        border: "1px solid rgba(255,255,255,0.35)",
-                        background: checked ? themeFill(darkMode, accentColor, "#fff") : "transparent",
-                      }} />
+                        width: 22, height: 22, borderRadius: 5, flexShrink: 0,
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        border: checked ? "1px solid #2dd4bf" : "1px solid rgba(255,255,255,0.35)",
+                        background: checked ? "#2dd4bf" : "transparent",
+                        color: "#0b2a26", fontSize: 14, fontWeight: 900, lineHeight: 1,
+                        transition: "background 120ms ease, border-color 120ms ease",
+                      }}>
+                        {checked ? "✓" : ""}
+                      </span>
                     </button>
                   );
                 })}
