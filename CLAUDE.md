@@ -5183,6 +5183,33 @@ programmatic load exactly.
 Not live-verified this pass -- `tsc --noEmit` and `next build` both
 clean.
 
+### Different-equipment recall: the found combo can be stale/decoupled since (2026-08-28)
+
+Live-tested right after shipping: tapping "Switch to {truck}/{trailer} &
+Recall" surfaced a raw RPC error, `Combo not found or not active:
+<uuid>`. Root cause, confirmed from the screenshot: the OLD test load's
+combo paired the current truck with a DIFFERENT trailer that's since
+been swapped out -- that specific `equipment_combos` row is no longer
+`active` (decoupled), so `claim_combo` correctly refuses it. There's
+nothing to switch TO for that specific historical combo_id anymore.
+
+**Fixed** in `findLastLoadAtTerminalDifferentEquipment` -- now also
+selects `active` and returns null (same as "nothing found at all") when
+the matched combo isn't currently active, instead of offering a switch
+button that's guaranteed to fail. Deliberately doesn't search further
+back in history for an older, still-active combo at the same terminal --
+out of scope for this pass, flagged not built.
+
+Also hardened `handleSwitchAndRecallEquipment`'s error handling in
+`page.tsx` for the residual race (decoupled by someone else between the
+lookup and the claim attempt) -- a "not found or not active" RPC message
+now shows as "That equipment isn't available anymore -- it may have been
+reassigned since that load," not the raw error string with a bare UUID.
+
+Live-verified the original bug via the user's own screenshot; the fix
+itself not re-verified live this pass -- `tsc --noEmit` and `next build`
+both clean.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.

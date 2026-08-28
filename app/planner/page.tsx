@@ -1294,7 +1294,18 @@ export default function CalculatorPage() {
       applyRecalledReport(report);
       setAltEquipmentPrompt(null);
     } catch (e: any) {
-      setAltEquipmentError(e?.message ?? "Failed to switch equipment.");
+      // findLastLoadAtTerminalDifferentEquipment already filters out
+      // combos that were inactive at lookup time, but a raw "Combo not
+      // found or not active" (plus a bare UUID) can still surface here in
+      // a genuine race -- decoupled by someone else between the lookup and
+      // this claim attempt. Give an actionable message instead of the raw
+      // RPC error either way.
+      const msg = String(e?.message ?? "");
+      setAltEquipmentError(
+        /not found or not active/i.test(msg)
+          ? "That equipment isn't available anymore -- it may have been reassigned since that load."
+          : (msg || "Failed to switch equipment.")
+      );
     } finally {
       setAltEquipmentBusy(false);
     }

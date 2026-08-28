@@ -575,10 +575,21 @@ export function usePlanSlots({
 
     const { data: comboRow } = await supabase
       .from("equipment_combos")
-      .select("truck_id, trailer_id")
+      .select("truck_id, trailer_id, active")
       .eq("combo_id", comboId)
       .maybeSingle();
     if (!comboRow) return null;
+    // The specific combo that load used may have since been decoupled
+    // (e.g. the trailer was swapped) -- confirmed live: claim_combo
+    // correctly rejects a since-inactive combo ("Combo not found or not
+    // active"), which surfaced as a raw RPC error in the warning sheet.
+    // Nothing useful to offer at that point (there's no still-existing
+    // pairing to switch to for that specific old combo_id) -- treat it
+    // the same as "nothing found" rather than showing a switch button
+    // that's guaranteed to fail. Deliberately doesn't search further back
+    // in history for an older, still-active combo -- out of scope for
+    // this pass.
+    if ((comboRow as any).active !== true) return null;
 
     const [truckRes, trailerRes] = await Promise.all([
       (comboRow as any).truck_id
