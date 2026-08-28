@@ -366,18 +366,28 @@ export function usePlanSlots({
     return result;
   }
 
-  async function fetchLastLoadFromLog(): Promise<any | null> {
+  // opts.terminalId scopes the search to a specific terminal -- used by
+  // recallLastLoad (see its own comment) so "Recall Last Load" reproduces
+  // the last load actually done AT THE CURRENTLY SELECTED TERMINAL, not
+  // just the last load anywhere on this combo. The passive slip-seat
+  // pre-fill (combo-claim effect) and refreshLastLoad (post-completion
+  // residue refresh) both call this with no terminalId, unchanged --
+  // those exist to answer "what's in this equipment right now," which is
+  // legitimately terminal-independent.
+  async function fetchLastLoadFromLog(opts?: { terminalId?: string }): Promise<any | null> {
     if (!selectedComboId) return null;
 
     // Only a genuinely finalized ("loaded") row counts -- an abandoned
     // "planned" row (LOAD tapped but never confirmed LOADED) must never be
     // treated as "the last load" for slip-seat pre-fill or the Target/
     // Actual/Diff summary. No fallback to "any status" on purpose.
-    const { data: comboRows, error: comboErr } = await supabase
+    let query = supabase
       .from("load_log")
       .select("load_id, status, started_at, completed_at, terminal_id, planned_total_gal, planned_gross_lbs, diff_lbs, plan_slot, cg_bias")
       .eq("combo_id", selectedComboId)
-      .eq("status", "loaded")
+      .eq("status", "loaded");
+    if (opts?.terminalId) query = query.eq("terminal_id", opts.terminalId);
+    const { data: comboRows, error: comboErr } = await query
       .order("started_at", { ascending: false })
       .limit(1);
 
@@ -400,11 +410,26 @@ export function usePlanSlots({
       planned_gallons: Number(l.planned_gallons ?? 0),
     }));
 
-    const compPlan: Record<string, { empty: boolean; productId: string }> = {};
+    // capOverride reconstructed from what was ACTUALLY loaded into each
+    // compartment -- capOverride itself is a planning-time-only concept
+    // (never a stored column; it's baked into the allocation that produces
+    // planned_gallons at begin_load time), so there's no literal "was this
+    // capped" field to read back. Pinning the recalled cap to the exact
+    // prior planned_gallons is what actually makes "recall last load"
+    // reproduce the same load again -- without it, this reconstruction
+    // silently dropped any cap the driver had set (confirmed live: caps
+    // reappeared instantly on reloading a named preset, which already
+    // saved capOverride correctly, but never showed up here since this
+    // was the one path that never restored it at all).
+    const compPlan: Record<string, { empty: boolean; productId: string; capOverride?: number }> = {};
     for (const line of lines) {
       const n = String(line.comp_number ?? "");
       if (!n || !line.product_id) continue;
-      compPlan[n] = { empty: false, productId: line.product_id };
+      compPlan[n] = {
+        empty: false,
+        productId: line.product_id,
+        ...(line.planned_gallons > 0 ? { capOverride: Math.round(line.planned_gallons) } : {}),
+      };
     }
 
     const plannedGross = resolvedRow.planned_gross_lbs != null ? Number(resolvedRow.planned_gross_lbs) : null;
@@ -803,8 +828,16 @@ export function usePlanSlots({
   // have independent trigger dependencies and can fire in either order;
   // a page reload was tried first and found to lose that race in
   // practice, live-verified before switching to this direct approach).
+  //
+  // Scoped to the CURRENTLY SELECTED terminal -- per explicit follow-up
+  // ("if I tap recall last load, it should recall the last load for the
+  // terminal selected"), not just the last load anywhere for this combo.
+  // If this combo has never completed a load at this specific terminal,
+  // this returns null (same silent no-op the caller already handles for
+  // "no completed load at all") rather than falling back to some other
+  // terminal's load.
   const recallLastLoad = useCallback(async () => {
-    const dbPayload = await fetchLastLoadFromLog();
+    const dbPayload = await fetchLastLoadFromLog({ terminalId: selectedTerminalId || undefined });
     if (!dbPayload) return null;
     safeWrite(planStoreKey(0), dbPayload);
     if (selectedComboId) {
@@ -826,7 +859,7 @@ export function usePlanSlots({
     // loadWorkflow directly.
     return report;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedComboId, authUserId, planStoreKey, safeWrite, applySnapshot, refreshSlotHas]);
+  }, [selectedComboId, selectedTerminalId, authUserId, planStoreKey, safeWrite, applySnapshot, refreshSlotHas]);
 
   return {
     PLAN_SLOTS,

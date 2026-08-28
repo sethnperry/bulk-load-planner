@@ -4876,6 +4876,55 @@ Not live-verified this pass (the animation timing/feel in particular
 wants a real device look, not just a typecheck) -- `tsc --noEmit` and
 `next build` both clean.
 
+### Recall Last Load: missing compartment caps + not scoped to the current terminal (2026-08-28)
+
+User report: loaded Preset B (which now correctly saves `capOverride`,
+see the 2026-08-27 fix above), switched terminals a few times, then
+tapped "Recall Last Load" -- the caps were gone, product selection was
+right. Tapping Preset B again brought the caps right back, confirming
+they really were saved correctly; the bug was specific to the recall
+path.
+
+**Root cause**: `usePlanSlots.ts`'s `fetchLastLoadFromLog()` (the shared
+function behind the passive slip-seat pre-fill, `refreshLastLoad`, AND
+`recallLastLoad`) reconstructs `compPlan` from `load_lines` after a real
+completed load, but only ever set `{ empty, productId }` per compartment
+-- `capOverride` was never included at all, for any of its three callers.
+This isn't a stored column gap (capOverride is planning-time-only, baked
+into the allocation that produces `planned_gallons` at `begin_load` time,
+never persisted as its own value) -- there was simply no code path
+restoring it. Fixed by setting `capOverride: Math.round(planned_gallons)`
+per compartment when reconstructing -- pinning the recalled cap to
+exactly what was actually loaded is what makes "recall last load"
+actually reproduce the same load again, and is the only available signal
+for "what ceiling applied here" since no explicit cap value is stored.
+
+**Second, separate ask**: "if I tap recall last load, it should recall
+the last load for the terminal selected" -- the query behind
+`recallLastLoad` had no terminal filter at all (`fetchLastLoadFromLog`
+only ever filtered by `combo_id`), so it always returned the most recent
+completed load anywhere, regardless of which terminal was currently
+selected. `fetchLastLoadFromLog` gained an optional `{ terminalId }`
+param; only `recallLastLoad` passes it (`selectedTerminalId`) -- the
+passive slip-seat pre-fill (on combo claim) and `refreshLastLoad` (post-
+completion residue refresh) are both deliberately left unscoped, since
+those exist to answer "what's currently in this equipment," which is
+legitimately terminal-independent, not "what did I load here." If this
+combo has never completed a load at the currently selected terminal, the
+button now correctly does nothing (same silent no-op already in place
+for "no completed load exists at all") rather than falling back to some
+other terminal's load.
+
+Also added `selectedTerminalId` to `recallLastLoad`'s own `useCallback`
+dependency array -- it's now a real input to the function, and omitting
+it (the file's existing lint-suppressed pattern for several of these
+callbacks) would have meant a driver switching terminals without any
+other listed dependency changing could still be holding a stale closure
+over the PREVIOUS terminal.
+
+Not live-verified this pass -- `tsc --noEmit` and `next build` both
+clean.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.
