@@ -5117,6 +5117,72 @@ history at the same terminal under two different equipment combos to
 exercise, which isn't available from this side. `tsc --noEmit` and `next
 build` both clean.
 
+**Follow-up same day: button showed the trailer being switched to too**
+-- the confirm button only ever read "Switch to {truck} & Recall,"
+silently dropping the trailer. Now shows both (`Switch to {truck} /
+{trailer} & Recall`), and the description bolds the pair for a clearer
+at-a-glance comparison.
+
+### Fresh mount snaps to the last casually-browsed terminal, not the last real load (2026-08-28)
+
+User found this while testing the different-equipment recall feature
+above: switched to a terminal they knew they'd used different equipment
+at, purely to test -- refreshing the page afterward kept that
+test-browsed terminal instead of returning to wherever their actual most
+recent load happened. "Refreshing the page, or closing the app and
+reopening, should always open to the most recent load at whatever
+terminal the most recent load was."
+
+**Root cause**: `useLocation.ts`'s persisted-location restore
+(`protankr_location_v2:{userId}` in localStorage) just replays whatever
+state/city/terminal was last SELECTED in the picker, with zero
+relationship to real load history -- merely browsing a terminal to look
+around (without ever loading there) permanently became "home" until
+manually changed again.
+
+**Fixed**: new effect, gated to run once per hydration (same shape as the
+existing persisted-location restore it runs alongside), looks up this
+driver's own most recent completed load (any equipment -- combo-
+independent, matching the literal ask) via `load_log` and, if found,
+resolves its terminal's city/state and OVERRIDES whatever the naive
+picker-history restore just set. A driver with no load history at all
+(brand new, or simply never completed one) keeps whatever the existing
+restore already produced -- nothing to override with. Also restores
+`selectedRackId` from the load's own `rack_id` when present, so a
+multi-rack terminal doesn't need to re-prompt unnecessarily.
+
+Not live-verified this pass -- `tsc --noEmit` and `next build` both
+clean.
+
+### Save Plan button showed up after Recall Last Load with nothing actually changed (2026-08-28)
+
+Same testing session, second report: recalling a previous load
+immediately made the "Save Plan" button appear, even though nothing had
+been touched since the recall. Per explicit direction, it should only
+appear once the driver actually changes something FROM the recalled
+plan (a different product, the CG slider, a cap) -- not for the recall
+itself.
+
+**Root cause**: `page.tsx` already has a `captureBaselineNext` mechanism
+built for exactly this class of problem -- every OTHER programmatic
+plan-load (tapping a preset, the automatic restore on terminal/combo
+switch) calls `setCaptureBaselineNext(true)` right after, so the
+dirty-check's baseline re-captures against the just-applied plan instead
+of whatever was on screen before it. "Recall Last Load" was the one path
+that never called it -- `planSlots.recallLastLoad()` applies the
+recalled `compPlan`/`cgSlider` same as any other restore, but nothing
+told the baseline tracker this was a programmatic load, not a user edit,
+so the dirty-check compared the recalled plan against the PRE-recall
+baseline and (usually) found a difference immediately.
+
+**Fixed**: `applyRecalledReport` (the shared function both the normal
+recall and the switch-equipment-then-recall path already funnel through)
+now calls `setCaptureBaselineNext(true)` too, matching every other
+programmatic load exactly.
+
+Not live-verified this pass -- `tsc --noEmit` and `next build` both
+clean.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.

@@ -199,6 +199,64 @@ export function useLocation(authUserId: string) {
     }, 50);
   }, [authUserId, effectiveLocKey, userLocKey]);
 
+  // ── Snap fresh mount/reload to the most recent REAL load's terminal ──────
+  // Per explicit follow-up: the restore above just replays whatever the
+  // terminal picker was last casually left on (including browsing/testing a
+  // terminal without ever actually loading there), which isn't the same
+  // thing as "where I actually am." A refresh or app reopen should reflect
+  // real activity -- wherever the driver's most recent completed load
+  // happened -- not merely the last thing they tapped in the picker.
+  //
+  // Runs once per hydration (loadLocationSyncRef), same shape as the
+  // persisted-location restore above, and deliberately OVERRIDES whatever
+  // that restore just set once it resolves -- a driver with no load
+  // history at all (brand new, or simply never completed one) keeps
+  // whatever the persisted-location restore already set (or the blank
+  // default), since there's nothing real to override it with. Combo-
+  // independent on purpose ("wherever my most recent load was," not
+  // scoped to whichever equipment happens to be selected right now) -- this
+  // hook doesn't know about equipment at all, and the ask itself wasn't
+  // equipment-scoped.
+  const loadLocationSyncRef = useRef("");
+  useEffect(() => {
+    if (!authUserId) return;
+    if (loadLocationSyncRef.current === effectiveLocKey) return;
+    loadLocationSyncRef.current = effectiveLocKey;
+
+    (async () => {
+      const { data: rows } = await supabase
+        .from("load_log")
+        .select("terminal_id, rack_id, started_at")
+        .eq("user_id", authUserId)
+        .eq("status", "loaded")
+        .order("started_at", { ascending: false })
+        .limit(1);
+      const row = rows?.[0] as any;
+      const terminalId = row?.terminal_id ? String(row.terminal_id) : "";
+      if (!terminalId) return;
+
+      const { data: termRow } = await supabase
+        .from("terminals")
+        .select("city, state")
+        .eq("terminal_id", terminalId)
+        .maybeSingle();
+      const city = (termRow as any)?.city ? normCity(String((termRow as any).city)) : "";
+      const state = (termRow as any)?.state ? normState(String((termRow as any).state)) : "";
+      if (!state) return;
+
+      hydratingRef.current = true;
+      skipResetRef.current = true;
+      setSelectedState(state);
+      setSelectedCity(city);
+      setSelectedTerminalId(terminalId);
+      setSelectedRackId(row?.rack_id ? String(row.rack_id) : "");
+      setTimeout(() => {
+        skipResetRef.current = false;
+        hydratingRef.current = false;
+      }, 50);
+    })();
+  }, [authUserId, effectiveLocKey]);
+
   // Mark user-touched after hydration
   useEffect(() => {
     if (!hydratedOnceRef.current) return;

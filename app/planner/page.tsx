@@ -1239,7 +1239,18 @@ export default function CalculatorPage() {
   // "switch equipment, then recall" path below, since both end the same
   // way once a report actually comes back.
   const applyRecalledReport = useCallback((report: any | null) => {
-    if (report) loadWorkflow.setLoadReport(report);
+    if (report) {
+      loadWorkflow.setLoadReport(report);
+      // planSlots.recallLastLoad() already called setCompPlan/setCgSlider
+      // (via applySnapshot) before this runs -- without this, the "Save
+      // Plan" button's dirty-check compared the just-recalled plan against
+      // whatever baseline was captured BEFORE the recall, so it showed up
+      // immediately even though nothing the driver actually did had
+      // changed anything yet. Same captureBaselineNext mechanism every
+      // other programmatic plan-load (preset tap, terminal/combo switch)
+      // already uses -- this was the one path that never set it.
+      setCaptureBaselineNext(true);
+    }
     if (report?.plan_slot) {
       setLastLoadedSlot(report.plan_slot);
       setActiveSlotLetter(report.plan_slot);
