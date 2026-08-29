@@ -5505,17 +5505,92 @@ before moving on.
   company-wide, not per-unit, and never actually needed a real unit id to
   manage — only *logging* a service against one does.
 
-**Not done yet, later phases**: `SoloEquipmentModal.tsx`'s Edit/unit-picker
-+ Filter button + onboarding auto-open + report section (Tare/Target
-merge, trailer's own "last serviced" line); `BinderModal.tsx`'s single-unit
-mode + required-fields header; `EquipmentModal.tsx` (fleet) Filter button +
+### Phase B — Main modal wiring (shipped this pass)
+
+- **New `app/planner/modals/UnitPickerSheet.tsx`** — small themed "Truck or
+  Trailer?" sheet, styled to match the existing confirm-dialog pattern
+  already used elsewhere in `SoloEquipmentModal.tsx` (commandeer/remove
+  confirmations), not a separate design system — that's what "match our
+  theme" means in the context this sheet actually appears in.
+- **New `app/planner/modals/RegionLocalAreaFilterModal.tsx`** — the Filter
+  button's destination: two big options (Region / Local Area), each
+  opening a list of the company's catalog entries to pick from (plus
+  "All Regions"/"All Areas"). `canManage` (always `true` for solo, since
+  a solo company's sole member is always `role: 'admin'`) gates inline
+  rename/soft-delete controls and a "+ Add" row — drivers (a later,
+  fleet-tier consumer of this same component) get select-only. This is
+  the ONE place the `equipment_regions`/`equipment_local_areas` catalogs
+  get renamed/removed; `RequiredEquipmentFields.tsx`'s own picker can only
+  add a brand-new entry, never rename/delete, so there's a single editor
+  per catalog.
+- **`SoloEquipmentModal.tsx` — Edit (was File)**: `openEdit()` skips the
+  new `UnitPickerSheet` entirely when only one unit is currently selected
+  (same "don't ask when there's nothing to choose between" precedent as
+  the outage-report product picker, 2026-08-28) and opens that unit's
+  `BinderModal` directly; with both selected, the sheet asks first.
+  Neither selected falls through to `BinderModal`'s own existing "Select
+  equipment first" empty state, unchanged.
+- **`SoloEquipmentModal.tsx` — Filter button**: added via
+  `FullscreenModal`'s existing `headerRight` slot (top right, per spec).
+  `filteredTrucks`/`filteredTrailers` (new `useMemo`s) narrow the grid to
+  matching Region/Local Area; a currently-selected unit that gets
+  filtered out of view stays selected (filtering is a display
+  convenience here, not an implicit deselect) -- only the list of other
+  options shrinks. `trucks`/`trailers` queries now also select
+  `region, local_area` (previously not fetched at all in this modal).
+- **`SoloEquipmentModal.tsx` — onboarding**: a new effect defaults straight
+  into Add Truck (then Add Trailer, once a truck is selected and no
+  trailer exists) when `trucks.length === 0`/`trailers.length === 0`,
+  instead of showing an empty grid with just a "+". Deliberately not a
+  literal unescapable trap -- canceling out of Add Truck just leaves the
+  empty grid+"+" visible (the effect's own dependency array doesn't
+  change from a cancel alone, so it won't immediately reopen) -- but
+  `SetupGate.tsx`'s own pre-existing hard gate (`comboSelected`) still
+  refuses to let the driver past the Equipment step at all until a real
+  combo exists, and reopening this modal from there re-runs the effect
+  and nudges again. `handleTruckAdded`/`handleTrailerAdded` auto-select
+  the just-added unit when it was the equipment's first one (captures
+  `wasEmpty` from the still-stale closure before `loadEquipment()`
+  refetches, so a genuinely-first add always has exactly one row to grab
+  -- no ordering/`created_at` column needed), continuing the forced
+  Truck → Trailer → Location sequence into `SetupGate`'s own next step
+  automatically.
+- **`SoloEquipmentModal.tsx` — report section**: Tare and Target merged
+  onto one row ("Tare / Target — 34,800 / 80,000 lbs", no "weight"/"gross
+  weight" wording), tap-anywhere still opens Scale History exactly as
+  either used to individually. Trailer's own report line is back, using
+  the new `mostRecentServiceForUnit()` helper (backward-looking last
+  date + type, e.g. "08/12/26 · Check & Inspect" — deliberately NOT the
+  truck's forward-looking `computeUnitServiceDue()`, since the spec asks
+  for what was done, not a due prediction) — `loadServiceAndWash` now
+  also queries the trailer's own `service_records`, which it previously
+  skipped entirely per the prior "truck-only" decision this reverses.
+- **`BinderModal.tsx` — single-unit mode + required fields**: already
+  structurally ready for one-unit-at-a-time (`UnitSection` already
+  rendered independently per `truckId`/`trailerId`) — `SoloEquipmentModal`
+  now simply never passes both at once. New `RequiredFieldsBlock`
+  (reuses `RequiredEquipmentFields.tsx`, the same component the Add/Edit
+  Truck/Trailer front page uses) renders always-visible, un-collapsed,
+  above the existing `UnitInfoRow` — which is trimmed down to just VIN/
+  Plate/Notes ("the rest, behind buttons" — already collapsed-then-edit,
+  needed no UX change, just no longer duplicating Year/Make/Model/Unit #
+  now that `RequiredFieldsBlock` owns those). `UnitDetail`/`detailCols`
+  extended with `region`/`local_area`. Modal title now reflects the
+  single unit shown (`"Truck · 25184"` / `"Trailer · 3151"`), falling
+  back to the generic "Equipment File" for the (now theoretical) both-or-
+  neither case. Known, accepted gap: renaming a Unit # here doesn't
+  refresh the caller's own `truckName`/`trailerName` prop within the same
+  Binder session (only picks up the new name once the caller's equipment
+  list reloads) — not worth a new callback chain for this cosmetic case.
+
+**Not done yet, Phase C**: `EquipmentModal.tsx` (fleet) Filter button +
 onboarding sequencing; `SimpleServiceModal`'s dual-unit-type rework for
 "servicing both together."
 
-`tsc --noEmit` and `next build` both clean. Not live-verified this pass —
-same reason as every authenticated equipment-flow change this session
-(no logged-in session available from this side). Migration not yet
-applied.
+`tsc --noEmit` and `next build` both clean after both phases. Not
+live-verified this pass — same reason as every authenticated
+equipment-flow change this session (no logged-in session available from
+this side). Migration not yet applied.
 
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.

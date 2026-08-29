@@ -19,6 +19,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { FullscreenModal } from "@/lib/ui/FullscreenModal";
 import { CustomSelect } from "@/lib/ui/CustomSelect";
+import { RequiredEquipmentFields } from "@/lib/ui/driver/RequiredEquipmentFields";
 import {
   usePermitAttachments, AttachmentIndicator, DocPreviewModal,
   type AttachmentRecord, type AttachmentGroup,
@@ -47,6 +48,8 @@ type UnitDetail = {
   vin_number: string | null;
   plate_number: string | null;
   notes: string | null;
+  region: string | null;
+  local_area: string | null;
 };
 
 type UnitKind = "truck" | "trailer";
@@ -311,21 +314,119 @@ function InfoField({ label, value, full, truncate }: { label: string; value: str
   );
 }
 
-function UnitInfoRow({
-  unitKind, unitId, unitName, detail, isExpanded, onToggleExpand, onSaved,
+// ─── Required fields -- big, un-collapsed, always visible ──────────────────
+// Per explicit follow-up ("required fields out front, big and easy to
+// use... the rest behind buttons"): Unit #/Year/Make/Model/Region/Local
+// Area now live here, always shown, using the same shared component the
+// new Add/Edit Truck/Trailer front page uses (lib/ui/driver/
+// RequiredEquipmentFields.tsx) -- one editor for these 6 fields, not two.
+// VIN/Plate/Notes stay in UnitInfoRow below, unchanged (already
+// collapsed-then-edit, already "behind a button").
+//
+// Known, accepted gap: renaming the Unit # here doesn't refresh the
+// caller's own truckName/trailerName prop (e.g. SoloEquipmentModal's
+// header/labels) within this same Binder session -- that only picks up
+// the new name the next time the caller's own equipment list reloads.
+// Not worth a new callback chain just for this cosmetic case.
+function RequiredFieldsBlock({
+  unitKind, unitId, unitName, companyId, detail, onSaved,
 }: {
   unitKind: UnitKind;
   unitId: string;
   unitName: string;
+  companyId: string;
+  detail: UnitDetail | null;
+  onSaved: () => void;
+}) {
+  const [name, setName] = useState(unitName);
+  const [year, setYear] = useState("");
+  const [make, setMake] = useState("");
+  const [model, setModel] = useState("");
+  const [region, setRegion] = useState("");
+  const [localArea, setLocalArea] = useState("");
+  const [dirty, setDirty] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    setName(unitName);
+    setYear(detail?.year != null ? String(detail.year) : "");
+    setMake(detail?.make ?? "");
+    setModel(detail?.model ?? "");
+    setRegion(detail?.region ?? "");
+    setLocalArea(detail?.local_area ?? "");
+    setDirty(false);
+    setErr(null);
+  }, [unitName, detail]);
+
+  function markDirty<T>(setter: (v: T) => void) {
+    return (v: T) => { setter(v); setDirty(true); };
+  }
+
+  async function save() {
+    if (!name.trim()) { setErr("Unit # is required."); return; }
+    setBusy(true);
+    setErr(null);
+    try {
+      const table = unitKind === "truck" ? "trucks" : "trailers";
+      const idCol = unitKind === "truck" ? "truck_id" : "trailer_id";
+      const nameCol = unitKind === "truck" ? "truck_name" : "trailer_name";
+      const patch: any = {
+        [nameCol]: name.trim(),
+        year: year.trim() ? Number(year) : null,
+        make: make.trim() || null,
+        model: model.trim() || null,
+        region: region || null,
+        local_area: localArea || null,
+      };
+      const { error } = await supabase.from(table).update(patch).eq(idCol, unitId);
+      if (error) throw error;
+      setDirty(false);
+      onSaved();
+    } catch (e: any) {
+      setErr(e?.message ?? "Failed to save.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <div style={{ fontSize: 13, fontWeight: 800, color: "rgba(255,255,255,0.5)", letterSpacing: 0.5, textTransform: "uppercase" as const, marginBottom: 10 }}>
+        {unitKind === "truck" ? "Truck" : "Trailer"}
+      </div>
+      {err && <div style={{ color: "#fca5a5", fontSize: 12, marginBottom: 8 }}>{err}</div>}
+      <RequiredEquipmentFields
+        kind={unitKind} companyId={companyId} editable
+        name={name} onNameChange={markDirty(setName)}
+        year={year} onYearChange={markDirty(setYear)}
+        make={make} onMakeChange={markDirty(setMake)}
+        model={model} onModelChange={markDirty(setModel)}
+        region={region} onRegionChange={markDirty(setRegion)}
+        localArea={localArea} onLocalAreaChange={markDirty(setLocalArea)}
+      />
+      {dirty && (
+        <button type="button" onClick={save} disabled={busy} style={{ ...saveBtnStyle, marginTop: 12 }}>
+          {busy ? "Saving…" : "Save"}
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ─── VIN / Plate / Notes -- "the rest," collapsed then edit ────────────────
+
+function UnitInfoRow({
+  unitKind, unitId, detail, isExpanded, onToggleExpand, onSaved,
+}: {
+  unitKind: UnitKind;
+  unitId: string;
   detail: UnitDetail | null;
   isExpanded: boolean;
   onToggleExpand: () => void;
   onSaved: () => void;
 }) {
   const [editing, setEditing] = useState(false);
-  const [year, setYear] = useState("");
-  const [make, setMake] = useState("");
-  const [model, setModel] = useState("");
   const [vin, setVin] = useState("");
   const [plate, setPlate] = useState("");
   const [notes, setNotes] = useState("");
@@ -334,9 +435,6 @@ function UnitInfoRow({
 
   useEffect(() => {
     if (!isExpanded) { setEditing(false); return; }
-    setYear(detail?.year != null ? String(detail.year) : "");
-    setMake(detail?.make ?? "");
-    setModel(detail?.model ?? "");
     setVin(detail?.vin_number ?? "");
     setPlate(detail?.plate_number ?? "");
     setNotes(detail?.notes ?? "");
@@ -350,9 +448,6 @@ function UnitInfoRow({
       const table = unitKind === "truck" ? "trucks" : "trailers";
       const idCol = unitKind === "truck" ? "truck_id" : "trailer_id";
       const patch = {
-        year: year.trim() ? Number(year) : null,
-        make: make.trim() || null,
-        model: model.trim() || null,
         vin_number: vin.trim() || null,
         plate_number: plate.trim() || null,
         notes: notes.trim() || null,
@@ -368,15 +463,13 @@ function UnitInfoRow({
     }
   }
 
-  const summary = [detail?.year, detail?.make, detail?.model].filter(Boolean).join(" ");
-
   return (
     <div style={{ marginBottom: 8 }}>
       <div onClick={onToggleExpand} style={{ display: "flex", alignItems: "baseline", gap: 8, cursor: "pointer", padding: "2px 0 8px" }}>
-        <span style={{ fontSize: 13, fontWeight: 800, color: "rgba(255,255,255,0.5)", letterSpacing: 0.5, textTransform: "uppercase" as const }}>
-          {unitKind === "truck" ? "Truck" : "Trailer"} · {unitName}
+        <span style={{ fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.4)" }}>
+          VIN / Plate / Notes
         </span>
-        {summary && <span style={{ fontSize: 12, color: "rgba(255,255,255,0.3)", textTransform: "none" as const }}>{summary}</span>}
+        <span style={{ fontSize: 9, color: "rgba(255,255,255,0.3)", transform: isExpanded ? "rotate(180deg)" : "none", transition: "transform 150ms" }}>▼</span>
       </div>
 
       {isExpanded && (
@@ -386,9 +479,6 @@ function UnitInfoRow({
           {!editing ? (
             <>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 12 }}>
-                <InfoField label="Year" value={detail?.year != null ? String(detail.year) : "—"} />
-                <InfoField label="Make" value={detail?.make || "—"} />
-                <InfoField label="Model" value={detail?.model || "—"} />
                 <InfoField label="Plate" value={detail?.plate_number || "—"} />
                 <InfoField label="VIN" value={detail?.vin_number || "—"} full />
                 {detail?.notes && <InfoField label="Notes" value={detail.notes} full truncate />}
@@ -397,11 +487,9 @@ function UnitInfoRow({
             </>
           ) : (
             <>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
-                <div><label style={labelStyle}>Year</label><input type="number" value={year} onChange={(e) => setYear(e.target.value)} style={inputStyle} /></div>
-                <div><label style={labelStyle}>Make</label><input value={make} onChange={(e) => setMake(e.target.value)} style={inputStyle} /></div>
-                <div><label style={labelStyle}>Model</label><input value={model} onChange={(e) => setModel(e.target.value)} style={inputStyle} /></div>
-                <div><label style={labelStyle}>Plate</label><input value={plate} onChange={(e) => setPlate(e.target.value)} style={inputStyle} /></div>
+              <div style={{ marginBottom: 10 }}>
+                <label style={labelStyle}>Plate</label>
+                <input value={plate} onChange={(e) => setPlate(e.target.value)} style={inputStyle} />
               </div>
               <div style={{ marginBottom: 10 }}>
                 <label style={labelStyle}>VIN</label>
@@ -568,8 +656,12 @@ function UnitSection({
 
   return (
     <div style={{ marginBottom: 18 }}>
+      <RequiredFieldsBlock
+        unitKind={unitKind} unitId={unitId} unitName={unitName} companyId={companyId} detail={detail}
+        onSaved={onSaved}
+      />
       <UnitInfoRow
-        unitKind={unitKind} unitId={unitId} unitName={unitName} detail={detail}
+        unitKind={unitKind} unitId={unitId} detail={detail}
         isExpanded={expandedId === `${unitKind}-info`}
         onToggleExpand={() => onToggleExpand(`${unitKind}-info`)}
         onSaved={onSaved}
@@ -854,7 +946,7 @@ export default function BinderModal({
   const [typeEditor, setTypeEditor] = useState<{ mode: "new" | "edit"; type: PermitType | null; unit: UnitKind; initialName?: string } | null>(null);
   const [addPicker, setAddPicker] = useState<UnitKind | null>(null);
 
-  const detailCols = "year, make, model, vin_number, plate_number, notes";
+  const detailCols = "year, make, model, vin_number, plate_number, notes, region, local_area";
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -888,9 +980,18 @@ export default function BinderModal({
     setExpandedId((cur) => (cur === id ? null : id));
   }
 
+  // Reflects whichever single unit this Binder is actually scoped to --
+  // Edit now always opens it single-unit (see SoloEquipmentModal.tsx's
+  // openEdit()). Generic "Equipment File" is kept as the fallback for any
+  // caller still passing both truckId and trailerId, or neither.
+  const modalTitle =
+    truckId && !trailerId ? `Truck · ${truckName ?? "File"}` :
+    trailerId && !truckId ? `Trailer · ${trailerName ?? "File"}` :
+    "Equipment File";
+
   return (
     <>
-      <FullscreenModal open={open} onClose={onClose} title="Equipment File" footer={null}>
+      <FullscreenModal open={open} onClose={onClose} title={modalTitle} footer={null}>
         {loading && <div style={{ textAlign: "center" as const, color: "rgba(255,255,255,0.3)", fontSize: 13, padding: "24px 0" }}>Loading…</div>}
         {!loading && !truckId && !trailerId && (
           <div style={{ textAlign: "center" as const, color: "rgba(255,255,255,0.3)", fontSize: 13, padding: "24px 0" }}>Select equipment first.</div>

@@ -31,11 +31,13 @@ import RecordHistoryModal from "./RecordHistoryModal";
 import BinderModal from "./BinderModal";
 import { TruckModal as AdminTruckModal, TrailerModal as AdminTrailerModal } from "@/lib/ui/driver/EquipmentDetails";
 import { type ServiceType, ServiceTypeSelect, ServiceTypeEditorModal, SimpleServiceModal } from "./ServiceTypeManager";
+import UnitPickerSheet from "./UnitPickerSheet";
+import RegionLocalAreaFilterModal, { type EquipmentFilter } from "./RegionLocalAreaFilterModal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type TruckRow = { truck_id: string; truck_name: string; active: boolean | null };
-type TrailerRow = { trailer_id: string; trailer_name: string; active: boolean | null };
+type TruckRow = { truck_id: string; truck_name: string; active: boolean | null; region: string | null; local_area: string | null };
+type TrailerRow = { trailer_id: string; trailer_name: string; active: boolean | null; region: string | null; local_area: string | null };
 type ComboRow = {
   combo_id: string;
   truck_id: string | null;
@@ -337,6 +339,36 @@ export function computeUnitServiceDue(
   return { unitLabel, typeName, display: `Due at ${nextReading.toLocaleString()} ${unitWord}` };
 }
 
+export type UnitLastService = { unitLabel: "Truck" | "Trailer"; typeName: string | null; display: string };
+
+/**
+ * Backward-looking, unlike computeUnitServiceDue's forward-looking "next
+ * due" -- per explicit spec, the trailer's own report line shows the date
+ * (short form) and type of its MOST RECENT service, not a due prediction.
+ * Trailers may not have a configured interval at all (service types can
+ * be duration/miles/hours/none), so "due" often isn't even computable for
+ * them -- but even when it is, this line is deliberately about what
+ * already happened, matching "the trailer line should show the date...
+ * and the type of service done."
+ */
+export function mostRecentServiceForUnit(
+  unitLabel: "Truck" | "Trailer",
+  records: ServiceRecordLite[],
+  types: ServiceType[],
+): UnitLastService {
+  const applicable = records.filter((r) => {
+    const type = types.find((t) => t.service_type_id === r.service_type_id);
+    return !type || type.applies_to === "both" || type.applies_to === unitLabel.toLowerCase();
+  });
+  if (!applicable.length) return { unitLabel, typeName: null, display: "No service recorded" };
+  const latest = applicable.reduce((a, b) =>
+    b.date !== a.date ? (b.date > a.date ? b : a) : (b.created_at > a.created_at ? b : a)
+  );
+  const type = types.find((t) => t.service_type_id === latest.service_type_id) ?? null;
+  const short = new Date(latest.date).toLocaleDateString(undefined, { month: "2-digit", day: "2-digit", year: "2-digit" });
+  return { unitLabel, typeName: type?.name ?? "Service", display: `${short} · ${type?.name ?? "Service"}` };
+}
+
 function computeWashLines(truckWashedAt: string | null, trailerWashedAt: string | null): UnitWash[] {
   const sameDay = !!truckWashedAt && !!trailerWashedAt && truckWashedAt.slice(0, 10) === trailerWashedAt.slice(0, 10);
   if (sameDay) return [{ unitLabel: "Both", display: fmtDate(truckWashedAt!) }];
@@ -370,6 +402,10 @@ export default function SoloEquipmentModal({
 
   const [serviceTypes, setServiceTypes] = useState<ServiceType[]>([]);
   const [serviceLines, setServiceLines] = useState<UnitServiceDue[]>([]);
+  // Trailer's own report line, separate from serviceLines (truck's forward-
+  // looking "next due") -- backward-looking last-serviced, see
+  // mostRecentServiceForUnit's own header comment.
+  const [trailerServiceLine, setTrailerServiceLine] = useState<UnitLastService | null>(null);
   const [washLines, setWashLines] = useState<UnitWash[]>([]);
 
   const [scaleOpen, setScaleOpen] = useState(false);
@@ -378,7 +414,17 @@ export default function SoloEquipmentModal({
   const [washOpen, setWashOpen] = useState(false);
   const [serviceHistoryOpen, setServiceHistoryOpen] = useState(false);
   const [washHistoryOpen, setWashHistoryOpen] = useState(false);
+  // Edit (was "File") -- pick which unit, then that unit's Binder only.
+  // binderOpen gates visibility; binderUnit narrows which id(s) it's
+  // scoped to (null = neither selected, Binder falls back to its own
+  // existing "Select equipment first" empty state). editPickerOpen gates
+  // the picker sheet itself, shown only when both units are selected --
+  // see openEdit().
   const [binderOpen, setBinderOpen] = useState(false);
+  const [binderUnit, setBinderUnit] = useState<"truck" | "trailer" | null>(null);
+  const [editPickerOpen, setEditPickerOpen] = useState(false);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [filter, setFilter] = useState<EquipmentFilter>({ region: null, localArea: null });
   const [addTruckOpen, setAddTruckOpen] = useState(false);
   const [addTrailerOpen, setAddTrailerOpen] = useState(false);
   const [removeTarget, setRemoveTarget] = useState<
@@ -407,8 +453,8 @@ export default function SoloEquipmentModal({
     setLoading(true);
     setError(null);
     const [{ data: t, error: tErr }, { data: tr, error: trErr }, { data: c, error: cErr }] = await Promise.all([
-      supabase.from("trucks").select("truck_id, truck_name, active").eq("company_id", companyId).eq("active", true).order("truck_name"),
-      supabase.from("trailers").select("trailer_id, trailer_name, active").eq("company_id", companyId).eq("active", true).order("trailer_name"),
+      supabase.from("trucks").select("truck_id, truck_name, active, region, local_area").eq("company_id", companyId).eq("active", true).order("truck_name"),
+      supabase.from("trailers").select("trailer_id, trailer_name, active, region, local_area").eq("company_id", companyId).eq("active", true).order("trailer_name"),
       supabase.from("equipment_combos").select("combo_id, truck_id, trailer_id, tare_lbs, target_weight, active, claimed_by").eq("company_id", companyId).eq("active", true),
     ]);
     if (tErr || trErr || cErr) {
@@ -457,13 +503,14 @@ export default function SoloEquipmentModal({
   // here would silently show "No service recorded" right after a successful
   // save. A fresh, uncached fetch sidesteps the staleness entirely.
   const loadServiceAndWash = useCallback(async (truckId: string | null, trailerId: string | null) => {
-    if (!truckId && !trailerId) { setServiceLines([]); setWashLines([]); return; }
+    if (!truckId && !trailerId) { setServiceLines([]); setTrailerServiceLine(null); setWashLines([]); return; }
 
     const { data: typesData } = await supabase
       .from("service_types").select("service_type_id, name, interval_kind, interval_value, applies_to, is_active").eq("company_id", companyId);
     const types = (typesData ?? []) as ServiceType[];
 
     const serviceResults: UnitServiceDue[] = [];
+    let trailerLine: UnitLastService | null = null;
     let truckWashedAt: string | null = null;
     let trailerWashedAt: string | null = null;
 
@@ -476,15 +523,20 @@ export default function SoloEquipmentModal({
       truckWashedAt = (washes ?? [])[0]?.washed_at ?? null;
     }
     if (trailerId) {
-      // Service due is deliberately truck-only in the report section below
-      // (per explicit direction: "just the trucks next service due") -- so
-      // this only needs the trailer's wash record, not a service query too.
-      const { data: washes } = await supabase
-        .from("wash_records").select("washed_at").eq("trailer_id", trailerId).order("washed_at", { ascending: false }).limit(1);
+      // Trailer's own report line -- brought back per explicit follow-up
+      // ("we want to add the trailer report line under the truck again").
+      // Backward-looking (last serviced), not the truck's forward-looking
+      // "next due" -- see mostRecentServiceForUnit's own header comment.
+      const [{ data: records }, { data: washes }] = await Promise.all([
+        supabase.from("service_records").select("service_type_id, date, reading_value, created_at").eq("trailer_id", trailerId),
+        supabase.from("wash_records").select("washed_at").eq("trailer_id", trailerId).order("washed_at", { ascending: false }).limit(1),
+      ]);
+      trailerLine = mostRecentServiceForUnit("Trailer", (records ?? []) as any, types);
       trailerWashedAt = (washes ?? [])[0]?.washed_at ?? null;
     }
 
     setServiceLines(serviceResults);
+    setTrailerServiceLine(trailerLine);
     setWashLines(computeWashLines(truckWashedAt, trailerWashedAt));
   }, [companyId]);
 
@@ -506,6 +558,27 @@ export default function SoloEquipmentModal({
     if (!open) return;
     void loadServiceAndWash(selectedTruckId, selectedTrailerId);
   }, [open, selectedTruckId, selectedTrailerId, loadServiceAndWash]);
+
+  // ── Onboarding: default straight into Add Truck -> Add Trailer when
+  // nothing is on file yet ──────────────────────────────────────────────
+  // Per explicit spec: "If there are no equipment user must add a Truck.
+  // After a truck has been added, it gets selected and a trailer is
+  // required. Then it is automatically selected and the requirements move
+  // on to location." This nudges the driver straight into the Add flow
+  // instead of an empty grid with just a "+" -- it's not a literal trap
+  // (canceling out of Add Truck just leaves the empty grid+"+" showing,
+  // since the effect's own deps below don't change from that alone, so it
+  // won't immediately reopen), but SetupGate's own outer hard gate
+  // (comboSelected) still refuses to let the driver past Equipment at all
+  // until a real combo exists -- reopening this modal from there re-runs
+  // this effect and nudges again. Fires for ANY zero-equipment state, not
+  // just first-time signup, since that's the literal condition described
+  // (no equipment on file), not "new company only."
+  useEffect(() => {
+    if (!open || loading) return;
+    if (trucks.length === 0) { setAddTruckOpen(true); return; }
+    if (trailers.length === 0 && selectedTruckId) { setAddTrailerOpen(true); }
+  }, [open, loading, trucks.length, trailers.length, selectedTruckId]);
 
   // ── Actions ──────────────────────────────────────────────────────────────
   //
@@ -623,6 +696,41 @@ export default function SoloEquipmentModal({
     void resolvePair(selectedTruckId, next);
   }
 
+  // Auto-select the just-added truck/trailer when it's this equipment's
+  // first one -- "wasEmpty" is captured from the still-stale `trucks`/
+  // `trailers` closure BEFORE loadEquipment() refetches, so after a
+  // genuinely-first add there's exactly one row to grab, no ordering or
+  // created_at column needed.
+  async function handleTruckAdded() {
+    const wasEmpty = trucks.length === 0;
+    setAddTruckOpen(false);
+    await loadEquipment();
+    if (wasEmpty) {
+      const { data } = await supabase.from("trucks").select("truck_id").eq("company_id", companyId).eq("active", true).limit(1).maybeSingle();
+      if ((data as any)?.truck_id) toggleTruck(String((data as any).truck_id));
+    }
+  }
+  async function handleTrailerAdded() {
+    const wasEmpty = trailers.length === 0;
+    setAddTrailerOpen(false);
+    await loadEquipment();
+    if (wasEmpty) {
+      const { data } = await supabase.from("trailers").select("trailer_id").eq("company_id", companyId).eq("active", true).limit(1).maybeSingle();
+      if ((data as any)?.trailer_id) toggleTrailer(String((data as any).trailer_id));
+    }
+  }
+
+  // Edit (was "File") -- skip the unit picker entirely when only one unit
+  // is currently selected (same "don't ask when there's nothing to choose
+  // between" precedent as the outage-report product picker), otherwise
+  // ask which unit. Neither selected falls through to Binder's own
+  // existing "Select equipment first" empty state.
+  function openEdit() {
+    if (selectedTruckId && selectedTrailerId) { setEditPickerOpen(true); return; }
+    setBinderUnit(selectedTruckId ? "truck" : selectedTrailerId ? "trailer" : null);
+    setBinderOpen(true);
+  }
+
   function confirmCommandeer() {
     if (!commandeerTarget) return;
     const { kind, id } = commandeerTarget;
@@ -677,12 +785,46 @@ export default function SoloEquipmentModal({
     [combos, selectedComboId]
   );
 
+  // Filter button's result -- narrows the grid to matching Region/Local
+  // Area. A currently-selected truck/trailer that gets filtered out stays
+  // selected (filtering is a display convenience, not a deselect) -- only
+  // the visible list of OTHER options shrinks.
+  const filteredTrucks = useMemo(
+    () => trucks.filter((t) =>
+      (!filter.region || t.region === filter.region) &&
+      (!filter.localArea || t.local_area === filter.localArea)
+    ),
+    [trucks, filter]
+  );
+  const filteredTrailers = useMemo(
+    () => trailers.filter((t) =>
+      (!filter.region || t.region === filter.region) &&
+      (!filter.localArea || t.local_area === filter.localArea)
+    ),
+    [trailers, filter]
+  );
+
   const truckLongPress = (t: TruckRow) => createLongPress(() => setRemoveTarget({ kind: "truck", id: t.truck_id, name: t.truck_name }));
   const trailerLongPress = (t: TrailerRow) => createLongPress(() => setRemoveTarget({ kind: "trailer", id: t.trailer_id, name: t.trailer_name }));
 
   return (
     <>
-      <FullscreenModal open={open} onClose={onClose} title="Equipment" footer={null}>
+      <FullscreenModal
+        open={open} onClose={onClose} title="Equipment" footer={null}
+        headerRight={
+          <button
+            type="button"
+            onClick={() => setFilterOpen(true)}
+            style={{
+              background: "none", border: "none", cursor: "pointer",
+              color: (filter.region || filter.localArea) ? "#fff" : "rgba(255,255,255,0.4)",
+              fontSize: 12, fontWeight: 800, letterSpacing: 0.3,
+            }}
+          >
+            Filter{(filter.region || filter.localArea) ? " •" : ""}
+          </button>
+        }
+      >
         <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
 
           {error && (
@@ -697,7 +839,7 @@ export default function SoloEquipmentModal({
               <div>
                 <div style={S.sectionHeader}>Trucks</div>
                 <div style={{ display: "grid", gap: 8 }}>
-                  {trucks.map((t) => {
+                  {filteredTrucks.map((t) => {
                     const selected = t.truck_id === selectedTruckId;
                     const { didFire, ...lpHandlers } = truckLongPress(t);
                     return (
@@ -719,7 +861,7 @@ export default function SoloEquipmentModal({
               <div>
                 <div style={S.sectionHeader}>Trailers</div>
                 <div style={{ display: "grid", gap: 8 }}>
-                  {trailers.map((t) => {
+                  {filteredTrailers.map((t) => {
                     const selected = t.trailer_id === selectedTrailerId;
                     const { didFire, ...lpHandlers } = trailerLongPress(t);
                     return (
@@ -751,20 +893,22 @@ export default function SoloEquipmentModal({
 
           {/* ── Report section (non-scrolling) ── */}
           <div style={{ flexShrink: 0 }}>
-            {selectedCombo && Number(selectedCombo.tare_lbs ?? 0) > 0 && (
+            {/* Tare + Target merged onto one row per explicit follow-up
+                ("no need to say weight or gross weight just tare and
+                target. the 'lbs' speaks for itself") -- tap anywhere on
+                the row still opens Scale History, same as either used to
+                individually. */}
+            {selectedCombo && (Number(selectedCombo.tare_lbs ?? 0) > 0 || Number(selectedCombo.target_weight ?? 0) > 0) && (
               <div style={S.reportLine} onClick={() => setScaleHistoryOpen(true)}>
-                <span style={S.reportLabel}>Tare weight</span>
-                <span style={{ fontWeight: 900, color: COLOR_TARE }}>{Number(selectedCombo.tare_lbs).toLocaleString()} lbs</span>
+                <span style={S.reportLabel}>Tare / Target</span>
+                <span style={{ fontWeight: 900, color: COLOR_TARE }}>
+                  {Number(selectedCombo.tare_lbs ?? 0) > 0 ? `${Number(selectedCombo.tare_lbs).toLocaleString()}` : "—"}
+                  {" / "}
+                  {Number(selectedCombo.target_weight ?? 0) > 0 ? `${Number(selectedCombo.target_weight).toLocaleString()}` : "—"}
+                  {" lbs"}
+                </span>
               </div>
             )}
-            {selectedCombo && Number(selectedCombo.target_weight ?? 0) > 0 && (
-              <div style={S.reportLine} onClick={() => setScaleHistoryOpen(true)}>
-                <span style={S.reportLabel}>Target gross weight</span>
-                <span style={{ fontWeight: 900, color: COLOR_TARE }}>{Number(selectedCombo.target_weight).toLocaleString()} lbs</span>
-              </div>
-            )}
-            {/* Truck-only -- see loadServiceAndWash's own comment for why
-                the trailer's service due was dropped from this line. */}
             {serviceLines.length > 0 ? (
               <div style={S.reportLine} onClick={() => setServiceHistoryOpen(true)}>
                 <span style={S.reportLabel}>Next Service{serviceLines[0].typeName ? ` · ${serviceLines[0].typeName}` : ""}</span>
@@ -774,6 +918,16 @@ export default function SoloEquipmentModal({
               <div style={S.reportLine} onClick={() => setServiceHistoryOpen(true)}>
                 <span style={S.reportLabel}>Next Service</span>
                 <span style={{ fontWeight: 900, color: COLOR_SERVICE }}>No service recorded</span>
+              </div>
+            )}
+            {/* Trailer's own line, brought back per explicit follow-up --
+                backward-looking (last serviced), not a due prediction,
+                see mostRecentServiceForUnit's own header comment. Only
+                shown once a trailer is actually selected. */}
+            {selectedTrailerId && trailerServiceLine && (
+              <div style={S.reportLine} onClick={() => setServiceHistoryOpen(true)}>
+                <span style={S.reportLabel}>Trailer Serviced</span>
+                <span style={{ fontWeight: 900, color: COLOR_SERVICE, fontSize: 13 }}>{trailerServiceLine.display}</span>
               </div>
             )}
             {washLines.length > 0 ? (
@@ -798,7 +952,7 @@ export default function SoloEquipmentModal({
               <div style={S.actionBtn()} onClick={() => setScaleOpen(true)}>Scale</div>
               <div style={S.actionBtn()} onClick={() => setServiceOpen(true)}>Service</div>
               <div style={S.actionBtn()} onClick={() => setWashOpen(true)}>Wash</div>
-              <div style={S.actionBtn()} onClick={() => setBinderOpen(true)}>File</div>
+              <div style={S.actionBtn()} onClick={openEdit}>Edit</div>
             </div>
 
             {/* This modal opts out of FullscreenModal's own default Done
@@ -889,23 +1043,54 @@ export default function SoloEquipmentModal({
         onChanged={() => loadServiceAndWash(selectedTruckId, selectedTrailerId)}
       />
 
-      {/* ── Binder (§7) ── */}
+      {/* ── Binder (§7) -- scoped to ONE unit at a time now (Edit picks
+          which), per explicit follow-up: "Right now it is both units in
+          one. We want to pick the unit, truck or trailer, then open it's
+          binder." Neither selected (binderUnit === null) falls through to
+          Binder's own existing "Select equipment first" empty state. ── */}
       <BinderModal
         open={binderOpen}
         onClose={() => setBinderOpen(false)}
         companyId={companyId}
-        truckId={selectedTruckId}
-        trailerId={selectedTrailerId}
+        truckId={binderUnit === "truck" ? selectedTruckId : null}
+        trailerId={binderUnit === "trailer" ? selectedTrailerId : null}
         truckName={trucks.find((t) => t.truck_id === selectedTruckId)?.truck_name}
         trailerName={trailers.find((t) => t.trailer_id === selectedTrailerId)?.trailer_name}
       />
 
-      {/* ── Add new truck / trailer ── */}
+      {/* ── Edit: pick which unit (only shown when both are selected --
+          openEdit() skips straight to Binder otherwise) ── */}
+      <UnitPickerSheet
+        open={editPickerOpen}
+        truckName={trucks.find((t) => t.truck_id === selectedTruckId)?.truck_name ?? null}
+        trailerName={trailers.find((t) => t.trailer_id === selectedTrailerId)?.trailer_name ?? null}
+        onPickTruck={() => { setEditPickerOpen(false); setBinderUnit("truck"); setBinderOpen(true); }}
+        onPickTrailer={() => { setEditPickerOpen(false); setBinderUnit("trailer"); setBinderOpen(true); }}
+        onCancel={() => setEditPickerOpen(false)}
+      />
+
+      {/* ── Filter (top right of main modal) ── */}
+      <RegionLocalAreaFilterModal
+        open={filterOpen}
+        onClose={() => setFilterOpen(false)}
+        companyId={companyId}
+        // Solo companies' sole member is always role='admin' (existing
+        // solo-provisioning architecture) -- no myRole prop needed here to
+        // decide add/edit/remove access, unlike the fleet-tier equivalent.
+        canManage
+        filter={filter}
+        onChange={setFilter}
+      />
+
+      {/* ── Add new truck / trailer -- onDone also auto-selects when this
+          was the equipment's first one (see handleTruckAdded/
+          handleTrailerAdded's own comment), continuing the forced
+          Truck -> Trailer -> Location onboarding sequence. ── */}
       {addTruckOpen && (
-        <AdminTruckModal truck={null} companyId={companyId} onClose={() => setAddTruckOpen(false)} onDone={() => { setAddTruckOpen(false); loadEquipment(); }} />
+        <AdminTruckModal truck={null} companyId={companyId} onClose={() => setAddTruckOpen(false)} onDone={handleTruckAdded} />
       )}
       {addTrailerOpen && (
-        <AdminTrailerModal trailer={null} companyId={companyId} onClose={() => setAddTrailerOpen(false)} onDone={() => { setAddTrailerOpen(false); loadEquipment(); }} />
+        <AdminTrailerModal trailer={null} companyId={companyId} onClose={() => setAddTrailerOpen(false)} onDone={handleTrailerAdded} />
       )}
 
       {/* ── Commandeer confirmation -- selecting a truck/trailer another
