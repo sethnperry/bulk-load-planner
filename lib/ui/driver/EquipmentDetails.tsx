@@ -10,7 +10,8 @@ import {
   TRUCK_CATEGORIES, TRAILER_CATEGORIES,
   type EquipmentType, type AttachmentGroup,
 } from "@/lib/ui/driver/DocHub";
-import { type ServiceType, fetchServiceTypes, SimpleServiceModal } from "@/app/planner/modals/ServiceTypeManager";
+import { type ServiceType, fetchServiceTypes, SimpleServiceModal, ServiceTypeListModal } from "@/app/planner/modals/ServiceTypeManager";
+import { RequiredEquipmentFields } from "@/lib/ui/driver/RequiredEquipmentFields";
 
 // Types
 // ─────────────────────────────────────────────────────────────
@@ -727,10 +728,17 @@ const emptySensitive: SensitiveData = { purchase_price: "", purchase_date: "", l
 // modal, service type management has never been role-restricted in the
 // solo flow this came from, and the user explicitly asked that stay true
 // here too ("everyone should be able to edit").
-function ServiceSection({ unitKind, unitId, unitName, companyId }: {
+//
+// 2026-08-29: externally controlled (open/onClose props) instead of owning
+// its own button+state -- the new front-page "Service Schedule" button
+// (TruckModal/TrailerModal) now drives this directly, opening either this
+// (an existing, real unit) or ServiceTypeListModal (isNew, no unit id yet)
+// depending on isNew. Was ServiceSection; renamed since it's no longer a
+// self-contained page section, just the log-a-service modal.
+function ServiceLogModal({ open, onClose, unitKind, unitId, unitName, companyId }: {
+  open: boolean; onClose: () => void;
   unitKind: "truck" | "trailer"; unitId: string; unitName: string; companyId: string;
 }) {
-  const [open, setOpen] = useState(false);
   const [authUserId, setAuthUserId] = useState<string | null>(null);
   const [serviceTypes, setServiceTypes] = useState<ServiceType[]>([]);
 
@@ -744,25 +752,19 @@ function ServiceSection({ unitKind, unitId, unitName, companyId }: {
   useEffect(() => { if (companyId) reloadTypes(); }, [companyId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div style={{ marginTop: 10, marginBottom: 10 }}>
-      <button type="button" onClick={() => setOpen(true)}
-        style={{ ...css.btn("subtle"), fontSize: 11, width: "100%", textAlign: "left" as const }}>
-        Log Service / Manage Service Types
-      </button>
-      <SimpleServiceModal
-        open={open}
-        onClose={() => setOpen(false)}
-        companyId={companyId}
-        authUserId={authUserId}
-        truckId={unitKind === "truck" ? unitId : null}
-        trailerId={unitKind === "trailer" ? unitId : null}
-        truckName={unitKind === "truck" ? unitName : null}
-        trailerName={unitKind === "trailer" ? unitName : null}
-        serviceTypes={serviceTypes}
-        onTypesChanged={reloadTypes}
-        onSaved={() => {}}
-      />
-    </div>
+    <SimpleServiceModal
+      open={open}
+      onClose={onClose}
+      companyId={companyId}
+      authUserId={authUserId}
+      truckId={unitKind === "truck" ? unitId : null}
+      trailerId={unitKind === "trailer" ? unitId : null}
+      truckName={unitKind === "truck" ? unitName : null}
+      trailerName={unitKind === "trailer" ? unitName : null}
+      serviceTypes={serviceTypes}
+      onTypesChanged={reloadTypes}
+      onSaved={() => {}}
+    />
   );
 }
 
@@ -862,7 +864,16 @@ function TruckModal({ truck, companyId, onClose, onDone, myRole }: {
   const [make,      setMake]      = useState(truck?.make ?? "");
   const [model,     setModel]     = useState(truck?.model ?? "");
   const [year,      setYear]      = useState(String(truck?.year ?? ""));
+  const [region,    setRegion]    = useState(truck?.region ?? "");
+  const [localArea, setLocalArea] = useState(truck?.local_area ?? "");
   const [active,    setActive]    = useState(truck?.active ?? true);
+  // 2026-08-29 rework: front page (required fields) vs. Details (everything
+  // else, unchanged) -- one form/save either way, this only controls what's
+  // currently visible. serviceOpen drives whichever service modal fits
+  // (ServiceTypeListModal pre-save, ServiceLogModal once a real truck_id
+  // exists) from the one "Service Schedule" button.
+  const [screen,      setScreen]      = useState<"front" | "details">("front");
+  const [serviceOpen, setServiceOpen] = useState(false);
   // Permit dates
   const [regExp,    setRegExp]    = useState(truck?.reg_expiration_date ?? "");
   const [regEnf,    setRegEnf]    = useState(truck?.reg_enforcement_date ?? "");
@@ -916,7 +927,8 @@ function TruckModal({ truck, companyId, onClose, onDone, myRole }: {
     setSaving(true); setErr(null);
     const payload: any = {
       truck_name: name.trim(), vin_number: vin || null, plate_number: plate || null, make: make || null, model: model || null,
-      year: year ? parseInt(year) : null, active, company_id: companyId,
+      year: year ? parseInt(year) : null, region: region || null, local_area: localArea || null,
+      active, company_id: companyId,
       reg_expiration_date: regExp || null, reg_enforcement_date: regEnf || null,
       inspection_shop: insShop || null, inspection_issue_date: insIssue || null, inspection_expiration_date: insExp || null,
       inspection_enforcement_date: insEnf || null, inspection_notes: insNotes || null,
@@ -980,103 +992,134 @@ function TruckModal({ truck, companyId, onClose, onDone, myRole }: {
       style={{ ...css.input, ...sm, ...(locked ? { opacity: 0.55, cursor: "not-allowed" as const } : {}) }} />
   );
 
+  const saveCloseBtn = canEditRestricted && (
+    <button style={{ ...css.btn("primary"), flex: "1 1 0", minWidth: 80, textAlign: "center" as const }} onClick={save} disabled={saving}>
+      {saving ? "Saving…" : "Save & Close"}
+    </button>
+  );
+
   return (
     <Modal title={isNew ? "Add Truck" : "Edit Truck"} onClose={onClose} wide>
       {err && <Banner msg={err} type="error" />}
 
-      {/* ── Identification ── */}
-      {/* Row 1: Unit · VIN · Plate */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "6px 10px", marginBottom: 6 }}>
-        <div><label style={{ ...css.label, fontSize: 10 }}>Unit #</label>
-          {canEditRestricted ? ti(name, setName, "e.g. T-101") : <div style={{ ...css.input, ...sm, opacity: 0.6 }}>{name || "—"}</div>}
-        </div>
-        <div><label style={{ ...css.label, fontSize: 10 }}>VIN</label>{ti(vin, setVin, "VIN", "text", !canEditRestricted)}</div>
-        <div><label style={{ ...css.label, fontSize: 10 }}>Plate</label>{ti(plate, setPlate, "e.g. ABC1234", "text", !canEditRestricted)}</div>
-      </div>
-      {/* Row 2: Make · Model · Year */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "6px 10px", marginBottom: 6 }}>
-        <div><label style={{ ...css.label, fontSize: 10 }}>Make</label>{ti(make, setMake, "e.g. Kenworth", "text", !canEditRestricted)}</div>
-        <div><label style={{ ...css.label, fontSize: 10 }}>Model</label>{ti(model, setModel, "e.g. T680", "text", !canEditRestricted)}</div>
-        <div><label style={{ ...css.label, fontSize: 10 }}>Year</label>{ti(year, setYear, "2022", "number", !canEditRestricted)}</div>
-      </div>
+      {screen === "front" ? (
+        <>
+          {/* ── Front page: only what's needed to get this truck on file ── */}
+          <RequiredEquipmentFields
+            kind="truck" companyId={companyId} editable={canEditRestricted}
+            name={name} onNameChange={setName}
+            year={year} onYearChange={setYear}
+            make={make} onMakeChange={setMake}
+            model={model} onModelChange={setModel}
+            region={region} onRegionChange={setRegion}
+            localArea={localArea} onLocalAreaChange={setLocalArea}
+          />
 
-      <hr style={css.divider} />
-
-      {/* ── Permit Book ── */}
-      <PermitEditRow editable={canEditRestricted} label="Registration"              expVal={regExp}   onExpChange={setRegExp}   enfVal={regEnf}   onEnfChange={setRegEnf}   notesVal={regNotes}  onNotesChange={setRegNotes} />
-      <PermitEditRow editable={canEditRestricted} label="Annual Inspection"          expVal={insExp}   onExpChange={setInsExp}   enfVal={insEnf}     onEnfChange={setInsEnf}     notesVal={insNotes}     onNotesChange={setInsNotes}
-        extra={
-          <div style={{ display: "flex", gap: 6 }}>
-            <input value={insShop} onChange={e => setInsShop(e.target.value)} placeholder="Inspection shop" disabled={!canEditRestricted}
-              style={{ ...css.input, ...sm, flex: 1, ...(canEditRestricted ? {} : { opacity: 0.55, cursor: "not-allowed" as const }) }} />
-            <input type="date" value={insIssue} onChange={e => setInsIssue(e.target.value)} disabled={!canEditRestricted}
-              style={{ ...css.input, ...sm, width: 130, flexShrink: 0, ...(canEditRestricted ? {} : { opacity: 0.55, cursor: "not-allowed" as const }) }} />
+          <div style={{ display: "flex", flexDirection: "column" as const, gap: 8, marginTop: 16 }}>
+            <button type="button" onClick={() => setServiceOpen(true)} style={{ ...css.btn("ghost"), width: "100%", textAlign: "left" as const }}>
+              Service Schedule
+            </button>
+            <button type="button" onClick={() => setScreen("details")} style={{ ...css.btn("ghost"), width: "100%", textAlign: "left" as const }}>
+              Details →
+            </button>
           </div>
-        }
-      />
-      <PermitEditRow editable={canEditRestricted} label="IFTA Permits + Decals"     expVal={iftaExp}  onExpChange={setIftaExp}  enfVal={iftaEnf}     onEnfChange={setIftaEnf}     notesVal={iftaNotes}     onNotesChange={setIftaNotes} />
-      <PermitEditRow editable={canEditRestricted} label="PHMSA HazMat Permit"       expVal={phmsaExp} onExpChange={setPhmsaExp} enfVal={phmsaEnf}    onEnfChange={setPhmsaEnf}    notesVal={phmsaNotes}    onNotesChange={setPhmsaNotes} />
-      <PermitEditRow editable={canEditRestricted} label="Alliance HazMat Permit"    expVal={alliExp}  onExpChange={setAlliExp}  enfVal={alliEnf}     onEnfChange={setAlliEnf}     notesVal={alliNotes}     onNotesChange={setAlliNotes} />
-      <PermitEditRow editable={canEditRestricted} label="Fleet Insurance Cab Card"  expVal={fleetExp} onExpChange={setFleetExp} enfVal={fleetEnf}    onEnfChange={setFleetEnf}    notesVal={fleetNotes}    onNotesChange={setFleetNotes} />
-      <PermitEditRow editable={canEditRestricted} label="HazMat Transportation Lic" expVal={hazLicExp} onExpChange={setHazLicExp} enfVal={hazLicEnf} onEnfChange={setHazLicEnf}   notesVal={hazLicNotes}   onNotesChange={setHazLicNotes} />
-      <PermitEditRow editable={canEditRestricted} label="Inner Bridge Permit"       expVal={ibExp}    onExpChange={setIbExp}    enfVal={ibEnf}      onEnfChange={setIbEnf}       notesVal={ibNotes}       onNotesChange={setIbNotes} />
 
-      <hr style={css.divider} />
-
-      {/* ── Other Permits ── */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-        <span style={{ fontSize: 11, color: T.muted, fontWeight: 600, letterSpacing: 0.4 }}>OTHER PERMITS</span>
-        {canEditRestricted && (
-          <button type="button" onClick={addOtherPermit} style={{ ...css.btn("subtle"), fontSize: 11, padding: "2px 10px" }}>+ Add</button>
-        )}
-      </div>
-      {otherPermits.length === 0 && (
-        <div style={{ fontSize: 11, color: T.muted, marginBottom: 6 }}>None — click + Add for state permits, etc.</div>
-      )}
-      {otherPermits.map((p, i) => (
-        <div key={i} style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 3 }}>
-          <input value={p.label} onChange={e => updateOtherPermit(i, "label", e.target.value)} disabled={!canEditRestricted}
-            placeholder="e.g. FL State Permit" style={{ ...css.input, ...sm, flex: 1, ...(canEditRestricted ? {} : { opacity: 0.55, cursor: "not-allowed" as const }) }} />
-          <input type="date" value={p.expiration_date} onChange={e => updateOtherPermit(i, "expiration_date", e.target.value)} disabled={!canEditRestricted}
-            style={{ ...css.input, ...sm, width: 130, flexShrink: 0, ...(canEditRestricted ? {} : { opacity: 0.55, cursor: "not-allowed" as const }) }} />
-          {canEditRestricted && (
-            <button type="button" onClick={() => removeOtherPermit(i)}
-              style={{ background: "none", border: "none", cursor: "pointer", color: T.danger, fontSize: 13, padding: "0 4px" }}>✕</button>
-          )}
-        </div>
-      ))}
-
-      <hr style={css.divider} />
-
-      <Field label="Notes">
-        <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3} disabled={!canEditRestricted}
-          style={{ ...css.input, width: "100%", fontSize: 12, resize: "vertical" as const, ...(canEditRestricted ? {} : { opacity: 0.55, cursor: "not-allowed" as const }) }} />
-      </Field>
-
-      {!isNew && (
-        <ServiceSection unitKind="truck" unitId={truck!.truck_id} unitName={name || truck!.truck_name} companyId={companyId} />
-      )}
-
-      {!isNew && myRole === "admin" && (
-        <SensitiveInfoSection unitKind="truck" unitId={truck!.truck_id} companyId={companyId} />
-      )}
-
-      <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" as const }}>
-        {!isNew && canDelete && (
-          <button style={{ ...css.btn("danger"), flex: "1 1 0", minWidth: 80, textAlign: "center" as const }} onClick={deleteTruck} disabled={saving}>Delete</button>
-        )}
-        {!isNew && canEditRestricted && (
-          <button style={{ ...css.btn("ghost"), flex: "1 1 0", minWidth: 80, textAlign: "center" as const,
-            color: active ? T.warning : T.success, borderColor: active ? T.warning : T.success }}
-            onClick={() => setActive(v => !v)} disabled={saving}>
-            {active ? "Deactivate" : "Reactivate"}
+          <div style={{ display: "flex", gap: 8, marginTop: 16, flexWrap: "wrap" as const }}>
+            <button style={{ ...css.btn("ghost"), flex: "1 1 0", minWidth: 80, textAlign: "center" as const }} onClick={onClose}>Cancel</button>
+            {saveCloseBtn}
+          </div>
+        </>
+      ) : (
+        <>
+          {/* ── Details: everything else -- vin, plate, permits, notes, we already had this built ── */}
+          <button type="button" onClick={() => setScreen("front")} style={{ ...css.btn("subtle"), fontSize: 11, marginBottom: 12 }}>
+            ← Back
           </button>
-        )}
-        <button style={{ ...css.btn("ghost"), flex: "1 1 0", minWidth: 80, textAlign: "center" as const }} onClick={onClose}>Cancel</button>
-        {canEditRestricted && (
-          <button style={{ ...css.btn("primary"), flex: "1 1 0", minWidth: 80, textAlign: "center" as const }} onClick={save} disabled={saving}>{saving ? "Saving…" : isNew ? "Add Truck" : "Save"}</button>
-        )}
-      </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "6px 10px", marginBottom: 6 }}>
+            <div><label style={{ ...css.label, fontSize: 10 }}>VIN</label>{ti(vin, setVin, "VIN", "text", !canEditRestricted)}</div>
+            <div><label style={{ ...css.label, fontSize: 10 }}>Plate</label>{ti(plate, setPlate, "e.g. ABC1234", "text", !canEditRestricted)}</div>
+          </div>
+
+          <hr style={css.divider} />
+
+          {/* ── Permit Book ── */}
+          <PermitEditRow editable={canEditRestricted} label="Registration"              expVal={regExp}   onExpChange={setRegExp}   enfVal={regEnf}   onEnfChange={setRegEnf}   notesVal={regNotes}  onNotesChange={setRegNotes} />
+          <PermitEditRow editable={canEditRestricted} label="Annual Inspection"          expVal={insExp}   onExpChange={setInsExp}   enfVal={insEnf}     onEnfChange={setInsEnf}     notesVal={insNotes}     onNotesChange={setInsNotes}
+            extra={
+              <div style={{ display: "flex", gap: 6 }}>
+                <input value={insShop} onChange={e => setInsShop(e.target.value)} placeholder="Inspection shop" disabled={!canEditRestricted}
+                  style={{ ...css.input, ...sm, flex: 1, ...(canEditRestricted ? {} : { opacity: 0.55, cursor: "not-allowed" as const }) }} />
+                <input type="date" value={insIssue} onChange={e => setInsIssue(e.target.value)} disabled={!canEditRestricted}
+                  style={{ ...css.input, ...sm, width: 130, flexShrink: 0, ...(canEditRestricted ? {} : { opacity: 0.55, cursor: "not-allowed" as const }) }} />
+              </div>
+            }
+          />
+          <PermitEditRow editable={canEditRestricted} label="IFTA Permits + Decals"     expVal={iftaExp}  onExpChange={setIftaExp}  enfVal={iftaEnf}     onEnfChange={setIftaEnf}     notesVal={iftaNotes}     onNotesChange={setIftaNotes} />
+          <PermitEditRow editable={canEditRestricted} label="PHMSA HazMat Permit"       expVal={phmsaExp} onExpChange={setPhmsaExp} enfVal={phmsaEnf}    onEnfChange={setPhmsaEnf}    notesVal={phmsaNotes}    onNotesChange={setPhmsaNotes} />
+          <PermitEditRow editable={canEditRestricted} label="Alliance HazMat Permit"    expVal={alliExp}  onExpChange={setAlliExp}  enfVal={alliEnf}     onEnfChange={setAlliEnf}     notesVal={alliNotes}     onNotesChange={setAlliNotes} />
+          <PermitEditRow editable={canEditRestricted} label="Fleet Insurance Cab Card"  expVal={fleetExp} onExpChange={setFleetExp} enfVal={fleetEnf}    onEnfChange={setFleetEnf}    notesVal={fleetNotes}    onNotesChange={setFleetNotes} />
+          <PermitEditRow editable={canEditRestricted} label="HazMat Transportation Lic" expVal={hazLicExp} onExpChange={setHazLicExp} enfVal={hazLicEnf} onEnfChange={setHazLicEnf}   notesVal={hazLicNotes}   onNotesChange={setHazLicNotes} />
+          <PermitEditRow editable={canEditRestricted} label="Inner Bridge Permit"       expVal={ibExp}    onExpChange={setIbExp}    enfVal={ibEnf}      onEnfChange={setIbEnf}       notesVal={ibNotes}       onNotesChange={setIbNotes} />
+
+          <hr style={css.divider} />
+
+          {/* ── Other Permits ── */}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+            <span style={{ fontSize: 11, color: T.muted, fontWeight: 600, letterSpacing: 0.4 }}>OTHER PERMITS</span>
+            {canEditRestricted && (
+              <button type="button" onClick={addOtherPermit} style={{ ...css.btn("subtle"), fontSize: 11, padding: "2px 10px" }}>+ Add</button>
+            )}
+          </div>
+          {otherPermits.length === 0 && (
+            <div style={{ fontSize: 11, color: T.muted, marginBottom: 6 }}>None — click + Add for state permits, etc.</div>
+          )}
+          {otherPermits.map((p, i) => (
+            <div key={i} style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 3 }}>
+              <input value={p.label} onChange={e => updateOtherPermit(i, "label", e.target.value)} disabled={!canEditRestricted}
+                placeholder="e.g. FL State Permit" style={{ ...css.input, ...sm, flex: 1, ...(canEditRestricted ? {} : { opacity: 0.55, cursor: "not-allowed" as const }) }} />
+              <input type="date" value={p.expiration_date} onChange={e => updateOtherPermit(i, "expiration_date", e.target.value)} disabled={!canEditRestricted}
+                style={{ ...css.input, ...sm, width: 130, flexShrink: 0, ...(canEditRestricted ? {} : { opacity: 0.55, cursor: "not-allowed" as const }) }} />
+              {canEditRestricted && (
+                <button type="button" onClick={() => removeOtherPermit(i)}
+                  style={{ background: "none", border: "none", cursor: "pointer", color: T.danger, fontSize: 13, padding: "0 4px" }}>✕</button>
+              )}
+            </div>
+          ))}
+
+          <hr style={css.divider} />
+
+          <Field label="Notes">
+            <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3} disabled={!canEditRestricted}
+              style={{ ...css.input, width: "100%", fontSize: 12, resize: "vertical" as const, ...(canEditRestricted ? {} : { opacity: 0.55, cursor: "not-allowed" as const }) }} />
+          </Field>
+
+          {!isNew && myRole === "admin" && (
+            <SensitiveInfoSection unitKind="truck" unitId={truck!.truck_id} companyId={companyId} />
+          )}
+
+          <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" as const }}>
+            {!isNew && canDelete && (
+              <button style={{ ...css.btn("danger"), flex: "1 1 0", minWidth: 80, textAlign: "center" as const }} onClick={deleteTruck} disabled={saving}>Delete</button>
+            )}
+            {!isNew && canEditRestricted && (
+              <button style={{ ...css.btn("ghost"), flex: "1 1 0", minWidth: 80, textAlign: "center" as const,
+                color: active ? T.warning : T.success, borderColor: active ? T.warning : T.success }}
+                onClick={() => setActive(v => !v)} disabled={saving}>
+                {active ? "Deactivate" : "Reactivate"}
+              </button>
+            )}
+            <button style={{ ...css.btn("ghost"), flex: "1 1 0", minWidth: 80, textAlign: "center" as const }} onClick={onClose}>Cancel</button>
+            {saveCloseBtn}
+          </div>
+        </>
+      )}
+
+      {isNew ? (
+        <ServiceTypeListModal open={serviceOpen} onClose={() => setServiceOpen(false)} companyId={companyId} unit="truck" />
+      ) : (
+        <ServiceLogModal open={serviceOpen} onClose={() => setServiceOpen(false)} unitKind="truck" unitId={truck!.truck_id} unitName={name || truck!.truck_name} companyId={companyId} />
+      )}
     </Modal>
   );
 }
@@ -1142,8 +1185,13 @@ function TrailerModal({ trailer, companyId, onClose, onDone, myRole }: {
   const [make,      setMake]      = useState(trailer?.make ?? "");
   const [model,     setModel]     = useState(trailer?.model ?? "");
   const [year,      setYear]      = useState(String(trailer?.year ?? ""));
+  const [region,    setRegion]    = useState(trailer?.region ?? "");
+  const [localArea, setLocalArea] = useState(trailer?.local_area ?? "");
   const [active,    setActive]    = useState(trailer?.active ?? true);
   const [comps,     setComps]     = useState<Compartment[]>(trailer?.compartments ?? []);
+  // 2026-08-29 rework -- see TruckModal's identical comment above.
+  const [screen,      setScreen]      = useState<"front" | "details">("front");
+  const [serviceOpen, setServiceOpen] = useState(false);
   // Permit dates
   const [trRegExp,   setTrRegExp]   = useState(trailer?.trailer_reg_expiration_date ?? "");
   const [trRegEnf,   setTrRegEnf]   = useState(trailer?.trailer_reg_enforcement_date ?? "");
@@ -1179,6 +1227,10 @@ function TrailerModal({ trailer, companyId, onClose, onDone, myRole }: {
       setErr("Missing company id (cannot save). Close and reopen Equipment Details, or ask your admin to assign you to a company.");
       return;
     }
+    // A trailer with no compartments can't carry anything -- per explicit
+    // spec, at least one compartment is required, same as the 6 identity
+    // fields above.
+    if (comps.length === 0) { setErr("At least one compartment is required."); return; }
     if (comps.some(c => !c.max_gallons || c.max_gallons <= 0)) { setErr("All compartments need max gallons > 0."); return; }
     if (comps.some(c => c.cap_gallons != null && (c.cap_gallons <= 0 || c.cap_gallons > c.max_gallons))) {
       setErr("Cap can't exceed a compartment's total volume.");
@@ -1187,7 +1239,7 @@ function TrailerModal({ trailer, companyId, onClose, onDone, myRole }: {
     setSaving(true); setErr(null);
     const payload: any = {
       trailer_name: name.trim(), vin_number: vin || null, plate_number: plate || null, make: make || null, model: model || null,
-      year: year ? parseInt(year) : null,
+      year: year ? parseInt(year) : null, region: region || null, local_area: localArea || null,
       cg_max: 1.0, // always 1 per spec
       active, company_id: companyId,
       trailer_reg_expiration_date: trRegExp || null, trailer_reg_enforcement_date: trRegEnf || null,
@@ -1259,126 +1311,162 @@ function TrailerModal({ trailer, companyId, onClose, onDone, myRole }: {
       style={{ ...css.input, ...sm, ...(locked ? { opacity: 0.55, cursor: "not-allowed" as const } : {}) }} />
   );
 
+  // Gated by canEditRestricted now (was previously unconditional -- a real,
+  // pre-existing inconsistency found while unifying with TruckModal's own
+  // already-gated Save button; fixed here since it's the same button now).
+  const saveCloseBtn = canEditRestricted && (
+    <button style={{ ...css.btn("primary"), flex: "1 1 0", minWidth: 80, textAlign: "center" as const }} onClick={save} disabled={saving}>
+      {saving ? "Saving…" : "Save & Close"}
+    </button>
+  );
+
   return (
     <Modal title={isNew ? "Add Trailer" : "Edit Trailer"} onClose={onClose} wide>
       {err && <Banner msg={err} type="error" />}
 
-      {/* ── Identification ── */}
-      {/* Row 1: Unit · VIN · Plate */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "6px 10px", marginBottom: 6 }}>
-        <div><label style={{ ...css.label, fontSize: 10 }}>Unit #</label>
-          {canEditRestricted ? ti(name, setName, "e.g. 3151") : <div style={{ ...css.input, ...sm, opacity: 0.6 }}>{name || "—"}</div>}
-        </div>
-        <div><label style={{ ...css.label, fontSize: 10 }}>VIN</label>{ti(vin, setVin, "VIN", "text", !canEditRestricted)}</div>
-        <div><label style={{ ...css.label, fontSize: 10 }}>Plate</label>{ti(plate, setPlate, "e.g. ABC1234", "text", !canEditRestricted)}</div>
-      </div>
-      {/* Row 2: Make · Model · Year */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "6px 10px", marginBottom: 6 }}>
-        <div><label style={{ ...css.label, fontSize: 10 }}>Make</label>{ti(make, setMake, "e.g. Polar", "text", !canEditRestricted)}</div>
-        <div><label style={{ ...css.label, fontSize: 10 }}>Model</label>{ti(model, setModel, "e.g. Tank", "text", !canEditRestricted)}</div>
-        <div><label style={{ ...css.label, fontSize: 10 }}>Year</label>{ti(year, setYear, "2020", "number", !canEditRestricted)}</div>
-      </div>
-
-      <hr style={css.divider} />
-
-      {/* ── Compartments ── */}
-      <div style={{ background: T.surface2, borderRadius: 8, padding: "10px 12px", marginBottom: 10 }}>
-        <CompartmentEditor comps={comps} onChange={setComps} editable={canEditRestricted} />
-      </div>
-
-      <hr style={css.divider} />
-
-      {/* ── Permit Book ── */}
-      <PermitEditRow editable={canEditRestricted} label="Trailer Registration" expVal={trRegExp} onExpChange={setTrRegExp} enfVal={trRegEnf} onEnfChange={setTrRegEnf} notesVal={trRegNotes} onNotesChange={setTrRegNotes} />
-      <PermitEditRow editable={canEditRestricted} label="Annual Inspection"    expVal={trInsExp} onExpChange={setTrInsExp} enfVal={trInsEnf} onEnfChange={setTrInsEnf} notesVal={trInsNotes} onNotesChange={setTrInsNotes}
-        extra={
-          <div style={{ display: "flex", gap: 6 }}>
-            <input value={trInsShop} onChange={e => setTrInsShop(e.target.value)} placeholder="Inspection shop" disabled={!canEditRestricted}
-              style={{ ...css.input, ...sm, flex: 1, ...(canEditRestricted ? {} : { opacity: 0.55, cursor: "not-allowed" as const }) }} />
-            <input type="date" value={trInsIssue} onChange={e => setTrInsIssue(e.target.value)} disabled={!canEditRestricted}
-              style={{ ...css.input, ...sm, width: 130, flexShrink: 0, ...(canEditRestricted ? {} : { opacity: 0.55, cursor: "not-allowed" as const }) }} />
-          </div>
-        }
-      />
-
-      <hr style={css.divider} />
-
-      {/* ── Tank Inspections — dynamic ── */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-        <span style={{ fontSize: 11, color: T.muted, fontWeight: 600, letterSpacing: 0.4 }}>TANK INSPECTIONS</span>
-        {canEditRestricted && (
-        <div style={{ position: "relative" as const }}>
-          <button type="button" onClick={() => setTankAddOpen(v => !v)}
-            style={{ ...css.btn("subtle"), fontSize: 11, padding: "2px 10px" }}>+ Add</button>
-          {tankAddOpen && (() => {
-            const addedKeys = new Set(tanks.map(t => t.key));
-            const available = TANK_DEFS.filter(d => !addedKeys.has(d.key));
-            return available.length === 0 ? null : (
-              <div style={{ position: "absolute" as const, right: 0, top: "110%", zIndex: 50,
-                background: T.surface2, border: `1px solid ${T.border}`, borderRadius: T.radiusSm,
-                minWidth: 220, boxShadow: "0 8px 24px rgba(0,0,0,0.5)", overflow: "hidden" }}>
-                {available.map(d => (
-                  <div key={d.key}
-                    onClick={() => { setTanks(prev => [...prev, { key: d.key, date: "", notes: "" }]); setTankAddOpen(false); }}
-                    style={{ padding: "8px 14px", fontSize: 12, cursor: "pointer", color: T.text,
-                      borderBottom: `1px solid ${T.border}22` }}
-                    onMouseEnter={e => (e.currentTarget.style.background = T.surface3)}
-                    onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>
-                    {d.label}
-                  </div>
-                ))}
-              </div>
-            );
-          })()}
-        </div>
-        )}
-      </div>
-      {tanks.length === 0 && <div style={{ fontSize: 11, color: T.muted, marginBottom: 6 }}>No tank inspections added yet.</div>}
-      {tanks.map((tank) => {
-        const def = TANK_DEFS.find(d => d.key === tank.key)!;
-        return (
-          <TankEditRow
-            key={tank.key}
-            editable={canEditRestricted}
-            label={def.label}
-            dateVal={tank.date}
-            onDateChange={v => setTanks(prev => prev.map(t => t.key === tank.key ? { ...t, date: v } : t))}
-            notesVal={tank.notes}
-            onNotesChange={v => setTanks(prev => prev.map(t => t.key === tank.key ? { ...t, notes: v } : t))}
-            onRemove={() => setTanks(prev => prev.filter(t => t.key !== tank.key))}
+      {screen === "front" ? (
+        <>
+          {/* ── Front page: required fields + compartments (also required) ── */}
+          <RequiredEquipmentFields
+            kind="trailer" companyId={companyId} editable={canEditRestricted}
+            name={name} onNameChange={setName}
+            year={year} onYearChange={setYear}
+            make={make} onMakeChange={setMake}
+            model={model} onModelChange={setModel}
+            region={region} onRegionChange={setRegion}
+            localArea={localArea} onLocalAreaChange={setLocalArea}
           />
-        );
-      })}
 
-      <hr style={css.divider} />
+          <div style={{ marginTop: 14 }}>
+            <div style={{ ...css.label, fontSize: 10, marginBottom: 6 }}>Compartments (at least 1 required)</div>
+            <div style={{ background: T.surface2, borderRadius: 8, padding: "10px 12px" }}>
+              <CompartmentEditor comps={comps} onChange={setComps} editable={canEditRestricted} />
+            </div>
+          </div>
 
-      <Field label="Notes">
-        <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3} disabled={!canEditRestricted}
-          style={{ ...css.input, width: "100%", fontSize: 12, resize: "vertical" as const, ...(canEditRestricted ? {} : { opacity: 0.55, cursor: "not-allowed" as const }) }} />
-      </Field>
+          <div style={{ display: "flex", flexDirection: "column" as const, gap: 8, marginTop: 16 }}>
+            <button type="button" onClick={() => setServiceOpen(true)} style={{ ...css.btn("ghost"), width: "100%", textAlign: "left" as const }}>
+              Service Schedule
+            </button>
+            <button type="button" onClick={() => setScreen("details")} style={{ ...css.btn("ghost"), width: "100%", textAlign: "left" as const }}>
+              Details →
+            </button>
+          </div>
 
-      {!isNew && (
-        <ServiceSection unitKind="trailer" unitId={trailer!.trailer_id} unitName={name || trailer!.trailer_name} companyId={companyId} />
-      )}
-
-      {!isNew && myRole === "admin" && (
-        <SensitiveInfoSection unitKind="trailer" unitId={trailer!.trailer_id} companyId={companyId} />
-      )}
-
-      <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" as const }}>
-        {!isNew && canDelete && (
-          <button style={{ ...css.btn("danger"), flex: "1 1 0", minWidth: 80, textAlign: "center" as const }} onClick={deleteTrailer} disabled={saving}>Delete</button>
-        )}
-        {!isNew && canEditRestricted && (
-          <button style={{ ...css.btn("ghost"), flex: "1 1 0", minWidth: 80, textAlign: "center" as const,
-            color: active ? T.warning : T.success, borderColor: active ? T.warning : T.success }}
-            onClick={() => setActive(v => !v)} disabled={saving}>
-            {active ? "Deactivate" : "Reactivate"}
+          <div style={{ display: "flex", gap: 8, marginTop: 16, flexWrap: "wrap" as const }}>
+            <button style={{ ...css.btn("ghost"), flex: "1 1 0", minWidth: 80, textAlign: "center" as const }} onClick={onClose}>Cancel</button>
+            {saveCloseBtn}
+          </div>
+        </>
+      ) : (
+        <>
+          {/* ── Details: everything else -- vin, plate, permits, notes, we already had this built ── */}
+          <button type="button" onClick={() => setScreen("front")} style={{ ...css.btn("subtle"), fontSize: 11, marginBottom: 12 }}>
+            ← Back
           </button>
-        )}
-        <button style={{ ...css.btn("ghost"), flex: "1 1 0", minWidth: 80, textAlign: "center" as const }} onClick={onClose}>Cancel</button>
-        <button style={{ ...css.btn("primary"), flex: "1 1 0", minWidth: 80, textAlign: "center" as const }} onClick={save} disabled={saving}>{saving ? "Saving…" : isNew ? "Add Trailer" : "Save"}</button>
-      </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "6px 10px", marginBottom: 6 }}>
+            <div><label style={{ ...css.label, fontSize: 10 }}>VIN</label>{ti(vin, setVin, "VIN", "text", !canEditRestricted)}</div>
+            <div><label style={{ ...css.label, fontSize: 10 }}>Plate</label>{ti(plate, setPlate, "e.g. ABC1234", "text", !canEditRestricted)}</div>
+          </div>
+
+          <hr style={css.divider} />
+
+          {/* ── Permit Book ── */}
+          <PermitEditRow editable={canEditRestricted} label="Trailer Registration" expVal={trRegExp} onExpChange={setTrRegExp} enfVal={trRegEnf} onEnfChange={setTrRegEnf} notesVal={trRegNotes} onNotesChange={setTrRegNotes} />
+          <PermitEditRow editable={canEditRestricted} label="Annual Inspection"    expVal={trInsExp} onExpChange={setTrInsExp} enfVal={trInsEnf} onEnfChange={setTrInsEnf} notesVal={trInsNotes} onNotesChange={setTrInsNotes}
+            extra={
+              <div style={{ display: "flex", gap: 6 }}>
+                <input value={trInsShop} onChange={e => setTrInsShop(e.target.value)} placeholder="Inspection shop" disabled={!canEditRestricted}
+                  style={{ ...css.input, ...sm, flex: 1, ...(canEditRestricted ? {} : { opacity: 0.55, cursor: "not-allowed" as const }) }} />
+                <input type="date" value={trInsIssue} onChange={e => setTrInsIssue(e.target.value)} disabled={!canEditRestricted}
+                  style={{ ...css.input, ...sm, width: 130, flexShrink: 0, ...(canEditRestricted ? {} : { opacity: 0.55, cursor: "not-allowed" as const }) }} />
+              </div>
+            }
+          />
+
+          <hr style={css.divider} />
+
+          {/* ── Tank Inspections — dynamic ── */}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+            <span style={{ fontSize: 11, color: T.muted, fontWeight: 600, letterSpacing: 0.4 }}>TANK INSPECTIONS</span>
+            {canEditRestricted && (
+            <div style={{ position: "relative" as const }}>
+              <button type="button" onClick={() => setTankAddOpen(v => !v)}
+                style={{ ...css.btn("subtle"), fontSize: 11, padding: "2px 10px" }}>+ Add</button>
+              {tankAddOpen && (() => {
+                const addedKeys = new Set(tanks.map(t => t.key));
+                const available = TANK_DEFS.filter(d => !addedKeys.has(d.key));
+                return available.length === 0 ? null : (
+                  <div style={{ position: "absolute" as const, right: 0, top: "110%", zIndex: 50,
+                    background: T.surface2, border: `1px solid ${T.border}`, borderRadius: T.radiusSm,
+                    minWidth: 220, boxShadow: "0 8px 24px rgba(0,0,0,0.5)", overflow: "hidden" }}>
+                    {available.map(d => (
+                      <div key={d.key}
+                        onClick={() => { setTanks(prev => [...prev, { key: d.key, date: "", notes: "" }]); setTankAddOpen(false); }}
+                        style={{ padding: "8px 14px", fontSize: 12, cursor: "pointer", color: T.text,
+                          borderBottom: `1px solid ${T.border}22` }}
+                        onMouseEnter={e => (e.currentTarget.style.background = T.surface3)}
+                        onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>
+                        {d.label}
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+            </div>
+            )}
+          </div>
+          {tanks.length === 0 && <div style={{ fontSize: 11, color: T.muted, marginBottom: 6 }}>No tank inspections added yet.</div>}
+          {tanks.map((tank) => {
+            const def = TANK_DEFS.find(d => d.key === tank.key)!;
+            return (
+              <TankEditRow
+                key={tank.key}
+                editable={canEditRestricted}
+                label={def.label}
+                dateVal={tank.date}
+                onDateChange={v => setTanks(prev => prev.map(t => t.key === tank.key ? { ...t, date: v } : t))}
+                notesVal={tank.notes}
+                onNotesChange={v => setTanks(prev => prev.map(t => t.key === tank.key ? { ...t, notes: v } : t))}
+                onRemove={() => setTanks(prev => prev.filter(t => t.key !== tank.key))}
+              />
+            );
+          })}
+
+          <hr style={css.divider} />
+
+          <Field label="Notes">
+            <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3} disabled={!canEditRestricted}
+              style={{ ...css.input, width: "100%", fontSize: 12, resize: "vertical" as const, ...(canEditRestricted ? {} : { opacity: 0.55, cursor: "not-allowed" as const }) }} />
+          </Field>
+
+          {!isNew && myRole === "admin" && (
+            <SensitiveInfoSection unitKind="trailer" unitId={trailer!.trailer_id} companyId={companyId} />
+          )}
+
+          <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" as const }}>
+            {!isNew && canDelete && (
+              <button style={{ ...css.btn("danger"), flex: "1 1 0", minWidth: 80, textAlign: "center" as const }} onClick={deleteTrailer} disabled={saving}>Delete</button>
+            )}
+            {!isNew && canEditRestricted && (
+              <button style={{ ...css.btn("ghost"), flex: "1 1 0", minWidth: 80, textAlign: "center" as const,
+                color: active ? T.warning : T.success, borderColor: active ? T.warning : T.success }}
+                onClick={() => setActive(v => !v)} disabled={saving}>
+                {active ? "Deactivate" : "Reactivate"}
+              </button>
+            )}
+            <button style={{ ...css.btn("ghost"), flex: "1 1 0", minWidth: 80, textAlign: "center" as const }} onClick={onClose}>Cancel</button>
+            {saveCloseBtn}
+          </div>
+        </>
+      )}
+
+      {isNew ? (
+        <ServiceTypeListModal open={serviceOpen} onClose={() => setServiceOpen(false)} companyId={companyId} unit="trailer" />
+      ) : (
+        <ServiceLogModal open={serviceOpen} onClose={() => setServiceOpen(false)} unitKind="trailer" unitId={trailer!.trailer_id} unitName={name || trailer!.trailer_name} companyId={companyId} />
+      )}
     </Modal>
   );
 }

@@ -5398,6 +5398,125 @@ Not live-verified this pass (no authenticated session available from this
 side, same as every change in this thread) -- `tsc --noEmit` and `next
 build` both clean.
 
+## Equipment modal rework (2026-08-29, user's handwritten spec) — in progress
+
+Planned via Plan Mode (approved plan preserved at
+`wild-discovering-plum.md`) from a Samsung Notes export the user pasted in.
+Real gap: `TruckModal`/`TrailerModal` (`lib/ui/driver/EquipmentDetails.tsx`,
+already shared by solo and fleet tiers) showed every field flat in one long
+form with no distinction between what's needed to get a unit on file and
+what can wait, and there was no way to *edit* an existing unit's identity
+fields from the main Solo picker (`SoloEquipmentModal.tsx`) at all — only
+select (tap) or delete (long-press).
+
+Four scope decisions clarified with the user via `AskUserQuestion` before
+writing the plan (asked, not guessed):
+- **File → Edit** stays wired to the Binder (`BinderModal.tsx`), not a new
+  destination — Edit picks Truck or Trailer (skipping the pick when only
+  one unit is currently selected), then opens that ONE unit's Binder
+  instead of today's combined both-units-in-one screen. The Binder's
+  required-fields block moves to a big, un-collapsed section up top.
+  Attachments stay exactly as-is (already optional, already per-permit).
+- **Region/Local Area** become real managed catalogs (new tables), not
+  free text — mirrors the existing `service_types`/`permit_types` pattern
+  in this exact codebase (company-scoped, soft-delete only, "future
+  entries only" on rename/delete). `trucks.region`/`trucks.local_area`
+  (and the trailer equivalents) stay plain text columns, unchanged — the
+  catalog just feeds them instead of free-typing.
+- **"Staggered" PM scheduling** needs no new scheduling engine — service
+  types already carry independent intervals, and
+  `computeUnitServiceDue` (`SoloEquipmentModal.tsx`) already picks
+  whichever type is soonest due across every type with records for a
+  unit. That's the staggering. Confirmed with the user rather than
+  building a rotation/count-based engine that wasn't actually being asked
+  for.
+- **Scope applies to both tiers** — solo and fleet-tier admin/dispatch/
+  lead. Fleet drivers (who can't add) get the same Truck→Trailer→Location
+  order, but by *selecting* from the fleet's existing "Uncoupled
+  Equipment" picker instead of creating new units.
+
+**Two pre-existing, parallel permit systems stay parallel — not unified
+this pass.** `EquipmentDetails.tsx`'s permit rows (`trucks.reg_expiration_date`
+etc., the *old* hardcoded columns) power the new modal's **Details**
+button ("the vin, plate, permits, notes we already have built" — literal
+reuse). `BinderModal.tsx`'s `permit_types`/`equipment_permits` (the
+*newer*, company-managed, attachment-capable system, per that file's own
+header comment) powers **Edit**. Merging them is out of scope here.
+
+Building in three dependency-ordered phases, each typechecked/built clean
+before moving on.
+
+### Phase A — Foundation (shipped this pass)
+
+- **Migration** `20260829010000_equipment_regions_local_areas.sql`
+  (**not yet applied**) — `equipment_regions` / `equipment_local_areas`
+  (company_id, name, is_active, created_at), RLS mirrors `permit_types`/
+  `service_types` exactly (company-scoped, no DB-level role check — UI
+  gates add/edit/remove to admin/dispatch/lead in Phase B/C's Filter
+  modal). Backfills existing distinct `trucks.region`/`local_area` (and
+  trailer equivalents) into real catalog rows per company, so nothing
+  already on file disappears from the new picker once this ships.
+- **New `lib/ui/driver/RequiredEquipmentFields.tsx`** — the shared 6-field
+  block (Unit #, Year, Make, Model, Region, Local Area), parametrized by
+  `kind: "truck" | "trailer"` for placeholder copy. Region/Local Area are
+  small custom pickers (not a plain `<select>`) reading from the new
+  catalog tables, with an inline "+ Add new" — deliberately does NOT do
+  rename/soft-delete here (that stays the Filter modal's job in Phase
+  B/C, gated to privileged roles, so there's one place to manage the list
+  instead of two that could disagree). Deliberately self-styled (own
+  inline style constants) so it looks identical wherever it's mounted,
+  regardless of the host file's own styling conventions — this component
+  is shared across `lib/ui/driver/` (plain `<select>`+tokens convention)
+  and `app/planner/modals/` (`CustomSelect` convention) files.
+- **`TruckModal`/`TrailerModal` restructured** (`EquipmentDetails.tsx`):
+  a `screen: "front" | "details"` state (default `"front"`) now gates two
+  views inside the same modal/form — no new save flow, no second `Modal`
+  wrapper, just what's currently visible. **Front page**:
+  `RequiredEquipmentFields` + (trailer only) Compartments, kept visible
+  here per explicit spec ("keep the section for compartments") + a
+  **Service Schedule** button + a **Details →** button + **Save & Close**
+  (renamed from the old isNew-conditional "Add Truck"/"Save" label,
+  same underlying `save()`). **Details**: everything else, unchanged —
+  VIN, plate, all permit rows, Other Permits, Notes, Sensitive Info,
+  Delete, Deactivate — just relocated, not rewritten, behind a "← Back"
+  link. Trailer's `save()` gained a `comps.length === 0` guard ("At least
+  one compartment is required"), matching the front page's own claim.
+  Both `save()` payloads now include `region`/`local_area` for the first
+  time — confirmed via reading `save()` that these fields were **never
+  actually written** by this modal before (present on the `Truck`/
+  `Trailer` types and already read/filtered elsewhere in the app, e.g.
+  `EquipmentModal.tsx`'s fleet region filter, but nothing ever set them
+  through this modal) — a real, pre-existing gap, not something this pass
+  broke.
+- **Real, pre-existing inconsistency found and fixed in passing**:
+  `TrailerModal`'s Save button was never gated by `canEditRestricted` at
+  all (unlike `TruckModal`'s, which always was) — a driver viewing a
+  trailer they can't edit would still see an enabled Save button. Fixed
+  as a natural side effect of unifying both into one shared
+  `saveCloseBtn` — now consistently gated on both.
+- **`ServiceSection` renamed to `ServiceLogModal`, externally controlled**
+  (`open`/`onClose` props instead of owning its own button+state) — the
+  new front-page "Service Schedule" button now drives it directly for an
+  existing unit (`!isNew`). For `isNew` (no real `truck_id`/`trailer_id`
+  yet), the same button opens the new **`ServiceTypeListModal`**
+  (`ServiceTypeManager.tsx`) instead — a lighter "list + edit + + New
+  type" view reusing the existing `ServiceTypeEditorModal`/
+  `fetchServiceTypes` (no second copy), since service types are
+  company-wide, not per-unit, and never actually needed a real unit id to
+  manage — only *logging* a service against one does.
+
+**Not done yet, later phases**: `SoloEquipmentModal.tsx`'s Edit/unit-picker
++ Filter button + onboarding auto-open + report section (Tare/Target
+merge, trailer's own "last serviced" line); `BinderModal.tsx`'s single-unit
+mode + required-fields header; `EquipmentModal.tsx` (fleet) Filter button +
+onboarding sequencing; `SimpleServiceModal`'s dual-unit-type rework for
+"servicing both together."
+
+`tsc --noEmit` and `next build` both clean. Not live-verified this pass —
+same reason as every authenticated equipment-flow change this session
+(no logged-in session available from this side). Migration not yet
+applied.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.
