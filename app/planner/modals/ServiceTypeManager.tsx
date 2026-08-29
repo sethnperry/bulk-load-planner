@@ -409,6 +409,60 @@ export function ServiceTypeSelect({
 
 // ─── Log a service record against a truck and/or trailer ──────────────────
 
+// ─── One unit's own type (+ reading) picker, used standalone or as one of
+// two independent sub-sections when servicing both units together ─────────
+// 2026-08-29: previously "Both" forced the SAME service_type_id onto both
+// units' rows -- per explicit spec ("a user might put wet service for the
+// truck and check and inspect for the trailer type"), each unit now picks
+// its own type entirely independently.
+
+function UnitServiceFields({
+  unitLabel, types, typeId, onTypeIdChange, reading, onReadingChange, showReading, onEditType, onNewType,
+}: {
+  unitLabel: string;
+  types: ServiceType[];
+  typeId: string;
+  onTypeIdChange: (v: string) => void;
+  reading: string;
+  onReadingChange: (v: string) => void;
+  showReading: boolean;
+  onEditType: (t: ServiceType) => void;
+  onNewType: () => void;
+}) {
+  const selectedType = types.find((t) => t.service_type_id === typeId);
+  const effectiveKind = selectedType?.interval_kind;
+  const needsReading = showReading && (effectiveKind === "miles" || effectiveKind === "hours");
+
+  return (
+    <div style={{ display: "grid", gap: 10 }}>
+      <div style={{ fontSize: 11, fontWeight: 800, color: "rgba(255,255,255,0.4)", textTransform: "uppercase" as const, letterSpacing: 0.5 }}>
+        {unitLabel}
+      </div>
+      <div>
+        <label style={fieldLabel}>Type</label>
+        <ServiceTypeSelect
+          value={typeId}
+          onChange={onTypeIdChange}
+          types={types}
+          onEditType={onEditType}
+          onNewType={onNewType}
+        />
+      </div>
+      {selectedType && selectedType.interval_kind !== "none" && (
+        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>
+          Interval: every {selectedType.interval_value} {selectedType.interval_kind}
+        </div>
+      )}
+      {needsReading && (
+        <div>
+          <label style={fieldLabel}>{effectiveKind === "miles" ? "Odometer (miles) *" : "Engine hours *"}</label>
+          <input type="number" value={reading} onChange={(e) => onReadingChange(e.target.value)} style={inputStyle} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function SimpleServiceModal({
   open, onClose, companyId, authUserId, truckId, trailerId, truckName, trailerName, serviceTypes, onTypesChanged, onSaved,
 }: {
@@ -417,12 +471,13 @@ export function SimpleServiceModal({
   serviceTypes: ServiceType[]; onTypesChanged: () => void; onSaved: () => void;
 }) {
   const [unit, setUnit] = useState<"truck" | "trailer" | "both">("both");
-  const [typeId, setTypeId] = useState("");
-  const [typeEditor, setTypeEditor] = useState<{ mode: "new" | "edit"; type: ServiceType | null } | null>(null);
+  const [truckTypeId, setTruckTypeId] = useState("");
+  const [truckReading, setTruckReading] = useState("");
+  const [trailerTypeId, setTrailerTypeId] = useState("");
+  const [typeEditor, setTypeEditor] = useState<{ mode: "new" | "edit"; type: ServiceType | null; target: "truck" | "trailer" } | null>(null);
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [shopName, setShopName] = useState("");
   const [location, setLocation] = useState("");
-  const [reading, setReading] = useState("");
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -430,48 +485,53 @@ export function SimpleServiceModal({
   useEffect(() => {
     if (open) {
       setUnit(truckId && trailerId ? "both" : trailerId ? "trailer" : "truck");
-      setTypeId("");
+      setTruckTypeId("");
+      setTruckReading("");
+      setTrailerTypeId("");
       setDate(new Date().toISOString().slice(0, 10));
       setShopName("");
       setLocation("");
-      setReading("");
       setNotes("");
       setErr(null);
     }
   }, [open, truckId, trailerId]);
 
-  const availableTypes = useMemo(
-    () => serviceTypes.filter((t) => t.is_active && (unit === "both" || t.applies_to === "both" || t.applies_to === unit)),
-    [serviceTypes, unit]
+  // Each unit's own picker only ever shows types actually applicable to
+  // it -- independent of the overall `unit` selection now, since Both no
+  // longer means "one type for everyone."
+  const truckTypes = useMemo(
+    () => serviceTypes.filter((t) => t.is_active && (t.applies_to === "both" || t.applies_to === "truck")),
+    [serviceTypes]
   );
-  const selectedType = availableTypes.find((t) => t.service_type_id === typeId);
-  const effectiveKind = selectedType?.interval_kind;
-  const needsReading = effectiveKind === "miles" || effectiveKind === "hours";
+  const trailerTypes = useMemo(
+    () => serviceTypes.filter((t) => t.is_active && (t.applies_to === "both" || t.applies_to === "trailer")),
+    [serviceTypes]
+  );
+
+  const showTruck = truckId && (unit === "both" || unit === "truck");
+  const showTrailer = trailerId && (unit === "both" || unit === "trailer");
 
   async function save() {
     setBusy(true);
     setErr(null);
     try {
-      if (needsReading && !reading.trim()) {
-        throw new Error(effectiveKind === "miles" ? "Enter the odometer reading." : "Enter the engine hours.");
+      const truckType = truckTypes.find((t) => t.service_type_id === truckTypeId);
+      const truckNeedsReading = truckType && (truckType.interval_kind === "miles" || truckType.interval_kind === "hours");
+      if (showTruck && truckNeedsReading && !truckReading.trim()) {
+        throw new Error(truckType!.interval_kind === "miles" ? "Enter the truck's odometer reading." : "Enter the truck's engine hours.");
       }
-      if (!typeId) throw new Error("Select a service type.");
-      const finalTypeId = typeId;
+      if (showTruck && !truckTypeId) throw new Error("Select a service type for the truck.");
+      if (showTrailer && !trailerTypeId) throw new Error("Select a service type for the trailer.");
 
       const rows: any[] = [];
-      if (unit === "both" || unit === "truck") {
-        if (truckId) rows.push({ company_id: companyId, truck_id: truckId, trailer_id: null, service_type_id: finalTypeId, date, shop_name: shopName || null, location: location || null, reading_value: reading ? Number(reading) : null, notes: notes || null, created_by: authUserId });
+      if (showTruck) {
+        rows.push({ company_id: companyId, truck_id: truckId, trailer_id: null, service_type_id: truckTypeId, date, shop_name: shopName || null, location: location || null, reading_value: truckReading ? Number(truckReading) : null, notes: notes || null, created_by: authUserId });
       }
-      if (unit === "both" || unit === "trailer") {
-        if (trailerId) {
-          // Trailers don't track mileage/engine-hours. When a miles/hours
-          // type tags along on a "Both" service, don't carry the truck's
-          // reading onto the trailer's row -- it isn't meaningful for the
-          // trailer. The report/history display this case as
-          // "{type} (with Truck)" instead of a bogus due-at calculation.
-          const trailerReading = needsReading ? null : (reading ? Number(reading) : null);
-          rows.push({ company_id: companyId, truck_id: null, trailer_id: trailerId, service_type_id: finalTypeId, date, shop_name: shopName || null, location: location || null, reading_value: trailerReading, notes: notes || null, created_by: authUserId });
-        }
+      if (showTrailer) {
+        // Trailers don't track mileage/engine-hours -- no reading field
+        // for the trailer's own sub-section at all (see UnitServiceFields'
+        // showReading prop below).
+        rows.push({ company_id: companyId, truck_id: null, trailer_id: trailerId, service_type_id: trailerTypeId, date, shop_name: shopName || null, location: location || null, reading_value: null, notes: notes || null, created_by: authUserId });
       }
       if (!rows.length) throw new Error("No unit selected.");
 
@@ -508,34 +568,35 @@ export function SimpleServiceModal({
           />
         </div>
 
-        <div>
-          <label style={fieldLabel}>Type</label>
-          <ServiceTypeSelect
-            value={typeId}
-            onChange={setTypeId}
-            types={availableTypes}
-            onEditType={(t) => setTypeEditor({ mode: "edit", type: t })}
-            onNewType={() => setTypeEditor({ mode: "new", type: null })}
+        {/* Servicing both together: an additional area for the trailer
+            shows up below the truck's, each with its own type. */}
+        {showTruck && (
+          <UnitServiceFields
+            unitLabel={unit === "both" ? `Truck${truckName ? ` · ${truckName}` : ""}` : "Type"}
+            types={truckTypes}
+            typeId={truckTypeId} onTypeIdChange={setTruckTypeId}
+            reading={truckReading} onReadingChange={setTruckReading}
+            showReading
+            onEditType={(t) => setTypeEditor({ mode: "edit", type: t, target: "truck" })}
+            onNewType={() => setTypeEditor({ mode: "new", type: null, target: "truck" })}
           />
-        </div>
-
-        {selectedType && selectedType.interval_kind !== "none" && (
-          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>
-            Interval: every {selectedType.interval_value} {selectedType.interval_kind}
-          </div>
+        )}
+        {showTrailer && (
+          <UnitServiceFields
+            unitLabel={unit === "both" ? `Trailer${trailerName ? ` · ${trailerName}` : ""}` : "Type"}
+            types={trailerTypes}
+            typeId={trailerTypeId} onTypeIdChange={setTrailerTypeId}
+            reading="" onReadingChange={() => {}}
+            showReading={false}
+            onEditType={(t) => setTypeEditor({ mode: "edit", type: t, target: "trailer" })}
+            onNewType={() => setTypeEditor({ mode: "new", type: null, target: "trailer" })}
+          />
         )}
 
         <div>
           <label style={fieldLabel}>Date</label>
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={inputStyle} />
         </div>
-
-        {needsReading && (
-          <div>
-            <label style={fieldLabel}>{effectiveKind === "miles" ? "Odometer (miles) *" : "Engine hours *"}</label>
-            <input type="number" value={reading} onChange={(e) => setReading(e.target.value)} style={inputStyle} />
-          </div>
-        )}
 
         <div>
           <label style={fieldLabel}>Shop name</label>
@@ -559,9 +620,16 @@ export function SimpleServiceModal({
         companyId={companyId}
         mode={typeEditor?.mode ?? "new"}
         type={typeEditor?.type ?? null}
-        unit={unit}
-        onSaved={(_fresh, savedId) => { onTypesChanged(); setTypeEditor(null); setTypeId(savedId); }}
-        onDeleted={(_fresh, deletedId) => { onTypesChanged(); setTypeEditor(null); setTypeId((cur) => (cur === deletedId ? "" : cur)); }}
+        unit={typeEditor?.target ?? "both"}
+        onSaved={(_fresh, savedId) => {
+          onTypesChanged(); setTypeEditor(null);
+          if (typeEditor?.target === "trailer") setTrailerTypeId(savedId); else setTruckTypeId(savedId);
+        }}
+        onDeleted={(_fresh, deletedId) => {
+          onTypesChanged(); setTypeEditor(null);
+          if (typeEditor?.target === "trailer") setTrailerTypeId((cur) => (cur === deletedId ? "" : cur));
+          else setTruckTypeId((cur) => (cur === deletedId ? "" : cur));
+        }}
       />
     </FullscreenModal>
   );

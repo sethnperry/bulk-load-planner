@@ -5583,14 +5583,70 @@ before moving on.
   Binder session (only picks up the new name once the caller's equipment
   list reloads) — not worth a new callback chain for this cosmetic case.
 
-**Not done yet, Phase C**: `EquipmentModal.tsx` (fleet) Filter button +
-onboarding sequencing; `SimpleServiceModal`'s dual-unit-type rework for
-"servicing both together."
+### Phase C — Fleet tier + dual-unit service (shipped this pass)
 
-`tsc --noEmit` and `next build` both clean after both phases. Not
-live-verified this pass — same reason as every authenticated
-equipment-flow change this session (no logged-in session available from
-this side). Migration not yet applied.
+- **`ServiceTypeManager.tsx` — `SimpleServiceModal` dual-unit-type rework**:
+  "Both" previously forced the exact same `service_type_id` onto both the
+  truck's and trailer's rows. Per explicit spec ("a user might put wet
+  service for the truck and check and inspect for the trailer type"),
+  each unit now has its own fully independent type picker (new
+  `UnitServiceFields`, one instance per visible unit) — "an additional
+  area for the trailer shows up below" when servicing both together,
+  exactly as described. Date/Shop/Location/Notes stay one shared set for
+  the visit (the spec never asked those to split per-unit). Each unit's
+  own picker is filtered to types actually applicable to it (`applies_to`
+  truck/both or trailer/both) independent of the overall Unit selector —
+  previously "Both" showed every type regardless of fit. `typeEditor`
+  now carries a `target: "truck" | "trailer"` so "+ New type"/edit-type
+  from either sub-section resolves back into the right picker instead of
+  a single shared `typeId`.
+- **`EquipmentModal.tsx` (fleet tier) — Filter button**: added via the
+  same `headerRight` slot pattern, now threaded through `ModalShell` (new
+  optional prop, forwarded to `FullscreenModal`). Filters "My Equipment"
+  (`filteredMyEquipmentCombos`, new `useMemo`) by looking up each combo's
+  own truck and comparing its `region`/`local_area` — trucks/trailers'
+  fetch queries and their local `TruckRow`/`TrailerRow` types gained
+  `local_area` for the first time (previously only `region` was fetched
+  here at all; Local Area filtering didn't exist anywhere in this file).
+  Reuses the same `RegionLocalAreaFilterModal` Solo already uses — one
+  Filter UI, not two independently-drifting copies.
+- **`EquipmentModal.tsx` — onboarding sequencing**: new effect fires only
+  for a genuinely fresh company (`coupledCombos.length === 0` company-
+  wide, not just "this driver hasn't claimed anything yet" — an
+  established fleet with real coupled equipment never gets nudged just
+  because the current viewer's own "My Equipment" happens to be empty).
+  Admin/dispatch/lead (`canAddEquipment`) get defaulted into Add Truck,
+  then Add Trailer (reusing the exact same shared `AdminTruckModal`/
+  `AdminTrailerModal` the new minimal front-page flow already uses — see
+  Phase A), then handed off to `FleetModal`'s own already-built
+  Uncoupled Equipment picker to actually couple them, rather than
+  reimplementing that coupling flow a second time. Drivers (who can't
+  add) get dropped straight into `FleetModal` itself — "select from the
+  fleet" — the exact same Browse Fleet UI that was already reachable via
+  a manual tap, just opened automatically instead of requiring the
+  driver to notice and tap it themselves; no new permission surface.
+
+**Full pass complete** across all three phases. `tsc --noEmit` and `next
+build` both clean. Not live-verified this pass — same reason as every
+authenticated equipment-flow change this session (no logged-in session
+available from this side). Migration
+(`20260829010000_equipment_regions_local_areas.sql`) not yet applied —
+Region/Local Area pickers, and the Filter button's catalog management,
+won't have real data to show until it runs.
+
+**Manual walkthrough once the migration is applied** (per the plan's own
+verification section): add a truck through the new minimal flow → tap
+Service Schedule pre-save (confirms `ServiceTypeListModal` works with no
+real unit id yet) → Save & Close → tap Edit on the main modal → pick
+Truck → confirm its Binder shows just that one unit with Required Fields
+big and un-collapsed up top → log a "Both" service with different truck/
+trailer types → confirm the report section shows the truck's next-due
+line and the trailer's own last-serviced line, independently → try the
+Filter button's Region/Local Area add-then-select path, including the
+add/rename/remove controls as an admin and select-only as a plain driver
+→ (fleet tier) confirm a brand-new company's admin gets nudged into Add
+Truck → Add Trailer → Browse Fleet in sequence, while a driver on that
+same fresh company gets dropped straight into Browse Fleet instead.
 
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.

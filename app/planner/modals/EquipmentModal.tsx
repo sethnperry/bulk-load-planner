@@ -35,6 +35,7 @@ import DecoupleModal from "./DecoupleModal";
 import SoloEquipmentModal from "./SoloEquipmentModal";
 import ComboEditModal from "@/lib/ui/driver/ComboEditModal";
 import { TruckCard as AdminTruckCard, TrailerCard as AdminTrailerCard, TruckModal as AdminTruckModal, TrailerModal as AdminTrailerModal, type Truck as AdminTruck, type Trailer as AdminTrailer, type OtherPermit as AdminOtherPermit } from "@/lib/ui/driver/EquipmentDetails";
+import RegionLocalAreaFilterModal, { type EquipmentFilter } from "./RegionLocalAreaFilterModal";
 import type { SetupSession } from "@/lib/setupSession";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -57,6 +58,7 @@ type TruckRow = {
   truck_name: string;
   active: boolean | null;
   region?: string | null;
+  local_area?: string | null;
   status_code?: string | null;
   status_location?: string | null;
   status_notes?: string | null;
@@ -68,6 +70,7 @@ type TrailerRow = {
   trailer_name: string;
   active: boolean | null;
   region?: string | null;
+  local_area?: string | null;
   status_code?: string | null;
   status_location?: string | null;
   status_notes?: string | null;
@@ -565,15 +568,16 @@ const S = {
 // ─── Shared modal shell ───────────────────────────────────────────────────────
 
 function ModalShell({
-  open, onClose, title, children,
+  open, onClose, title, children, headerRight,
 }: {
   open: boolean;
   onClose: () => void;
   title: string;
   children: React.ReactNode;
+  headerRight?: React.ReactNode;
 }) {
   return (
-    <FullscreenModal open={open} onClose={onClose} title={title} footer={null}>
+    <FullscreenModal open={open} onClose={onClose} title={title} footer={null} headerRight={headerRight}>
       <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#000" }}>
         <div style={{ flex: 1, overflowY: "auto", padding: "0 16px 8px" }}>
           {children}
@@ -1083,14 +1087,28 @@ export default function EquipmentModal({
   const [newTareLbs,    setNewTareLbs]    = useState("");
   const [newTargetLbs,  setNewTargetLbs]  = useState("80000");
 
+  // Filter (top right of main modal) -- Region already had its own
+  // dropdown in FleetModal's own uncoupled-equipment picker; this is the
+  // shared Region/Local Area filter the Solo-tier modal also uses,
+  // narrowing "My Equipment" down to matching combos.
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [filter, setFilter] = useState<EquipmentFilter>({ region: null, localArea: null });
+
+  // Onboarding: default straight into Add Truck -> Add Trailer -> couple
+  // for admin/dispatch/lead when the company has no equipment at all yet;
+  // drivers (who can't add) get dropped straight into Browse Fleet
+  // instead -- "select from the fleet." See the effect below.
+  const [fleetAddTruckOpen, setFleetAddTruckOpen] = useState(false);
+  const [fleetAddTrailerOpen, setFleetAddTrailerOpen] = useState(false);
+
   // ── Loaders ────────────────────────────────────────────────────────────────
 
   const loadEquipment = useCallback(async () => {
     setEquipLoading(true);
     const [{ data: truckData }, { data: trailerData }, { data: regionData }] =
       await Promise.all([
-        supabase.from("trucks").select("truck_id, truck_name, active, region, status_code, status_location, status_notes, status_updated_at").eq("active", true).order("truck_name"),
-        supabase.from("trailers").select("trailer_id, trailer_name, active, region, status_code, status_location, status_notes, status_updated_at").eq("active", true).order("trailer_name"),
+        supabase.from("trucks").select("truck_id, truck_name, active, region, local_area, status_code, status_location, status_notes, status_updated_at").eq("active", true).order("truck_name"),
+        supabase.from("trailers").select("trailer_id, trailer_name, active, region, local_area, status_code, status_location, status_notes, status_updated_at").eq("active", true).order("trailer_name"),
         supabase.from("trucks").select("region").eq("active", true).not("region", "is", null),
       ]);
     setTrucks((truckData ?? []) as TruckRow[]);
@@ -1315,6 +1333,43 @@ export default function EquipmentModal({
     [coupledCombos, primaryTruckIds, authUserId, selectedComboId]
   );
 
+  // Filter button's result -- narrows "My Equipment" to combos whose truck
+  // matches the selected Region/Local Area. A combo without a resolved
+  // truck row yet (still loading) is excluded rather than shown
+  // unfiltered, matching "filters all the equipment down to only show
+  // what is local."
+  const filteredMyEquipmentCombos = useMemo(() => {
+    if (!filter.region && !filter.localArea) return myEquipmentCombos;
+    return myEquipmentCombos.filter((c) => {
+      const truck = trucks.find((t) => String(t.truck_id) === String(c.truck_id));
+      if (!truck) return false;
+      return (!filter.region || truck.region === filter.region) && (!filter.localArea || truck.local_area === filter.localArea);
+    });
+  }, [myEquipmentCombos, trucks, filter]);
+
+  // ── Onboarding: fleet-tier equivalent of Solo's own "nudge into Add
+  // Truck -> Add Trailer" -- per explicit spec ("This is for solo tier
+  // and admin/dispatch/lead roles in the fleet tier... Driver roles dont
+  // have adding equipment authorization so for them they would just have
+  // to select from the fleet"). Only fires for a genuinely fresh company
+  // (no coupled combos exist company-wide yet) -- an established fleet
+  // with equipment already coupled never gets nudged just because this
+  // particular driver hasn't claimed anything yet (that's what "My
+  // Equipment" + Browse Fleet's own SELECT buttons are for).
+  const canAddEquipment = myRole === "admin" || myRole === "dispatch" || myRole === "lead";
+  useEffect(() => {
+    if (!open || isSolo || equipLoading || combosLoading) return;
+    if (coupledCombos.length > 0) return;
+    if (fleetAddTruckOpen || fleetAddTrailerOpen || fleetOpen) return;
+    if (!canAddEquipment) { setFleetOpen(true); return; }
+    if (trucks.length === 0) { setFleetAddTruckOpen(true); return; }
+    if (trailers.length === 0) { setFleetAddTrailerOpen(true); return; }
+    // Both exist company-wide but nothing's coupled yet -- hand off to
+    // FleetModal's own already-built Uncoupled Equipment picker rather
+    // than reinventing the couple flow here.
+    setFleetOpen(true);
+  }, [open, isSolo, equipLoading, combosLoading, coupledCombos.length, trucks.length, trailers.length, canAddEquipment, fleetAddTruckOpen, fleetAddTrailerOpen, fleetOpen]);
+
   const coupledTruckIds = useMemo(
     () => new Set(coupledCombos.map((c) => String(c.truck_id))),
     [coupledCombos]
@@ -1480,6 +1535,15 @@ export default function EquipmentModal({
     await doCouple(tare, target);
   }
 
+  function handleFleetTruckAdded() {
+    setFleetAddTruckOpen(false);
+    loadEquipment();
+  }
+  function handleFleetTrailerAdded() {
+    setFleetAddTrailerOpen(false);
+    loadEquipment();
+  }
+
   // isSolo starts null until the company fetch resolves. Falling through to
   // the fleet JSX below during that gap caused a visible flash of the old
   // modal before flipping to SoloEquipmentModal on every open. Render
@@ -1625,27 +1689,44 @@ export default function EquipmentModal({
 
   return (
     <>
-      <ModalShell open={open} onClose={onClose} title="Equipment">
+      <ModalShell
+        open={open} onClose={onClose} title="Equipment"
+        headerRight={
+          <button
+            type="button"
+            onClick={() => setFilterOpen(true)}
+            style={{
+              background: "none", border: "none", cursor: "pointer",
+              color: (filter.region || filter.localArea) ? "#fff" : "rgba(255,255,255,0.4)",
+              fontSize: 12, fontWeight: 800, letterSpacing: 0.3,
+            }}
+          >
+            Filter{(filter.region || filter.localArea) ? " •" : ""}
+          </button>
+        }
+      >
         {errNode}
 
         {/* ── My Equipment (starred coupled combos only) ─────────────────── */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 8, marginBottom: 4 }}>
           <div style={S.sectionHeader}>My Equipment</div>
-          {myEquipmentCombos.length > 0 && (
-            <div style={{ color: "rgba(255,255,255,0.28)", fontWeight: 700, fontSize: 13 }}>{myEquipmentCombos.length}</div>
+          {filteredMyEquipmentCombos.length > 0 && (
+            <div style={{ color: "rgba(255,255,255,0.28)", fontWeight: 700, fontSize: 13 }}>{filteredMyEquipmentCombos.length}</div>
           )}
         </div>
         <div style={S.sub}>Only coupled equipment is usable by the planner.</div>
 
         {combosLoading ? (
           <div style={S.sub}>Loading…</div>
-        ) : myEquipmentCombos.length === 0 ? (
+        ) : filteredMyEquipmentCombos.length === 0 ? (
           <div style={{ ...S.sub, marginTop: 8 }}>
-            No equipment selected. Use <em>Browse fleet & couple equipment →</em> below to find and select your rig.
+            {myEquipmentCombos.length === 0
+              ? <>No equipment selected. Use <em>Browse fleet &amp; couple equipment →</em> below to find and select your rig.</>
+              : "No equipment matches the current filter."}
           </div>
         ) : (
           <div style={{ marginTop: 6 }}>
-            {myEquipmentCombos.map((c) => {
+            {filteredMyEquipmentCombos.map((c) => {
               const cid     = String(c.combo_id);
               const cm      = mergeCombo(c, comboMeta[cid]);
               const mine    = isMine(cm);
@@ -1809,6 +1890,26 @@ export default function EquipmentModal({
         }}
         onSaved={() => { hydrateCombosFromDb(); onRefreshCombos(); }}
       />
+
+      {/* ── Filter (top right of main modal) ── */}
+      <RegionLocalAreaFilterModal
+        open={filterOpen}
+        onClose={() => setFilterOpen(false)}
+        companyId={companyId ?? ""}
+        canManage={canAddEquipment}
+        filter={filter}
+        onChange={setFilter}
+      />
+
+      {/* ── Onboarding: Add Truck -> Add Trailer for a fresh company (see
+          the effect above) -- reuses the exact same shared modal the new
+          minimal front-page flow already uses. ── */}
+      {fleetAddTruckOpen && (
+        <AdminTruckModal truck={null} companyId={companyId ?? ""} onClose={() => setFleetAddTruckOpen(false)} onDone={handleFleetTruckAdded} myRole={myRole ?? undefined} />
+      )}
+      {fleetAddTrailerOpen && (
+        <AdminTrailerModal trailer={null} companyId={companyId ?? ""} onClose={() => setFleetAddTrailerOpen(false)} onDone={handleFleetTrailerAdded} myRole={myRole ?? undefined} />
+      )}
     </>
   );
 }
