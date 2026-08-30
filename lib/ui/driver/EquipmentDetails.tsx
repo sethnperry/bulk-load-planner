@@ -10,7 +10,7 @@ import {
   TRUCK_CATEGORIES, TRAILER_CATEGORIES,
   type EquipmentType, type AttachmentGroup,
 } from "@/lib/ui/driver/DocHub";
-import { type ServiceType, fetchServiceTypes, SimpleServiceModal, ServiceTypeListModal } from "@/app/planner/modals/ServiceTypeManager";
+import { ServiceTypeListModal } from "@/app/planner/modals/ServiceTypeManager";
 import { RequiredEquipmentFields } from "@/lib/ui/driver/RequiredEquipmentFields";
 
 // Types
@@ -718,56 +718,6 @@ type SensitiveData = {
 
 const emptySensitive: SensitiveData = { purchase_price: "", purchase_date: "", lease_terms: "", insurance_claims: "" };
 
-// Log a service record / manage service types (name + interval) for this
-// unit -- previously only reachable via the solo-tier equipment picker
-// (SoloEquipmentModal.tsx), so a fleet (non-solo) company had no way at all
-// to create a service type or set its interval. Added here 2026-08-07 per
-// explicit user direction, reusing the exact same SimpleServiceModal both
-// tiers now share (see ServiceTypeManager.tsx). Deliberately NOT gated by
-// myRole/canEditRestricted -- unlike the identity/permit fields on this
-// modal, service type management has never been role-restricted in the
-// solo flow this came from, and the user explicitly asked that stay true
-// here too ("everyone should be able to edit").
-//
-// 2026-08-29: externally controlled (open/onClose props) instead of owning
-// its own button+state -- the new front-page "Service Schedule" button
-// (TruckModal/TrailerModal) now drives this directly, opening either this
-// (an existing, real unit) or ServiceTypeListModal (isNew, no unit id yet)
-// depending on isNew. Was ServiceSection; renamed since it's no longer a
-// self-contained page section, just the log-a-service modal.
-function ServiceLogModal({ open, onClose, unitKind, unitId, unitName, companyId }: {
-  open: boolean; onClose: () => void;
-  unitKind: "truck" | "trailer"; unitId: string; unitName: string; companyId: string;
-}) {
-  const [authUserId, setAuthUserId] = useState<string | null>(null);
-  const [serviceTypes, setServiceTypes] = useState<ServiceType[]>([]);
-
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => setAuthUserId(data.user?.id ?? null));
-  }, []);
-
-  async function reloadTypes() {
-    setServiceTypes(await fetchServiceTypes(companyId));
-  }
-  useEffect(() => { if (companyId) reloadTypes(); }, [companyId]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  return (
-    <SimpleServiceModal
-      open={open}
-      onClose={onClose}
-      companyId={companyId}
-      authUserId={authUserId}
-      truckId={unitKind === "truck" ? unitId : null}
-      trailerId={unitKind === "trailer" ? unitId : null}
-      truckName={unitKind === "truck" ? unitName : null}
-      trailerName={unitKind === "trailer" ? unitName : null}
-      serviceTypes={serviceTypes}
-      onTypesChanged={reloadTypes}
-      onSaved={() => {}}
-    />
-  );
-}
-
 function SensitiveInfoSection({ unitKind, unitId, companyId }: { unitKind: "truck" | "trailer"; unitId: string; companyId: string }) {
   const [open, setOpen] = useState(false);
   const [data, setData] = useState<SensitiveData>(emptySensitive);
@@ -869,9 +819,13 @@ function TruckModal({ truck, companyId, onClose, onDone, myRole }: {
   const [active,    setActive]    = useState(truck?.active ?? true);
   // 2026-08-29 rework: front page (required fields) vs. Details (everything
   // else, unchanged) -- one form/save either way, this only controls what's
-  // currently visible. serviceOpen drives whichever service modal fits
-  // (ServiceTypeListModal pre-save, ServiceLogModal once a real truck_id
-  // exists) from the one "Service Schedule" button.
+  // currently visible. "Service Schedule" (serviceOpen) always opens
+  // ServiceTypeListModal -- setting up TYPES and their intervals, never
+  // logging an actual service -- per explicit clarification: "the is
+  // where we determine service types and the intervals... we record the
+  // service from the main modal service button." Recording a real
+  // service stays where it already was, the main equipment picker's own
+  // "Service" button (SimpleServiceModal), untouched by this modal.
   const [screen,      setScreen]      = useState<"front" | "details">("front");
   const [serviceOpen, setServiceOpen] = useState(false);
   // Permit dates
@@ -1115,11 +1069,7 @@ function TruckModal({ truck, companyId, onClose, onDone, myRole }: {
         </>
       )}
 
-      {isNew ? (
-        <ServiceTypeListModal open={serviceOpen} onClose={() => setServiceOpen(false)} companyId={companyId} unit="truck" />
-      ) : (
-        <ServiceLogModal open={serviceOpen} onClose={() => setServiceOpen(false)} unitKind="truck" unitId={truck!.truck_id} unitName={name || truck!.truck_name} companyId={companyId} />
-      )}
+      <ServiceTypeListModal open={serviceOpen} onClose={() => setServiceOpen(false)} companyId={companyId} unit="truck" />
     </Modal>
   );
 }
@@ -1462,11 +1412,7 @@ function TrailerModal({ trailer, companyId, onClose, onDone, myRole }: {
         </>
       )}
 
-      {isNew ? (
-        <ServiceTypeListModal open={serviceOpen} onClose={() => setServiceOpen(false)} companyId={companyId} unit="trailer" />
-      ) : (
-        <ServiceLogModal open={serviceOpen} onClose={() => setServiceOpen(false)} unitKind="trailer" unitId={trailer!.trailer_id} unitName={name || trailer!.trailer_name} companyId={companyId} />
-      )}
+      <ServiceTypeListModal open={serviceOpen} onClose={() => setServiceOpen(false)} companyId={companyId} unit="trailer" />
     </Modal>
   );
 }

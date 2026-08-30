@@ -5687,6 +5687,48 @@ visual consistency, per the "just a different name" framing.
 `tsc --noEmit` and `next build` both clean. Not live-verified this pass
 (no authenticated session available from this side) -- worth a real
 click-through on the same device that caught the original gap.
+
+### Service Schedule clarified: types/intervals only, never logging a service (2026-08-29, same day follow-up)
+
+Real bug in the Binder restructure just above, caught by explicit
+clarification before it was ever tested live: "the [Service Schedule] is
+where we determine service types and the intervals for the various
+services. we record the service from the main modal service button. so
+in the new equipment and edit modal service Schedule we set the type.
+then determine the intervals (miles/hours/time)... then add, remove, edit
+each type option." Phase A had built exactly this for `isNew`
+(`ServiceTypeListModal`) but wired the **existing**-unit case (`!isNew`)
+to the wrong thing entirely -- `ServiceLogModal`, the actual log-a-service
+form (pick unit, type, date, reading, shop, notes, submit a
+`service_records` row). Same mistake carried into `BinderModal.tsx`'s
+same-day restructure, which reused `SimpleServiceModal` directly for its
+own Service Schedule button.
+
+Fixed in both places: `EquipmentDetails.tsx`'s TruckModal/TrailerModal
+now always open `ServiceTypeListModal` for Service Schedule, no more
+`isNew` branching -- the now-unreachable `ServiceLogModal` wrapper
+(and its now-unused `SimpleServiceModal`/`ServiceType`/`fetchServiceTypes`
+imports) were deleted rather than left as dead code.
+`BinderModal.tsx`'s `UnitSection` does the same -- `ServiceTypeListModal`
+instead of a `SimpleServiceModal` wrapper, dropping the `authUserId`/
+`serviceTypes` state it no longer needs. Recording an actual service is
+completely untouched -- still exactly the main equipment picker's own
+"Service" button (`SoloEquipmentModal.tsx`'s action row →
+`SimpleServiceModal`), which was never part of this Phase A/B/C rework
+at all.
+
+Also tightened `ServiceTypeEditorModal`'s interval-value field (the one
+place "that selection determines the field type for the value" was still
+a bit soft) -- the label and placeholder now read "Every how many
+miles/hours/days" instead of a generic "Interval value," driven directly
+by the Interval kind picked just above it.
+
+`tsc --noEmit` and `next build` both clean. Not live-verified this pass.
+(Also caught and fixed in the same pass: my own previous edit to this
+file had accidentally dropped the "## Pre-launch cleanup" section heading
+below -- restored, no content was actually lost, just its own heading.)
+
+## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.
 

@@ -175,8 +175,16 @@ export function ServiceTypeEditorModal({
             </div>
             {kind !== "none" && (
               <div>
-                <label style={fieldLabel}>Interval value</label>
-                <input placeholder="e.g. 65000" type="number" value={value} onChange={(e) => setValue(e.target.value)} style={inputStyle} />
+                {/* Label/placeholder are driven by the Interval selection
+                    above -- "that selection determines the field type for
+                    the value," per explicit direction. */}
+                <label style={fieldLabel}>
+                  {kind === "miles" ? "Every how many miles" : kind === "hours" ? "Every how many hours" : "Every how many days"}
+                </label>
+                <input
+                  placeholder={kind === "miles" ? "e.g. 65000" : kind === "hours" ? "e.g. 500" : "e.g. 90"}
+                  type="number" value={value} onChange={(e) => setValue(e.target.value)} style={inputStyle}
+                />
               </div>
             )}
             <div>

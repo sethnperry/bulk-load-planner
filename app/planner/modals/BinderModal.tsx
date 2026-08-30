@@ -20,7 +20,7 @@ import { supabase } from "@/lib/supabase/client";
 import { FullscreenModal } from "@/lib/ui/FullscreenModal";
 import { CustomSelect } from "@/lib/ui/CustomSelect";
 import { RequiredEquipmentFields } from "@/lib/ui/driver/RequiredEquipmentFields";
-import { type ServiceType, fetchServiceTypes, SimpleServiceModal } from "./ServiceTypeManager";
+import { ServiceTypeListModal } from "./ServiceTypeManager";
 import {
   usePermitAttachments, AttachmentIndicator, DocPreviewModal,
   type AttachmentRecord, type AttachmentGroup,
@@ -621,11 +621,15 @@ function CompartmentsSection({
 // Close, with everything else (VIN/Plate/Notes, Compartments, the permit
 // + attachment list) behind Details, same "front page vs. Details"
 // pattern EquipmentDetails.tsx's TruckModal/TrailerModal already
-// established. Service Schedule reuses SimpleServiceModal directly
-// (mirrors EquipmentDetails.tsx's own ServiceLogModal wrapper, which
-// isn't exported from that file) -- Binder is only ever opened for an
-// EXISTING unit, so there's no isNew/pre-save case to handle here like
-// that file's ServiceTypeListModal branch covers.
+// established.
+//
+// Service Schedule opens ServiceTypeListModal (types + intervals only,
+// same as the Add/Edit modal's own button) per the same-day clarification
+// this codebase's other Service Schedule buttons already got fixed to
+// match: "this is where we determine service types and the intervals...
+// we record the service from the main modal service button." Recording
+// an actual service stays exactly where it already was -- the main
+// equipment picker's own "Service" button -- untouched by this file.
 function UnitSection({
   unitKind, unitId, unitName, companyId, types, records, detail, expandedId, onToggleExpand,
   onEditType, onAddType, onSaved, onClose,
@@ -647,16 +651,6 @@ function UnitSection({
   const { pagesFor, hasDoc, reload: reloadDocs } = usePermitAttachments(unitKind, unitId, companyId);
   const [screen, setScreen] = useState<"front" | "details">("front");
   const [serviceOpen, setServiceOpen] = useState(false);
-  const [authUserId, setAuthUserId] = useState<string | null>(null);
-  const [serviceTypes, setServiceTypes] = useState<ServiceType[]>([]);
-
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => setAuthUserId(data.user?.id ?? null));
-  }, []);
-  const reloadServiceTypes = useCallback(async () => {
-    setServiceTypes(await fetchServiceTypes(companyId));
-  }, [companyId]);
-  useEffect(() => { if (companyId) void reloadServiceTypes(); }, [companyId, reloadServiceTypes]);
 
   const rows: Row[] = useMemo(() => {
     const applicable = types.filter((t) => {
@@ -755,19 +749,7 @@ function UnitSection({
         </>
       )}
 
-      <SimpleServiceModal
-        open={serviceOpen}
-        onClose={() => setServiceOpen(false)}
-        companyId={companyId}
-        authUserId={authUserId}
-        truckId={unitKind === "truck" ? unitId : null}
-        trailerId={unitKind === "trailer" ? unitId : null}
-        truckName={unitKind === "truck" ? unitName : null}
-        trailerName={unitKind === "trailer" ? unitName : null}
-        serviceTypes={serviceTypes}
-        onTypesChanged={reloadServiceTypes}
-        onSaved={() => {}}
-      />
+      <ServiceTypeListModal open={serviceOpen} onClose={() => setServiceOpen(false)} companyId={companyId} unit={unitKind} />
     </div>
   );
 }
