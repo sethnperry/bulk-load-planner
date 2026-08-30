@@ -20,6 +20,7 @@ import { supabase } from "@/lib/supabase/client";
 import { FullscreenModal } from "@/lib/ui/FullscreenModal";
 import { CustomSelect } from "@/lib/ui/CustomSelect";
 import { RequiredEquipmentFields } from "@/lib/ui/driver/RequiredEquipmentFields";
+import { type ServiceType, fetchServiceTypes, SimpleServiceModal } from "./ServiceTypeManager";
 import {
   usePermitAttachments, AttachmentIndicator, DocPreviewModal,
   type AttachmentRecord, type AttachmentGroup,
@@ -116,6 +117,15 @@ const cancelBtnStyle: React.CSSProperties = {
 const dangerBtnStyle: React.CSSProperties = {
   padding: "12px 14px", borderRadius: 6, border: "1px solid rgba(220,60,60,0.4)",
   background: "rgba(180,40,40,0.12)", color: "#fca5a5", fontWeight: 800, fontSize: 14, cursor: "pointer",
+};
+// Front-page nav buttons -- matches the Add/Edit Truck/Trailer modal's own
+// "Service Schedule"/"Details →" ghost-button look (css.btn("ghost") in
+// EquipmentDetails.tsx), reproduced here since this file has its own style
+// constants rather than importing that file's tokens.
+const navBtnStyle: React.CSSProperties = {
+  width: "100%", padding: "13px 14px", borderRadius: 6, marginBottom: 8,
+  border: "1px solid rgba(255,255,255,0.14)", background: "rgba(255,255,255,0.05)",
+  color: "#fff", fontSize: 14, fontWeight: 700, textAlign: "left" as const, cursor: "pointer",
 };
 
 // ─── Permit type editor (rename / change applies_to / soft-delete) ──────────
@@ -603,9 +613,22 @@ function CompartmentsSection({
 
 // ─── Per-unit permit list section ───────────────────────────────────────────
 
+// 2026-08-29 follow-up: restructured to match the Add/Edit Truck/Trailer
+// modal's own shape exactly, per explicit direction ("match the edit
+// truck modal to the add truck modal... same thing with service
+// Schedule etc. just a different name") -- front page (Required Fields,
+// unchanged from the prior pass) + Service Schedule / Details →/ Save &
+// Close, with everything else (VIN/Plate/Notes, Compartments, the permit
+// + attachment list) behind Details, same "front page vs. Details"
+// pattern EquipmentDetails.tsx's TruckModal/TrailerModal already
+// established. Service Schedule reuses SimpleServiceModal directly
+// (mirrors EquipmentDetails.tsx's own ServiceLogModal wrapper, which
+// isn't exported from that file) -- Binder is only ever opened for an
+// EXISTING unit, so there's no isNew/pre-save case to handle here like
+// that file's ServiceTypeListModal branch covers.
 function UnitSection({
   unitKind, unitId, unitName, companyId, types, records, detail, expandedId, onToggleExpand,
-  onEditType, onAddType, onSaved,
+  onEditType, onAddType, onSaved, onClose,
 }: {
   unitKind: UnitKind;
   unitId: string;
@@ -619,8 +642,21 @@ function UnitSection({
   onEditType: (t: PermitType) => void;
   onAddType: () => void;
   onSaved: () => void;
+  onClose: () => void;
 }) {
   const { pagesFor, hasDoc, reload: reloadDocs } = usePermitAttachments(unitKind, unitId, companyId);
+  const [screen, setScreen] = useState<"front" | "details">("front");
+  const [serviceOpen, setServiceOpen] = useState(false);
+  const [authUserId, setAuthUserId] = useState<string | null>(null);
+  const [serviceTypes, setServiceTypes] = useState<ServiceType[]>([]);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => setAuthUserId(data.user?.id ?? null));
+  }, []);
+  const reloadServiceTypes = useCallback(async () => {
+    setServiceTypes(await fetchServiceTypes(companyId));
+  }, [companyId]);
+  useEffect(() => { if (companyId) void reloadServiceTypes(); }, [companyId, reloadServiceTypes]);
 
   const rows: Row[] = useMemo(() => {
     const applicable = types.filter((t) => {
@@ -656,45 +692,82 @@ function UnitSection({
 
   return (
     <div style={{ marginBottom: 18 }}>
-      <RequiredFieldsBlock
-        unitKind={unitKind} unitId={unitId} unitName={unitName} companyId={companyId} detail={detail}
-        onSaved={onSaved}
-      />
-      <UnitInfoRow
-        unitKind={unitKind} unitId={unitId} detail={detail}
-        isExpanded={expandedId === `${unitKind}-info`}
-        onToggleExpand={() => onToggleExpand(`${unitKind}-info`)}
-        onSaved={onSaved}
-      />
-      {unitKind === "trailer" && (
-        <CompartmentsSection trailerId={unitId} expandedId={expandedId} onToggleExpand={onToggleExpand} />
+      {screen === "front" ? (
+        <>
+          <RequiredFieldsBlock
+            unitKind={unitKind} unitId={unitId} unitName={unitName} companyId={companyId} detail={detail}
+            onSaved={onSaved}
+          />
+          <div style={{ marginTop: 16 }}>
+            <button type="button" onClick={() => setServiceOpen(true)} style={navBtnStyle}>Service Schedule</button>
+            <button type="button" onClick={() => setScreen("details")} style={navBtnStyle}>Details →</button>
+          </div>
+          {/* Everything below Required Fields already autosaves per field
+              (RequiredFieldsBlock's own Save, each permit row's own Save,
+              etc.) -- there's nothing left pending to batch-commit, so
+              "Save & Close" here is really just Close, styled the same as
+              the Add/Edit Truck/Trailer modal's own button for visual
+              consistency. No separate Cancel either, for the same reason
+              -- there's nothing uncommitted to discard. */}
+          <button type="button" onClick={onClose} style={{ ...saveBtnStyle, marginTop: 8 }}>Save & Close</button>
+        </>
+      ) : (
+        <>
+          <button type="button" onClick={() => setScreen("front")} style={{ ...cancelBtnStyle, width: "auto", padding: "6px 12px", fontSize: 11, marginBottom: 14 }}>
+            ← Back
+          </button>
+
+          <UnitInfoRow
+            unitKind={unitKind} unitId={unitId} detail={detail}
+            isExpanded={expandedId === `${unitKind}-info`}
+            onToggleExpand={() => onToggleExpand(`${unitKind}-info`)}
+            onSaved={onSaved}
+          />
+          {unitKind === "trailer" && (
+            <CompartmentsSection trailerId={unitId} expandedId={expandedId} onToggleExpand={onToggleExpand} />
+          )}
+          {rows.map((row) => (
+            <PermitRow
+              key={row.id}
+              row={row}
+              unitKind={unitKind}
+              unitId={unitId}
+              companyId={companyId}
+              isExpanded={expandedId === row.id}
+              onToggleExpand={() => onToggleExpand(row.id)}
+              onEditType={() => onEditType(row.type)}
+              hasDoc={hasDoc(row.type.permit_type_id)}
+              pages={pagesFor(row.type.permit_type_id)}
+              onDocsChanged={reloadDocs}
+              onSaved={onSaved}
+            />
+          ))}
+          <div
+            onClick={onAddType}
+            style={{
+              borderRadius: 6, border: "1px dashed rgba(255,255,255,0.18)", padding: "10px 12px",
+              textAlign: "center" as const, cursor: "pointer", fontSize: 13, fontWeight: 700,
+              color: "rgba(255,255,255,0.35)", marginTop: 4,
+            }}
+          >
+            + Add permit type
+          </div>
+        </>
       )}
-      {rows.map((row) => (
-        <PermitRow
-          key={row.id}
-          row={row}
-          unitKind={unitKind}
-          unitId={unitId}
-          companyId={companyId}
-          isExpanded={expandedId === row.id}
-          onToggleExpand={() => onToggleExpand(row.id)}
-          onEditType={() => onEditType(row.type)}
-          hasDoc={hasDoc(row.type.permit_type_id)}
-          pages={pagesFor(row.type.permit_type_id)}
-          onDocsChanged={reloadDocs}
-          onSaved={onSaved}
-        />
-      ))}
-      <div
-        onClick={onAddType}
-        style={{
-          borderRadius: 6, border: "1px dashed rgba(255,255,255,0.18)", padding: "10px 12px",
-          textAlign: "center" as const, cursor: "pointer", fontSize: 13, fontWeight: 700,
-          color: "rgba(255,255,255,0.35)", marginTop: 4,
-        }}
-      >
-        + Add permit type
-      </div>
+
+      <SimpleServiceModal
+        open={serviceOpen}
+        onClose={() => setServiceOpen(false)}
+        companyId={companyId}
+        authUserId={authUserId}
+        truckId={unitKind === "truck" ? unitId : null}
+        trailerId={unitKind === "trailer" ? unitId : null}
+        truckName={unitKind === "truck" ? unitName : null}
+        trailerName={unitKind === "trailer" ? unitName : null}
+        serviceTypes={serviceTypes}
+        onTypesChanged={reloadServiceTypes}
+        onSaved={() => {}}
+      />
     </div>
   );
 }
@@ -1003,6 +1076,7 @@ export default function BinderModal({
             onEditType={(t) => setTypeEditor({ mode: "edit", type: t, unit: "truck" })}
             onAddType={() => setAddPicker("truck")}
             onSaved={load}
+            onClose={onClose}
           />
         )}
         {!loading && trailerId && (
@@ -1012,6 +1086,7 @@ export default function BinderModal({
             onEditType={(t) => setTypeEditor({ mode: "edit", type: t, unit: "trailer" })}
             onAddType={() => setAddPicker("trailer")}
             onSaved={load}
+            onClose={onClose}
           />
         )}
       </FullscreenModal>

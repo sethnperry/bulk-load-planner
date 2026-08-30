@@ -5648,7 +5648,45 @@ add/rename/remove controls as an admin and select-only as a plain driver
 Truck → Add Trailer → Browse Fleet in sequence, while a driver on that
 same fresh company gets dropped straight into Browse Fleet instead.
 
-## Pre-launch cleanup (before app store submission)
+### Binder (Edit) restructured to match the Add/Edit Truck/Trailer modal's own shape (2026-08-29, same day follow-up)
+
+Live screenshot from the user showed the real gap: "Edit" (the picker →
+`BinderModal.tsx` flow from Phase B) landed on a screen with Required
+Fields up top (correct, from Phase B) but then went straight into a flat
+list -- VIN/Plate/Notes row, then every permit row with its paperclip/
+attachment icon, no Service Schedule button, no Details step, no Save &
+Close -- structurally nothing like the Add Truck modal's front-page/
+Service-Schedule/Details/Save-&-Close shape, even though `RequiredFieldsBlock`
+already reused the same component. Per explicit direction ("match the
+edit truck modal to the add truck modal? it should be the same thing
+with service Schedule etc. just a different name. same for trailer").
+
+`BinderModal.tsx`'s `UnitSection` gained the identical `screen: "front" |
+"details"` pattern `EquipmentDetails.tsx`'s TruckModal/TrailerModal
+already uses: **front page** = `RequiredFieldsBlock` (unchanged) +
+**Service Schedule** + **Details →** + **Save & Close**; **Details** =
+everything that used to be always-visible -- `UnitInfoRow` (VIN/Plate/
+Notes), `CompartmentsSection` (trailer only), the full permit +
+attachment list, "+ Add permit type" -- behind a "← Back" link.
+
+Service Schedule reuses `SimpleServiceModal` directly (fetches
+`serviceTypes`/`authUserId` inline, same shape as `EquipmentDetails.tsx`'s
+own `ServiceLogModal` wrapper, which isn't exported from that file so
+couldn't be imported directly) -- Binder is only ever opened for an
+**existing** unit, so there's no `isNew`/pre-save branch to handle here
+the way `ServiceTypeListModal` covers on the Add side.
+
+"Save & Close" is deliberately just `onClose()` (threaded down as a new
+`UnitSection` prop) -- everything on the Details screen already autosaves
+per-field (`RequiredFieldsBlock`'s own conditional Save, each permit
+row's own Save/Delete, `UnitInfoRow`'s own Save), so there's nothing left
+to batch-commit and no separate Cancel needed either (nothing uncommitted
+to discard) -- styled identically to the Add/Edit modal's own button for
+visual consistency, per the "just a different name" framing.
+
+`tsc --noEmit` and `next build` both clean. Not live-verified this pass
+(no authenticated session available from this side) -- worth a real
+click-through on the same device that caught the original gap.
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.
 
