@@ -200,7 +200,7 @@ export default function ScaleTicketModal({
               color: "rgba(255,255,255,0.85)", cursor: "pointer",
             }}
           >
-            Record Weight
+            Validate Load
           </button>
           <button
             type="button"
@@ -213,7 +213,7 @@ export default function ScaleTicketModal({
               color: "rgba(255,255,255,0.92)", cursor: "pointer",
             }}
           >
-            Done
+            Save & Close
           </button>
         </div>
       </div>
