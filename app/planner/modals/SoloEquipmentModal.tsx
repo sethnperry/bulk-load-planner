@@ -911,12 +911,12 @@ export default function SoloEquipmentModal({
             )}
             {serviceLines.length > 0 ? (
               <div style={S.reportLine} onClick={() => setServiceHistoryOpen(true)}>
-                <span style={S.reportLabel}>Next Service{serviceLines[0].typeName ? ` · ${serviceLines[0].typeName}` : ""}</span>
+                <span style={S.reportLabel}>Truck{serviceLines[0].typeName ? ` - ${serviceLines[0].typeName}` : ""}</span>
                 <span style={{ fontWeight: 900, color: COLOR_SERVICE, fontSize: 13 }}>{serviceLines[0].display}</span>
               </div>
             ) : (
               <div style={S.reportLine} onClick={() => setServiceHistoryOpen(true)}>
-                <span style={S.reportLabel}>Next Service</span>
+                <span style={S.reportLabel}>Truck</span>
                 <span style={{ fontWeight: 900, color: COLOR_SERVICE }}>No service recorded</span>
               </div>
             )}
@@ -932,7 +932,7 @@ export default function SoloEquipmentModal({
             )}
             {washLines.length > 0 ? (
               <div style={S.reportLine} onClick={() => setWashHistoryOpen(true)}>
-                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 4, width: "100%" }}>
                   {washLines.map((w) => (
                     <div key={w.unitLabel} style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
                       <span style={S.reportLabel}>{w.unitLabel === "Both" ? "Washed" : `${w.unitLabel} washed`}</span>

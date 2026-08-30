@@ -5728,6 +5728,28 @@ by the Interval kind picked just above it.
 file had accidentally dropped the "## Pre-launch cleanup" section heading
 below -- restored, no content was actually lost, just its own heading.)
 
+### Report section polish: wash-date alignment, truck service line label (2026-08-29, same day follow-up)
+
+Two small fixes to `SoloEquipmentModal.tsx`'s report section, per explicit
+follow-up:
+- **Washed-on date wasn't right-aligned** -- the wash lines' wrapping
+  column `<div>` (holding one row per unit when Truck/Trailer washed on
+  different days) had no explicit width, so as the sole child of the
+  report row's own `justifyContent: "space-between"` container it just
+  shrank to its content's width and sat at the left edge -- each row's own
+  `space-between` then only had that narrow width to work with, squeezing
+  the date in tight next to the label instead of pushing it to the row's
+  actual right edge the way the Tare/Target and Truck service rows already
+  do. Fixed with `width: "100%"` on that wrapper.
+- **Truck's service line relabeled** from "Next Service · {type}" to
+  "Truck - {type}" (e.g. "Truck - Dry"), matching the "Truck"/"Trailer
+  Serviced" naming convention the trailer's own line already uses,
+  hyphen instead of the middle-dot separator. The no-data fallback
+  ("No service recorded") now labels its row "Truck" too, for the same
+  reason.
+
+`tsc --noEmit` and `next build` both clean. Not live-verified this pass.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.
