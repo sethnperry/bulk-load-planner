@@ -5869,6 +5869,103 @@ that's same-company-only context, not public exposure.
 
 `tsc --noEmit` and `next build` both clean. Not live-verified this pass.
 
+## Terminal tab pivot: Lane Map removed, Insights (Volume/Trends/Recovery) added (2026-08-31)
+
+Planned via Plan Mode (approved plan preserved at
+`wild-discovering-plum.md`) per explicit direction: "get rid of the whole
+lane map and status update system. this will be way too involved and
+complicated for every terminal across the country." Replaced with a bar
+chart of gallons loaded per product over a selectable time period ("like
+stock analysis"), with room to grow into other analytics via the same
+sub-tab mechanic every other tab in this app already uses.
+
+Two scope decisions confirmed with the user before writing the plan
+(asked, not guessed):
+- **Racks stay, the Lane Map doesn't.** `rack_id` is load-bearing for
+  more than the grid -- rack-aware terminal selection, the per-rack
+  product list, and the Out of Product outage flag all key off it. Only
+  the *visual* lane/arm grid and its manual per-arm status update UI were
+  removed; the rack picker and rack-level product list/STUD are
+  unchanged.
+- **Recovery-rate comparison stays company-scoped.** No cross-company
+  ("global") driver comparison -- flagged as a real, separate privacy/
+  business decision for later, not built alongside this reshuffle.
+
+**Removed**: `RackLaneGrid.tsx` and `LaneStatusModal.tsx` deleted
+outright. `EditTerminalModal.tsx` lost its entire Lane/Arm Layout view
+(`LayoutView`/`LaneRow`/`LaneArmProductsView`/`ArmProductPickerModal`,
+~600 lines) and the "Edit Lane/Arm Layout" button that opened it, along
+with the now-unused `letterFor`/`iconBtnStyle`/`MAX_PRODUCTS_PER_ARM`/
+`displayLabel`/`CustomSelect` imports that only that view needed.
+**Kept, unchanged**: `RacksView` (rack name/create/delete, Renewal Days),
+`ProductsView` (rack-level product list curation), `RackProductStatusModal.tsx`
+(the rack-level STUD -- feeds `terminal_products`/`terminal_temp_bias`,
+unrelated to the per-arm grid). `rack_arms`/`rack_lanes` tables and their
+live data are untouched in the DB, just no longer rendered -- cheap to
+resurrect later, nothing destructive here.
+
+**New `app/planner/terminal/page.tsx`** (full rebuild): terminal identity
+header (unchanged) + a new **This Terminal / All Terminals** toggle, then
+4 sub-tabs via `CenteredSubTabs` (the same "dial" mechanic already used
+for this page's own rack picker, Cards' sub-tabs, etc. -- exactly what "a
+dial like every other tab" meant):
+- **Status**: everything this page used to be -- rack picker, product
+  list, STUD, Edit Terminal -- verbatim, just one of four views now
+  instead of the whole tab. Shows a placeholder while All Terminals is
+  selected (racks are inherently per-terminal).
+- **Volume** (the one fully-built chart this pass): new
+  `app/planner/terminal/VolumeChart.tsx` -- a grouped bar chart, one
+  cluster per time bucket, gallons per product within each, colored via
+  the existing `productColorFor()` (same palette the outage banner's
+  detail cards already use, so a product reads the same color everywhere
+  rather than a second invented palette). Period control reuses this
+  app's own established 7d/30d/90d/All lookback-chip convention (already
+  duplicated across `MyLoadsModal`/`ScaleHistoryModal`/
+  `RecordHistoryModal`/`UnderloadingDashboardModal` -- no shared component
+  exists to import, same as those). Bucketing is adaptive ("like stock
+  analysis") -- daily bars for 7d/30d, weekly for 90d, monthly for All
+  (new `bucketLoads()`/`bucketKeyFor()` in `page.tsx`) -- so the chart
+  stays legible instead of one bar per day over a year of history.
+- **Trends / Recovery**: honest "coming soon" placeholders (reusing the
+  page's existing `PlaceholderPanel`) -- not guessed-at functionality.
+  Recorded for the next pass: Trends = seasonal API/temp charts from
+  `terminal_temp_bias`/`load_lines.actual_api`; Recovery =
+  `load_points.recovered_gallons` comparison across the driver's own
+  company (same source `UnderloadingDashboardModal.tsx` already
+  aggregates), explicitly not cross-company.
+
+**Volume's data source**: `load_log` has no `company_id` column (this
+file's own prior notes) -- scoped via `useCompanyRoster(shell.companyId)`
+(already-shared hook, same one `UnderloadingDashboardModal.tsx` uses) to
+get member `user_id`s, then `load_log` filtered to those ids +
+`status = 'loaded'` (real completed loads, not `'completed'` -- confirmed
+the hard way earlier this project, see the incentive-backfill history in
+this file) + the lookback window, then `load_lines` joined by `load_id`.
+Fetched client-side and aggregated in JS, same pattern
+`PayrollReportModal.tsx`/`UnderloadingDashboardModal.tsx` already use --
+no new RPC, no new migration. **Visibility deliberately reuses whatever
+RLS already permits per role** -- a plain driver's chart is scoped to
+their own loads, staff roles see fleet-wide via the same grants
+`UnderloadingDashboardModal.tsx` already relies on. Widening plain-driver
+visibility to fleet-wide totals (so "how much *we've* loaded" reads
+company-wide for every role) is flagged as a real, separate RLS decision,
+not made here.
+
+**Tab label renamed** "Terminal" → "Insights" in
+`CalculatorLayoutClient.tsx`'s `TERMINAL_TAB` -- label only, `id`/`href`
+(`/planner/terminal`) deliberately unchanged, same "route/label only,
+internal identifiers untouched" precedent as the `/calculator` →
+`/planner` rename.
+
+`tsc --noEmit` and `next build` both clean. Not live-verified this pass
+(no authenticated session available from this side, and Volume needs real
+completed loads at a real terminal to show anything meaningful) -- manual
+walkthrough once live: open Insights, confirm Status (rack picker/product
+list/STUD/Edit Terminal) still works exactly as before, switch to Volume,
+confirm a real terminal with completed loads shows a believable chart,
+toggle All Terminals, cycle the 7d/30d/90d/All chips, confirm Trends/
+Recovery show clean placeholders.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.

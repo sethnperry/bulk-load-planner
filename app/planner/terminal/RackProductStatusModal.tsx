@@ -2,8 +2,10 @@
 // app/planner/terminal/RackProductStatusModal.tsx
 //
 // The bottom "STUD" button on a rack screen -- rack-level Product Status
-// Update, distinct from LaneStatusModal's per-arm granularity. Marks a
-// product out (or back in) across the whole rack, and -- when API/temp are
+// Update (the per-arm Lane Map/LaneStatusModal this used to sit alongside
+// was removed 2026-08-31, per explicit direction -- see page.tsx's own
+// header comment; this modal is unrelated to that removal and unchanged).
+// Marks a product out (or back in) across the whole rack, and -- when API/temp are
 // supplied -- feeds the *existing* fuel-temp-bias system
 // (update_terminal_temp_bias RPC) via the same predicted-temp/error
 // computation useLoadWorkflow.ts already does after a load completes. No new

@@ -51,7 +51,11 @@ import type { Role } from "@/lib/ui/driver/role";
 // Dispatch never gets a Planner tab -- dispatchers don't get in a truck.
 // Admin and super admins get both, since "admins should have the planner
 // used by lead drivers" (see page.tsx's canDriverTrain).
-const TERMINAL_TAB = { id: "terminal", label: "Terminal", href: "/planner/terminal" };
+// Label only, per explicit direction (2026-08-31 Terminal tab pivot --
+// Lane Map removed, Volume/Trends/Recovery analytics added) -- id/href
+// deliberately unchanged, same "route/label only, internal identifiers
+// untouched" precedent as the /calculator -> /planner rename.
+const TERMINAL_TAB = { id: "terminal", label: "Insights", href: "/planner/terminal" };
 const DISPATCH_TAB = { id: "dispatch", label: "Dispatch", href: "/planner/dispatch" };
 const PLANNER_TAB = { id: "planner", label: "Planner", href: "/planner" };
 const CARDS_TAB = { id: "cards", label: "Cards", href: "/planner/cards" };
