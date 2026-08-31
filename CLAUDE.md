@@ -5856,6 +5856,19 @@ properly, not re-guess around.
 
 `tsc --noEmit` and `next build` both clean.
 
+### Terminal outage detail modal: drop the truck number from Out of Product (2026-08-31, same day)
+
+Per explicit direction ("the out of product should maybe not show the
+truck number since it is public. only the company name") --
+`TerminalOutageDetailModal.tsx`'s `ReportRow` top line now branches by
+report type: Out of Product (visible cross-company, to any driver at any
+company heading to that terminal) drops the truck number entirely and
+shows just the company name; Out of Allocation (still RLS-scoped to the
+reporter's own company) is unchanged -- `{driver} Truck {unit}`, since
+that's same-company-only context, not public exposure.
+
+`tsc --noEmit` and `next build` both clean. Not live-verified this pass.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.

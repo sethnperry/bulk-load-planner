@@ -33,7 +33,14 @@ function ReportRow({ report, timeZone, onClear, clearing }: {
   onClear: (reportId: string) => void;
   clearing: boolean;
 }) {
-  const topLine = `${report.personLabel} Truck ${report.truckLabel}`;
+  // Out of Product is visible cross-company (any driver at any company
+  // heading to this terminal), so the truck number -- otherwise public --
+  // is dropped here per explicit direction; company name alone. Out of
+  // Allocation stays same-company-only (RLS-scoped), where the truck
+  // number is useful context, not exposure.
+  const topLine = report.reportType === "out_of_product"
+    ? report.personLabel
+    : `${report.personLabel} Truck ${report.truckLabel}`;
   const productLine = report.reportType === "out_of_product"
     ? `Terminal Out of ${report.productName}`
     : `OOA ${report.productName}`;
