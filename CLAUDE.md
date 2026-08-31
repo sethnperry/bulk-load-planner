@@ -5808,6 +5808,54 @@ banner:
 check with a planned product that matches an active report, one that
 doesn't, and no plan at all.
 
+### Real regression from the above, reported live: Planner opened to empty ("MT") compartments (2026-08-31, same day)
+
+User report right after the outage-banner pass shipped: "that wiped the
+plans. it now opens to mt compartments." Not fully root-caused yet (no
+live session to reproduce against), but a real, plausible mechanism was
+found and mitigated immediately rather than left unaddressed.
+
+**The mechanism**: `CalculatorShellContext.tsx`'s own `value` object
+(everything `useCalculatorShell()` returns) is a plain object literal,
+never wrapped in `useMemo` -- a pre-existing pattern, not introduced this
+pass, but one that means ANY state change inside the provider re-renders
+every consumer of the shell, including `page.tsx` itself. The new
+`plannedProductIds` sync effect (previous section) originally called
+`shell.setPlannedProductIds(...)` on **every** `compPlan` change --
+including cap-override edits and fill-level drags, which change
+`compPlan`'s object reference without changing which products are
+selected -- meaning a routine plan edit now triggered an extra
+shell-wide re-render cycle that didn't exist before this feature. If any
+other effect in `page.tsx` or `usePlanSlots.ts` depends on `equipment`/
+`location` as whole objects (fresh references every unmemoized-provider
+render) rather than their specific fields, that extra churn could
+plausibly cause a hydration/restore effect to re-fire at the wrong
+moment and land on empty state -- consistent with "opens to MT
+compartments."
+
+**Mitigated**: the sync effect now computes a stable signature (sorted,
+joined product-id string) and only calls `shell.setPlannedProductIds`
+when that signature actually changes -- a cap/fill-only edit no longer
+triggers a shell-level state update at all, eliminating most of the
+churn this feature introduced. This does NOT fix the underlying
+unmemoized-context pattern itself (a bigger, separate, real cleanup --
+wrapping that large `value` object in `useMemo` needs its own careful
+dependency-array pass, not something to rush during an active incident)
+-- flagged here as a genuine follow-up, not silently deferred.
+
+**Not yet confirmed**: whether this was actually the true root cause, or
+whether the underlying saved plan data was ever actually at risk (nothing
+in this pass's diff writes an empty `compPlan` anywhere -- the far more
+likely explanation is a display/hydration timing issue, not real data
+loss, consistent with this project's own repeated prior incidents in this
+same category -- see "Presets rework" and "Equipment selection broken"
+elsewhere in this file, both of which turned out to be non-destructive
+once root-caused). Needs a real live re-test after this fix, and if it
+recurs, the unmemoized shell context value is the next thing to fix
+properly, not re-guess around.
+
+`tsc --noEmit` and `next build` both clean.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.

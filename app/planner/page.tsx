@@ -569,13 +569,26 @@ export default function CalculatorPage() {
   // visible on every tab) filters to only relevant reports off this, per
   // explicit direction ("only want to show people it is out of product or
   // out of allocation if they are trying to load that specific product").
+  //
+  // Guarded to only push a NEW state update when the actual set of product
+  // ids changes, not on every compPlan object change (cap-override edits,
+  // fill-level drags, etc. all change compPlan's reference without
+  // changing which products are selected) -- CalculatorShellContext's own
+  // `value` object is a plain literal, not memoized, so any state update
+  // there re-renders the whole shell tree; pushing on every compPlan
+  // change would have made that re-render fire far more often than
+  // before this feature existed, on every keystroke-level plan edit.
+  const plannedProductIdsSigRef = useRef<string>("");
   useEffect(() => {
-    const ids = new Set(
+    const ids = Array.from(new Set(
       Object.values(compPlan)
         .filter((c) => !c.empty && c.productId)
         .map((c) => c.productId)
-    );
-    shell.setPlannedProductIds(ids);
+    )).sort();
+    const sig = ids.join(",");
+    if (sig === plannedProductIdsSigRef.current) return;
+    plannedProductIdsSigRef.current = sig;
+    shell.setPlannedProductIds(new Set(ids));
   }, [compPlan, shell.setPlannedProductIds]);
 
   // "Save plan {letter}" is dirty-tracked against a baseline snapshot taken
