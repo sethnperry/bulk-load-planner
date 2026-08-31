@@ -564,6 +564,20 @@ export default function CalculatorPage() {
     });
   }, [compPlanKey]);
 
+  // Shares "what's the driver actually planning to load" up into the shell
+  // context -- the terminal outage banner (mounted in the shared header,
+  // visible on every tab) filters to only relevant reports off this, per
+  // explicit direction ("only want to show people it is out of product or
+  // out of allocation if they are trying to load that specific product").
+  useEffect(() => {
+    const ids = new Set(
+      Object.values(compPlan)
+        .filter((c) => !c.empty && c.productId)
+        .map((c) => c.productId)
+    );
+    shell.setPlannedProductIds(ids);
+  }, [compPlan, shell.setPlannedProductIds]);
+
   // "Save plan {letter}" is dirty-tracked against a baseline snapshot taken
   // right after the last load/save -- it only shows when the current plan
   // actually diverges from what's saved, and hides itself immediately after

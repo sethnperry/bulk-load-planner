@@ -28,6 +28,7 @@ import LocationModal from "./modals/LocationModal";
 import MyTerminalsModal from "./modals/MyTerminalsModal";
 import RackSelectSheet from "./components/RackSelectSheet";
 import TerminalOutageBanner from "./components/TerminalOutageBanner";
+import { useActiveOutageBanner } from "./hooks/useTerminalOutageReports";
 import { CalculatorShellProvider, useCalculatorShell } from "./CalculatorShellContext";
 import { addDaysISO_, isPastISO_, formatMDYWithCountdown_ } from "./utils/dates";
 import { normState } from "./utils/normalize";
@@ -76,7 +77,7 @@ function activeTabFor(pathname: string | null): string | "none" {
   return "planner";
 }
 
-function TabBar() {
+function TabBar({ compact }: { compact?: boolean }) {
   const pathname = usePathname();
   const router = useRouter();
   const shell = useCalculatorShell();
@@ -134,8 +135,12 @@ function TabBar() {
     }, 80);
   }
 
+  // marginTop is the historical "icon row to tab bar" gap; when the outage
+  // banner is showing directly above instead (compact), that gap is
+  // redundant/excessive and gets collapsed down to near nothing, per
+  // explicit direction ("remove the space under it").
   return (
-    <div style={{ marginTop: 18, flexShrink: 0 }}>
+    <div style={{ marginTop: compact ? 2 : 18, flexShrink: 0 }}>
       <div
         ref={scrollRef}
         onScroll={onScroll}
@@ -207,6 +212,12 @@ function Header({ onOpenSettings }: { onOpenSettings: () => void }) {
   const iconStroke = themeIconStroke(darkMode);
   const pathname = usePathname();
 
+  // Fetched once here (not inside TerminalOutageBanner itself) so Header
+  // can also collapse TabBar's own spacing when the banner actually has
+  // something to show -- see TabBar's `compact` prop.
+  const terminalId = shell.location.selectedTerminalId ? String(shell.location.selectedTerminalId) : null;
+  const outageBanner = useActiveOutageBanner(terminalId, shell.effectiveUserId || null, shell.plannedProductIds);
+
   // The OS status bar / PWA chrome strip above this header is drawn by the
   // browser from <meta name="theme-color">, not from any CSS on the page --
   // layout.tsx's static `viewport.themeColor` only sets its initial value,
@@ -256,8 +267,13 @@ function Header({ onOpenSettings }: { onOpenSettings: () => void }) {
           <GearIcon onClick={onOpenSettings} stroke={iconStroke} />
         </div>
       </div>
-      <TerminalOutageBanner />
-      <TabBar />
+      <TerminalOutageBanner
+        tickerMessage={outageBanner.tickerMessage}
+        reports={outageBanner.reports}
+        timeZone={outageBanner.timeZone}
+        refresh={outageBanner.refresh}
+      />
+      <TabBar compact={!!outageBanner.tickerMessage} />
     </div>
   );
 }

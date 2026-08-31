@@ -94,6 +94,9 @@ type ShellValue = {
   // driver/lead roles.
   selectedDriverId: string;
   setSelectedDriverId: (id: string) => void;
+  // See the state declaration's own comment below for why this lives here.
+  plannedProductIds: Set<string>;
+  setPlannedProductIds: (ids: Set<string>) => void;
   // Rack-aware loading (see CLAUDE.md "rack-aware loading" discussion): the
   // ONE place that should ever change location.selectedTerminalId in the
   // driver-facing app -- resolves how many racks the terminal has and
@@ -390,6 +393,18 @@ export function CalculatorShellProvider({ children }: { children: React.ReactNod
 
   const [selectedDriverId, setSelectedDriverId] = useState("");
 
+  // Which products the driver's current live plan actually calls for --
+  // shared here (not local to page.tsx) so the header's outage banner
+  // (mounted above every tab, not just Planner) can filter to only
+  // relevant reports regardless of which tab is currently active. Driven
+  // by page.tsx's own compPlan via an effect (see that file) -- page.tsx
+  // itself unmounts when navigating to a sibling tab, so this value is a
+  // last-known snapshot while elsewhere, not a live subscription; that's
+  // the correct behavior here (the driver is still going to load that
+  // plan when they return to Planner). Starts empty until Planner has
+  // been visited at least once this session.
+  const [plannedProductIds, setPlannedProductIds] = useState<Set<string>>(new Set());
+
   // ── Rack-aware loading ────────────────────────────────────────────────────
   // See CLAUDE.md "rack-aware loading, unified": every terminal now has at
   // least one rack (auto-named "Main Rack" if it never touched the Terminal
@@ -455,6 +470,7 @@ export function CalculatorShellProvider({ children }: { children: React.ReactNod
     theme,
     role, companyId, isSuperAdmin,
     selectedDriverId, setSelectedDriverId,
+    plannedProductIds, setPlannedProductIds,
     chooseTerminal, rackPickerOpen, rackPickerRacks, resolveRackPick,
   };
 

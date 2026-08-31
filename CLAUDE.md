@@ -5750,6 +5750,64 @@ follow-up:
 
 `tsc --noEmit` and `next build` both clean. Not live-verified this pass.
 
+### Terminal outage banner: single continuous line, tighter spacing, filtered to the driver's own plan (2026-08-31)
+
+Three explicit follow-ups against a live screenshot of the two-half
+banner:
+
+- **Space under the banner removed.** The visible gap wasn't the banner's
+  own -- `CalculatorLayoutClient.tsx`'s `TabBar` had a hardcoded
+  `marginTop: 18` left over from before the banner existed (originally
+  meant as breathing room between the icon row and the tab strip); once
+  the banner sat between them, that same 18px applied AFTER the banner
+  too, on top of the banner's own height. `TabBar` gained a `compact`
+  prop (`marginTop: 2` instead of `18`); `Header` now fetches the outage
+  data itself (`useActiveOutageBanner`, moved up from
+  `TerminalOutageBanner.tsx`) so it can pass `compact={!!tickerMessage}`
+  to `TabBar` -- the only way to know "is anything above the tab bar right
+  now" without either hardcoding an assumption or querying twice.
+  `TerminalOutageBanner.tsx` is now a plain presentational component
+  (`tickerMessage`/`reports`/`timeZone`/`refresh` props), no hook of its
+  own.
+- **Merged into one continuous line, one arrow.** Was two independent
+  `MessageTicker` halves side by side (Out of Product / Out of
+  Allocation), each with its own chevron and a vertical divider between
+  them. Per explicit direction ("these are two distinct issues... make
+  this read like one continuous line. Only one arrow"),
+  `useActiveOutageBanner` now composes a single `tickerMessage` string --
+  each type's own entries still join with " - ", but the two groups (when
+  both present) now join with a wider "   ---   " separator into ONE
+  string, rendered as one `MessageTicker` with one trailing chevron. The
+  two-section split in the detail modal (`TerminalOutageDetailModal.tsx`)
+  is unchanged -- only the collapsed ticker line merged, the expanded
+  detail view still clearly separates the two report types.
+- **Filtered to the driver's own current plan.** Per explicit direction
+  ("We only want to show people it is out of product or out of allocation
+  if they are trying to load that specific product... If my plan is
+  calling for regular or premium, don't show it"). New
+  `CalculatorShellContext.tsx` state, `plannedProductIds: Set<string>` +
+  setter -- lives in the shell (not local to `page.tsx`) specifically
+  because the banner is mounted in the shared `Header`, visible on every
+  tab, not just Planner. `app/planner/page.tsx` gained a small effect
+  syncing `compPlan`'s non-empty compartments' product IDs into
+  `shell.setPlannedProductIds` on every change. Since `page.tsx` itself
+  unmounts when the driver navigates to a sibling tab (confirmed via this
+  file's own prior architecture notes on tab routing), this is a
+  last-known snapshot while elsewhere, not a live subscription -- correct
+  here, since the driver is still going to load that same plan when they
+  return to Planner. `useActiveOutageBanner` gained a third
+  `plannedProductIds` argument and now filters fetched rows to only
+  matching `product_id`s before dedup/composition; an empty or unset set
+  (no plan yet this session) shows nothing at all rather than guessing at
+  relevance -- a driver who never opens Planner in a session won't see
+  the banner, a known/accepted edge case given how central Planner
+  already is to the app's own flow.
+
+`tsc --noEmit` and `next build` both clean. Not live-verified this pass
+(no authenticated session available from this side) -- worth a real
+check with a planned product that matches an active report, one that
+doesn't, and no plan at all.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.

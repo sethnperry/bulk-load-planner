@@ -17,6 +17,20 @@
 // TerminalOutageDetailModal.tsx needs to render its own 3-row cards,
 // instead of one pre-formatted `text` string.
 //
+// 2026-08-31: two more follow-ups. (1) Out of Product and Out of
+// Allocation are now merged into ONE continuous ticker line
+// ("Out of Premium 93   ---   OOA Regular 87") instead of two
+// side-by-side halves each with their own chevron -- per explicit
+// direction ("make this read like one continuous line. Only one arrow").
+// (2) The banner is filtered to `plannedProductIds` (the driver's own
+// live plan, threaded from CalculatorShellContext -- see that file and
+// page.tsx's own sync effect) -- a report for a product the driver isn't
+// currently planning to load at all is dropped before it's ever composed,
+// per explicit direction ("only want to show people it is out of product
+// or out of allocation if they are trying to load that specific
+// product"). No plan yet (empty/unset `plannedProductIds`) means nothing
+// shows -- there's nothing to compare relevance against.
+//
 // Out of Product also reuses the Terminal tab's existing
 // rack_product_status.is_out flag (see RackProductStatusModal.tsx) so the
 // Terminal tab's own product list never disagrees with this banner -- see
@@ -155,16 +169,18 @@ export async function clearOutageReport(reportId: string): Promise<{ error: stri
  * impersonation), so "can I clear this" stays consistent with "did I post
  * this."
  */
-export function useActiveOutageBanner(terminalId: string | null, effectiveUserId: string | null): {
-  productMessages: string[];
-  allocationMessages: string[];
+export function useActiveOutageBanner(
+  terminalId: string | null,
+  effectiveUserId: string | null,
+  plannedProductIds: Set<string> | null | undefined
+): {
+  tickerMessage: string | null;
   reports: ComposedOutageReport[];
   timeZone: string;
   refresh: () => void;
 } {
   const [timeZone, setTimeZone] = useState<string | null>(null);
-  const [productMessages, setProductMessages] = useState<string[]>([]);
-  const [allocationMessages, setAllocationMessages] = useState<string[]>([]);
+  const [tickerMessage, setTickerMessage] = useState<string | null>(null);
   const [reports, setReports] = useState<ComposedOutageReport[]>([]);
 
   useEffect(() => {
@@ -178,7 +194,11 @@ export function useActiveOutageBanner(terminalId: string | null, effectiveUserId
   }, [terminalId]);
 
   const fetchAndCompose = useCallback(async () => {
-    if (!terminalId) { setProductMessages([]); setAllocationMessages([]); setReports([]); return; }
+    if (!terminalId) { setTickerMessage(null); setReports([]); return; }
+    // Nothing planned yet (or Planner hasn't been visited this session) --
+    // nothing to judge relevance against, so show nothing rather than
+    // guessing. See this file's own 2026-08-31 header comment.
+    if (!plannedProductIds || plannedProductIds.size === 0) { setTickerMessage(null); setReports([]); return; }
     const tz = timeZone || "America/New_York";
     const cutoffMs = mostRecentClearingCheckpoint(Date.now(), tz);
 
@@ -189,19 +209,22 @@ export function useActiveOutageBanner(terminalId: string | null, effectiveUserId
       .gte("created_at", new Date(cutoffMs).toISOString())
       .order("created_at", { ascending: false });
 
-    if (error || !data || data.length === 0) { setProductMessages([]); setAllocationMessages([]); setReports([]); return; }
+    if (error || !data || data.length === 0) { setTickerMessage(null); setReports([]); return; }
 
     // Rows already come back newest-first -- keeping only the first row
     // seen per (report_type, product_id) is exactly "resolve to the most
-    // recent."
+    // recent." Only a product the driver's current plan actually calls
+    // for is relevant here at all -- filtered before dedup, not after.
     const seen = new Set<string>();
     const rows: OutageRow[] = [];
     for (const r of data as OutageRow[]) {
+      if (!plannedProductIds.has(r.product_id)) continue;
       const key = `${r.report_type}:${r.product_id}`;
       if (seen.has(key)) continue;
       seen.add(key);
       rows.push(r);
     }
+    if (rows.length === 0) { setTickerMessage(null); setReports([]); return; }
 
     const productIds = Array.from(new Set(rows.map((r) => r.product_id)));
     const companyIds = Array.from(new Set(rows.filter((r) => r.report_type === "out_of_product").map((r) => r.company_id)));
@@ -244,9 +267,15 @@ export function useActiveOutageBanner(terminalId: string | null, effectiveUserId
     });
 
     setReports(composed);
-    setProductMessages(composed.filter((c) => c.reportType === "out_of_product").map((c) => c.tickerText));
-    setAllocationMessages(composed.filter((c) => c.reportType === "out_of_allocation").map((c) => c.tickerText));
-  }, [terminalId, timeZone, effectiveUserId]);
+
+    // One continuous line -- per explicit follow-up ("make this read like
+    // one continuous line. Only one arrow") -- Out of Product entries
+    // joined by " - ", Out of Allocation entries joined by " - ", the two
+    // groups (when both present) joined by a wider "   ---   " separator.
+    const productPart = composed.filter((c) => c.reportType === "out_of_product").map((c) => c.tickerText).join(" - ");
+    const allocationPart = composed.filter((c) => c.reportType === "out_of_allocation").map((c) => c.tickerText).join(" - ");
+    setTickerMessage([productPart, allocationPart].filter(Boolean).join("   ---   ") || null);
+  }, [terminalId, timeZone, effectiveUserId, plannedProductIds]);
 
   useEffect(() => {
     fetchAndCompose();
@@ -254,5 +283,5 @@ export function useActiveOutageBanner(terminalId: string | null, effectiveUserId
     return () => clearInterval(id);
   }, [fetchAndCompose]);
 
-  return { productMessages, allocationMessages, reports, timeZone: timeZone || "America/New_York", refresh: fetchAndCompose };
+  return { tickerMessage, reports, timeZone: timeZone || "America/New_York", refresh: fetchAndCompose };
 }
