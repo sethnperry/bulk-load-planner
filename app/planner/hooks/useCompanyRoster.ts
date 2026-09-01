@@ -3,9 +3,9 @@
 //
 // Company member list (user_id + display_name) via get_display_names_full --
 // the same roster-fetch shape independently duplicated by
-// DriverAssignmentModal.tsx and FleetCardsModal.tsx. This is now the third
-// call site (Dispatch tab's driver picker, Driver Training's trainee
-// picker), so it's shared here rather than copied a third time.
+// DriverAssignmentModal.tsx and FleetCardsModal.tsx. Shared here rather
+// than copied again -- callers include the Dispatch tab's driver picker
+// and the Period Report/Underloading Dashboard's driver-group filter.
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase/client";

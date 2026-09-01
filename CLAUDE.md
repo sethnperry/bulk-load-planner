@@ -2714,7 +2714,14 @@ afterward as a regression check — renders normally, "Select" button
 present (correctly shown only for the own-view case), no duplicate-key
 errors on this fresh load. `tsc --noEmit` clean throughout.
 
-### Driver Training (Lead/Admin-in-lead-mode feature)
+### Driver Training (Lead/Admin-in-lead-mode feature) — REMOVED 2026-08-31
+
+**Removed entirely, per explicit direction** ("not worth it and kinda
+adds to the clutter on the planner tab") — see "Performance pass #1"
+later in this file for the removal itself and what stayed in the DB
+unused. Everything below this line is a historical record of the
+feature as it existed before removal — don't build against it.
+
 - A "Driver Training" button on the Planner (lead/admin-acting-as-lead
   only) opens a driver-selection modal (exact modal design not yet done —
   open task) to pick a trainee.
@@ -5965,6 +5972,66 @@ list/STUD/Edit Terminal) still works exactly as before, switch to Volume,
 confirm a real terminal with completed loads shows a believable chart,
 toggle All Terminals, cycle the 7d/30d/90d/All chips, confirm Trends/
 Recovery show clean placeholders.
+
+## Performance pass #1: Driver Training removed, outage-banner poll slowed (2026-08-31)
+
+Kicked off by a full-app performance/reliability audit (read-only,
+CalculatorShellContext/data-fetching/polling patterns across the whole
+app) requested by the user, who's noticing real load-time and tab-switch
+delays. Top findings from that audit, for reference: (1)
+`CalculatorShellContext.tsx`'s `value` object is a plain literal, never
+memoized -- any shell state change re-renders the whole tree; the
+biggest single architectural fix available, but risky to rush, not done
+this pass. (2) Zero data-fetching cache anywhere in the app (no React
+Query/SWR, one hand-rolled `Map` for ambient temp) -- every tab/modal
+refetches from scratch on every mount, including things like the
+`products` catalog independently fetched by several different files.
+(3) Several always-on polling loops running for every user regardless of
+whether the feature behind them is ever used. This entry addresses the
+first two concrete, low-risk items from that list; the context
+memoization and a real caching layer are flagged as their own separate,
+dedicated passes -- not attempted here.
+
+**Driver Training removed entirely**, per explicit direction ("not
+worth it and kinda adds to the clutter on the planner tab") -- this also
+directly kills one of the two always-on 30s polls the audit flagged (the
+trainee-side "Training with X" banner check in `page.tsx`, which ran
+for literally every user every 30 seconds regardless of whether they'd
+ever be a trainee). Removed: `canDriverTrain`/`traineeId`/`traineeName`/
+`trainingModalOpen` state, the "Driver Training" button + "Loading with
+X" banner + trainee-side "Training with X" banner + its 30s poll
+`useEffect`, the `DriverTrainingModal` mount, and
+`useLoadWorkflow.ts`'s `trainingTraineeId` prop + the fire-and-forget
+`trainee_id` UPDATE after `begin_load`. `app/planner/components/DriverTrainingModal.tsx`
+deleted outright (no other importers). `DriverPicker.tsx`/
+`useCompanyRoster.ts` are unaffected -- both have other real callers
+(Dispatch tab, Period Report/Underloading Dashboard's driver-group
+filter) and their stale doc-comment references to Driver Training were
+updated, not left dangling.
+
+**Deliberately NOT touched**: `load_log.trainee_id` (the column) and its
+`load_log_select_trainee` RLS policy are left in the DB, unused --
+same "leave it, don't drop it" precedent this project already uses for
+other abandoned columns (see `lane_alpha`/`arm_alpha`,
+`terminal_racks.lane_count` etc. elsewhere in this file). Nothing reads
+or writes it anymore; harmless to leave, no migration needed.
+
+**Outage banner poll slowed from 30s to 90s** (`useTerminalOutageReports.ts`,
+new `OUTAGE_POLL_MS` constant) -- this poll runs in the shared `Header`
+for every user on every tab the whole time the Planner layout is
+mounted, so it was the other concrete, low-risk win available immediately:
+cuts that query's aggregate volume by two-thirds with no real loss of
+freshness, since the underlying data itself only changes on a 6-hour
+checkpoint schedule anyway.
+
+**Not done this pass, flagged for dedicated follow-ups**: memoizing
+`CalculatorShellContext`'s value object; adding a real caching layer
+(React Query) for repeatedly-fetched near-static data (products catalog,
+terminal catalog, company roster); auditing for other duplicate fetches
+once that caching layer exists to actually consolidate them into.
+
+`tsc --noEmit` and `next build` both clean. Not live-verified this pass
+(no authenticated session available from this side).
 
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.

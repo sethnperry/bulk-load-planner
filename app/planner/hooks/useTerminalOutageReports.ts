@@ -43,6 +43,8 @@ import { mostRecentClearingCheckpoint, nextClearingCheckpoint } from "../utils/d
 
 export type OutageReportType = "out_of_product" | "out_of_allocation";
 
+const OUTAGE_POLL_MS = 90_000;
+
 // ─── Submit ─────────────────────────────────────────────────────────────────
 
 type SubmitArgs = {
@@ -141,16 +143,14 @@ export async function clearOutageReport(reportId: string): Promise<{ error: stri
 }
 
 /**
- * Polls (30s, matching the existing trainee-banner precedent in page.tsx)
- * for currently-active outage reports at `terminalId` and composes them
- * into per-report-type message lists (`productMessages`/
- * `allocationMessages`, one MessageTicker.tsx row each -- per explicit
- * follow-up putting Out of Product and Out of Allocation on their own
- * separate banner rows rather than one mixed ticker) plus a structured
- * per-report list (`reports`, for the detail view's expiry/Clear-Issue UI).
- * RLS on terminal_outage_reports already narrows "out_of_allocation" rows
- * to the caller's own active company -- no client-side company filtering
- * needed here on top of that.
+ * Polls (every OUTAGE_POLL_MS) for currently-active outage reports at
+ * `terminalId` and composes them into a single joined ticker string
+ * (`tickerMessage`, one continuous line for TerminalOutageBanner.tsx --
+ * see that file's own header comment for why it's one line, not two)
+ * plus a structured per-report list (`reports`, for the detail view's
+ * expiry/Clear-Issue UI). RLS on terminal_outage_reports already narrows
+ * "out_of_allocation" rows to the caller's own active company -- no
+ * client-side company filtering needed here on top of that.
  *
  * Deduped to the most recent report per (report_type, product_id) --
  * per explicit follow-up ("multiple entries should resolve to the most
@@ -279,7 +279,14 @@ export function useActiveOutageBanner(
 
   useEffect(() => {
     fetchAndCompose();
-    const id = setInterval(fetchAndCompose, 30000);
+    // 90s, not 30s -- this poll runs for every user, on every tab, for the
+    // whole time the Planner layout is mounted (it lives in the shared
+    // Header). Outage reports aren't urgent-to-the-second (the clearing
+    // schedule itself is only checkpointed every 6 hours), so a slower
+    // poll cuts this query's aggregate volume by two-thirds with no real
+    // loss of freshness -- part of the 2026-08-31 performance pass (see
+    // CLAUDE.md).
+    const id = setInterval(fetchAndCompose, OUTAGE_POLL_MS);
     return () => clearInterval(id);
   }, [fetchAndCompose]);
 

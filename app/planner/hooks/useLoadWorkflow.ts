@@ -40,7 +40,6 @@ type Props = {
   onRefreshTerminalAccess?: () => Promise<void>;    // re-fetch terminal expiry dates
   onPostLoadComplete?: () => Promise<void>;         // re-read load_log for slot 0 / slip seat
   predictedTempF?: number | null;                  // what the predictor said at plan time
-  trainingTraineeId?: string | null;                // Driver Training: tag this load for a trainee (see CLAUDE.md)
   activeSlotLetter?: number | null;                 // which named preset (1-5 / A-E) was active when LOAD was tapped, for the recap card's "Plan X" label
 };
 
@@ -56,7 +55,6 @@ export function useLoadWorkflow({
   onRefreshTerminalAccess,
   onPostLoadComplete,
   predictedTempF,
-  trainingTraineeId,
   activeSlotLetter,
 }: Props) {
   const [activeLoadId, setActiveLoadId] = useState<string | null>(null);
@@ -180,28 +178,19 @@ export function useLoadWorkflow({
 
       // Rack-aware loading: tag which physical rack this load happened at
       // (see CLAUDE.md "rack-aware loading"). Plain UPDATE on the row just
-      // created, same non-blocking pattern as trainee_id/plan_slot below --
-      // a failure here only means this load can't be attributed to a rack
-      // later, never blocks the load itself. Skipped entirely for a 0/1-rack
+      // created, same non-blocking pattern as plan_slot below -- a failure
+      // here only means this load can't be attributed to a rack later,
+      // never blocks the load itself. Skipped entirely for a 0/1-rack
       // terminal (selectedRackId is "" -- nothing to tag).
       if (selectedRackId && result.load_id) {
         supabase.from("load_log").update({ rack_id: selectedRackId }).eq("load_id", result.load_id)
           .then(({ error }) => { if (error) console.error("[rack] failed to tag rack_id:", error.message); });
       }
 
-      // Driver Training: tag this load for the trainee (single-load model --
-      // see CLAUDE.md "Terminal Tier — Build Spec"). Plain UPDATE on the
-      // lead's own just-created row, already covered by load_log_update_own;
-      // no RPC change needed. Non-fatal -- a failure here shouldn't block
-      // the load itself, just the training attribution.
-      if (trainingTraineeId && result.load_id) {
-        supabase.from("load_log").update({ trainee_id: trainingTraineeId }).eq("load_id", result.load_id)
-          .then(({ error }) => { if (error) console.error("[training] failed to tag trainee_id:", error.message); });
-      }
-
       // Recap card label ("Plan A") -- plain UPDATE on the row just created,
-      // same pattern as trainee_id above. Non-fatal: a failure here only
-      // means the recap can't name a preset, never blocks the load itself.
+      // same non-blocking pattern as rack_id above. Non-fatal: a failure
+      // here only means the recap can't name a preset, never blocks the
+      // load itself.
       if (activeSlotLetter && result.load_id) {
         supabase.from("load_log").update({ plan_slot: activeSlotLetter }).eq("load_id", result.load_id)
           .then(({ error }) => { if (error) console.error("[recap] failed to tag plan_slot:", error.message); });
@@ -254,7 +243,7 @@ export function useLoadWorkflow({
     beginLoadBusy, selectedComboId, selectedTerminalId, selectedRackId, selectedState, selectedCity,
     selectedCityId, planRows, plannedGallonsTotal, plannedWeightLbs,
     tare, cgBias, ambientTempF, tempF, setProductInputs, setLoadingGallonsOverride, onRefreshTerminalAccess, authUserId,
-    trainingTraineeId, activeSlotLetter,
+    activeSlotLetter,
   ]);
 
   // ── Cancel (Loading modal closed before LOADED is tapped) ─────────────────

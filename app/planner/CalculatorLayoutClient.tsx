@@ -50,7 +50,7 @@ import type { Role } from "@/lib/ui/driver/role";
 //
 // Dispatch never gets a Planner tab -- dispatchers don't get in a truck.
 // Admin and super admins get both, since "admins should have the planner
-// used by lead drivers" (see page.tsx's canDriverTrain).
+// used by lead drivers."
 // Label only, per explicit direction (2026-08-31 Terminal tab pivot --
 // Lane Map removed, Volume/Trends/Recovery analytics added) -- id/href
 // deliberately unchanged, same "route/label only, internal identifiers

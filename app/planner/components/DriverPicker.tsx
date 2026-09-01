@@ -1,10 +1,12 @@
 "use client";
 // app/planner/components/DriverPicker.tsx
 //
-// Search-and-pick a company roster member -- shared by the Dispatch tab
-// (dispatcher picking who to view) and the Driver Training trainee picker.
-// Built on useCompanyRoster (the third call site for that fetch shape, so
-// it's a shared hook rather than a third copy).
+// Search-and-pick a company roster member -- the Dispatch tab's own
+// driver picker (dispatcher picking who to view). Built on
+// useCompanyRoster (originally the third call site for that fetch shape,
+// alongside Driver Training's trainee picker before that feature was
+// removed 2026-08-31 -- kept as a shared hook regardless, other callers
+// still use it).
 
 import React, { useMemo, useState } from "react";
 import { useCompanyRoster } from "../hooks/useCompanyRoster";
