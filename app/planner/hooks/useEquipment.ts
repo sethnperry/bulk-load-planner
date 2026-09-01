@@ -256,7 +256,18 @@ export function useEquipment(authUserId: string, setupSession?: SetupSession | n
     return `${t} / ${tr}`;
   }, [selectedCombo, truckNameById, trailerNameById]);
 
-  return {
+  // Memoized so this hook returns the SAME object reference across renders
+  // where nothing it actually owns changed -- every field here already
+  // comes from useState/useCallback/useMemo (each already correctly
+  // reactive on its own), so this can only stabilize the wrapper's own
+  // identity, never mask a real change. This matters because
+  // CalculatorShellContext.tsx spreads this whole object into its own
+  // (also memoized, see that file) context value -- without this, calling
+  // useEquipment() fresh on every provider render would hand back a new
+  // object every time regardless, defeating that outer memoization for
+  // every one of this hook's consumers. Part of the 2026-08-31
+  // performance pass (see CLAUDE.md).
+  return useMemo(() => ({
     combos,
     combosLoading,
     combosError,
@@ -272,5 +283,9 @@ export function useEquipment(authUserId: string, setupSession?: SetupSession | n
     loadPrimaryEquipment,
     togglePrimaryTruck,
     togglePrimaryTrailer,
-  };
+  }), [
+    combos, combosLoading, combosError, selectedComboId, setSelectedComboId,
+    selectedCombo, truckNameById, trailerNameById, equipmentLabel, fetchCombos,
+    primaryTruckIds, primaryTrailerIds, loadPrimaryEquipment, togglePrimaryTruck, togglePrimaryTrailer,
+  ]);
 }

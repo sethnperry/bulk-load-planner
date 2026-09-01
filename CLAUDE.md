@@ -6033,6 +6033,77 @@ once that caching layer exists to actually consolidate them into.
 `tsc --noEmit` and `next build` both clean. Not live-verified this pass
 (no authenticated session available from this side).
 
+### Performance pass #2: `CalculatorShellContext` memoized (2026-08-31, dedicated branch)
+
+Item #1 from the audit above -- "biggest single fix for the re-render
+churn, needs care not haste." Done on a dedicated branch
+(`perf/memoize-shell-context`, off `main` at `c9896ae`, the last known-
+good pushed commit) rather than directly on `main`, per explicit user
+request about backup/recovery safety before a change in this specific
+risk class: a wrong `useMemo`/`useCallback` dependency array produces
+silently stale UI, which neither `tsc --noEmit` nor `next build` can
+catch, and this session has no way to live-test it.
+
+**The bug**: `CalculatorShellContext.tsx`'s `value` object (everything
+`useCalculatorShell()` returns -- consumed by `Header`, `TabBar`, and
+whichever tab's `page.tsx` is currently mounted) was a fresh plain object
+literal on every render. Since a new object is never `===` a previous
+one, EVERY state change anywhere in the provider -- a modal opening, a
+card being tapped, the outage-banner poll ticking -- re-rendered every
+consumer of the shell, not just the piece that actually changed. This is
+also the mechanism flagged (but not confirmed) as a possible contributor
+to the "wiped the plans" incident earlier this session -- an unmemoized
+context value make that class of bug easier to trigger, even though the
+user's own follow-up suggested that specific incident may have been
+unrelated.
+
+**The fix, in two layers** (each verified safe on its own before moving
+to the next, via `tsc --noEmit` after each layer):
+
+1. **Every shell sub-hook's own return object memoized first**
+   (`hooks/useEquipment.ts`, `useLocation.ts`, `useTerminals.ts`,
+   `useExpirations.ts`, `useTerminalFilters.ts`) -- each already returned
+   only `useState` values/setters (React-stable by construction) or
+   already-`useCallback`/`useMemo`'d fields, so this step was a pure
+   wrap: `return useMemo(() => ({...fields}), [...fields])`, mechanically
+   safe since no individual field's own reactivity changed, only the
+   returned object's identity stabilized.
+   `useTheme.ts` needed a real (behavior-preserving) refactor, not just a
+   wrap -- `persist`/`setDarkMode`/`setAccentColor` were plain functions
+   recreated every render, converted to `useCallback` with their genuine
+   dependencies (`persist` depends on `userId`; `setDarkMode`/
+   `setAccentColor` each depend on the OTHER field's current value, since
+   both are persisted together as one `StoredTheme`).
+2. **The outer `value` object itself**, in `CalculatorShellContext.tsx` --
+   two more unstable pieces found by inspection and fixed first
+   (`cityKey`/`isCityStarred`/`toggleCityStar` and
+   `setCardDataForTerminal_`, all plain functions converted to
+   `useCallback` with their real dependencies), THEN the full ~44-field
+   `value` object wrapped in `useMemo`, dependency array listing every
+   field. This step only works correctly because of step 1 -- `equipment`/
+   `location`/`terminals`/`expirations`/`terminalFilters`/`theme` (the 6
+   sub-hook results) are now themselves stable references; without step 1,
+   memoizing just the outer object would have been a no-op (a fresh
+   `equipment` object every render would still bust the memo every time).
+
+**Not done this pass**: `chooseTerminal`/`resolveRackPick` (already
+`useCallback`-wrapped with pre-existing, intentional
+`eslint-disable-line react-hooks/exhaustive-deps` comments) were left
+exactly as they were -- their dependency arrays predate this pass and
+weren't touched, on the theory that a working-but-lint-suppressed
+callback is lower-risk left alone than "corrected" without being able to
+verify the correction live.
+
+`tsc --noEmit` and `next build` both clean throughout (checked after the
+hook-level layer and again after the outer `value` layer). **Not live-
+verified** -- this is exactly the class of change that can't be caught by
+typechecking, and this session has no authenticated browser session to
+exercise it with. Sitting on `perf/memoize-shell-context`, not yet merged
+to `main` -- per the user's own safety framing, this should get a real
+live click-through (switch every tab, open/close modals, edit a plan,
+switch terminals/equipment) before merging, not merged on the strength of
+a clean build alone.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.

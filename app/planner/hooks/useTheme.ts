@@ -33,7 +33,7 @@
 // meta tag -- but guarantees correctness instead of a state that can get
 // permanently stuck disagreeing with what Settings shows.
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 function storageKey(userId: string) {
   return `protankr_theme_v1:${userId || "anon"}`;
@@ -75,20 +75,28 @@ export function useTheme(userId: string) {
     }
   }, [userId]);
 
-  function persist(next: StoredTheme) {
+  // Stabilized via useCallback/useMemo (previously plain functions/object,
+  // a new reference every render) -- see useEquipment.ts's identical
+  // comment for why this matters for CalculatorShellContext's own
+  // memoization. Same runtime behavior, just now correctly reactive:
+  // persist genuinely depends on userId (which company's storage key to
+  // write), setDarkMode/setAccentColor genuinely depend on the OTHER
+  // field's current value (persisted together as one StoredTheme).
+  const persist = useCallback((next: StoredTheme) => {
     try { localStorage.setItem(DEVICE_KEY, JSON.stringify(next)); } catch {}
     if (!userId) return;
     try { localStorage.setItem(storageKey(userId), JSON.stringify(next)); } catch {}
-  }
+  }, [userId]);
 
-  function setDarkMode(v: boolean) {
+  const setDarkMode = useCallback((v: boolean) => {
     setDarkModeState(v);
     persist({ darkMode: v, accentColor });
-  }
-  function setAccentColor(v: string | null) {
+  }, [persist, accentColor]);
+
+  const setAccentColor = useCallback((v: string | null) => {
     setAccentColorState(v);
     persist({ darkMode, accentColor: v });
-  }
+  }, [persist, darkMode]);
 
-  return { darkMode, accentColor, setDarkMode, setAccentColor };
+  return useMemo(() => ({ darkMode, accentColor, setDarkMode, setAccentColor }), [darkMode, accentColor, setDarkMode, setAccentColor]);
 }

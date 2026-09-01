@@ -265,5 +265,8 @@ export function useExpirations(opts: {
   const mostUrgent    = activeItems[0] ?? null;
   const allDeferred   = items.length > 0 && activeItems.length === 0;
 
-  return { items, activeItems, deferredItems, expiredCount, warningCount, mostUrgent, allDeferred, toggleDefer };
+  // Memoized -- see useEquipment.ts's identical comment for why.
+  return useMemo(() => ({
+    items, activeItems, deferredItems, expiredCount, warningCount, mostUrgent, allDeferred, toggleDefer,
+  }), [items, activeItems, deferredItems, expiredCount, warningCount, mostUrgent, allDeferred, toggleDefer]);
 }

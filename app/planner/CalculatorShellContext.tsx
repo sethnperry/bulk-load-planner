@@ -239,9 +239,12 @@ export function CalculatorShellProvider({ children }: { children: React.ReactNod
     } catch { setStarredCitySet(new Set()); }
   }, [authUserId]);
 
-  const cityKey = (state: string, city: string) => `${normState(state)}||${normCity(city)}`;
-  const isCityStarred = (state: string, city: string) => starredCitySet.has(cityKey(state, city));
-  const toggleCityStar = (state: string, city: string) => {
+  // Stabilized via useCallback (previously plain functions, a new
+  // reference every render) -- see hooks/useEquipment.ts's identical
+  // comment for why this matters once value below is memoized.
+  const cityKey = useCallback((state: string, city: string) => `${normState(state)}||${normCity(city)}`, []);
+  const isCityStarred = useCallback((state: string, city: string) => starredCitySet.has(cityKey(state, city)), [starredCitySet, cityKey]);
+  const toggleCityStar = useCallback((state: string, city: string) => {
     const key = cityKey(state, city);
     setStarredCitySet((prev) => {
       const next = new Set(prev);
@@ -249,7 +252,7 @@ export function CalculatorShellProvider({ children }: { children: React.ReactNod
       try { localStorage.setItem(`${CITY_STARS_KEY_PREFIX}${authUserId || "anon"}`, JSON.stringify(Array.from(next))); } catch {}
       return next;
     });
-  };
+  }, [cityKey, authUserId]);
 
   const stateOptions = useMemo(() => {
     if (location.statesCatalog.length > 0) {
@@ -370,7 +373,9 @@ export function CalculatorShellProvider({ children }: { children: React.ReactNod
     })();
   }, [effectiveUserId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const setCardDataForTerminal_ = async (terminalId: string, data: CardData) => {
+  // Stabilized via useCallback -- see cityKey/isCityStarred/toggleCityStar's
+  // identical comment above.
+  const setCardDataForTerminal_ = useCallback(async (terminalId: string, data: CardData) => {
     setCardDataByTerminalId(prev => ({ ...prev, [terminalId]: data }));
     if (!effectiveUserId) return;
     if (setupSession) {
@@ -389,7 +394,7 @@ export function CalculatorShellProvider({ children }: { children: React.ReactNod
         { onConflict: "user_id,terminal_id" }
       );
     }
-  };
+  }, [effectiveUserId, setupSession]);
 
   const [selectedDriverId, setSelectedDriverId] = useState("");
 
@@ -456,7 +461,15 @@ export function CalculatorShellProvider({ children }: { children: React.ReactNod
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.setSelectedRackId, location.selectedTerminalId]);
 
-  const value: ShellValue = {
+  // Memoized -- this was previously a fresh object literal every render,
+  // meaning ANY state change anywhere in this provider (including things
+  // unrelated to what a given consumer actually reads) re-rendered the
+  // entire shell tree: Header, TabBar, and whichever tab's page.tsx is
+  // currently mounted. Safe to memoize now that every field above is
+  // itself stable (raw useState values/setters, or useCallback/useMemo) --
+  // see hooks/useEquipment.ts's identical comment. Part of the 2026-08-31
+  // performance pass (see CLAUDE.md "Performance pass #2").
+  const value: ShellValue = useMemo(() => ({
     authEmail, authUserId, setupSession, effectiveUserId,
     equipment, location, terminals, expirations,
     myTerminalIdSet, terminalFilters,
@@ -472,7 +485,23 @@ export function CalculatorShellProvider({ children }: { children: React.ReactNod
     selectedDriverId, setSelectedDriverId,
     plannedProductIds, setPlannedProductIds,
     chooseTerminal, rackPickerOpen, rackPickerRacks, resolveRackPick,
-  };
+  }), [
+    authEmail, authUserId, setupSession, effectiveUserId,
+    equipment, location, terminals, expirations,
+    myTerminalIdSet, terminalFilters,
+    equipOpen, setEquipOpen, expModalOpen, setExpModalOpen,
+    termOpen, setTermOpen,
+    locOpen, setLocOpen, statePickerOpen, setStatePickerOpen,
+    expandedTerminalId, setExpandedTerminalId,
+    isCityStarred, toggleCityStar,
+    stateOptions, selectedStateLabel, selectedStateName, cities, topCities, allCities,
+    cardDataByTerminalId, setCardDataForTerminal_,
+    theme,
+    role, companyId, isSuperAdmin,
+    selectedDriverId, setSelectedDriverId,
+    plannedProductIds, setPlannedProductIds,
+    chooseTerminal, rackPickerOpen, rackPickerRacks, resolveRackPick,
+  ]);
 
   return <ShellContext.Provider value={value}>{children}</ShellContext.Provider>;
 }

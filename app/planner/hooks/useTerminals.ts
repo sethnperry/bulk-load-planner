@@ -3,7 +3,7 @@
 // Owns: my_terminals fetch, terminal catalog, get_carded RPC, access dates, star toggle.
 // When setupSession is active, all user-scoped reads/writes go through /api/admin/setup.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 import type { SetupSession } from "@/lib/setupSession";
 import type { TerminalCatalogRow, TerminalRow } from "../types";
@@ -336,7 +336,11 @@ export function useTerminals(
     return expiresISO || computedExpires || null;
   }, [terminalCatalog, accessDateByTerminalId]);
 
-  return {
+  // Memoized -- see useEquipment.ts's identical comment for why (every
+  // field here is already a raw useState value/setter or a useCallback,
+  // both React-stable by construction, so this only stabilizes the
+  // wrapper object itself).
+  return useMemo(() => ({
     terminals, setTerminals,
     termLoading, termError, setTermError,
     terminalCatalog,
@@ -350,5 +354,10 @@ export function useTerminals(
     doGetCarded,
     toggleTerminalStar,
     terminalDisplayInfo,
-  };
+  }), [
+    terminals, setTerminals, termLoading, termError, setTermError, terminalCatalog,
+    catalogLoading, catalogError, accessDateByTerminalId, cardingBusyId,
+    loadMyTerminals, refreshTerminalAccessForUser, setAccessDateForTerminal,
+    deleteAccessDateForTerminal, doGetCarded, toggleTerminalStar, terminalDisplayInfo,
+  ]);
 }

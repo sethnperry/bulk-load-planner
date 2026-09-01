@@ -417,7 +417,14 @@ export function useLocation(authUserId: string) {
     [selectedCity, selectedState]
   );
 
-  return {
+  // Memoized so this hook returns a stable reference across renders where
+  // nothing it owns actually changed -- every field here is already a raw
+  // useState value/setter (React-stable by construction), an already-
+  // memoized derived value, or a ref (identity-stable by definition), so
+  // this can only stabilize the wrapper object itself, never mask a real
+  // change. See useEquipment.ts's identical comment for why this matters
+  // (CalculatorShellContext.tsx spreads this into its own memoized value).
+  return useMemo(() => ({
     selectedState,
     setSelectedState,
     selectedCity,
@@ -437,5 +444,10 @@ export function useLocation(authUserId: string) {
     ambientTempF,
     ambientTempLoading,
     skipResetRef,
-  };
+  }), [
+    selectedState, setSelectedState, selectedCity, setSelectedCity,
+    selectedTerminalId, setSelectedTerminalId, selectedRackId, setSelectedRackId,
+    selectedCityId, locationLabel, statesCatalog, statesLoading, statesError,
+    citiesCatalog, citiesLoading, citiesError, ambientTempF, ambientTempLoading, skipResetRef,
+  ]);
 }

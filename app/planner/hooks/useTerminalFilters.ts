@@ -48,5 +48,6 @@ export function useTerminalFilters<TMy extends BaseTerminal & { starred?: any },
       });
   }, [terminalCatalog, selectedState, selectedCity, myTerminalIdSet]);
 
-  return { terminalsFiltered, catalogTerminalsInCity };
+  // Memoized -- see useEquipment.ts's identical comment for why.
+  return useMemo(() => ({ terminalsFiltered, catalogTerminalsInCity }), [terminalsFiltered, catalogTerminalsInCity]);
 }
