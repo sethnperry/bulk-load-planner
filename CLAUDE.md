@@ -6108,6 +6108,25 @@ a clean build alone.
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.
 
+- **Vercel Preview environment is missing `SUPABASE_SERVICE_ROLE_KEY`.**
+  Found 2026-08-31 when pushing `perf/memoize-shell-context` triggered
+  this project's first-ever Preview deployment (every prior deployment in
+  `vercel ls` history is Production -- pushes apparently always went
+  straight to `main` before). The build failed at page-data collection:
+  `Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY` in
+  `/api/admin/setup/route.ts`. Confirmed via `vercel env ls`:
+  `SUPABASE_SERVICE_ROLE_KEY` is configured for Production only, never
+  Preview (`NEXT_PUBLIC_SUPABASE_URL`/`NEXT_PUBLIC_SUPABASE_ANON_KEY` ARE
+  set for both). Unrelated to whatever branch triggers it -- any Preview
+  build of this repo, on any branch, would hit the same failure. Fix is a
+  one-line `vercel env add SUPABASE_SERVICE_ROLE_KEY preview` (same value
+  Production already has) -- deliberately not done automatically, since it
+  means typing a real service-role secret into Vercel. Explicitly
+  deprioritized by the user for now (not using Preview URLs for QA
+  currently) -- local `next build`/`tsc --noEmit` are unaffected (both
+  read the same key from `.env.local`) and remain the real gate for
+  merging branches.
+
 - ~~**Orphaned "planned" `load_log` rows never get cleaned up.**~~ —
   **prevention shipped 2026-08-13**, backlog cleanup written but not yet
   applied. Option (b) from the original writeup: `useLoadWorkflow.ts`'s
