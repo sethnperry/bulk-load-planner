@@ -41,17 +41,30 @@ export async function GET(req: NextRequest) {
     if (!email) throw new Error(`Unknown or unconfigured demo persona: ${persona}`);
 
     const admin = getAdmin();
+    const redirectTo = `${origin}/auth/confirm`;
     const { data, error } = await admin.auth.admin.generateLink({
       type: "magiclink",
       email,
-      options: { redirectTo: `${origin}/auth/confirm` },
+      options: { redirectTo },
     });
 
-    if (error || !data?.properties?.action_link) {
+    // Build confirmUrl from token_hash pointing at our own /auth/confirm
+    // route -- NOT Supabase's raw action_link (<project>.supabase.co/auth/
+    // v1/verify), which is a GET that consumes the one-time token on the
+    // very first hit. Any prefetch/link-scanner/preflight that requests
+    // that URL before the "real" navigation completes silently burns it --
+    // the exact class of bug already found and fixed for the invite email
+    // (see app/api/admin/invite/route.ts, and CLAUDE.md's "magic link /
+    // login reliability" history) but never ported to this route.
+    // /auth/confirm/page.tsx already expects `?token_hash=...&type=...`
+    // and only consumes it via an explicit client-side verifyOtp() call,
+    // so this is a drop-in fix, not a new mechanism.
+    if (error || !data?.properties?.hashed_token) {
       throw new Error(error?.message ?? "Failed to generate demo login link.");
     }
+    const confirmUrl = `${redirectTo}?token_hash=${encodeURIComponent(data.properties.hashed_token)}&type=magiclink`;
 
-    return NextResponse.redirect(data.properties.action_link);
+    return NextResponse.redirect(confirmUrl);
   } catch (e: any) {
     console.error("demo/start failed:", e?.message ?? e);
     return NextResponse.redirect(`${origin}/demo/ended?reason=error`);

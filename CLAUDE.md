@@ -6095,14 +6095,84 @@ callback is lower-risk left alone than "corrected" without being able to
 verify the correction live.
 
 `tsc --noEmit` and `next build` both clean throughout (checked after the
-hook-level layer and again after the outer `value` layer). **Not live-
-verified** -- this is exactly the class of change that can't be caught by
-typechecking, and this session has no authenticated browser session to
-exercise it with. Sitting on `perf/memoize-shell-context`, not yet merged
-to `main` -- per the user's own safety framing, this should get a real
-live click-through (switch every tab, open/close modals, edit a plan,
-switch terminals/equipment) before merging, not merged on the strength of
-a clean build alone.
+hook-level layer and again after the outer `value` layer). Sitting on
+`perf/memoize-shell-context`, not yet merged to `main` at the time this
+was written -- see the live-verification pass immediately below, done the
+same day.
+
+### `perf/memoize-shell-context` live-verified via the demo login route (2026-09-01)
+
+This session gained real browser access for the first time (`preview_start`
+against the local dev server, on this same branch) and used it to run the
+live click-through the memoization work above was waiting on, via
+`/api/demo/start?persona=alpha` -- a purpose-built shareable demo-login
+route already in the codebase (mints a fresh magic link for one of two
+fixed demo accounts, no email/password needed).
+
+**Found and fixed a real, unrelated bug on the way in**: the demo route
+failed twice in a row with "Link expired or already used" /
+"No token found in this link." Root cause: `app/api/demo/start/route.ts`
+still redirected through Supabase's raw `action_link`
+(`<project>.supabase.co/auth/v1/verify`), which consumes the one-time
+token on the very first GET -- the exact bug already found and fixed for
+the admin-invite email (see "invite email -- fixed the consuming-link
+bug" earlier in this file), just never ported to this route. Any
+prefetch/preflight against that URL (this session's own browser tooling,
+in this case) burns the token before the "real" navigation completes.
+Fixed identically: build `confirmUrl` from `hashed_token` pointed at our
+own `/auth/confirm?token_hash=...&type=magiclink` instead of the raw
+`action_link` -- `/auth/confirm/page.tsx` already handles this shape via
+an explicit client-side `verifyOtp()` call, so no other file needed to
+change. Live-verified immediately after: the demo login now completes on
+the first try, landing on `/planner` as the demo admin.
+
+**With that fixed, ran the actual verification checklist** against the
+real demo/QA company's live data (the persistent one referenced
+throughout this file's own history -- Seth Perry/Test Testerson, real
+equipment, real terminal cards):
+- Selected equipment via the Equipment modal (25184-A / 3151-A) -- real
+  Tare/Target populated correctly.
+- Dispatch tab: picked a driver (Test Testerson) -- identity, equipment,
+  schedule, and terminal cards (correct expiry colors, including a real
+  -71-day expired-red card) all rendered.
+- Switched to Cards tab -- correctly stayed scoped to "Viewing Test
+  Testerson's terminal cards," confirming the shared `selectedDriverId`
+  survived the tab switch under the now-memoized shell value.
+- Insights tab -- rack picker, product list (real API/temp readings),
+  and the new Volume chart (shipped this same session, never live-
+  tested until now) all rendered correctly; "All" range showed a real
+  grouped bar chart (monthly buckets, correct diesel=yellow/regular=white
+  coloring, real gallon totals) against actual historical load data --
+  first live confirmation the Terminal tab pivot's chart genuinely works
+  end to end, not just typechecks.
+- Vault tab rendered its first-time PIN-setup screen correctly (didn't
+  set a PIN -- not needed for this check).
+- Back on Planner: opened/closed the Compartment product picker cleanly;
+  switched terminals (Fort Lauderdale -> Global South) -- plan correctly
+  re-synced (stale "N/A" flags cleared to "MT"), predicted temp updated,
+  and the multi-rack picker correctly triggered ("Global South has more
+  than one rack"); picked South Rack -- state updated correctly.
+- **The exact scenario behind the earlier "wiped the plans" scare**:
+  navigated away (Insights) and back to Planner -- terminal/rack selection
+  (Global South · South Rack) and the auto-restored plan (real D2
+  product, real gallons, dial back on the correct preset) both survived
+  the round trip with nothing wiped. Strong evidence that incident either
+  wasn't caused by the unmemoized shell context, or (more likely, given
+  this pass) is now fixed as a side effect of memoizing it.
+- Equipment modal: opened, attempted a switch to a truck with no prior
+  pairing (correctly prompted "New Pairing, enter tare weight"), canceled
+  -- selection correctly reverted to the original truck/trailer with no
+  stale state.
+- One stale-looking console 400 was observed but not chased -- consistent
+  with this project's own documented "console never resets for the tab's
+  lifetime" behavior (see `browser_console_messages_never_resets` in this
+  session's memory), and nothing in the UI showed any corresponding
+  error at any point in the walkthrough.
+
+No visible re-render bugs, no stale UI, no lost state anywhere in the
+walkthrough. This is the first genuinely live-tested confirmation for
+this branch -- ready to merge to `main` on the strength of this pass, not
+just the clean build.
 
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
