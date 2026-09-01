@@ -6033,9 +6033,169 @@ once that caching layer exists to actually consolidate them into.
 `tsc --noEmit` and `next build` both clean. Not live-verified this pass
 (no authenticated session available from this side).
 
+### Performance pass #2: `CalculatorShellContext` memoized (2026-08-31, dedicated branch)
+
+Item #1 from the audit above -- "biggest single fix for the re-render
+churn, needs care not haste." Done on a dedicated branch
+(`perf/memoize-shell-context`, off `main` at `c9896ae`, the last known-
+good pushed commit) rather than directly on `main`, per explicit user
+request about backup/recovery safety before a change in this specific
+risk class: a wrong `useMemo`/`useCallback` dependency array produces
+silently stale UI, which neither `tsc --noEmit` nor `next build` can
+catch, and this session has no way to live-test it.
+
+**The bug**: `CalculatorShellContext.tsx`'s `value` object (everything
+`useCalculatorShell()` returns -- consumed by `Header`, `TabBar`, and
+whichever tab's `page.tsx` is currently mounted) was a fresh plain object
+literal on every render. Since a new object is never `===` a previous
+one, EVERY state change anywhere in the provider -- a modal opening, a
+card being tapped, the outage-banner poll ticking -- re-rendered every
+consumer of the shell, not just the piece that actually changed. This is
+also the mechanism flagged (but not confirmed) as a possible contributor
+to the "wiped the plans" incident earlier this session -- an unmemoized
+context value make that class of bug easier to trigger, even though the
+user's own follow-up suggested that specific incident may have been
+unrelated.
+
+**The fix, in two layers** (each verified safe on its own before moving
+to the next, via `tsc --noEmit` after each layer):
+
+1. **Every shell sub-hook's own return object memoized first**
+   (`hooks/useEquipment.ts`, `useLocation.ts`, `useTerminals.ts`,
+   `useExpirations.ts`, `useTerminalFilters.ts`) -- each already returned
+   only `useState` values/setters (React-stable by construction) or
+   already-`useCallback`/`useMemo`'d fields, so this step was a pure
+   wrap: `return useMemo(() => ({...fields}), [...fields])`, mechanically
+   safe since no individual field's own reactivity changed, only the
+   returned object's identity stabilized.
+   `useTheme.ts` needed a real (behavior-preserving) refactor, not just a
+   wrap -- `persist`/`setDarkMode`/`setAccentColor` were plain functions
+   recreated every render, converted to `useCallback` with their genuine
+   dependencies (`persist` depends on `userId`; `setDarkMode`/
+   `setAccentColor` each depend on the OTHER field's current value, since
+   both are persisted together as one `StoredTheme`).
+2. **The outer `value` object itself**, in `CalculatorShellContext.tsx` --
+   two more unstable pieces found by inspection and fixed first
+   (`cityKey`/`isCityStarred`/`toggleCityStar` and
+   `setCardDataForTerminal_`, all plain functions converted to
+   `useCallback` with their real dependencies), THEN the full ~44-field
+   `value` object wrapped in `useMemo`, dependency array listing every
+   field. This step only works correctly because of step 1 -- `equipment`/
+   `location`/`terminals`/`expirations`/`terminalFilters`/`theme` (the 6
+   sub-hook results) are now themselves stable references; without step 1,
+   memoizing just the outer object would have been a no-op (a fresh
+   `equipment` object every render would still bust the memo every time).
+
+**Not done this pass**: `chooseTerminal`/`resolveRackPick` (already
+`useCallback`-wrapped with pre-existing, intentional
+`eslint-disable-line react-hooks/exhaustive-deps` comments) were left
+exactly as they were -- their dependency arrays predate this pass and
+weren't touched, on the theory that a working-but-lint-suppressed
+callback is lower-risk left alone than "corrected" without being able to
+verify the correction live.
+
+`tsc --noEmit` and `next build` both clean throughout (checked after the
+hook-level layer and again after the outer `value` layer). Sitting on
+`perf/memoize-shell-context`, not yet merged to `main` at the time this
+was written -- see the live-verification pass immediately below, done the
+same day.
+
+### `perf/memoize-shell-context` live-verified via the demo login route (2026-09-01)
+
+This session gained real browser access for the first time (`preview_start`
+against the local dev server, on this same branch) and used it to run the
+live click-through the memoization work above was waiting on, via
+`/api/demo/start?persona=alpha` -- a purpose-built shareable demo-login
+route already in the codebase (mints a fresh magic link for one of two
+fixed demo accounts, no email/password needed).
+
+**Found and fixed a real, unrelated bug on the way in**: the demo route
+failed twice in a row with "Link expired or already used" /
+"No token found in this link." Root cause: `app/api/demo/start/route.ts`
+still redirected through Supabase's raw `action_link`
+(`<project>.supabase.co/auth/v1/verify`), which consumes the one-time
+token on the very first GET -- the exact bug already found and fixed for
+the admin-invite email (see "invite email -- fixed the consuming-link
+bug" earlier in this file), just never ported to this route. Any
+prefetch/preflight against that URL (this session's own browser tooling,
+in this case) burns the token before the "real" navigation completes.
+Fixed identically: build `confirmUrl` from `hashed_token` pointed at our
+own `/auth/confirm?token_hash=...&type=magiclink` instead of the raw
+`action_link` -- `/auth/confirm/page.tsx` already handles this shape via
+an explicit client-side `verifyOtp()` call, so no other file needed to
+change. Live-verified immediately after: the demo login now completes on
+the first try, landing on `/planner` as the demo admin.
+
+**With that fixed, ran the actual verification checklist** against the
+real demo/QA company's live data (the persistent one referenced
+throughout this file's own history -- Seth Perry/Test Testerson, real
+equipment, real terminal cards):
+- Selected equipment via the Equipment modal (25184-A / 3151-A) -- real
+  Tare/Target populated correctly.
+- Dispatch tab: picked a driver (Test Testerson) -- identity, equipment,
+  schedule, and terminal cards (correct expiry colors, including a real
+  -71-day expired-red card) all rendered.
+- Switched to Cards tab -- correctly stayed scoped to "Viewing Test
+  Testerson's terminal cards," confirming the shared `selectedDriverId`
+  survived the tab switch under the now-memoized shell value.
+- Insights tab -- rack picker, product list (real API/temp readings),
+  and the new Volume chart (shipped this same session, never live-
+  tested until now) all rendered correctly; "All" range showed a real
+  grouped bar chart (monthly buckets, correct diesel=yellow/regular=white
+  coloring, real gallon totals) against actual historical load data --
+  first live confirmation the Terminal tab pivot's chart genuinely works
+  end to end, not just typechecks.
+- Vault tab rendered its first-time PIN-setup screen correctly (didn't
+  set a PIN -- not needed for this check).
+- Back on Planner: opened/closed the Compartment product picker cleanly;
+  switched terminals (Fort Lauderdale -> Global South) -- plan correctly
+  re-synced (stale "N/A" flags cleared to "MT"), predicted temp updated,
+  and the multi-rack picker correctly triggered ("Global South has more
+  than one rack"); picked South Rack -- state updated correctly.
+- **The exact scenario behind the earlier "wiped the plans" scare**:
+  navigated away (Insights) and back to Planner -- terminal/rack selection
+  (Global South · South Rack) and the auto-restored plan (real D2
+  product, real gallons, dial back on the correct preset) both survived
+  the round trip with nothing wiped. Strong evidence that incident either
+  wasn't caused by the unmemoized shell context, or (more likely, given
+  this pass) is now fixed as a side effect of memoizing it.
+- Equipment modal: opened, attempted a switch to a truck with no prior
+  pairing (correctly prompted "New Pairing, enter tare weight"), canceled
+  -- selection correctly reverted to the original truck/trailer with no
+  stale state.
+- One stale-looking console 400 was observed but not chased -- consistent
+  with this project's own documented "console never resets for the tab's
+  lifetime" behavior (see `browser_console_messages_never_resets` in this
+  session's memory), and nothing in the UI showed any corresponding
+  error at any point in the walkthrough.
+
+No visible re-render bugs, no stale UI, no lost state anywhere in the
+walkthrough. This is the first genuinely live-tested confirmation for
+this branch -- ready to merge to `main` on the strength of this pass, not
+just the clean build.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.
+
+- **Vercel Preview environment is missing `SUPABASE_SERVICE_ROLE_KEY`.**
+  Found 2026-08-31 when pushing `perf/memoize-shell-context` triggered
+  this project's first-ever Preview deployment (every prior deployment in
+  `vercel ls` history is Production -- pushes apparently always went
+  straight to `main` before). The build failed at page-data collection:
+  `Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY` in
+  `/api/admin/setup/route.ts`. Confirmed via `vercel env ls`:
+  `SUPABASE_SERVICE_ROLE_KEY` is configured for Production only, never
+  Preview (`NEXT_PUBLIC_SUPABASE_URL`/`NEXT_PUBLIC_SUPABASE_ANON_KEY` ARE
+  set for both). Unrelated to whatever branch triggers it -- any Preview
+  build of this repo, on any branch, would hit the same failure. Fix is a
+  one-line `vercel env add SUPABASE_SERVICE_ROLE_KEY preview` (same value
+  Production already has) -- deliberately not done automatically, since it
+  means typing a real service-role secret into Vercel. Explicitly
+  deprioritized by the user for now (not using Preview URLs for QA
+  currently) -- local `next build`/`tsc --noEmit` are unaffected (both
+  read the same key from `.env.local`) and remain the real gate for
+  merging branches.
 
 - ~~**Orphaned "planned" `load_log` rows never get cleaned up.**~~ —
   **prevention shipped 2026-08-13**, backlog cleanup written but not yet
