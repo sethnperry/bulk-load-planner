@@ -6174,6 +6174,96 @@ walkthrough. This is the first genuinely live-tested confirmation for
 this branch -- ready to merge to `main` on the strength of this pass, not
 just the clean build.
 
+### Performance pass #3: React Query added as a shared catalog cache (2026-09-01)
+
+Item #2 from the audit, done on its own branch (`perf/react-query-catalog-cache`,
+off `main`'s post-item-#1 commit) per the same safety precedent just set.
+Full research pass confirmed the original audit's impression concretely:
+7 independent `supabase.from("products")` call sites (`app/admin/page.tsx`,
+`IncentiveSettingsModal.tsx`, `PayrollReportModal.tsx`,
+`ManageTerminalProductsModal.tsx`, `EditTerminalModal.tsx`,
+`terminal/page.tsx`, `useTerminalOutageReports.ts` -- the last refetching
+on every 90s poll tick for as long as the Planner layout is mounted), and
+`useCompanyRoster` (already a shared hook, 5 call sites) with zero
+internal caching -- its `excludeUserId` option confirmed to be a pure
+post-fetch filter, never part of the query.
+
+**Added `@tanstack/react-query` v5** -- `app/providers/QueryProvider.tsx`
+(new, `"use client"`, `useState(() => new QueryClient())` per the
+standard Next.js App Router pattern) mounted in `app/layout.tsx` at the
+true root, not scoped to `CalculatorShellProvider` -- `/admin` sits
+outside the `/planner` tree entirely and needed to share the same cache.
+Global defaults: `refetchOnWindowFocus: false` (a PWA backgrounds/
+foregrounds constantly; the library default would cause surprising
+refetch storms), `retry: 1`, no global `staleTime` override (set per-query
+instead, so nothing not yet migrated to `useQuery` changes behavior).
+
+`lib/queries/useProductsCatalog.ts` (new) -- one canonical fetch (union of
+every column any of the 7 sites needed, no `active`/id filter, sorted by
+`product_name`), `staleTime: 10 min`. Each consumer applies its own
+filter/lookup client-side via `useMemo` (e.g. `admin/page.tsx`'s
+`.eq("active", true)` became `.filter(p => p.active)` post-cache) --
+preserves every site's exact prior behavior. Also exports
+`fetchProductsCatalogCached(queryClient)` for `admin/page.tsx`'s
+`loadAll()`, a plain async function (not a component render path) that
+can't call a hook directly -- goes through `QueryClient.fetchQuery`
+instead, same cache/key/staleTime.
+
+`useCompanyRoster.ts` -- internals only, swapped to `useQuery` keyed
+`["companyRoster", companyId]` (no `excludeUserId` in the key, confirmed
+unnecessary above). Exported signature unchanged, so all 5 call sites
+(`DriverPicker`, `PayrollReportModal`, `UnderloadingDashboardModal`,
+`DriverGroupPicker`, Terminal tab) needed zero edits.
+
+**Real bug found and fixed during live verification, not just
+typechecked**: after migrating all 7 products call sites, a fresh
+`/planner/terminal` load threw React's "Maximum update depth exceeded" in
+the console. Root cause: several consumers destructured
+`const { data: x = [] } = useProductsCatalog()` -- a bare `[]` default is
+a NEW array literal on every render while `data` is still `undefined`
+(before the catalog's first fetch resolves), which is normally harmless,
+but `useTerminalOutageReports.ts` specifically feeds that value through a
+`useMemo` (`productFullById`/`productShortById`) into a `useCallback`
+(`fetchAndCompose`) that's itself a `useEffect`'s only dependency -- each
+render produced new Maps, a new callback identity, re-firing the effect,
+which calls `setState`, triggering another render, forever. Fixed at the
+source in the hook itself rather than patching every consumer's
+destructuring: `useProductsCatalog()` now returns `query.data ??
+EMPTY_CATALOG` where `EMPTY_CATALOG` is a single module-level stable
+array -- `data` is never `undefined` for any consumer, so the unstable-
+default problem can't recur for this hook, including future consumers
+that haven't been written yet.
+
+**Live-verified end-to-end** via the demo login route (`/api/demo/start`)
+against real "Test Company Alpha" data: `/admin`'s Incentive Settings
+(real ULSD/B100 benchmarks) and its "Add a benchmark product" picker
+(`ManageTerminalProductsModal` in pick mode, grouped catalog rendering
+correctly) both confirmed working -- two independent consumers nested
+three levels deep, same cache. Period Report rendered its correct empty
+state for the current period with no errors. `/planner/terminal`'s Status
+view (real rack product list with live API/temp readings) and its Edit
+Terminal -> Edit Product List (`EditTerminalModal`'s `ProductsView`) both
+confirmed rendering the full real catalog correctly. Dispatch tab's
+driver picker (`useCompanyRoster` via `DriverPicker`) showed real names.
+After the infinite-loop fix, re-verified via a genuinely fresh browser
+tab (not just a reload, to rule out any console-buffer staleness) across
+`/planner/terminal` and `/planner` -- zero console errors, `Header`'s
+outage-report poll (the hook that was looping) mounted and ran clean.
+One pre-existing, expected 404 (the not-yet-applied `company_subscriptions`
+table -- matches this file's own documented "fails open" design) was the
+only console noise seen anywhere in this pass, on `/admin`, before or
+after the fix.
+
+`tsc --noEmit` and `next build` both clean throughout every phase.
+
+**Explicitly deferred, not bundled into this pass**: the `terminals`
+catalog's own duplication (5+ sites beyond the shared `useTerminals()`
+hook, itself mounted twice independently) -- `useTerminals.ts` was just
+carefully memoized in the immediately preceding pass; touching its
+internals again this soon was judged not worth the added risk before this
+pass's own pattern had been proven live. Natural next follow-up, not
+started.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.

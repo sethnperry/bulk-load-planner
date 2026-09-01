@@ -15,6 +15,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { FullscreenModal } from "@/lib/ui/FullscreenModal";
+import { useProductsCatalog } from "@/lib/queries/useProductsCatalog";
 
 export type CatalogProduct = {
   product_id: string;
@@ -71,7 +72,13 @@ export default function ManageTerminalProductsModal({
 }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [allProducts, setAllProducts] = useState<CatalogProduct[]>([]);
+  // Sourced from the shared cached catalog (lib/queries/useProductsCatalog.ts)
+  // instead of this modal's own supabase.from("products") fetch on every
+  // open -- that shared CatalogProduct type is a structural superset of
+  // this file's own (narrower) CatalogProduct export below, so no mapping
+  // is needed. rack_product_status is still fetched per-open below (real,
+  // rack-specific, mutable data -- not catalog-static).
+  const { data: allProducts = [], isLoading: productsLoading, error: productsError } = useProductsCatalog();
   // undefined = no rack_product_status row yet; true/false = row exists with that active flag
   const [activeMap, setActiveMap] = useState<Record<string, boolean | undefined>>({});
   const [savingId, setSavingId] = useState<string | null>(null);
@@ -80,30 +87,23 @@ export default function ManageTerminalProductsModal({
   useEffect(() => {
     if (!open) return;
     if (mode === "rack" && !rackId) return;
+    // Pick mode has no rack context -- just the plain catalog above, no
+    // rack_product_status query at all.
+    if (mode !== "rack") { setActiveMap({}); return; }
     let cancelled = false;
     (async () => {
       setLoading(true);
       setError(null);
-      // Pick mode has no rack context -- just the plain catalog, no
-      // rack_product_status query at all.
-      const [{ data: products, error: pErr }, rpsResult] = await Promise.all([
-        supabase.from("products")
-          .select("product_id, product_name, display_name, description, button_code, hex_code, is_dyed")
-          .order("product_name"),
-        mode === "rack"
-          ? supabase.from("rack_product_status").select("product_id, active").eq("rack_id", rackId!)
-          : Promise.resolve({ data: [], error: null }),
-      ]);
-      const { data: rps, error: rpsErr } = rpsResult;
+      const { data: rps, error: rpsErr } = await supabase
+        .from("rack_product_status").select("product_id, active").eq("rack_id", rackId!);
       if (cancelled) return;
-      if (pErr || rpsErr) {
-        setError(pErr?.message ?? rpsErr?.message ?? "Failed to load products.");
+      if (rpsErr) {
+        setError(rpsErr.message ?? "Failed to load products.");
         setLoading(false);
         return;
       }
       const map: Record<string, boolean | undefined> = {};
       for (const row of (rps ?? []) as any[]) map[row.product_id] = row.active !== false;
-      setAllProducts((products ?? []) as CatalogProduct[]);
       setActiveMap(map);
       setLoading(false);
     })();
@@ -188,14 +188,16 @@ export default function ManageTerminalProductsModal({
           }}
         />
 
-        {error && <div style={{ color: "#f87171", fontSize: 12 }}>{error}</div>}
-        {loading && <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 13 }}>Loading…</div>}
+        {(error || productsError) && (
+          <div style={{ color: "#f87171", fontSize: 12 }}>{error ?? (productsError as any)?.message ?? "Failed to load products."}</div>
+        )}
+        {(loading || productsLoading) && <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 13 }}>Loading…</div>}
 
-        {!loading && grouped.length === 0 && (
+        {!loading && !productsLoading && grouped.length === 0 && (
           <div style={{ color: "rgba(255,255,255,0.35)", fontSize: 13 }}>No products found.</div>
         )}
 
-        {!loading && grouped.map(({ label, products }) => (
+        {!loading && !productsLoading && grouped.map(({ label, products }) => (
           <div key={label} style={{ display: "grid", gap: 6 }}>
             <div style={{
               fontSize: 11, fontWeight: 800, color: "rgba(255,255,255,0.35)",

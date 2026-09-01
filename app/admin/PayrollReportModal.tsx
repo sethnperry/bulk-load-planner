@@ -16,6 +16,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { generatePayPeriods, type PayPeriod, type PayPeriodType } from "./payPeriods";
 import { useCompanyRoster } from "@/app/planner/hooks/useCompanyRoster";
+import { useProductsCatalog } from "@/lib/queries/useProductsCatalog";
 import DriverGroupPicker from "./DriverGroupPicker";
 
 type LoadPointRow = {
@@ -73,7 +74,15 @@ export default function PayrollReportModal({ open, onClose, companyId }: Props) 
   const [points, setPoints] = useState<LoadPointRow[]>([]);
   const [nameById, setNameById] = useState<Record<string, string>>({});
   const [employeeNumberById, setEmployeeNumberById] = useState<Record<string, string | null>>({});
-  const [productLabelById, setProductLabelById] = useState<Record<string, string>>({});
+  // Sourced from the shared cached catalog (lib/queries/useProductsCatalog.ts)
+  // instead of this modal's own per-period .in("product_id", productIds)
+  // fetch -- the full catalog is already in the cache, so a plain lookup
+  // covers every id this period could ever reference with no network call.
+  const { data: productsCatalog = [] } = useProductsCatalog();
+  const productLabelById = useMemo(
+    () => Object.fromEntries(productsCatalog.map((p) => [p.product_id, p.display_name ?? p.product_name ?? p.product_id])),
+    [productsCatalog]
+  );
 
   const [expandedDriverId, setExpandedDriverId] = useState<string | null>(null);
   const [expandedLoadId, setExpandedLoadId] = useState<string | null>(null);
@@ -137,19 +146,16 @@ export default function PayrollReportModal({ open, onClose, companyId }: Props) 
       setPoints(rows);
 
       const driverIds = Array.from(new Set(rows.map((r) => r.driver_id)));
-      const productIds = Array.from(new Set(rows.map((r) => r.product_id)));
 
-      const [{ data: nameRows }, { data: profileRows }, { data: productRows }, { data: reportRows }] = await Promise.all([
+      const [{ data: nameRows }, { data: profileRows }, { data: reportRows }] = await Promise.all([
         driverIds.length > 0 ? supabase.rpc("get_display_names_full", { p_user_ids: driverIds }) : Promise.resolve({ data: [] as any[] }),
         driverIds.length > 0 ? supabase.from("profiles").select("user_id, employee_number").in("user_id", driverIds) : Promise.resolve({ data: [] as any[] }),
-        productIds.length > 0 ? supabase.from("products").select("product_id, product_name, display_name").in("product_id", productIds) : Promise.resolve({ data: [] as any[] }),
         supabase.from("payroll_reports").select("is_stale").eq("company_id", companyId).eq("period_start", selectedPeriod.start).eq("period_end", selectedPeriod.end).order("generated_at", { ascending: false }).limit(1),
       ]);
       if (cancelled) return;
 
       setNameById(Object.fromEntries(((nameRows ?? []) as any[]).map((p) => [p.user_id, p.display_name ?? "Unknown"])));
       setEmployeeNumberById(Object.fromEntries(((profileRows ?? []) as any[]).map((p) => [p.user_id, p.employee_number ?? null])));
-      setProductLabelById(Object.fromEntries(((productRows ?? []) as any[]).map((p) => [p.product_id, p.display_name ?? p.product_name ?? p.product_id])));
       setIsStale(Boolean((reportRows ?? [])[0]?.is_stale));
       setLoading(false);
     })();

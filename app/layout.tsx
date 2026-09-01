@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Outfit } from "next/font/google";
 import "./globals.css";
 import ServiceWorkerRegistration from "@/components/ServiceWorkerRegistration";
+import QueryProvider from "@/app/providers/QueryProvider";
 
 const outfit = Outfit({
   variable: "--font-outfit",
@@ -50,7 +51,7 @@ export default function RootLayout({
         style={{ background: "#111111", colorScheme: "dark" }}
       >
         <ServiceWorkerRegistration />
-        {children}
+        <QueryProvider>{children}</QueryProvider>
       </body>
     </html>
   );

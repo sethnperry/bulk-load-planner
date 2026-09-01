@@ -36,10 +36,11 @@
 // Terminal tab's own product list never disagrees with this banner -- see
 // CLAUDE.md "Terminal outage banners" for the full design.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { resolveEffectiveRackId } from "../utils/rack";
 import { mostRecentClearingCheckpoint, nextClearingCheckpoint } from "../utils/dates";
+import { useProductsCatalog } from "@/lib/queries/useProductsCatalog";
 
 export type OutageReportType = "out_of_product" | "out_of_allocation";
 
@@ -183,6 +184,23 @@ export function useActiveOutageBanner(
   const [tickerMessage, setTickerMessage] = useState<string | null>(null);
   const [reports, setReports] = useState<ComposedOutageReport[]>([]);
 
+  // Sourced from the shared cached catalog (lib/queries/useProductsCatalog.ts)
+  // instead of this hook's own supabase.from("products") lookup on every
+  // fetch -- this matters more here than anywhere else in the app: this
+  // poll runs every 90s, for every user, on every tab, for the whole time
+  // the Planner layout is mounted (see the poll comment below). After the
+  // catalog's first fetch, subsequent ticks read straight from cache
+  // (10 min staleTime) instead of hitting products on every single tick.
+  const { data: productsCatalog = [] } = useProductsCatalog();
+  const productFullById = useMemo(
+    () => new Map(productsCatalog.map((p) => [p.product_id, p.product_name ?? p.display_name ?? "product"])),
+    [productsCatalog]
+  );
+  const productShortById = useMemo(
+    () => new Map(productsCatalog.map((p) => [p.product_id, p.display_name ?? p.product_name ?? "product"])),
+    [productsCatalog]
+  );
+
   useEffect(() => {
     if (!terminalId) { setTimeZone(null); return; }
     let cancelled = false;
@@ -226,20 +244,17 @@ export function useActiveOutageBanner(
     }
     if (rows.length === 0) { setTickerMessage(null); setReports([]); return; }
 
-    const productIds = Array.from(new Set(rows.map((r) => r.product_id)));
     const companyIds = Array.from(new Set(rows.filter((r) => r.report_type === "out_of_product").map((r) => r.company_id)));
     const reporterIds = Array.from(new Set(rows.filter((r) => r.report_type === "out_of_allocation").map((r) => r.reporter_user_id)));
 
-    const [productsRes, companiesRes, namesRes]: any[] = await Promise.all([
-      productIds.length ? supabase.from("products").select("product_id, product_name, display_name").in("product_id", productIds) : Promise.resolve({ data: [] }),
+    const [companiesRes, namesRes]: any[] = await Promise.all([
       companyIds.length ? supabase.from("companies").select("company_id, company_name").in("company_id", companyIds) : Promise.resolve({ data: [] }),
       reporterIds.length ? supabase.rpc("get_display_names_full", { p_user_ids: reporterIds }) : Promise.resolve({ data: [] }),
     ]);
 
-    // Full name for the detail card's product line; short name (falls
-    // back to full when no shorter display_name is set) for the ticker.
-    const productFullById = new Map<string, string>((productsRes.data ?? []).map((p: any) => [p.product_id, p.product_name ?? p.display_name ?? "product"]));
-    const productShortById = new Map<string, string>((productsRes.data ?? []).map((p: any) => [p.product_id, p.display_name ?? p.product_name ?? "product"]));
+    // productFullById/productShortById come from the shared cached catalog
+    // hook above (full name for the detail card's product line; short name,
+    // falling back to full, for the ticker) -- no longer fetched here.
     const companyNameById = new Map<string, string>((companiesRes.data ?? []).map((c: any) => [c.company_id, c.company_name ?? ""]));
     const displayNameByUserId = new Map<string, string>((namesRes.data ?? []).map((n: any) => [n.user_id, n.display_name ?? ""]));
 
@@ -275,7 +290,7 @@ export function useActiveOutageBanner(
     const productPart = composed.filter((c) => c.reportType === "out_of_product").map((c) => c.tickerText).join(" - ");
     const allocationPart = composed.filter((c) => c.reportType === "out_of_allocation").map((c) => c.tickerText).join(" - ");
     setTickerMessage([productPart, allocationPart].filter(Boolean).join("   ---   ") || null);
-  }, [terminalId, timeZone, effectiveUserId, plannedProductIds]);
+  }, [terminalId, timeZone, effectiveUserId, plannedProductIds, productFullById, productShortById]);
 
   useEffect(() => {
     fetchAndCompose();
