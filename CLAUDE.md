@@ -6264,6 +6264,23 @@ internals again this soon was judged not worth the added risk before this
 pass's own pattern had been proven live. Natural next follow-up, not
 started.
 
+**Dev-workflow gotcha, same category as this file's earlier "Dev-server
+stale-content trap"**: right after merging to `main` and hot-reloading the
+already-running dev server (not a fresh start), the very first live check
+threw `Uncaught: No QueryClient set, use QueryClientProvider to set one`
+-- alarming, since the merged code was already live-verified clean on the
+branch. A genuine dev-server restart (stop + start, not just a page
+reload) made it disappear completely, confirmed clean across two
+independent fresh-tab checks afterward. Root cause not chased further,
+but the pattern matches this app's own prior finding: Turbopack's
+Fast Refresh doesn't reliably re-establish a module-level singleton
+provider (here, the `QueryClient` created via `useState(() => new
+QueryClient())` in the new root-level `QueryProvider`) when the change is
+to `app/layout.tsx` itself, the one file HMR can't hot-patch as cleanly
+as a leaf component. **Takeaway for next time**: after adding or changing
+anything at the root layout / provider level, restart the dev server
+before trusting what it shows, don't debug the app code first.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.
