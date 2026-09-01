@@ -27,6 +27,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { FullscreenModal } from "@/lib/ui/FullscreenModal";
+import { useProductsCatalog } from "@/lib/queries/useProductsCatalog";
 import type { TerminalRack, RackProductStatusRow, ProductLite } from "./types";
 
 type View = "racks" | "products";
@@ -338,7 +339,12 @@ function RacksView({
 }
 
 function ProductsView({ rack, onChanged }: { rack: TerminalRack; onChanged: () => void }) {
-  const [allProducts, setAllProducts] = useState<ProductLite[]>([]);
+  // Sourced from the shared cached catalog (lib/queries/useProductsCatalog.ts)
+  // instead of this view's own supabase.from("products") fetch on every
+  // rack selected -- CatalogProduct is a structural superset of this
+  // file's ProductLite. rack_product_status stays its own per-rack fetch
+  // below (real, mutable data).
+  const { data: allProducts = [], isLoading: productsLoading, error: productsError } = useProductsCatalog();
   const [activeMap, setActiveMap] = useState<Record<string, boolean | undefined>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -350,19 +356,16 @@ function ProductsView({ rack, onChanged }: { rack: TerminalRack; onChanged: () =
     (async () => {
       setLoading(true);
       setError(null);
-      const [{ data: products, error: pErr }, { data: rp, error: rpErr }] = await Promise.all([
-        supabase.from("products").select("product_id, product_name, display_name, button_code, hex_code, is_dyed").order("product_name"),
-        supabase.from("rack_product_status").select("product_id, active").eq("rack_id", rack.rack_id),
-      ]);
+      const { data: rp, error: rpErr } = await supabase
+        .from("rack_product_status").select("product_id, active").eq("rack_id", rack.rack_id);
       if (cancelled) return;
-      if (pErr || rpErr) {
-        setError(pErr?.message ?? rpErr?.message ?? "Failed to load products.");
+      if (rpErr) {
+        setError(rpErr.message ?? "Failed to load products.");
         setLoading(false);
         return;
       }
       const map: Record<string, boolean | undefined> = {};
       for (const row of (rp ?? []) as any[]) map[row.product_id] = row.active !== false;
-      setAllProducts((products ?? []) as ProductLite[]);
       setActiveMap(map);
       setLoading(false);
     })();
@@ -409,10 +412,12 @@ function ProductsView({ rack, onChanged }: { rack: TerminalRack; onChanged: () =
         style={{ width: "100%", boxSizing: "border-box" as const, padding: "10px 12px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.03)", color: "white", fontSize: 13 }}
       />
 
-      {error && <div style={{ color: "#f87171", fontSize: 12 }}>{error}</div>}
-      {loading && <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 13 }}>Loading…</div>}
+      {(error || productsError) && (
+        <div style={{ color: "#f87171", fontSize: 12 }}>{error ?? (productsError as any)?.message ?? "Failed to load products."}</div>
+      )}
+      {(loading || productsLoading) && <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 13 }}>Loading…</div>}
 
-      {!loading && grouped.map(({ label, products }) => (
+      {!loading && !productsLoading && grouped.map(({ label, products }) => (
         <div key={label} style={{ display: "grid", gap: 6 }}>
           <div style={{ fontSize: 11, fontWeight: 800, color: "rgba(255,255,255,0.35)", textTransform: "uppercase" as const, letterSpacing: 0.6, marginTop: 4 }}>{label}</div>
           {products.map((p) => {

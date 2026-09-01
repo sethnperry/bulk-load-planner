@@ -18,6 +18,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { lbsPerGallonAtTemp } from "@/app/planner/utils/planMath";
 import ManageTerminalProductsModal, { type CatalogProduct } from "@/app/planner/modals/ManageTerminalProductsModal";
+import { useProductsCatalog } from "@/lib/queries/useProductsCatalog";
 
 type ProductRow = {
   product_id: string;
@@ -55,7 +56,11 @@ export default function IncentiveSettingsModal({ open, onClose, companyId }: Pro
   const [payPeriodType, setPayPeriodType] = useState("biweekly");
   const [payPeriodAnchorDate, setPayPeriodAnchorDate] = useState("");
 
-  const [products, setProducts] = useState<ProductRow[]>([]);
+  // Shared cached catalog (lib/queries/useProductsCatalog.ts) instead of
+  // this modal's own supabase.from("products") fetch on every open --
+  // CatalogProduct is a structural superset of this file's own ProductRow,
+  // so no per-consumer mapping is needed.
+  const { data: products = [] } = useProductsCatalog();
   const [benchmarks, setBenchmarks] = useState<Record<string, BenchmarkRow>>({});
   const [removedProductIds, setRemovedProductIds] = useState<Set<string>>(new Set());
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -73,9 +78,8 @@ export default function IncentiveSettingsModal({ open, onClose, companyId }: Pro
     let cancelled = false;
     (async () => {
       setLoading(true);
-      const [{ data: settings }, { data: prods }, { data: existing }] = await Promise.all([
+      const [{ data: settings }, { data: existing }] = await Promise.all([
         supabase.from("incentive_settings").select("enabled, weight_cap_lbs, pay_period_type, pay_period_anchor_date").eq("company_id", companyId).maybeSingle(),
-        supabase.from("products").select("product_id, product_name, display_name, button_code, api_60, alpha_per_f").order("product_name"),
         supabase.from("product_benchmarks").select("product_id, benchmark_gallons, reference_density").eq("company_id", companyId),
       ]);
       if (cancelled) return;
@@ -83,7 +87,6 @@ export default function IncentiveSettingsModal({ open, onClose, companyId }: Pro
       setWeightCapLbs(String(settings?.weight_cap_lbs ?? 80000));
       setPayPeriodType(settings?.pay_period_type ?? "biweekly");
       setPayPeriodAnchorDate(settings?.pay_period_anchor_date ?? new Date().toISOString().slice(0, 10));
-      setProducts((prods ?? []) as ProductRow[]);
       const map: Record<string, BenchmarkRow> = {};
       for (const row of (existing ?? []) as BenchmarkRow[]) map[row.product_id] = row;
       setBenchmarks(map);

@@ -40,6 +40,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { useCalculatorShell } from "../CalculatorShellContext";
 import { useCompanyRoster } from "../hooks/useCompanyRoster";
+import { useProductsCatalog } from "@/lib/queries/useProductsCatalog";
 import CenteredSubTabs, { type CenteredSubTab } from "../components/CenteredSubTabs";
 import VolumeChart, { type VolumeBucket } from "./VolumeChart";
 import RackProductStatusModal from "./RackProductStatusModal";
@@ -184,18 +185,15 @@ export default function TerminalPage() {
 
   useEffect(() => { loadRackProducts(); }, [loadRackProducts]);
 
-  // Product catalog, fetched once -- shared by Status (rack product list)
-  // and Volume (chart legend/labels).
-  const [productsById, setProductsById] = useState<Record<string, ProductLite>>({});
-  useEffect(() => {
-    (async () => {
-      const { data } = await supabase.from("products")
-        .select("product_id, product_name, display_name, description, button_code, hex_code, is_dyed, canonical_product_id");
-      const map: Record<string, ProductLite> = {};
-      for (const p of (data ?? []) as ProductLite[]) map[p.product_id] = p;
-      setProductsById(map);
-    })();
-  }, []);
+  // Product catalog -- shared by Status (rack product list) and Volume
+  // (chart legend/labels). Sourced from the shared cached catalog
+  // (lib/queries/useProductsCatalog.ts) instead of this page's own
+  // supabase.from("products") fetch on every mount of this tab.
+  const { data: productsCatalog = [] } = useProductsCatalog();
+  const productsById = useMemo<Record<string, ProductLite>>(
+    () => Object.fromEntries(productsCatalog.map((p) => [p.product_id, p as ProductLite])),
+    [productsCatalog]
+  );
 
   const activeRack = racks.find((r) => r.rack_id === activeRackId) ?? null;
   const rackSubTabs: CenteredSubTab[] = racks.map((r) => ({ id: r.rack_id, label: r.rack_name }));

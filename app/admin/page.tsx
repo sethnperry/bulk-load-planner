@@ -2,8 +2,10 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import { startSetupSession } from "@/lib/setupSession";
 import { supabase } from "@/lib/supabase/client";
+import { fetchProductsCatalogCached } from "@/lib/queries/useProductsCatalog";
 import ComboEditModal from "@/lib/ui/driver/ComboEditModal";
 import { TruckCard, TrailerCard, TruckModal, TrailerModal } from "@/lib/ui/driver/EquipmentDetails";
 import type { Truck, Trailer, OtherPermit, Compartment } from "@/lib/ui/driver/EquipmentDetails";
@@ -1113,6 +1115,7 @@ function TerminalModal({ terminal, companyId, allProducts, onClose, onDone }: {
 export default function AdminPage() {
   const [companyId,     setCompanyId]     = useState<string | null>(null);
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [currentUserId, setCurrentUserId] = useState<string>("");
   const [myRole,        setMyRole]        = useState<string>("");
   const [companyName,   setCompanyName]   = useState<string>("");
@@ -1262,14 +1265,20 @@ export default function AdminPage() {
       setCombos(((comboRows ?? []) as any[]).map(c => ({ ...c, in_use_by_name: c.claimed_by ? claimedNameMap[c.claimed_by] ?? null : null })) as unknown as Combo[]);
 
       // Always load the full product catalog (needed for TerminalModal picker)
-      const { data: prodRows } = await supabase
-        .from("products")
-        .select("product_id, product_name, button_code, hex_code, display_name, description, un_number, active, is_dyed")
-        .eq("active", true)
-        .order("product_name");
-      setAllProducts((prodRows ?? []) as Product[]);
+      // -- via the shared React Query cache (lib/queries/useProductsCatalog.ts)
+      // instead of its own supabase.from("products") call. loadAll() is a
+      // plain async function (not a component render path), so this goes
+      // through fetchQuery rather than the useProductsCatalog() hook --
+      // returns the cached catalog immediately if still fresh (loadAll()
+      // reruns after every truck/trailer/terminal save via onDone callbacks,
+      // so this now skips a full products refetch on most of those), or
+      // fetches once and caches it otherwise. Active-only filter applied
+      // client-side to preserve this file's exact prior behavior.
+      const allCatalogProducts = await fetchProductsCatalogCached(queryClient);
+      const prodRows = allCatalogProducts.filter((p) => p.active);
+      setAllProducts(prodRows as Product[]);
       const prodMap: Record<string, Product> = Object.fromEntries(
-        (prodRows ?? []).map((p: any) => [p.product_id, p as Product])
+        prodRows.map((p) => [p.product_id, p as unknown as Product])
       );
 
       // Terminals — no company gating, all active terminals are available.
@@ -1340,7 +1349,7 @@ export default function AdminPage() {
       })) as Terminal[]);
     } catch (e: any) { setErr(e?.message ?? "Load failed."); }
     finally { setLoading(false); }
-  }, []);
+  }, [queryClient]);
 
   useEffect(() => { loadAll(); }, [loadAll]);
 
