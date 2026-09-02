@@ -1581,9 +1581,8 @@ const lastProductInfoById = useMemo(() => {
     : recapValid ? "RELOAD"
     : "LOAD";
 
-  // Extracted so the exact same element/props can render in one of two
-  // spots (full-width top strip in portrait, or inside the compartments
-  // column in landscape) depending on isLandscape -- see the render below.
+  // Extracted to a const purely for readability -- rendered in exactly one
+  // spot, full-width, in every orientation (see the render below for why).
   const presetDialEl = (
     <PresetDial
       slots={planSlots.PLAN_SLOTS}
@@ -1669,16 +1668,19 @@ const lastProductInfoById = useMemo(() => {
         </div>
       )}
 
-      {/* Preset dial -- full-width, directly under the tab bar, same spot
-          in every orientation, "just like portrait mode" per explicit
-          follow-up. This is the third and (for now) final home for this
-          element within this session's landscape work -- it briefly
-          lived above the left column, then inside a landscape-only
-          right-hand column, before this reverted back to matching
-          portrait exactly. The shared header's own TabBar got a `thin`
-          variant instead (see CalculatorLayoutClient.tsx) as the actual
-          "reduce header height" lever this time, rather than moving or
-          shrinking the dial itself. */}
+      {/* Preset dial -- full-width, same spot in every orientation, "just
+          like portrait mode" per explicit follow-up. This is the third
+          and (for now) final home for this element within this session's
+          landscape work -- it briefly lived above the left column, then
+          inside a landscape-only right-hand column, before reverting back
+          to matching portrait exactly. The actual "reduce header height"
+          lever lives one level up, in the shared Header
+          (CalculatorLayoutClient.tsx) -- the tab bar itself has now moved
+          INTO the header's own icon row in landscape (an `inline` variant
+          of TabBar, sharing space with the hamburger/bell/gear) rather
+          than rendering as its own row above this page's content at all,
+          so this dial now sits directly under the header with nothing
+          else in between. */}
       <div>
         {presetDialEl}
       </div>

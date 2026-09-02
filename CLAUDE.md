@@ -7438,6 +7438,126 @@ fits (`scrollHeight === clientHeight`, 277). Zero truncated text at
 at 375x812, pixel-unaffected. `tsc --noEmit` and `next build` clean
 throughout. Not independently verified on a real device this pass.
 
+### Landscape refinement, round three: safe-area extension, tabs merged back inline, header shortened further (2026-09-02, same day)
+
+Real device screenshot with hand-drawn annotations, one message, three
+asks: eliminate the black bars down both screen edges (squiggly lines
+pointed straight at real Android soft-nav-bar buttons — recent-apps ⫴,
+home ○, back ‹ — visible on the right edge in landscape, confirming the
+device's on-screen nav strip was the actual cause); take the rest of the
+space out above the Equipment button; move the tab bar back up between
+the hamburger and bell/gear to shorten the header further, with the
+TerminalOutageBanner still correctly expanding the header downward only
+when there's an active outage.
+
+**Black bars — `app/layout.tsx`**: `viewport.viewportFit` added,
+`"cover"`. Without this, every `env(safe-area-inset-*)` used anywhere in
+this app (Header's own top-inset padding already relied on it) silently
+resolves to 0, and — the actual mechanism behind the black bars — the
+page's layout viewport stays narrower than the physical screen on a
+device with an on-screen edge (here, a landscape phone's soft-nav-bar
+strip). Without `"cover"`, the browser doesn't extend the page's own
+background into that strip at all; it paints its own default (black)
+there instead. `"cover"` extends the layout viewport (and this app's own
+backgrounds) all the way to the physical screen edges — the two files
+below then add matching `env(safe-area-inset-left/right)` PADDING (not
+applied globally, since most routes — the marketing site, `/admin` — have
+no reason to care about a landscape phone's nav-bar strip) so actual
+CONTENT stays clear of the unsafe zone while the background color
+underneath now reaches the true edge.
+
+Two places needed the matching padding, both in
+`app/planner/CalculatorLayoutClient.tsx`: **`Header`**'s icon row
+(`padding: "0 calc(env(safe-area-inset-right,0px)+16px) 0
+calc(env(safe-area-inset-left,0px)+16px)"`, alongside its pre-existing top
+inset), and **`ShellChrome`**'s scrollable content wrapper (same pattern,
+left/right only — bottom is unrelated to this pass). Neither div's own
+background shrinks from this padding — only descendants get pushed in —
+so the gradient/dark background now paints the full physical width
+regardless of how much of it is a real unsafe strip on a given device,
+while buttons/cards/text stay clear of it.
+
+**Honest limitation, flagged rather than silently assumed fixed**: this
+session's Browser pane has no real device nav bar to simulate, so
+`env(safe-area-inset-*)` evaluates to 0 in every check this pass could
+run — there's nothing to visually confirm the black bars are gone from
+here. What WAS verified: the CSS resolves without error, the layout
+degrades gracefully to the pre-existing (zero-inset) behavior when there
+IS no inset, and the mechanism itself (`viewportFit:"cover"` +
+compensating padding) is the standard, documented fix for exactly this
+class of problem. Needs the user's own real-device confirmation before
+considering this closed — same category of gap this project has always
+had for anything requiring genuine device hardware (real email delivery,
+the manifest orientation change earlier this same day).
+
+**Tabs merged back inline — `TabBar`'s `thin` prop renamed/reworked to
+`inline`.** This is the second time this exact idea has been built: an
+earlier pass in this same day's work built tabs sharing the icon row,
+then a follow-up explicitly reverted that back to a standalone (if
+tightened) full-width row, reasoning a full-width row centers correctly
+under whichever tab is active where a row split unevenly between the
+hamburger and bell/gear groups can't. This follow-up explicitly
+re-prioritized header height over that centering trade — "shift the tabs
+up in between the nav and bell/sprocket to shorten the header more" — so
+it's back, a real reversal made twice in a row now, not an oversight
+either time. `inline` mode: 84px tab slots (was 120), `marginTop:0` (it's
+a flex child of the icon row now, not a block stacked below it), tighter
+gap/padding/font (4px gap, `"4px 2px"` padding, 13px/12px active/inactive
+font vs. the full row's 8px/`"14px 2px"`/16px/14px), and the underline row
+skipped entirely (`{!inline && (...)}`) — the active tab is still legible
+from its own bolder/brighter text alone, and the underline's own height
+was exactly the kind of space this mode exists to reclaim. `Header`
+renders `{isLandscape && <div style={{flex:1,minWidth:0}}><TabBar inline
+/></div>}` between `NavMenu` and the bell/gear group, and
+`{!isLandscape && <TabBar compact={!!outageBanner.tickerMessage} />}` as
+the old full standalone row, unchanged, for portrait. `centerTab`/
+`onScroll`'s own centering logic needed no changes — both already read
+real element rects rather than hardcoding a tab width, so they adapt to
+either slot size automatically.
+
+**Outage banner still correctly expands/collapses.** `TerminalOutageBanner`
+renders in exactly the same spot in the JSX either way — right after the
+icon row, before the (now-conditional) full-row `TabBar` — so in landscape
+it's the only thing that can add height below the single icon+tabs row:
+zero height when there's nothing active (confirmed live — header measured
+exactly 48px total end-to-end, icon row + inline tabs, no outage banner
+present), and it would expand the header downward exactly as before once
+a report exists, same as it always did in portrait. No changes needed to
+`TerminalOutageBanner`/`useActiveOutageBanner` themselves for this pass.
+
+**"Space above the buttons"**: covered almost entirely as a side effect of
+the header shortening above — removing the tab bar's own row from
+landscape's vertical stack (previously always present as its own block
+above the page's content, even after the earlier "thin" tightening pass)
+is the real space this ask was pointing at. Left two small stale-comment
+cleanups in `app/planner/page.tsx` (the `presetDialEl` extraction comment
+and the render-site comment both still described an earlier version of
+this same day's design — updated to describe the current inline-tabs
+shape accurately) but made no further layout changes there; the
+`padding:16→6` fix from the immediately preceding pass already handles the
+page's own top/side margins.
+
+**Live-verified** via the demo login route at a real Android-landscape
+dimension (844×390), after a full dev-server restart (fresh, not
+hot-reloaded — this project's own documented HMR-staleness lesson):
+header measures exactly 48px tall end-to-end (icon row + inline tabs, no
+outage active); the "Planner" tab label's own rect (`y:18-42`) sits in the
+identical vertical band as the hamburger (`y:12-48`) and bell/gear
+(`y:19-41`/`20.5-39.5`) — genuinely inline, not a second row underneath;
+tapping "Insights" from the inline bar navigates to `/planner/terminal`
+and renders correctly with "Insights" the highlighted inline tab there
+too; the two-column Planner layout (Equipment/Location/Temp/RELOAD left,
+compartments right) renders with no horizontal overflow
+(`scrollWidth === clientWidth === 844`) and no scaling
+(`visualViewport.width === innerWidth === 844`). Portrait re-checked at
+375x812 and confirmed byte-for-byte the original stacked look — full
+icon row, separate full-width tab row with its underline restored, no
+trace of the landscape-only changes. Console clean beyond this project's
+own already-documented HMR-websocket noise (dev-server hot-reload IDs
+failing to reconnect — not a real regression, confirmed by pattern-
+matching for a real error string and finding none). `npx tsc --noEmit`
+and `npx next build` both clean throughout every edit.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.
