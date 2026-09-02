@@ -1609,6 +1609,40 @@ const lastProductInfoById = useMemo(() => {
     />
   );
 
+  // Extracted alongside presetDialEl for the same reason -- landscape
+  // renders both inside the compartments (right) column instead of
+  // full-width above the whole two-column row, per explicit follow-up:
+  // "the plan slot row extended all the way into the left column. it
+  // should only stretch across the right column. the save plan button
+  // should be on the right as well." One definition, two conditional
+  // render sites below (portrait vs. landscape), not two copies of the
+  // JSX itself.
+  const currentOverrides = overridesSnapshot(compPlan, cgSlider);
+  const isDirty = currentOverrides !== baselineOverrides;
+  const activeLetter = String.fromCharCode(64 + activeSlotLetter);
+  const actionRowEl = (!isDirty && selectedComp == null) ? null : (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10, minHeight: 18 }}>
+      <div>
+        {isDirty && (
+          <button type="button"
+            onClick={() => { planSlots.saveToSlot(activeSlotLetter); setBaselineOverrides(currentOverrides); }}
+            style={{ background: "none", border: "none", padding: 0, color: "rgba(255,255,255,0.75)", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+            Save plan {activeLetter}
+          </button>
+        )}
+      </div>
+      <div>
+        {selectedComp != null && (
+          <button type="button"
+            onClick={() => { setCompModalComp(selectedComp); setCompModalOpen(true); }}
+            style={{ background: "none", border: "none", padding: 0, color: "rgba(255,255,255,0.75)", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+            Edit Comp {selectedComp} Product
+          </button>
+        )}
+      </div>
+    </div>
+  );
+
   // ── Render ─────────────────────────────────────────────────────────────────
   // Landscape: trim the page's own side padding (16px -> 6px each side) so
   // the two-column row below reclaims that width instead of leaving it as
@@ -1669,22 +1703,26 @@ const lastProductInfoById = useMemo(() => {
         </div>
       )}
 
-      {/* Preset dial -- full-width, same spot in every orientation, "just
-          like portrait mode" per explicit follow-up. This is the third
-          and (for now) final home for this element within this session's
-          landscape work -- it briefly lived above the left column, then
-          inside a landscape-only right-hand column, before reverting back
-          to matching portrait exactly. The actual "reduce header height"
-          lever lives one level up, in the shared Header
-          (CalculatorLayoutClient.tsx) -- the tab bar itself has now moved
-          INTO the header's own icon row in landscape (an `inline` variant
-          of TabBar, sharing space with the hamburger/bell/gear) rather
-          than rendering as its own row above this page's content at all,
-          so this dial now sits directly under the header with nothing
-          else in between. */}
-      <div>
-        {presetDialEl}
-      </div>
+      {/* Preset dial -- portrait: full-width, same spot as always, directly
+          under the header. Landscape: NOT rendered here at all -- per
+          explicit follow-up ("the plan slot row extended all the way into
+          the left column. it should only stretch across the right
+          column"), it moves inside the compartments (right) column below
+          instead, so it no longer pushes the left column's buttons down.
+          This is the fourth home for this element within this session's
+          landscape work -- previously reverted back to "full-width, same
+          spot in every orientation" reasoning "just like portrait mode,"
+          but that full-width placement turned out to be exactly what was
+          pushing the left column's content down with nothing to do with
+          plan slots at all; scoping it to the column it actually belongs
+          to (compartments) is the real fix, not a further shrink of the
+          dial itself (already tightened as far as it reasonably goes in
+          the previous round). */}
+      {!isLandscape && (
+        <div>
+          {presetDialEl}
+        </div>
+      )}
 
       <PresetActionSheet
         open={presetSheetSlot != null}
@@ -1716,35 +1754,10 @@ const lastProductInfoById = useMemo(() => {
       {/* Action row -- left: "Save plan {letter}" once a temporary cap
           override exists anywhere (a concrete "diverges from saved" signal);
           right: "Edit Comp N Product" once a compartment bar has been
-          tapped/selected. Both above the compartment strip. */}
-      {(() => {
-        const currentOverrides = overridesSnapshot(compPlan, cgSlider);
-        const isDirty = currentOverrides !== baselineOverrides;
-        const activeLetter = String.fromCharCode(64 + activeSlotLetter);
-        if (!isDirty && selectedComp == null) return null;
-        return (
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10, minHeight: 18 }}>
-            <div>
-              {isDirty && (
-                <button type="button"
-                  onClick={() => { planSlots.saveToSlot(activeSlotLetter); setBaselineOverrides(currentOverrides); }}
-                  style={{ background: "none", border: "none", padding: 0, color: "rgba(255,255,255,0.75)", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
-                  Save plan {activeLetter}
-                </button>
-              )}
-            </div>
-            <div>
-              {selectedComp != null && (
-                <button type="button"
-                  onClick={() => { setCompModalComp(selectedComp); setCompModalOpen(true); }}
-                  style={{ background: "none", border: "none", padding: 0, color: "rgba(255,255,255,0.75)", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
-                  Edit Comp {selectedComp} Product
-                </button>
-              )}
-            </div>
-          </div>
-        );
-      })()}
+          tapped/selected. Portrait only here -- see actionRowEl's own
+          definition above for why landscape renders it inside the
+          compartments column instead. */}
+      {!isLandscape && actionRowEl}
 
       {/* Landscape: buttons+cards (Equipment/Location/Temp/Load/recap/
           points), all of it, stay together on the LEFT; compartments
@@ -1833,6 +1846,19 @@ const lastProductInfoById = useMemo(() => {
         display: "flex", flexDirection: "row", gap: REF_GAP,
       } : { display: "flex", flexDirection: "column" }}>
       <div className={isLandscape ? "pt-tabscroll" : undefined} style={isLandscape ? { width: REF_COMPARTMENTS_W, flexShrink: 0, order: 2, maxHeight: columnMaxHeight, overflowY: "auto" } : { width: "100%" }}>
+      {/* Landscape only -- see presetDialEl/actionRowEl's own definitions
+          above for why these live here now instead of full-width above
+          the whole two-column row: neither one has anything to do with
+          the left (buttons/cards) column, so scoping them to the column
+          they actually belong to is what lets the left column's content
+          start right under the header instead of being pushed down by a
+          dial/action-row that was never really "its" content. */}
+      {isLandscape && (
+        <>
+          {presetDialEl}
+          {actionRowEl}
+        </>
+      )}
       <PlannerControls
         styles={styles}
         selectedTrailerId={selectedTrailerId}

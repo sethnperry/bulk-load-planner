@@ -7694,6 +7694,44 @@ manifest or CSS declares). Flagged to the user as the next thing to check
 on-device rather than continuing to iterate blind in code that's already
 confirmed correct.
 
+### Preset dial + Save Plan action row rescoped to the right column only (2026-09-02, same day)
+
+User correctly diagnosed the real remaining cause of "space above the
+buttons" after all of the previous round's trimming -- not the dial's
+own size, but its PLACEMENT: "you have the plan slot row extended all
+the way into the left column. it should only stretch across the right
+column. the save plan button should be on the right as well. that should
+let the buttons shift up in the left column." Both `presetDialEl` and the
+"Save plan {letter} / Edit Comp N Product" action row had been rendering
+full-width, above the ENTIRE two-column row, ever since the very first
+landscape pass this session -- neither one has anything to do with the
+left (Equipment/Location/Temp/Load) column at all, so their full-width
+placement was what was pushing that column's content down, independent
+of how small the dial itself got.
+
+**Fixed by relocating, not further shrinking.** Both were already
+extracted as top-level consts (`presetDialEl`; the action row's own
+IIFE was newly extracted the same way, `actionRowEl`, so there's one
+definition, not two copies of the JSX). Portrait renders them exactly
+where they always have -- full-width, above the row, unchanged. Landscape
+now renders neither one there at all; both render as the first children
+INSIDE the compartments (right) column's own div, before
+`<PlannerControls>` -- so they only ever span `REF_COMPARTMENTS_W`, and
+the left column (`mainInfoStack`) starts flush at the top of the row,
+with nothing above it pushing it down.
+
+**Live-verified**: the left column's own header-to-Equipment-card gap
+dropped from 21px to **6px** at 844×390 (down from 44.7px at the start
+of today's landscape-refinement work -- an 87% reduction end to end).
+Confirmed the dial's active letter now renders well within the right
+half of the viewport (x≈556 of 844), not spanning full width. Tapped a
+compartment to trigger the "Edit Comp N Product" action-row button and
+confirmed it renders correctly right-aligned within the compartments
+column, not full-width. Portrait re-checked at 375×812 -- pixel-
+identical to before, dial and action row both still render full-width
+in their original spot. `npx tsc --noEmit` and `npx next build` both
+clean.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.
