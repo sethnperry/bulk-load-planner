@@ -1500,6 +1500,34 @@ const lastProductInfoById = useMemo(() => {
     : recapValid ? "RELOAD"
     : "LOAD";
 
+  // Extracted so the exact same element/props can render in one of two
+  // spots (full-width top strip in portrait, or inside the compartments
+  // column in landscape) depending on isLandscape -- see the render below.
+  const presetDialEl = (
+    <PresetDial
+      slots={planSlots.PLAN_SLOTS}
+      slotHas={planSlots.slotHas}
+      // Also gated on presetsReady -- until the initial server sync for
+      // this equipment combo has actually completed, a slot that reads
+      // "empty" might just be unsynced, not really empty, and PresetDial
+      // treats a tap on an empty slot as an implicit save. Interacting
+      // during that window silently overwrote real presets with
+      // whatever was on-screen at the time -- see usePlanSlots.ts.
+      disabled={!location.selectedTerminalId || !planSlots.presetsReady}
+      disabledReason={!location.selectedTerminalId ? "Select a terminal first" : "Syncing presets…"}
+      onLoad={(n) => {
+        planSlots.loadFromSlot(n);
+        setLastLoadedSlot(n);
+        setCaptureBaselineNext(true);
+        setCheckAvailabilityNext(true);
+      }}
+      onOpenActions={(n) => setPresetSheetSlot(n)}
+      onSave={(n) => { planSlots.saveToSlot(n); setBaselineOverrides(overridesSnapshot(compPlan, cgSlider)); }}
+      onActiveChange={setActiveSlotLetter}
+      syncTo={presetDialSyncTo}
+    />
+  );
+
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div style={styles.page}>
@@ -1530,31 +1558,19 @@ const lastProductInfoById = useMemo(() => {
       )}
 
       {/* Preset dial -- sits directly under the Planner/Cards/Vault tab bar,
-          per the design handoff (Preset dial is listed first in the
-          Planner tab's content, above the compartment strip). */}
+          same spot in both orientations. Deliberately full-width here (not
+          nested into the narrower landscape compartments column below) --
+          this row spans the same horizontal extent as the tab bar above
+          it, so PresetDial's own "center the active slot within this
+          scroll container" logic lands the active letter under whichever
+          tab is horizontally centered in the header, i.e. Planner, in
+          both orientations, with no extra alignment math needed. Nesting
+          it into the narrower right-hand compartments column (an earlier
+          version of this) put its own center under Cards instead of
+          Planner, since that column is offset right, not centered on the
+          page -- reverted. */}
       <div>
-        <PresetDial
-          slots={planSlots.PLAN_SLOTS}
-          slotHas={planSlots.slotHas}
-          // Also gated on presetsReady -- until the initial server sync for
-          // this equipment combo has actually completed, a slot that reads
-          // "empty" might just be unsynced, not really empty, and PresetDial
-          // treats a tap on an empty slot as an implicit save. Interacting
-          // during that window silently overwrote real presets with
-          // whatever was on-screen at the time -- see usePlanSlots.ts.
-          disabled={!location.selectedTerminalId || !planSlots.presetsReady}
-          disabledReason={!location.selectedTerminalId ? "Select a terminal first" : "Syncing presets…"}
-          onLoad={(n) => {
-            planSlots.loadFromSlot(n);
-            setLastLoadedSlot(n);
-            setCaptureBaselineNext(true);
-            setCheckAvailabilityNext(true);
-          }}
-          onOpenActions={(n) => setPresetSheetSlot(n)}
-          onSave={(n) => { planSlots.saveToSlot(n); setBaselineOverrides(overridesSnapshot(compPlan, cgSlider)); }}
-          onActiveChange={setActiveSlotLetter}
-          syncTo={presetDialSyncTo}
-        />
+        {presetDialEl}
       </div>
 
       <PresetActionSheet
@@ -1622,9 +1638,19 @@ const lastProductInfoById = useMemo(() => {
           this row collapses to flexDirection:"column" with gap:0, which
           reproduces today's plain sequential stack exactly (the children
           keep their own existing marginTop values for spacing, same as
-          before this wrapper existed -- no doubled gap+margin). */}
-      <div style={{ display: "flex", flexDirection: isLandscape ? "row" : "column", gap: isLandscape ? 16 : 0, alignItems: "flex-start" }}>
-      <div style={isLandscape ? { flex: "1 1 55%", minWidth: 0 } : { width: "100%" }}>
+          before this wrapper existed -- no doubled gap+margin).
+          alignItems:"stretch" in landscape (vs. the portrait-only
+          flex-start) makes both columns the same height, matching
+          whichever is naturally taller -- so the compartments column's
+          own bottom edge lines up with the info-card stack's instead of
+          stopping short and leaving empty space below it. `order` swaps
+          which one is visually on which side without touching where each
+          block actually sits in the JSX/DOM -- compartments go right,
+          info-cards go left. The preset dial (above, full-width) is
+          unaffected by this swap either way. */}
+      <div style={{ display: "flex", flexDirection: isLandscape ? "row" : "column", gap: isLandscape ? 16 : 0, alignItems: isLandscape ? "stretch" : "flex-start" }}>
+      <div style={isLandscape ? { flex: "1 1 62%", minWidth: 0, order: 2, display: "flex", flexDirection: "column" } : { width: "100%" }}>
+      <div style={isLandscape ? { flex: 1, display: "flex", flexDirection: "column" } : undefined}>
       <PlannerControls
         styles={styles}
         selectedTrailerId={selectedTrailerId}
@@ -1645,6 +1671,7 @@ const lastProductInfoById = useMemo(() => {
         selectedTerminalId={location.selectedTerminalId ?? ""}
         isLandscape={isLandscape}
       />
+      </div>
 
       <CompartmentModal
         open={compModalOpen}
@@ -1788,7 +1815,7 @@ const lastProductInfoById = useMemo(() => {
         const hasEquipment = Boolean(equipment.selectedCombo);
 
         return (
-          <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 10, ...(isLandscape ? { flex: "1 1 45%", minWidth: 0 } : {}) }}>
+          <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 10, ...(isLandscape ? { flex: "1 1 38%", minWidth: 0, order: 1 } : {}) }}>
 
             {/* Equipment card — two-up Truck / Trailer */}
             {(() => {

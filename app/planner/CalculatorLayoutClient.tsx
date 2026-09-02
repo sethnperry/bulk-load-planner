@@ -174,9 +174,21 @@ function TabBar({ compact }: { compact?: boolean }) {
           );
         })}
       </div>
-      <div style={{ display: "flex" }}>
+      {/* The active segment is a FIXED 120px -- matching each tab's own
+          `flex: "0 0 120px"` slot width above -- instead of a flex:1 third
+          of the whole bar. Scroll-snap-center guarantees the active tab is
+          always horizontally centered in this scroll container, so a
+          fixed-width bar centered the same way lands exactly under it,
+          whatever tab that happens to be, with no per-tab position
+          tracking needed. Previously flex:1 made this segment ~1/3 of the
+          *entire* tab row regardless of which tab was active or how many
+          tabs there were -- always centered on the row as a whole, never
+          actually scoped to one tab. Nudged up slightly (negative
+          marginTop into the label's own bottom padding) and thickened so
+          it reads as clearly attached to the tab text above it. */}
+      <div style={{ display: "flex", alignItems: "center", marginTop: -4 }}>
         <div style={{ flex: 1, height: 1, background: themeUnderlineTrack(darkMode) }} />
-        <div style={{ flex: 1, height: 2, background: themeUnderlineActive(darkMode) }} />
+        <div style={{ flex: "0 0 120px", height: 3, borderRadius: 2, background: themeUnderlineActive(darkMode) }} />
         <div style={{ flex: 1, height: 1, background: themeUnderlineTrack(darkMode) }} />
       </div>
     </div>

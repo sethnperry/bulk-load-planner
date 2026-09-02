@@ -89,7 +89,21 @@ export default function PresetDial({
     const idx = slots.indexOf(n);
     const el = container.children[idx] as HTMLElement | undefined;
     if (!el) return;
-    const target = el.offsetLeft + el.offsetWidth / 2 - container.clientWidth / 2;
+    // Bounding-rect deltas, not el.offsetLeft -- offsetLeft is relative to
+    // the nearest POSITIONED ancestor (any ancestor with position:relative/
+    // absolute/fixed), which is almost never this scroll container itself
+    // (it has no explicit position set, just overflow-x:auto), so it climbs
+    // to whatever positioned ancestor happens to sit further up the page's
+    // DOM tree -- producing a scroll target with no reliable relationship
+    // to this container's own coordinate space. Confirmed live: the active
+    // slot was landing scrolled fully off-screen while an unrelated middle
+    // slot sat centered instead. getBoundingClientRect() is always
+    // viewport-relative regardless of positioning context, matching the
+    // same (already-correct) approach onScroll() below already uses to
+    // figure out which slot is centered -- this makes the two agree.
+    const containerRect = container.getBoundingClientRect();
+    const elRect = el.getBoundingClientRect();
+    const target = container.scrollLeft + (elRect.left - containerRect.left) + elRect.width / 2 - containerRect.width / 2;
     suppressRef.current = true;
     container.scrollTo({ left: target, behavior: smooth ? "smooth" : "auto" });
     setTimeout(() => { suppressRef.current = false; }, smooth ? 400 : 50);

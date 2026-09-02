@@ -6667,6 +6667,93 @@ category as this project's other documented dev-server staleness
 quirks -- not a real regression, `tsc --noEmit` and `next build` were
 clean throughout and after.
 
+### Landscape layout refinement, per marked-up screenshot (2026-09-02, same day)
+
+User sent a screenshot of the freshly-shipped landscape layout with red
+hand-drawn markup and four concrete asks: narrow the active-tab underline
+(and make it more visible), shift the preset dial so the active letter
+sits under the Planner tab, move compartments to the right (info-cards
+left) with the compartment section's height matching/filling the info-card
+column's height, and narrow the info-card column so compartments get more
+of the room -- "everything can scale up dynamically to fit the screen."
+
+**Tab underline** (`CalculatorLayoutClient.tsx`'s `TabBar`) -- was three
+`flex:1` segments (dim/bright/dim) spanning the full tab width, only the
+middle third actually lit. Replaced with a fixed `flex:"0 0 120px"` bright
+segment (matching each tab's own 120px width) between two dim `flex:1`
+fillers, `height` 2px->3px, `marginTop:-4` to nudge it up nearer the tab
+label. Since every tab is scroll-snap-centered to the same horizontal
+center `centerTab()` always targets, a fixed-width bar centered in the row
+below it lands under whichever tab is active without any per-tab position
+tracking.
+
+**Compartments moved right / info-cards narrowed** (`page.tsx`,
+`PlannerControls.tsx`) -- the landscape row's split changed from ~55/45 to
+`flex:"1 1 62%"` (compartments, `order:2`) / `flex:"1 1 38%"` (info-cards,
+`order:1`) -- `order` alone flips which side each renders on without
+touching JSX/DOM position, unchanged from the original pass. Compartment
+bars now genuinely fill the taller column instead of stopping at a fixed
+clamp: a new `fillColumn` style (`display:flex, flexDirection:column,
+height:"100%"`) threads down from `PlannerControls`'s `<section>` through
+the bar-holder wrapper and the bar-columns row (`alignItems: isLandscape ?
+"stretch" : "flex-end"`), and the bar `<div>` itself switches from a fixed
+`height: barH` to `flex:1, minHeight:0` in landscape (portrait keeps the
+exact prior fixed-height formula, `barH` is used nowhere else in the
+file). `minHeight:0` sidesteps flex's own `min-height:auto` default, the
+same class of gotcha this file already fixed once for grid-item
+`min-width` (Product List row, 2026-08-06). Live-verified: both columns
+measure equal height via `alignItems:stretch` (486px vs 480px, the small
+diff being padding), and bars grow to 317px -- filling the column instead
+of the old fixed clamp -- with product-code/CG-slider content correctly
+occupying the remainder below the bars, not literal unused dead space.
+
+**Preset dial "under Planner tab" -- a real, pre-existing bug found and
+fixed, not just a positioning tweak.** The original pass's plan was to
+relocate the dial into the (now narrower, right-shifted) compartments
+column, reasoning its own scroll-snap centering would then center within
+that column instead of the full page. Live-testing that reasoning found
+two problems: (1) even correctly centered *within* the compartments
+column, that column's own center (real x=576) doesn't align with the
+Planner tab's center (x=422) -- the column is offset right, not
+viewport-centered, so nesting the dial there was never going to land
+under Planner regardless of the internal math; (2) `PresetDial.tsx`'s
+`centerSlot()` was actually computing the scroll target from
+`el.offsetLeft`, which is relative to the nearest *positioned* ancestor
+(any `position: relative/absolute/fixed` element up the tree) -- not the
+scroll container itself, which has no explicit `position` set (only
+`overflow-x:auto`). Confirmed live in **both** orientations before
+touching any layout code: the active slot (A) was scrolled fully
+off-screen (portrait: `rect.x = -24`, literally negative/invisible) while
+an unrelated middle slot (near C/D) sat centered instead -- a real,
+already-broken bug, not something this landscape pass introduced.
+
+Fixed `centerSlot()` to use `getBoundingClientRect()` deltas
+(`container.scrollLeft + (elRect.left - containerRect.left) + ...`)
+instead of `offsetLeft` -- viewport-relative regardless of positioning
+context, matching the same (already-correct) approach `onScroll()` in the
+same file already used to figure out which slot is centered after a
+manual swipe. With that fixed, reverted the dial back to its original
+single full-width location (above the two-column row, same spot in both
+orientations) instead of nesting it in the narrower landscape column --
+since that row spans the same width as the tab bar itself, centering the
+active slot within it now lands under whichever tab is horizontally
+centered in the header (Planner) automatically, in both orientations,
+with no extra alignment math needed. The narrower-column relocation
+(`isLandscape && <div>{presetDialEl}</div>` inside the compartments
+column) was removed entirely -- one `presetDialEl` render site now, not
+two.
+
+**Live-verified** via the demo login route at 844x390: active letter (A)
+now measures center-x 422.0, exactly matching the Planner tab's own
+measured center-x 422.0, in landscape. Re-checked portrait (375x812) as a
+regression check and found it *improved*, not just unaffected -- the same
+underlying `offsetLeft` bug had A scrolled off-screen there too before
+this fix; portrait now also correctly centers A under Planner. Screenshot-
+confirmed the full visual: underline directly under "Planner", dial
+letter A directly below it with its active-dot, compartments on the right
+(wider), info-cards on the left (narrower), bars visibly taller/filling
+the column. `tsc --noEmit` and `next build` both clean throughout.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.

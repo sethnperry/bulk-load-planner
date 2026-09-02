@@ -24,6 +24,13 @@ export default function PlannerControls(props: any) {
     compPlan, setCompPlan, terminalProducts, selectedComp, onSelectComp,
     selectedTerminalId, isLandscape,
   } = props;
+  // In landscape, each element in this chain (section -> bar-holder wrapper
+  // -> the flex row of bar-columns -> each column -> the bar itself) grows
+  // to fill whatever height page.tsx's flex:1 wrapper gives this component
+  // -- matching the info-card column's own (taller) natural height instead
+  // of stopping at a fixed clamp and leaving empty space below. Every
+  // addition here is landscape-only; portrait keeps its exact prior values.
+  const fillColumn = isLandscape ? { display: "flex" as const, flexDirection: "column" as const, height: "100%" } : {};
 
   const shell = useCalculatorShell();
   const handleFill = themeFill(shell.theme.darkMode, shell.theme.accentColor);
@@ -43,12 +50,12 @@ export default function PlannerControls(props: any) {
   }
 
   return (
-    <section style={{ border: "none", background: "transparent", padding: 0 }}>
+    <section style={{ border: "none", background: "transparent", padding: 0, ...fillColumn }}>
       {!selectedTrailerId && <div style={styles.help}>Select equipment to load compartments.</div>}
       {compError && <div style={styles.error}>Error loading compartments: {compError}</div>}
 
       {selectedTrailerId && !compLoading && !compError && compartments.length > 0 && (
-        <div style={{ marginTop: 6, marginBottom: 2, position: "relative" as const, opacity: selectedTerminalId ? 1 : 0.45, transition: "opacity 200ms" }}>
+        <div style={{ marginTop: 6, marginBottom: 2, position: "relative" as const, opacity: selectedTerminalId ? 1 : 0.45, transition: "opacity 200ms", ...(isLandscape ? { flex: 1 } : {}), ...fillColumn }}>
           {!selectedTerminalId && (
             <div style={{ position: "absolute" as const, inset: 0, zIndex: 2, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none" as const }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.50)", background: "rgba(0,0,0,0.55)", borderRadius: 8, padding: "4px 10px" }}>
@@ -62,7 +69,8 @@ export default function PlannerControls(props: any) {
             gap: 12,
             flexWrap: "nowrap",
             width: "100%",
-            alignItems: "flex-end",
+            alignItems: isLandscape ? "stretch" : "flex-end",
+            ...(isLandscape ? { flex: 1 } : {}),
           }}>
             {(() => {
               const n = compartments.length;
@@ -193,9 +201,22 @@ export default function PlannerControls(props: any) {
 
                     {/* Bar — no border, square corners, flat bottom. Selection
                         state (surfaces "Edit Comp N Product" in the action row
-                        above) is tracked but no longer drawn as a ring here. */}
+                        above) is tracked but no longer drawn as a ring here.
+                        Landscape: flex:1 instead of a fixed height -- the
+                        column above it is now stretched (see the parent
+                        row's alignItems) to the same height as the info-card
+                        stack, so the bar grows to fill whatever's left after
+                        the label row instead of stopping at a fixed clamp.
+                        minHeight:0 sidesteps flex's own min-height:auto
+                        default, which would otherwise refuse to let this
+                        shrink/grow correctly -- same class of gotcha this
+                        codebase has already hit and fixed once for
+                        min-width on a grid item (see the Product List
+                        row's own history). Portrait keeps the exact prior
+                        fixed-height formula, untouched. */}
                     <div style={{
-                      width: "100%", height: barH,
+                      width: "100%",
+                      ...(isLandscape ? { flex: 1, minHeight: 0 } : { height: barH }),
                       borderRadius: 0,
                       background: "rgba(255,255,255,0.06)",
                       position: "relative", overflow: "visible",
