@@ -6357,6 +6357,36 @@ Confirmed clean (zero console errors beyond the one pre-existing expected
 
 `tsc --noEmit` and `next build` both clean throughout every phase.
 
+### Card numbers no longer forced into credit-card grouping (2026-09-02)
+
+Per explicit feedback: terminal card numbers were rendering forced into
+groups of 4 ("4111 2222 3333 4444") regardless of how the driver actually
+typed them in. Root cause was narrower than it looked -- confirmed via a
+repo-wide search that `user_terminal_cards.card_number` was **never**
+stored or input-formatted with forced spacing at all; the raw string the
+driver types is exactly what's saved (`Cards tab`'s back-of-card `<input>`
+and the "Add Terminal Card" sheet both pipe `onChange` straight into
+state, no mask). The grouping only ever came from one function,
+`formatCardNumber()` in `cardTheme.ts`, called from exactly one place --
+the Cards tab's front-of-card display (`app/planner/cards/page.tsx`).
+`MyTerminalsModal.tsx` already displayed the raw stored value directly,
+so the app was already inconsistent with itself (grid view forced-
+grouped, terminal-picker view didn't).
+
+Fixed by removing the one call site (render `draft.cardNumber` directly)
+and deleting the now-dead `formatCardNumber()` function entirely --
+matches this project's own "duplicating/half-fixing this is how the bug
+creeps back in" precedent for exactly this kind of half-applied
+formatting. Every card number in the app now reads exactly as the driver
+entered it, everywhere, no exceptions.
+
+**Live-verified**: a real Chevron card stored as `4111222233334444` (no
+spaces) now renders identically on both the Cards tab grid and its own
+back-of-card edit view -- previously the grid alone forced it to
+"4111 2222 3333 4444". No console errors beyond the one pre-existing
+expected `company_subscriptions` 404. `tsc --noEmit` and `next build`
+both clean.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.

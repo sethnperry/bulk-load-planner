@@ -24,7 +24,7 @@ import SourcingModal from "../modals/SourcingModal";
 import { FullscreenModal } from "@/lib/ui/FullscreenModal";
 import { CustomSelect } from "@/lib/ui/CustomSelect";
 import {
-  formatCardNumber, cardStateFor, matchesFilter, FILTERS, DARK_EXP_COLOR,
+  cardStateFor, matchesFilter, FILTERS, DARK_EXP_COLOR,
   fieldLabel, fieldInput, btnPrimary, btnSecondary, btnDanger,
   CARD_BG, CARD_BORDER, CARD_BORDER_SELECTED, CARD_SHADOW,
   type CardState, type FilterKey,
@@ -81,7 +81,7 @@ function TerminalCard({
       </div>
       <div style={{ marginTop: 10, display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 8 }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: "rgba(255,255,255,0.85)", letterSpacing: 1, fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {draft.cardNumber ? formatCardNumber(draft.cardNumber) : "No card on file"}
+          {draft.cardNumber ? draft.cardNumber : "No card on file"}
         </div>
         <div style={{ textAlign: "right", flexShrink: 0 }}>
           <div style={{ fontSize: 9, fontWeight: 700, color: "rgba(255,255,255,0.4)", textTransform: "uppercase", letterSpacing: 0.4 }}>Exp</div>

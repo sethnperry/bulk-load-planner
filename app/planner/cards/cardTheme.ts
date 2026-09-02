@@ -28,12 +28,6 @@ export const CARD_BORDER = "1px solid rgba(255,255,255,0.10)";
 export const CARD_BORDER_SELECTED = "1px solid rgba(255,255,255,0.30)";
 export const CARD_SHADOW = "0 6px 14px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.06)";
 
-export function formatCardNumber(num: string): string {
-  const digits = num.replace(/\s+/g, "");
-  if (!digits) return "";
-  return digits.replace(/(.{4})/g, "$1 ").trim();
-}
-
 // ── Expiration → visual state ───────────────────────────────────────────────
 // Matches the app-wide "expiring within 7 days = orange, expired = red"
 // convention (useExpirations.ts's TERMINAL_WARN_DAYS = 7); expired 7+ days
