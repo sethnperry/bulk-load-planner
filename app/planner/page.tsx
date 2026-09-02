@@ -1529,8 +1529,16 @@ const lastProductInfoById = useMemo(() => {
   );
 
   // ── Render ─────────────────────────────────────────────────────────────────
+  // Landscape: trim the page's own side padding (16px -> 6px each side) so
+  // the two-column row below reclaims that width instead of leaving it as
+  // unused margin -- symmetric either way, so the preset dial's own
+  // "center within this content width" math (see below) still lands
+  // exactly on the viewport center, same as the tab bar's own centering,
+  // regardless of how much padding there is. Portrait keeps the original
+  // 16px unchanged.
+  const pageStyle = isLandscape ? { ...styles.page, paddingLeft: 6, paddingRight: 6 } : styles.page;
   return (
-    <div style={styles.page}>
+    <div style={pageStyle}>
       {/* Admin setup session banner */}
       {setupSession && (
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 14px", marginBottom: 8, borderRadius: 12, background: "rgba(251,146,60,0.12)", border: "1px solid rgba(251,146,60,0.30)" }}>
@@ -1647,9 +1655,22 @@ const lastProductInfoById = useMemo(() => {
           which one is visually on which side without touching where each
           block actually sits in the JSX/DOM -- compartments go right,
           info-cards go left. The preset dial (above, full-width) is
-          unaffected by this swap either way. */}
-      <div style={{ display: "flex", flexDirection: isLandscape ? "row" : "column", gap: isLandscape ? 16 : 0, alignItems: isLandscape ? "stretch" : "flex-start" }}>
-      <div style={isLandscape ? { flex: "1 1 62%", minWidth: 0, order: 2, display: "flex", flexDirection: "column" } : { width: "100%" }}>
+          unaffected by this swap either way. Split widened from 62/38 to
+          65/35, and the gap trimmed from 16 to 10, per explicit follow-up
+          feedback -- compartments should keep close to the same visual
+          weight/proportion they have in portrait (there, they're the
+          only thing on the row, effectively 100%), not be squeezed down
+          toward parity with the info-card column just because the two
+          now share a row. 74/26 was tried first and reverted -- it
+          shrank the info-card column below the width its own two-field
+          rows (e.g. "Card # 4111222233334444   Exp. 57 days") need, so
+          those started ellipsis-truncating instead of just looking
+          narrower; 65/35 was the narrowest info-card column (~279px at
+          844px wide) that still measured 0 truncated nodes in a live
+          check -- the actual ceiling on how far this split can go, not
+          an arbitrary number. */}
+      <div style={{ display: "flex", flexDirection: isLandscape ? "row" : "column", gap: isLandscape ? 10 : 0, alignItems: isLandscape ? "stretch" : "flex-start" }}>
+      <div style={isLandscape ? { flex: "1 1 65%", minWidth: 0, order: 2, display: "flex", flexDirection: "column" } : { width: "100%" }}>
       <div style={isLandscape ? { flex: 1, display: "flex", flexDirection: "column" } : undefined}>
       <PlannerControls
         styles={styles}
@@ -1815,7 +1836,7 @@ const lastProductInfoById = useMemo(() => {
         const hasEquipment = Boolean(equipment.selectedCombo);
 
         return (
-          <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 10, ...(isLandscape ? { flex: "1 1 38%", minWidth: 0, order: 1 } : {}) }}>
+          <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 10, ...(isLandscape ? { flex: "1 1 35%", minWidth: 0, order: 1 } : {}) }}>
 
             {/* Equipment card — two-up Truck / Trailer */}
             {(() => {

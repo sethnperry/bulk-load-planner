@@ -6754,6 +6754,57 @@ letter A directly below it with its active-dot, compartments on the right
 (wider), info-cards on the left (narrower), bars visibly taller/filling
 the column. `tsc --noEmit` and `next build` both clean throughout.
 
+### Landscape refinement, round two: compartments widened further, page padding trimmed (2026-09-02, same day)
+
+Per explicit follow-up: "make the compartment section wider so it keeps
+the same proportion it had in portrait mode but scale the button/report
+section and the compartment section up so it fits the entire width of
+the screen" -- read as two asks together: (1) compartments should carry
+close to the same visual dominance they have in portrait, where they're
+the only thing on the row (effectively 100% width) -- the 62/38 split from
+the first refinement pass still left them feeling squeezed down toward
+parity with the info-card column; (2) both columns should grow, not just
+compartments at the info-card column's expense, by reclaiming whatever
+outer margin was going unused instead of the row staying inset from the
+true screen edges.
+
+**Page padding** (`app/planner/page.tsx`): a new `pageStyle` override
+trims the Planner root div's own side padding from 16px to 6px, but only
+in landscape (`isLandscape ? { ...styles.page, paddingLeft: 6, paddingRight:
+6 } : styles.page`) -- portrait's shared `styles.page` (used by every
+other page too) is untouched. Kept symmetric on purpose: the preset
+dial's own "center within this content width" math (see the round-one
+fix above) only lands exactly under the Planner tab's viewport-center
+because the page's left/right padding are equal -- shrinking both sides
+by the same amount keeps that alignment intact while reclaiming ~20px of
+total width for the row below.
+
+**Split widened again, empirically bounded, not guessed**: tried 74/26
+first -- reverted immediately, confirmed live via a `scrollWidth >
+clientWidth` sweep of every `text-overflow:ellipsis` element that it
+truncated the info-card column's own two-field rows (`"Card #
+4111222233334444   Exp. 57 days"` on the Terminal card, the longest real
+row on this page). Backed off in two more measured steps (68/32, then
+65/35) re-running that same truncation sweep each time -- 65/35 was the
+first split that came back with **zero** truncated nodes, so it's used
+as the actual ceiling this specific page's real content allows, not a
+round number picked by eye. Also trimmed the inter-column gap from 16 to
+10 to reclaim a little more width for both sides. Comments at both split
+sites in `page.tsx` record the 74/26 attempt and why it was reverted, so
+a future pass doesn't rediscover the same ceiling by trial and error.
+
+**Live-verified** via the demo login route at 844x390: info-card column
+measured 279px wide (from 293px in the very first pass, but zero
+truncation, vs. 207px/broken at the rejected 74/26 attempt), compartments
+column widened correspondingly; Truck/Trailer, Terminal/card-number, and
+temp-prediction rows all render fully un-truncated in both a raw
+`getBoundingClientRect`-based sweep and a screenshot check. Preset dial's
+active letter re-confirmed still centered exactly under the Planner tab
+after the padding change (symmetric padding preserved the alignment, as
+expected). Portrait re-checked at 375x812 and confirmed pixel-unaffected
+-- the padding override and both flex-basis changes are landscape-only.
+`tsc --noEmit` and `next build` both clean throughout.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.
