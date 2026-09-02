@@ -6281,6 +6281,72 @@ as a leaf component. **Takeaway for next time**: after adding or changing
 anything at the root layout / provider level, restart the dev server
 before trusting what it shows, don't debug the app code first.
 
+### Performance pass #4: terminals catalog consolidation (2026-09-01)
+
+The deferred follow-up from Performance pass #3, done the same day on its
+own branch (`perf/terminals-catalog-cache`) once the products/roster
+caching pattern had been proven live. Fresh research confirmed
+`useTerminals()` really is mounted twice independently
+(`CalculatorShellContext.tsx` and `app/planner/cards/page.tsx`'s
+dispatch-context instance), plus 3 more full-catalog duplicate sites
+(`app/admin/page.tsx`, `FleetCardsModal.tsx`, `AdminLoadsModal.tsx`) and
+one `.in(terminalIds)` lookup worth folding in
+(`app/planner/dispatch/page.tsx`).
+
+`lib/queries/useTerminalsCatalog.ts` (new) -- same pattern as
+`useProductsCatalog.ts`, including the stable-`EMPTY_CATALOG`-reference
+fix applied from the start this time (no need to rediscover last pass's
+infinite-loop bug). `useTerminals.ts`'s own `loadTerminalCatalog()` was
+the one clearly separable piece of that hook (everything else --
+`loadMyTerminals`, `refreshTerminalAccessForUser`,
+`setAccessDateForTerminal`, `deleteAccessDateForTerminal`, `doGetCarded`,
+`toggleTerminalStar`, `terminalDisplayInfo` -- is per-user/mutable and
+untouched); replacing just that piece with the shared hook means both
+mount sites now share one fetch automatically, with **zero changes
+needed in `cards/page.tsx`** since it only ever consumed `useTerminals()`,
+never queried `terminals` directly itself.
+
+**A second, real pre-existing bug found and fixed as a byproduct of
+centralizing, not new scope creep**: `admin/page.tsx`'s own terminals
+fetch already had a documented fix for PostgREST's 1000-row cap (the live
+catalog is 1,238+ terminals) via paginated `fetchAllRows` -- but
+`useTerminals.ts`'s driver-facing fetch, `FleetCardsModal.tsx`, and
+`AdminLoadsModal.tsx` never got that same fix, silently capped at 1000
+rows the whole time. Centralizing into one canonical fetch meant picking
+the *correct* implementation for everyone -- `fetchTerminalsCatalog()`
+now paginates for every consumer, not just admin's.
+
+Migrated: `app/admin/page.tsx`'s `loadAll()` (via
+`fetchTerminalsCatalogCached(queryClient)`, mirroring
+`fetchProductsCatalogCached`), `FleetCardsModal.tsx`,
+`AdminLoadsModal.tsx` (all three via the `useTerminalsCatalog()` hook
+directly), and `dispatch/page.tsx`'s `.in(terminalIds)` lookup (now a
+client-side filter over the cached catalog instead of a network round
+trip). `service_types`' own 4-site duplication was investigated and
+**deliberately left out** -- unlike products/terminals/roster it's
+genuinely mutable per-company data (admin create/edit/deactivate), and
+one call site (`SoloEquipmentModal.tsx`) has an existing comment
+explaining it deliberately refetches fresh to avoid a same-tick
+staleness bug after a save -- consolidating it correctly needs real
+`invalidateQueries` wiring into every mutation site, a distinct,
+appropriately-scoped later pass.
+
+**Live-verified** via the demo login route against real "Test Company
+Alpha" data, after a full dev-server restart (not just a reload, per the
+HMR gotcha documented in pass #3): `/admin`'s Fleet Cards (real terminal
+search + driver card statuses), the Planner's My Terminals modal (real
+card status list), Dispatch tab's terminal-cards section (the migrated
+`.in()` lookup, city-grouped, correct dates), Cards tab in dispatch
+context (the second `useTerminals()` mount, "Viewing Test Testerson's
+terminal cards" with real data), and `AdminLoadsModal` (real load history
+with dates/gallons/lbs) all rendered correctly. The admin page's own
+"TERMINALS 1238 ACTIVE" count is a concrete confirmation the pagination
+fix works -- it would have silently read ≤1000 if the fix were broken.
+Confirmed clean (zero console errors beyond the one pre-existing expected
+`company_subscriptions` 404) on a genuinely fresh tab.
+
+`tsc --noEmit` and `next build` both clean throughout every phase.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.

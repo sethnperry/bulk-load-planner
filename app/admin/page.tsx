@@ -6,6 +6,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { startSetupSession } from "@/lib/setupSession";
 import { supabase } from "@/lib/supabase/client";
 import { fetchProductsCatalogCached } from "@/lib/queries/useProductsCatalog";
+import { fetchTerminalsCatalogCached } from "@/lib/queries/useTerminalsCatalog";
 import ComboEditModal from "@/lib/ui/driver/ComboEditModal";
 import { TruckCard, TrailerCard, TruckModal, TrailerModal } from "@/lib/ui/driver/EquipmentDetails";
 import type { Truck, Trailer, OtherPermit, Compartment } from "@/lib/ui/driver/EquipmentDetails";
@@ -1282,22 +1283,13 @@ export default function AdminPage() {
       );
 
       // Terminals — no company gating, all active terminals are available.
-      // Load all terminals with their products. Paginated (fetchAllRows) --
-      // PostgREST's server-side max-rows cap (confirmed live: 1000, and
-      // unaffected by `.range()` on the client -- a request for rows
-      // 0-4999 still silently comes back with only 1000 rows) means this
-      // catalog (1,238 terminals as of this write, see CLAUDE.md's
-      // terminal-seeding work) was ALREADY being truncated in the admin
-      // terminal list before this pass touched anything; fixed here since
-      // the rack aggregation below needs the complete terminal_id set to
-      // be correct.
-      const termRows = await fetchAllRows<any>((from, to) =>
-        supabase
-          .from("terminals")
-          .select("terminal_id, terminal_name, city, state, city_id, timezone, active, renewal_days, lat, lon")
-          .order("state").order("city").order("terminal_name")
-          .range(from, to)
-      );
+      // Load all terminals with their products, via the shared cached
+      // catalog (lib/queries/useTerminalsCatalog.ts) instead of this
+      // file's own paginated fetch -- that shared fetcher already
+      // preserves the same pagination fix this comment used to document
+      // locally (the live catalog is 1,238+ terminals, well past
+      // PostgREST's 1000-row cap).
+      const termRows = await fetchTerminalsCatalogCached(queryClient);
 
       // Product curation now lives on rack_product_status per rack, not a
       // terminal-wide table (see CLAUDE.md "rack-aware loading, unified") --

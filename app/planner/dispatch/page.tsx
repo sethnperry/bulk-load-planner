@@ -48,6 +48,7 @@ import { supabase } from "@/lib/supabase/client";
 import { startSetupSession } from "@/lib/setupSession";
 import { useCalculatorShell } from "../CalculatorShellContext";
 import DriverPicker from "../components/DriverPicker";
+import { useTerminalsCatalog } from "@/lib/queries/useTerminalsCatalog";
 import { addDaysISO_, daysUntilISO_, formatMDYWithCountdown_ } from "../utils/dates";
 
 // This page deliberately does NOT use cardTheme.ts's shared cardStateFor --
@@ -153,6 +154,11 @@ export default function DispatchPage() {
   const shell = useCalculatorShell();
   const { selectedDriverId, setSelectedDriverId, companyId, effectiveUserId, authUserId } = shell;
   const canUseAppAs = shell.role === "admin" || shell.isSuperAdmin;
+  // Sourced from the shared cached catalog (lib/queries/useTerminalsCatalog.ts)
+  // instead of this page's own .in("terminal_id", terminalIds) network
+  // lookup below -- the full catalog is already cached, so this is a
+  // client-side filter instead of a round trip.
+  const { data: terminalsCatalog = [] } = useTerminalsCatalog();
 
   const [identity, setIdentity] = useState<DriverIdentity | null>(null);
   const [schedule, setSchedule] = useState<{ days: number[]; start: string; end: string }>({ days: [], start: "", end: "" });
@@ -215,18 +221,15 @@ export default function DispatchPage() {
       for (const r of (accessRows ?? []) as any[]) accessByTerminal.set(String(r.terminal_id), r.carded_on);
 
       const terminalIds = Array.from(new Set([...accessByTerminal.keys(), ...cardIdSet]));
-      let termRows: any[] = [];
-      if (terminalIds.length > 0) {
-        const { data } = await supabase.from("terminals").select("terminal_id, terminal_name, city, state, renewal_days").in("terminal_id", terminalIds);
-        termRows = data ?? [];
-      }
+      const idSet = new Set(terminalIds);
+      const termRows = terminalsCatalog.filter((t) => idSet.has(String(t.terminal_id)));
       const rows: TerminalCardRow[] = termRows.map((t) => {
         const tid = String(t.terminal_id);
         const cardedOn = accessByTerminal.get(tid) ?? null;
         const renewalDays = t.renewal_days ?? 90;
         return {
           terminal_id: tid,
-          terminal_name: t.terminal_name,
+          terminal_name: t.terminal_name ?? "",
           city: t.city, state: t.state,
           expiresISO: cardedOn ? addDaysISO_(cardedOn, renewalDays) : null,
           hasCard: cardIdSet.has(tid),
@@ -271,7 +274,7 @@ export default function DispatchPage() {
       setLoading(false);
     })();
     return () => { cancelled = true; };
-  }, [selectedDriverId]);
+  }, [selectedDriverId, terminalsCatalog]);
 
   async function saveSchedule(next: { days: number[]; start: string; end: string }) {
     setSchedule(next);
