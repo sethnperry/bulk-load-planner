@@ -6387,6 +6387,123 @@ back-of-card edit view -- previously the grid alone forced it to
 expected `company_subscriptions` 404. `tsc --noEmit` and `next build`
 both clean.
 
+## Vault redesign: pattern lock, email recovery, Work/Personal categories (2026-09-02) -- in progress, branch `feature/vault-redesign`
+
+Per explicit direction: the numeric PIN "stood out like a sore thumb"
+color-wise (the plain 🔒 emoji's native gold/yellow rendering was the one
+colorful thing in an otherwise monochrome app), the layout felt generic,
+and there was no real recovery flow. Full plan preserved at
+`wild-discovering-plum.md`. Confirmed with the user before building:
+pattern-only, no PIN fallback.
+
+**Pattern lock** (`app/planner/vault/PatternLock.tsx`, new) -- a
+monochrome 3x3 dot grid (plain `<svg>`, Pointer Events for unified mouse/
+touch/pen), minimum 4 dots (the real Android minimum), two modes:
+`"confirm"` (draw twice, must match -- used for set/reset) and
+`"verify"` (draw once, emits the path -- used to unlock). Security model
+is byte-for-byte unchanged from the PIN it replaces:
+`user_vault_pin.pin_hash` is reused as-is (no column rename), now hashing
+a joined dot-path string (`"0-4-8-6-2"`) through the exact same
+`sha256Hex()` the old PIN used. The 🔒 emoji is replaced with a small
+inline monochrome SVG padlock (`LockIcon`, single fill color, no color
+rendering at all) -- directly fixes the "stands out" complaint by
+construction.
+
+**A real bug found and fixed during live verification, not just
+typechecked**: the component originally gated its pointermove handler on
+`drawing` (React state) and read `path` (React state) directly inside
+the handlers. Dispatching a fast down+move+move+move+up burst
+synchronously (which is exactly how this was caught -- via scripted
+`PointerEvent` dispatch, since a 3x3 grid's longest straight line is only
+3 collinear dots, short of the 4-dot minimum, so testing needed a real
+multi-segment drag) left every handler in that burst reading the
+PRE-gesture closure values, since React hadn't committed a render
+between them -- `handleMove`'s `if (!drawing) return` silently no-op'd
+for every move, so only the initial down's dot ever registered. Real
+touch/mouse input naturally spaces events across separate browser tasks
+(a render commits between each), so this likely wouldn't reproduce with
+a slow real drag, but a fast one could hit the same gap. Fixed by moving
+the actual gating/hit-test logic onto refs (`pathRef`, `drawingRef`,
+`stageRef`, `firstPathRef`) -- refs update synchronously and can't go
+stale regardless of render timing; the React state variables now exist
+purely to trigger the visual re-render (dot fill, connecting line).
+Live-verified after the fix: a scripted 5-dot zigzag (`0-4-8-6-2`)
+correctly registers all 5 dots, transitions to "Draw it again to
+confirm," and a matching second draw completes the real Supabase
+`user_vault_pin` upsert and unlocks -- confirmed end-to-end against live
+data, not just the component in isolation. A wrong second draw shows
+"Patterns didn't match"; a wrong unlock attempt shows "Incorrect
+pattern," both correctly staying on their respective screens.
+
+**Email-confirmed recovery**, replacing the old instant/unverified
+"Forgot PIN -> immediately pick a new one" bypass: new
+`app/api/vault/request-reset/route.ts` and
+`app/api/vault/confirm-reset/route.ts`, mirroring
+`app/api/admin/invite/route.ts`'s exact shape (service-role client,
+caller identity verified via `Authorization: Bearer <access_token>`, same
+Resend `fetch` pattern). New `vault_reset_tokens` table
+(`supabase/migrations/20260902000000_vault_reset_and_website.sql`,
+**written, not yet applied**) -- deny-by-default RLS (enabled, zero
+policies), only ever touched by these two service-role routes. Neither
+route touches `vault_entries` or writes `user_vault_pin` -- confirm-reset
+only validates/marks a token used; the client performs the actual
+pattern upsert afterward through the same authenticated path pattern
+setup always used, so entries are structurally never in this write path
+at all. Deliberately does NOT auto-consume the token on page load (a
+bare GET, which an email client's own link-scanner could trigger) --
+only an explicit tap does that, the same lesson this codebase has
+already learned three times for magic links (invite emails, the demo
+login route).
+
+**Categories**: Work / Personal preset chips + a "+ Custom" free-text
+option (still the same free-text `category` column, no schema change
+beyond `website`). Entries now render grouped by category (Work,
+Personal, then custom categories alphabetically, then Uncategorized)
+instead of one flat list. Card theming keyed off category via one
+`themeFor()` helper: Work gets a light card (off-white background, black
+text) -- the one deliberate exception to the app's dark theme; Personal
+and any custom category share the app's existing dark graphite/white-text
+styling, deliberately not a third color scheme (matches `cardTheme.ts`'s
+own 2026-08-19 precedent of removing a pastel "card-wallet" palette that
+clashed with the dark theme).
+
+**Fields reordered to read like a real password manager**: Label ->
+Website (new) -> Username -> Password (renamed from "Password / PIN /
+account #") -> Category -> Notes.
+
+**A second real bug found and fixed during this same pass**: both
+`saveEntry()` and `deleteEntry()` threw/discarded their Supabase error
+without ever surfacing it to the user -- a failed save left the modal
+open with no visible feedback (an actual unhandled promise rejection,
+caught live while testing against the not-yet-applied migration below);
+a failed delete would have optimistically removed the row from local
+state while it silently still existed server-side. Fixed with proper
+`try/catch` + a visible error banner in both cases (`formError` in the
+add/edit modal, `listError` in the entry list) -- a real robustness fix
+independent of the migration gap that surfaced it.
+
+**Live-verified** via the demo login route against real data, after a
+dev-server restart: pattern set/confirm/verify/wrong-attempt (see above,
+full round trip against the real `user_vault_pin` row); "Forgot Pattern"
+correctly calls `request-reset` and surfaces a clean, readable error
+("Could not find the table 'public.vault_reset_tokens'...") instead of
+crashing, confirming the route/error-handling path works even before the
+migration exists; saving a Work-category entry correctly surfaces
+("Could not find the 'website' column...") the same way. Confirmed clean
+(no stray console errors) on a genuinely fresh tab both before and after
+the error-surfacing fix.
+
+**Not yet live-verified -- blocked on the migration**: actual entry
+creation/category grouping/Work-vs-Personal card theming with real rows,
+and a full reset-email round trip (also needs `RESEND_API_KEY`/
+`INVITE_FROM_EMAIL` confirmed available, same limitation this project has
+always had for testing email flows from this side). Once
+`20260902000000_vault_reset_and_website.sql` is applied via the Supabase
+SQL editor, these are the next things to verify before merging
+`feature/vault-redesign` to `main`.
+
+`tsc --noEmit` and `next build` both clean throughout every phase.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.
