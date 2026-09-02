@@ -1545,7 +1545,18 @@ const lastProductInfoById = useMemo(() => {
   // exactly on the viewport center, same as the tab bar's own centering,
   // regardless of how much padding there is. Portrait keeps the original
   // 16px unchanged.
-  const pageStyle = isLandscape ? { ...styles.page, paddingLeft: 6, paddingRight: 6 } : styles.page;
+  //
+  // isWide also raises styles.page's own maxWidth (1100, shared by every
+  // page in the app) -- missed in the previous pass, and the real reason
+  // the three-column row measured only ~1088px wide on a 1400px-wide
+  // viewport (156px of dead margin on each side, `margin:"0 auto"`
+  // centering a page that was still capped at 1100 regardless of the
+  // padding fix). 1100 stays exactly as-is for portrait and non-wide
+  // landscape -- this only changes behavior once isWide's own 1024px
+  // floor is already past it.
+  const pageStyle = isLandscape
+    ? { ...styles.page, paddingLeft: 6, paddingRight: 6, ...(isWide ? { maxWidth: 1800 } : {}) }
+    : styles.page;
   return (
     <div style={pageStyle}>
       {/* Admin setup session banner */}
@@ -1655,53 +1666,42 @@ const lastProductInfoById = useMemo(() => {
           this row collapses to flexDirection:"column" with gap:0, which
           reproduces today's plain sequential stack exactly (the children
           keep their own existing marginTop values for spacing, same as
-          before this wrapper existed -- no doubled gap+margin).
-          alignItems:"stretch" in landscape (vs. the portrait-only
-          flex-start) makes both columns the same height, matching
-          whichever is naturally taller -- so the compartments column's
-          own bottom edge lines up with the info-card stack's instead of
-          stopping short and leaving empty space below it. `order` swaps
-          which one is visually on which side without touching where each
-          block actually sits in the JSX/DOM -- compartments go right,
-          info-cards go left. The preset dial (above, full-width) is
-          unaffected by this swap either way. Split widened from 62/38 to
-          65/35, and the gap trimmed from 16 to 10, per explicit follow-up
-          feedback -- compartments should keep close to the same visual
-          weight/proportion they have in portrait (there, they're the
-          only thing on the row, effectively 100%), not be squeezed down
-          toward parity with the info-card column just because the two
-          now share a row. 74/26 was tried first and reverted -- it
-          shrank the info-card column below the width its own two-field
-          rows (e.g. "Card # 4111222233334444   Exp. 57 days") need, so
-          those started ellipsis-truncating instead of just looking
-          narrower; 65/35 was the narrowest info-card column (~279px at
-          844px wide) that still measured 0 truncated nodes in a live
-          check -- the actual ceiling on how far this split can go, not
-          an arbitrary number.
+          before this wrapper existed -- no doubled gap+margin). `order`
+          swaps which one is visually on which side without touching
+          where each block actually sits in the JSX/DOM -- compartments
+          go right, info-cards go left. The preset dial (above,
+          full-width) is unaffected by this swap either way.
 
-          isWide (>=1024px -- tablet/desktop, wider than any real phone's
-          landscape width) adds a THIRD column, order:3, for the recap +
-          incentive-points cards -- per explicit follow-up ("drop the
-          recap and points to be under the buttons and compartments side
-          by side then slide them to the far right ... on really wide
-          screens"). Below isWide, that same pair instead renders as its
-          own full-width row underneath this whole two-column row (see
-          recapPointsEl / the render call below) rather than competing
-          for room in an already-tight phone-landscape width. Either way,
-          pulling those two cards out of the info-card stack is what lets
-          compartments' alignItems:stretch match a SHORTER stack now
-          (Equipment/Location/Temp/Load button only) -- confirmed against
-          the user's own observation that in portrait, the compartment
-          strip's height already roughly matches that same shorter stack
-          once recap/points are excluded from the comparison.
+          Compartments hold a FIXED 65% in every landscape width tier,
+          narrow phone-landscape or wide desktop alike -- per explicit
+          follow-up rejecting an earlier version of this pass that
+          shrank it to 50% on wide screens to make room for a third
+          column: "we definitely don't want to stretch the compartment
+          height at all. The compartment section needs to stay in the
+          same proportion, same ratio no matter the screen size... just
+          shift it over. Take space out of the buttons." So on isWide
+          (>=1024px -- tablet/desktop, wider than any real phone's
+          landscape width), the third column (order:3, recap + incentive-
+          points cards, see below) and its own extra width come entirely
+          out of the info-card column's share (35% -> 18%, third column
+          17%), never out of compartments'. Below isWide, that same pair
+          instead renders as its own full-width row underneath this whole
+          two-column row (order:4, see recapPointsEl below) rather than
+          competing for room in an already-tight phone-landscape width.
+          alignItems:"stretch" only matches the CONTAINER heights between
+          columns -- PlannerControls.tsx's own bar height is a fixed
+          clamp regardless of orientation (also reverted this same pass,
+          see its own header comment), so a taller sibling column just
+          leaves harmless blank space below the bars, never stretches
+          them.
 
           flexWrap:"wrap" is what lets the below-row (order:4,
           flex-basis 100%) fall onto its own line under the two/three
           columns instead of needing to render outside this wrapper
-          entirely. The three columns themselves use grow-RATIO flex
-          values with flex-basis 0% (`"65 1 0%"`, not `"1 1 65%"`) rather
-          than percentage bases -- a real bug hit wiring this up: with
-          wrap enabled, percentage bases that sum to exactly 100% still
+          entirely. The columns themselves use grow-RATIO flex values
+          with flex-basis 0% (`"65 1 0%"`, not `"1 1 65%"`) rather than
+          percentage bases -- a real bug hit wiring this up: with wrap
+          enabled, percentage bases that sum to exactly 100% still
           overflow once the row's own `gap` is added on top, and a
           wrapping container resolves an overflowing line by giving EACH
           item its own line rather than shrinking to fit (shrink only
@@ -1713,27 +1713,8 @@ const lastProductInfoById = useMemo(() => {
       <div style={{
         display: "flex", flexDirection: isLandscape ? "row" : "column", flexWrap: isLandscape ? "wrap" : "nowrap",
         gap: isLandscape ? 10 : 0, alignItems: isLandscape ? "stretch" : "flex-start",
-        // Wide only: without this, the row's own height is only ever as
-        // tall as its shortest-content column naturally needs (the
-        // Equipment/Location/Temp/Load-button stack, a few hundred px),
-        // leaving most of a genuinely tall desktop viewport as dead black
-        // space below -- confirmed live at 1400x800, ~340px of empty
-        // space under a 299px-tall row. This pulls the row down to
-        // (roughly) fill the viewport instead, which -- combined with
-        // alignItems:stretch above and the compartments column's own
-        // flex:1 chain in PlannerControls.tsx -- is what actually makes
-        // the compartment bars grow to fill that space too ("zoom the
-        // whole thing in"), not just a cosmetic height on an empty div.
-        // 200px is an approximation of the header + tab bar + bottom
-        // breathing room above/below this row, not an exact measurement
-        // of either (both vary with banners/content) -- deliberately not
-        // applied to narrower landscape (a real phone turned sideways
-        // already has genuinely little vertical room and needs to
-        // scroll normally, not stretch into space that doesn't exist).
-        ...(isWide ? { minHeight: "calc(100vh - 200px)" } : {}),
       }}>
-      <div style={isLandscape ? { flex: `${isWide ? 50 : 65} 1 0%`, minWidth: 0, order: 2, display: "flex", flexDirection: "column" } : { width: "100%" }}>
-      <div style={isLandscape ? { flex: 1, display: "flex", flexDirection: "column" } : undefined}>
+      <div style={isLandscape ? { flex: "65 1 0%", minWidth: 0, order: 2 } : { width: "100%" }}>
       <PlannerControls
         styles={styles}
         selectedTrailerId={selectedTrailerId}
@@ -1755,7 +1736,6 @@ const lastProductInfoById = useMemo(() => {
         isLandscape={isLandscape}
         isWide={isWide}
       />
-      </div>
 
       <CompartmentModal
         open={compModalOpen}
@@ -1972,7 +1952,17 @@ const lastProductInfoById = useMemo(() => {
             // above), and its cards shouldn't stretch to fill that --
             // center them as a group instead of leaving all the extra
             // space stacked at the bottom.
-            ...(isLandscape ? { flex: `${isWide ? 27 : 35} 1 0%`, minWidth: 0, order: 1, ...(isWide ? { justifyContent: "center" } : {}) } : {}),
+            // minWidth 279px (not 0) on isWide -- the same real ceiling
+            // found for the non-wide 65/35 split (a smaller flex-basis
+            // than that, in ABSOLUTE pixels, truncates this column's own
+            // two-field rows regardless of what % it computes to on a
+            // given screen). A percentage alone can't guarantee that
+            // floor at every width -- confirmed live at 1400px wide, 18%
+            // (252px) already truncated "Truck · 25184-A" down to
+            // "Truck · 2...". Below that floor, this column simply keeps
+            // more than its nominal 18% share; the recap/points column
+            // (which has less text per line) absorbs the difference.
+            ...(isLandscape ? { flex: `${isWide ? 18 : 35} 1 0%`, minWidth: isWide ? 279 : 0, order: 1 } : {}),
           }}>
 
             {/* Equipment card — two-up Truck / Trailer */}
@@ -2156,7 +2146,7 @@ const lastProductInfoById = useMemo(() => {
           <>
             {mainInfoStack}
             {isWide && (
-              <div style={{ flex: "23 1 0%", minWidth: 0, order: 3, display: "flex", flexDirection: "column", justifyContent: "center" }}>
+              <div style={{ flex: "17 1 0%", minWidth: 240, order: 3, display: "flex", flexDirection: "column", justifyContent: "center" }}>
                 {recapPointsEl("column")}
               </div>
             )}

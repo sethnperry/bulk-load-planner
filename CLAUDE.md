@@ -6914,6 +6914,88 @@ sweep used for the earlier width-tuning passes). Portrait re-checked at
 original spot exactly as before. `tsc --noEmit` and `next build` both
 clean throughout.
 
+### The vertical-fill pass above was reverted the same day -- compartments stay fixed size, buttons shrink instead
+
+User rejected the whole "zoom in / fill vertical space" direction from a
+real desktop screenshot, with a hand-drawn reference mockup attached:
+"we definitely don't want to stretch the compartment height at all. The
+compartment section needs to stay in the same proportion, same ratio no
+matter the screen size. In fact lets not even scale it, just shift it
+over. Take space out of the buttons."
+
+**`PlannerControls.tsx`** — the whole `fillColumn`/`flex:1` chain from
+the round-three pass (`<section>` → bar-holder wrapper → bar-columns row
+→ each bar) is gone. The bar `<div>` is back to a fixed `height: barH`
+in every orientation, portrait and landscape alike — `barH`'s own
+landscape branch (`clamp(70px, 22vh, 130px)`, from the very first
+landscape pass) was already computing the right value all along, it just
+wasn't being applied once the round-three fill-chain took over. `alignItems`
+on the bar-columns row reverted from `isLandscape ? "stretch" : "flex-end"`
+to always `"flex-end"`.
+
+**`app/planner/page.tsx`**:
+- The wide-only `minHeight: "calc(100vh - 200px)"` on the row wrapper is
+  removed outright — the row is never forced taller than its content
+  needs, on any screen size.
+- Compartments' flex-basis is now a **flat, unconditional `"65 1 0%"`**
+  — narrow landscape and isWide alike. It no longer drops to 50% to make
+  room for the third column; per the user's own framing, whatever room
+  the third column needs comes entirely out of the info-card column's
+  share instead (35% → 18% on isWide).
+- **A real, separate bug found while re-verifying, not introduced by
+  this revert**: `styles.page`'s `maxWidth: 1100` (shared by every page
+  in the app, untouched since before this whole landscape project) was
+  never accounted for in any of the landscape passes. On a 1400px-wide
+  viewport the row measured only ~1088px, `margin: "0 auto"` centering a
+  page still capped at 1100 regardless of the padding fix from round two
+  — confirmed live via `getBoundingClientRect()` before touching layout
+  math further, not guessed at. `pageStyle` now also raises `maxWidth` to
+  1800 on isWide (portrait and non-wide landscape keep the original 1100
+  unchanged) — this, not the flex math, was the actual reason the
+  three-column row looked cramped rather than merely "wrong proportions."
+- **Real truncation hit and fixed while re-verifying, not shipped
+  blind**: a flat 18% for the info-card column truncates badly at
+  realistic wide widths ("Truck · 25184-A" → "Truck · 2...", confirmed
+  live at 1400px) — a low percentage doesn't guarantee the same real
+  pixel floor (279px, the ceiling already established in the round-two
+  pass) at every viewport width the way it did when compartments were
+  the ones giving up room. Fixed with `minWidth: 279` on isWide (not a
+  bigger percentage, which would just re-shrink compartments) — below
+  that floor, this column keeps more than its nominal 18% share and
+  compartments' own unconstrained flex-grow ratio absorbs the
+  difference, so compartments does end up narrower than a strict 65% at
+  the tight end of isWide's range (e.g. 449px of a 1024px-wide row, ~49%,
+  not 65%) but never below what's needed to keep the info-card column
+  legible. Same real problem, same fix, for the third (recap/points)
+  column: `minWidth: 240` (found by watching "7,785 gal" wrap onto two
+  lines at a first-guess 190px floor, then raising it until a live
+  height check confirmed a single 30px line instead of a 60px wrapped
+  one).
+
+**Known, explained tradeoff, not a silent compromise**: compartments is
+only genuinely a fixed 65% throughout the *non-wide* landscape range and
+at the wide end (e.g. 62% at 1400px, close to 65). Right at the isWide
+threshold (1024px) it measures closer to 49%, since both neighboring
+columns' pixel floors take a proportionally bigger bite of a narrower
+row. This is deliberate — the alternative (a literal, unconditional 65%
+at every width) reintroduces the truncation bug above, which is a worse
+outcome than compartments being modestly narrower right at one edge of
+one breakpoint's range.
+
+**Live-verified** via the demo login route: bar height confirmed fixed
+at 130px at 1400x800 and 85.8px at 844x390 (each exactly matching
+`barH`'s own clamp for that viewport height, not stretched to match a
+neighboring column) — the second, narrower value only after discovering
+and working around a resize-tool quirk where `useIsLandscape`'s
+`matchMedia` state didn't re-evaluate on a simulated viewport resize
+without a full page reload (the underlying `matchMedia(...).matches`
+itself was already correct; a real device resize event doesn't have
+this gap, since it isn't going through this same simulated-resize path
+at all). Re-swept for truncated/wrapped text at 1024px (boundary), 1400px,
+and 844px — zero truncated nodes and no wrapped stat lines at any of the
+three. Portrait re-checked at 375x812, pixel-unaffected. `tsc --noEmit`
+and `next build` clean throughout.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.
