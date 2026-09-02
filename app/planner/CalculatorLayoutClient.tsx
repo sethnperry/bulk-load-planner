@@ -99,7 +99,30 @@ function TabBar({ compact, inline }: { compact?: boolean; inline?: boolean }) {
     const idx = tabs.findIndex((t) => t.id === id);
     const el = container.children[idx] as HTMLElement | undefined;
     if (!el) return;
-    const target = el.offsetLeft + el.offsetWidth / 2 - container.clientWidth / 2;
+    // Bounding-rect deltas, not el.offsetLeft -- the exact same latent bug
+    // already found and fixed in PresetDial.tsx's centerSlot() (see that
+    // file's own comment), just never ported over here. offsetLeft
+    // resolves against the nearest POSITIONED ancestor (offsetParent),
+    // which for a tab nested in `inline` mode is Header's own
+    // `position:"relative"` wrapper -- NOT this scroll container, which
+    // has no `position` of its own. That produced a target inflated by
+    // the scroll container's own static offset within Header (52px from
+    // NavMenu, in the inline case) each time, silently shifting every
+    // "centered" tab left by exactly that much. This bug existed in
+    // portrait too, but was invisible there: the full-width, non-inline
+    // TabBar's scroll container always sat flush against Header's own
+    // left edge (offsetLeft-vs-Header and offsetLeft-vs-container
+    // happened to be the same reference frame), so it took `inline`
+    // mode's nonzero nesting to finally expose it. Confirmed live: the
+    // Planner tab (2nd tab index) measured a real ~88px leftward
+    // centering error at 844px wide before this fix. getBoundingClientRect()
+    // is always viewport-relative regardless of positioning context,
+    // matching the already-correct approach onScroll() below (and
+    // PresetDial's own centerSlot) already use -- this makes all three
+    // agree.
+    const containerRect = container.getBoundingClientRect();
+    const elRect = el.getBoundingClientRect();
+    const target = container.scrollLeft + (elRect.left - containerRect.left) + elRect.width / 2 - containerRect.width / 2;
     suppressScrollNavRef.current = true;
     container.scrollTo({ left: target, behavior: smooth ? "smooth" : "auto" });
     setTimeout(() => { suppressScrollNavRef.current = false; }, smooth ? 400 : 50);

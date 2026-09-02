@@ -7619,6 +7619,81 @@ conclusive proof from this side — needs the user's own direct
 confirmation (ideally after the dial-shrink fix ships too) before this is
 considered fully closed.
 
+### Real bug found: TabBar's own centerTab() had the exact same latent offsetLeft bug PresetDial already had (2026-09-02, same day)
+
+User reported, after a genuine reinstall, that the black bar was still
+there, the space above the buttons was still too much, AND — new this
+round — the inline tab bar itself looked visibly shifted left, off
+center between the hamburger and bell/gear. The third complaint was the
+one that actually cracked this open.
+
+**Confirmed live, not guessed**: measured the real deployed page (both
+production and local dev) — `Planner`'s label center sat at x≈318.5
+while the true midpoint between the nav button and the bell icon was
+x≈406.5, an ~88px leftward error. Read `TabBar`'s `centerTab()` and found
+it was still using `el.offsetLeft + el.offsetWidth/2 - container.clientWidth/2`
+-- **the exact same bug already found and fixed in `PresetDial.tsx`'s
+`centerSlot()`** earlier this session (see the "PresetDial centering bug"
+entry, Phase 2 of this landscape work), just never ported over to
+`TabBar`'s own copy of the same mechanic. `offsetLeft` resolves against
+the nearest *positioned* ancestor (`offsetParent`), which here is
+Header's own `position:"relative"` wrapper -- not the scroll container.
+In the ORIGINAL portrait-only design this was invisible: the full-width
+TabBar's scroll container always sat flush against Header's own left
+edge (both reference frames coincided by coincidence). `inline` mode
+(this session's own work) nested the scroll container inside the icon
+row at a real nonzero offset (52px, after NavMenu) for the first time --
+which is what finally exposed a bug that had been sitting there dormant
+the whole time.
+
+**Fixed** with the identical `getBoundingClientRect()`-delta approach
+already used by `onScroll()` in this same file and by `PresetDial.tsx`'s
+own (already-fixed) `centerSlot()` -- viewport-relative, immune to
+`offsetParent` climbing, matching all three implementations now. Confirms
+this project's own repeated lesson about duplicated logic drifting apart
+(`CustomSelect.tsx`/`ServiceTypeManager.tsx`'s own precedent) — this was
+the exact same bug fixed once already this session, just not
+generalized to its second copy.
+
+**Also went further on "space above the buttons"**, trusting the user's
+live device measurement over further guessing at CSS math from this end:
+`PresetDial.tsx`'s `compact` styling tightened again -- button padding
+`"1px 4px"` → `"0px 4px"`, label/dot gap `2px` → `1px`, dot `3px` → `2px`,
+and a new explicit `lineHeight: 1` on the compact label (the default
+line-height was adding several px of pure whitespace above/below a
+12px glyph that a small font barely needs -- unset/default for portrait,
+completely unaffected). `page.tsx`'s `mainInfoStack` `marginTop` in
+landscape dropped from `2` to `0`.
+
+**Live-verified**: `Planner` tab's measured center now matches the true
+container center almost exactly (406.49 vs 406.5) at 844×390, both
+locally and cross-checked against the deployed production meta/CSS
+before diagnosing further. The header-to-Equipment-card gap dropped
+again, from 29.9px to 21px (down from the original, pre-this-session
+44.7px -- more than halved total). Screenshot-confirmed the dial is
+still legible, not cramped. Portrait re-checked at 375×812 -- byte-
+identical to before, `compact`/`lineHeight` overrides never apply there.
+`npx tsc --noEmit` and `npx next build` both clean.
+
+**On the black bar, a different kind of update -- not a further code
+guess.** Directly inspected the actual rendered `<meta name="viewport">`
+tag on production: `content="width=device-width, initial-scale=1,
+viewport-fit=cover"` -- confirms the meta tag itself is textbook-correct,
+not a Next.js emission bug. Combined with the earlier confirmation that
+the compensating `env(safe-area-inset-*)` padding resolves cleanly, the
+web-standard mechanism for this class of problem is provably correctly
+built and deployed on this project's end. A black bar surviving a genuine
+reinstall, on code that's confirmed correct at every layer this session
+can inspect, points somewhere neither `viewport-fit` nor page CSS can
+reach: most likely a device/OS-level "fit to screen" or "full screen
+apps" setting (several Android OEM skins, Samsung's own Display settings
+in particular, letterbox an installed app -- WebAPK included -- to a
+fixed aspect ratio by default unless the specific app is toggled to full
+screen in system settings, entirely independent of what the app's own
+manifest or CSS declares). Flagged to the user as the next thing to check
+on-device rather than continuing to iterate blind in code that's already
+confirmed correct.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.

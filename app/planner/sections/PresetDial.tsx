@@ -212,8 +212,8 @@ export default function PresetDial({
                 onPointerLeave={onPressEnd}
                 onClick={onTap}
                 style={{
-                  display: "flex", flexDirection: "column", alignItems: "center", gap: compact ? 2 : 4,
-                  border: "none", background: "transparent", padding: compact ? "1px 4px" : "3px 4px",
+                  display: "flex", flexDirection: "column", alignItems: "center", gap: compact ? 1 : 4,
+                  border: "none", background: "transparent", padding: compact ? "0px 4px" : "3px 4px",
                   cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.4 : 1,
                 }}
                 title={disabled ? (disabledReason ?? "Select a terminal first") : has ? "Tap to load, hold for options" : "Tap to save"}
@@ -222,13 +222,21 @@ export default function PresetDial({
                   font: isActive
                     ? `600 ${compact ? 12 : 15}px Outfit`
                     : `500 ${compact ? 10 : 12}px Outfit`,
+                  // A tight, explicit line-height matters specifically for
+                  // compact -- the default (~1.2-1.4x the font size) adds
+                  // several px of pure whitespace above/below the glyph
+                  // that a small font barely needs, and this dial's total
+                  // height is exactly the "space above the buttons" this
+                  // prop exists to trim. Portrait keeps the browser default
+                  // (unset) -- untouched, unaffected by this at all.
+                  lineHeight: compact ? 1 : undefined,
                   color: isActive ? "#fff" : has ? "rgba(255,255,255,0.55)" : "rgba(255,255,255,0.25)",
                   transition: "color 150ms ease",
                 }}>
                   {String.fromCharCode(64 + n)}
                 </span>
                 <span style={{
-                  width: compact ? 3 : 4, height: compact ? 3 : 4, borderRadius: "50%", background: "#fff",
+                  width: compact ? 2 : 4, height: compact ? 2 : 4, borderRadius: "50%", background: "#fff",
                   opacity: isActive ? 1 : 0, transition: "opacity 150ms ease",
                 }} />
               </button>

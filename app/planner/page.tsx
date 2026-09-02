@@ -2104,7 +2104,7 @@ const lastProductInfoById = useMemo(() => {
 
         const mainInfoStack = (
           <div className={isLandscape ? "pt-tabscroll" : undefined} style={{
-            marginTop: isLandscape ? 2 : 6, display: "flex", flexDirection: "column", gap: 10,
+            marginTop: isLandscape ? 0 : 6, display: "flex", flexDirection: "column", gap: 10,
             // Fixed reference width (REF_SIDE_W), not a percentage --
             // see the sizing-model comment above the row wrapper. Scales
             // uniformly with everything else via the shared
