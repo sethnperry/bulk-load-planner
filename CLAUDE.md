@@ -7558,6 +7558,67 @@ failing to reconnect — not a real regression, confirmed by pattern-
 matching for a real error string and finding none). `npx tsc --noEmit`
 and `npx next build` both clean throughout every edit.
 
+### Real-device follow-up: confirmed live on production, dial shrunk further (2026-09-02, same day)
+
+User's real device still showed the black bars and "space above buttons"
+right after the previous entry shipped. Rather than guess at more layout
+changes blind, checked production directly (not just local dev) via the
+demo login route against `https://protankr.com/planner` at 844×390:
+header measured exactly 48px, tab labels sat in the same vertical band as
+the hamburger/bell/gear, and the safe-area `calc()` expressions resolved
+cleanly (`16px`/`12px`, i.e. `0 + base` with no real inset available in
+this environment) — confirming the previous fix genuinely reached
+production and renders correctly there. This pointed at a stale/cached
+PWA on the user's own device rather than a code bug, matching the same
+failure class already hit once this same day (the orientation-lock fix
+needing a full remove-and-reinstall of the home screen icon before
+Android would pick it up).
+
+**Asked, not guessed**, since I couldn't resolve the ambiguity from my
+own tooling: whether the left-edge bar, the right-edge bar (which visibly
+contains the phone's real system nav buttons — recent-apps/home/back, not
+something any web page's CSS can paint over without going into full
+immersive/fullscreen mode, a much bigger and generally-undesirable
+change), or both, was the persisting complaint. Answer: **left edge
+only** — confirms the right-side strip was always expected/accepted
+system chrome, not a bug to chase.
+
+**Real, concrete follow-up landed the same round**: a fresh real-device
+screenshot (after presumably reinstalling, since it showed the header fix
+already live — tabs correctly inline, no separate tab row) still showed
+a visible gap between the header and the Equipment card. Measured the
+exact breakdown live rather than guessing which piece to trim: content-
+wrapper-top to Equipment-card-top was ~44.7px, almost entirely the
+preset dial (`PresetDial.tsx`)'s own natural size — full portrait-sized
+letters (15px active/12px inactive font), gap, and dot — sitting
+full-width directly under the header, unconditional on orientation, plus
+6px of `marginTop` on the left info-card column.
+
+`PresetDial.tsx` gained an optional `compact` prop (default `false` —
+portrait untouched): smaller button padding (`"1px 4px"`, was
+`"3px 4px"`), smaller label font (12px/10px active/inactive, was
+15px/12px), smaller label-to-dot gap (2px, was 4px), smaller dot (3px,
+was 4px). `page.tsx` passes `compact={isLandscape}` into the one
+`presetDialEl` render site. Also trimmed the left info-card column's own
+`marginTop` from 6 to 2 in landscape (`page.tsx`, `mainInfoStack`) — a
+small additional piece of the same measured gap.
+
+**Live-verified**: the same content-wrapper-top-to-Equipment-top gap
+dropped from 44.7px to 29.9px (a genuine ~15px reduction, roughly a
+third) at 844×390, confirmed via direct measurement before and after,
+plus a screenshot showing the dial still legible and the layout not
+cramped. Portrait re-checked at 375x812 — dial renders at its original,
+unshrunk size, `compact` correctly never true there. `npx tsc --noEmit`
+and `npx next build` both clean.
+
+**Still open, flagged rather than silently assumed resolved**: whether
+the left-edge black bar is actually gone now. The follow-up screenshot
+that prompted this round showed no visible left-edge bar in what was
+sent, which is encouraging, but a single cropped screenshot isn't
+conclusive proof from this side — needs the user's own direct
+confirmation (ideally after the dial-shrink fix ships too) before this is
+considered fully closed.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.

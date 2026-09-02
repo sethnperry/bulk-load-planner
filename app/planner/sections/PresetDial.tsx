@@ -19,7 +19,7 @@
 import React, { useEffect, useRef, useState } from "react";
 
 export default function PresetDial({
-  slots, slotHas, disabled, disabledReason, onLoad, onOpenActions, onSave, onActiveChange, syncTo,
+  slots, slotHas, disabled, disabledReason, onLoad, onOpenActions, onSave, onActiveChange, syncTo, compact,
 }: {
   slots: readonly number[];
   slotHas: Record<number, boolean>;
@@ -55,6 +55,16 @@ export default function PresetDial({
   // useEffect's dependency check treats it as genuinely new regardless of
   // what `slot` number it carries.
   syncTo?: { slot: number } | null;
+  // Landscape only -- shrinks the dial's own vertical footprint (button
+  // padding, label font, label/dot gap, dot size) per explicit follow-up
+  // ("take the rest of the space out above the buttons"): after the
+  // header itself was shortened by moving the tab bar inline, this dial
+  // -- sitting directly under the header, full-width, unconditional on
+  // orientation -- was the next real, measurable contributor to that
+  // remaining gap (roughly 45px of it, confirmed live: header-bottom to
+  // Equipment-card-top). Portrait is untouched -- defaults to false, same
+  // sizing as before this prop existed.
+  compact?: boolean;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const suppressRef = useRef(false);
@@ -202,21 +212,23 @@ export default function PresetDial({
                 onPointerLeave={onPressEnd}
                 onClick={onTap}
                 style={{
-                  display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
-                  border: "none", background: "transparent", padding: "3px 4px",
+                  display: "flex", flexDirection: "column", alignItems: "center", gap: compact ? 2 : 4,
+                  border: "none", background: "transparent", padding: compact ? "1px 4px" : "3px 4px",
                   cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.4 : 1,
                 }}
                 title={disabled ? (disabledReason ?? "Select a terminal first") : has ? "Tap to load, hold for options" : "Tap to save"}
               >
                 <span style={{
-                  font: isActive ? "600 15px Outfit" : "500 12px Outfit",
+                  font: isActive
+                    ? `600 ${compact ? 12 : 15}px Outfit`
+                    : `500 ${compact ? 10 : 12}px Outfit`,
                   color: isActive ? "#fff" : has ? "rgba(255,255,255,0.55)" : "rgba(255,255,255,0.25)",
                   transition: "color 150ms ease",
                 }}>
                   {String.fromCharCode(64 + n)}
                 </span>
                 <span style={{
-                  width: 4, height: 4, borderRadius: "50%", background: "#fff",
+                  width: compact ? 3 : 4, height: compact ? 3 : 4, borderRadius: "50%", background: "#fff",
                   opacity: isActive ? 1 : 0, transition: "opacity 150ms ease",
                 }} />
               </button>
