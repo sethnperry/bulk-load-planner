@@ -6281,6 +6281,16 @@ as a leaf component. **Takeaway for next time**: after adding or changing
 anything at the root layout / provider level, restart the dev server
 before trusting what it shows, don't debug the app code first.
 
+**Recurred the same day, pass #4, with no layout/provider file touched
+this time** -- the exact same "No QueryClient set" 500 appeared on a
+dev server that had been running continuously through a `git checkout
+main` + merge (a lot of file churn under an already-live server, not a
+provider edit specifically). A restart fixed it identically. Broadens
+the takeaway above: it's not really about *which* file changed, it's
+about *how much changed on disk while the dev server kept running* --
+after a branch checkout or merge, not just a provider edit, restart
+before trusting what's shown.
+
 ### Performance pass #4: terminals catalog consolidation (2026-09-01)
 
 The deferred follow-up from Performance pass #3, done the same day on its
