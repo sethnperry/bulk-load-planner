@@ -7168,6 +7168,136 @@ every width (the uniform-scale fix from the previous entry still holds).
 `tsc --noEmit` and `next build` both clean. Genuinely worth a second
 real-device look once redeployed.
 
+### Landscape layout, third pass: symmetric 3-column composition, inline header tabs, and a real centering bug found live (2026-09-02, later same day)
+
+User's next follow-up (still working from the same real Android device)
+gave a much more specific target layout, described in five numbered
+points rather than a general complaint -- read and implemented close to
+verbatim, not reinterpreted:
+
+1. **Buttons (Equipment, Location, Temperature) shift LEFT.**
+2. **Compartments remain centered** -- just the compartments and the CG
+   slider, nothing else riding along with them.
+3. **Plan Slots, Recap, Points, Reload Button shift to the right side.**
+4. **Header**: "this allows a wide gap in the header between the nav
+   hamburger and the bell/sprocket. Shift the Tabs up in between them by
+   reducing the header height."
+5. **Never let anything shift off the sides -- vertical scroll is fine,
+   horizontal scroll is not.**
+
+**`app/planner/page.tsx` -- symmetric 3-column composition, always.**
+The isWide-conditional 2-vs-3-column split from the previous two passes
+(a narrower landscape got compartments+buttons only, with recap either a
+third column or a below-row depending on a 1024px breakpoint) is gone
+entirely -- every landscape width now uses the SAME composition: left
+column (Equipment/Location/Temp, `mainInfoStack`, order:1), center
+column (compartments + CG slider, unchanged, order:2), right column
+(Plan Slots/Load button/recap/points, new `rightStack`, order:3) -- just
+uniformly scaled to fit via the same `transform:scale` mechanism from
+the previous pass. `isWide` itself (the `useIsLandscape(1024)` call, and
+every branch that read it) was removed outright as genuinely dead code
+once nothing depended on it anymore -- including the now-pointless
+`isWide` prop PlannerControls.tsx never actually used.
+
+Two reference widths simplified to one: `REF_BUTTONS_W`(279)/
+`REF_RECAP_W`(240) replaced by a single `REF_SIDE_W`(279) used for BOTH
+side columns -- this is what makes point 2 ("compartments remain
+centered") literally true rather than approximately true: two
+differently-sized side columns can only ever make the center column
+*appear* roughly centered depending on their size difference; two
+IDENTICAL side columns make it centered by construction, regardless of
+content differences (recap/dial content is simply top-aligned within its
+column's fixed width, same as the left column, rather than sized to fit
+its own content).
+
+`loadButtonEl`, `loadBlockedMsgEl`, `footnoteEl` extracted as plain
+consts (same pattern already established for `mainInfoStack`/
+`recapPointsEl`) so the exact same elements render inside `mainInfoStack`
+in portrait (unchanged position) or inside the new `rightStack` in
+landscape, never both. `recapPointsEl` itself dropped its `"row" |
+"column"` mode parameter -- "row" mode only ever served the now-removed
+below-row layout; nothing calls it anymore, so the parameter and its
+conditional styling were removed rather than left as a dead, never-taken
+branch. Preset dial (`presetDialEl`) moved for a third time this session
+-- full-width (round one) -> above the left column (round two, "keep the
+header just above the left buttons") -> now inside `rightStack` (this
+pass, "Plan Slots... shift to the right side"). Each move superseded the
+last rather than layering on top of it.
+
+**`app/planner/CalculatorLayoutClient.tsx` -- inline header tabs,
+shared across every tab, not just Planner.** `TabBar` gained an `inline`
+prop (alongside the existing `compact`): smaller per-tab slot (84px, not
+120), smaller text, no `marginTop` (it's now a flex child of the icon
+row itself, not a stacked block below it), and no underline row at all
+(the active tab is still readable from its own bolder/brighter text
+alone; the underline's own height was exactly the kind of space this
+mode exists to reclaim). `centerTab`/`onScroll`'s own scroll-snap-
+centering logic needed no changes -- both already read real element
+rects rather than a hardcoded tab width, so they adapt automatically.
+`Header` now calls `useIsLandscape()` directly and, when true, renders
+`<TabBar inline />` in the SAME row as the hamburger/bell/gear (`flex:1`
+between them) instead of rendering the full `<TabBar>` as its own row
+underneath -- shrinking the header's total height, which is what
+actually frees the vertical room point 1-3's column reshuffle needed.
+Applies to every route under this shared layout (Dispatch/Insights/
+Planner/Cards/Vault), not just Planner, live-verified on Cards too --
+there was no reason a driver would want a taller header specifically
+elsewhere.
+
+**A real, separate centering bug found live while verifying point 2,
+not assumed working from a clean typecheck**: the scaled block's own
+`margin: "0 auto"` centering (in place since the sizing-model rewrite
+two passes ago) turns out to only correctly center a box NARROWER than
+its container. Once `rowScale` actually needs to shrink the block
+(`naturalRowWidth` 1128px exceeding the available width -- the common
+case on a real phone, not an edge case), the PRE-scale layout box is
+WIDER than its parent, and CSS resolves that "negative auto margin"
+case to zero rather than splitting the overflow evenly -- so the box
+sat flush against its container's left edge instead of centered, and
+`transform:scale()` then shrank it around THAT off-center point,
+visibly shifting the whole block right. Confirmed by direct measurement
+before touching anything: at 844px wide, the block's own rendered
+center landed 160px right of the container's true center, with the
+right (recap/points) column's edge extending to x=982 in an 844px
+viewport -- silently clipped by `ShellChrome`'s own `overflow:"hidden"`
+rather than producing a scrollbar (`document.body`'s own overflow
+measurement read a deceptive 0 throughout, since the clip happens at a
+nested ancestor, not `document.body` itself). This is almost certainly
+what the previous pass's real-device "compartments shifted off screen"
+report actually was, not (or not only) the Android-nav-bar theory that
+pass defensively hardened `useElementWidth` against -- that fix wasn't
+wrong to make, but this centering bug would have produced the exact
+same symptom on its own, on any landscape width narrower than 1128px
+reference-equivalent, nav bar or not.
+
+Fixed with the standard `left: 50%` + `transform:
+translateX(-50%) scale(rowScale)` pattern instead of `margin: "0 auto"`
+-- `left:50%` resolves against the PARENT's width (always correct,
+regardless of the element's own size), and `translateX(-50%)` shifts
+back by half of the ELEMENT's OWN layout width (also always correct,
+regardless of relative sizing) -- unlike margin:auto, this combination
+centers correctly whether the box is larger or smaller than its
+container.
+
+**Live-verified** via the demo login route at 844x390 and 1400x800:
+compartments' own measured center matches the viewport's true center
+exactly at both widths (422.0 at 844px, 700.0 at 1400px); both side
+columns measured symmetric (22px margin from each screen edge at both
+widths); bar aspect ratio still exactly 2.103/0.714/2.443 (the uniform-
+scale property from the previous pass survived this restructure, as
+expected -- nothing about the scale math itself changed, only the
+column composition and the centering method); zero truncated text,
+zero horizontal overflow at either width. Inline header tabs confirmed
+on both the Planner and Cards routes. Portrait re-checked at 375x812,
+pixel-unaffected (both the page and the header's own inline-tabs branch
+are isLandscape-gated). `tsc --noEmit` and `next build` clean
+throughout. Not independently verified on a real device this pass --
+worth a third real-device look once redeployed, specifically to confirm
+the centering fix actually resolves what the device screenshot showed
+(a stronger candidate explanation than the previous pass's nav-bar
+theory, per the reasoning above, but still not proven on real hardware
+from this session).
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.

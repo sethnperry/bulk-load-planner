@@ -37,6 +37,7 @@ import {
   themeUnderlineTrack, themeUnderlineActive,
 } from "./theme";
 import type { Role } from "@/lib/ui/driver/role";
+import { useIsLandscape } from "./hooks/useOrientation";
 
 // Terminal Tier pivot (2026-08-03, see CLAUDE.md "Terminal Tier — Build
 // Spec"). Every tab now has a stable, unique id regardless of role --
@@ -81,7 +82,7 @@ function activeTabFor(pathname: string | null): string | "none" {
   return "planner";
 }
 
-function TabBar({ compact }: { compact?: boolean }) {
+function TabBar({ compact, inline }: { compact?: boolean; inline?: boolean }) {
   const pathname = usePathname();
   const router = useRouter();
   const shell = useCalculatorShell();
@@ -139,19 +140,36 @@ function TabBar({ compact }: { compact?: boolean }) {
     }, 80);
   }
 
+  // inline (landscape only, see Header) renders a smaller, denser variant
+  // that sits INSIDE the icon row itself (between the hamburger and
+  // bell/gear), not as its own separate row underneath -- per explicit
+  // device feedback ("this allows a wide gap in the header between the
+  // nav hamburger and the bell/sprocket. Shift the Tabs up in between
+  // them by reducing the header height"). Same tab list, same click/
+  // scroll-snap-centering logic (centerTab/onScroll below don't hardcode
+  // a tab width, they read real element rects, so they adapt to either
+  // size automatically) -- just a smaller per-tab slot (84px, not 120),
+  // smaller text, no marginTop (it's a flex child of the icon row now,
+  // not a stacked block below it), and no underline row (the active tab
+  // is still readable from its own bolder/brighter text alone, and the
+  // underline's own height was exactly the kind of vertical space this
+  // mode exists to reclaim).
+  const tabW = inline ? 84 : 120;
+
   // marginTop is the historical "icon row to tab bar" gap; when the outage
   // banner is showing directly above instead (compact), that gap is
   // redundant/excessive and gets collapsed down to near nothing, per
-  // explicit direction ("remove the space under it").
+  // explicit direction ("remove the space under it"). Inline mode ignores
+  // both -- it's never stacked below anything, so there's no gap to tune.
   return (
-    <div style={{ marginTop: compact ? 2 : 18, flexShrink: 0 }}>
+    <div style={{ marginTop: inline ? 0 : (compact ? 2 : 18), flexShrink: 0 }}>
       <div
         ref={scrollRef}
         onScroll={onScroll}
         className="pt-tabscroll"
         style={{
-          display: "flex", gap: 8, overflowX: "auto", scrollSnapType: "x mandatory",
-          padding: "0 calc(50% - 60px)", WebkitOverflowScrolling: "touch",
+          display: "flex", gap: inline ? 4 : 8, overflowX: "auto", scrollSnapType: "x mandatory",
+          padding: `0 calc(50% - ${tabW / 2}px)`, WebkitOverflowScrolling: "touch",
         }}
       >
         {tabs.map((t) => {
@@ -160,13 +178,16 @@ function TabBar({ compact }: { compact?: boolean }) {
             <div
               key={t.id}
               onClick={() => { if (t.id !== active) router.push(t.href); else centerTab(t.id, true); }}
-              style={{ flex: "0 0 120px", scrollSnapAlign: "center", display: "flex", justifyContent: "center", cursor: "pointer" }}
+              style={{ flex: `0 0 ${tabW}px`, scrollSnapAlign: "center", display: "flex", justifyContent: "center", cursor: "pointer" }}
             >
               <div style={{
-                padding: "14px 2px",
-                font: isActive ? "500 16px Outfit" : "400 14px Outfit",
+                padding: inline ? "4px 2px" : "14px 2px",
+                font: isActive
+                  ? `500 ${inline ? 13 : 16}px Outfit`
+                  : `400 ${inline ? 12 : 14}px Outfit`,
                 color: isActive ? themeTabActive(darkMode) : themeTabInactive(darkMode),
                 transition: "all 150ms ease",
+                whiteSpace: "nowrap" as const,
               }}>
                 {t.label}
               </div>
@@ -174,23 +195,26 @@ function TabBar({ compact }: { compact?: boolean }) {
           );
         })}
       </div>
-      {/* The active segment is a FIXED 120px -- matching each tab's own
-          `flex: "0 0 120px"` slot width above -- instead of a flex:1 third
-          of the whole bar. Scroll-snap-center guarantees the active tab is
-          always horizontally centered in this scroll container, so a
-          fixed-width bar centered the same way lands exactly under it,
+      {/* The active segment is a FIXED tabW -- matching each tab's own
+          `flex: "0 0 <tabW>px"` slot width above -- instead of a flex:1
+          third of the whole bar. Scroll-snap-center guarantees the active
+          tab is always horizontally centered in this scroll container, so
+          a fixed-width bar centered the same way lands exactly under it,
           whatever tab that happens to be, with no per-tab position
           tracking needed. Previously flex:1 made this segment ~1/3 of the
           *entire* tab row regardless of which tab was active or how many
           tabs there were -- always centered on the row as a whole, never
           actually scoped to one tab. Nudged up slightly (negative
           marginTop into the label's own bottom padding) and thickened so
-          it reads as clearly attached to the tab text above it. */}
-      <div style={{ display: "flex", alignItems: "center", marginTop: -4 }}>
-        <div style={{ flex: 1, height: 1, background: themeUnderlineTrack(darkMode) }} />
-        <div style={{ flex: "0 0 120px", height: 3, borderRadius: 2, background: themeUnderlineActive(darkMode) }} />
-        <div style={{ flex: 1, height: 1, background: themeUnderlineTrack(darkMode) }} />
-      </div>
+          it reads as clearly attached to the tab text above it. Skipped
+          entirely in inline mode -- see the header comment above. */}
+      {!inline && (
+        <div style={{ display: "flex", alignItems: "center", marginTop: -4 }}>
+          <div style={{ flex: 1, height: 1, background: themeUnderlineTrack(darkMode) }} />
+          <div style={{ flex: `0 0 ${tabW}px`, height: 3, borderRadius: 2, background: themeUnderlineActive(darkMode) }} />
+          <div style={{ flex: 1, height: 1, background: themeUnderlineTrack(darkMode) }} />
+        </div>
+      )}
     </div>
   );
 }
@@ -227,6 +251,12 @@ function Header({ onOpenSettings }: { onOpenSettings: () => void }) {
   const { darkMode, accentColor } = shell.theme;
   const iconStroke = themeIconStroke(darkMode);
   const pathname = usePathname();
+  // Landscape: tabs move inline into this same icon row (see the render
+  // below and TabBar's own `inline` prop) instead of their own row
+  // underneath -- applies across every tab (Dispatch/Insights/Planner/
+  // Cards/Vault), not just Planner, since Header is the one shared shell
+  // component every route renders through.
+  const isLandscape = useIsLandscape();
 
   // Fetched once here (not inside TerminalOutageBanner itself) so Header
   // can also collapse TabBar's own spacing when the banner actually has
@@ -278,6 +308,16 @@ function Header({ onOpenSettings }: { onOpenSettings: () => void }) {
     }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 16px" }}>
         <NavMenu darkMode={darkMode} />
+        {/* Landscape: the inline tab bar fills the gap between the
+            hamburger and bell/gear right here, on the same row -- the
+            full-width TabBar row below is skipped entirely in this mode
+            (see the render further down), which is what actually
+            shrinks the header's total height. */}
+        {isLandscape && (
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <TabBar inline />
+          </div>
+        )}
         <div style={{ display: "flex", gap: 26, flexShrink: 0, alignItems: "center" }}>
           <BellIcon count={shell.expirations.expiredCount + shell.expirations.warningCount} onClick={() => shell.setExpModalOpen(true)} stroke={iconStroke} />
           <GearIcon onClick={onOpenSettings} stroke={iconStroke} />
@@ -289,7 +329,7 @@ function Header({ onOpenSettings }: { onOpenSettings: () => void }) {
         timeZone={outageBanner.timeZone}
         refresh={outageBanner.refresh}
       />
-      <TabBar compact={!!outageBanner.tickerMessage} />
+      {!isLandscape && <TabBar compact={!!outageBanner.tickerMessage} />}
     </div>
   );
 }
