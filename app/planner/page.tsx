@@ -250,7 +250,7 @@ export default function CalculatorPage() {
   // with a FIXED bar height (from the prior pass's own revert) is exactly
   // what produced that -- width kept growing independently of height as
   // the container widened, flattening the bars more and more on a wider
-  // screen. The fix: compartments and both side columns each get a FIXED,
+  // screen. The fix: compartments and the side column each get a FIXED,
   // unconditional reference pixel width (not a %), and the whole block is
   // wrapped in one CSS transform:scale() sized to fit whatever width is
   // actually available -- a uniform scale preserves every internal
@@ -261,21 +261,20 @@ export default function CalculatorPage() {
   // its container now scale together, so whatever fits at the reference
   // 1x size fits at any scale.
   //
-  // Always a 3-column composition now (buttons left, compartments
-  // centered, dial+Load+recap right -- see mainInfoStack/rightStack
-  // below), regardless of how wide the landscape viewport is -- per
-  // explicit follow-up asking for a real device: "Compartments remain
-  // centered... Plan Slots, Recap, Points, Reload Button shift to the
-  // right side." The earlier isWide-conditional 2-vs-3-column split (a
-  // narrower landscape got a below-row instead of a third column) is
-  // gone -- every landscape width uses the same composition now, just
-  // scaled uniformly to fit, so compartments can only ever be genuinely
-  // centered if both side columns share the same reference width
-  // (REF_SIDE_W, not two different ones for buttons vs. recap).
+  // Back to a 2-column composition (buttons+cards+recap+points left,
+  // compartments right -- see mainInfoStack below) after a same-day
+  // detour through 3 columns (compartments centered, a dedicated right
+  // column for Plan Slots/Load/recap/points). Explicit follow-up asked
+  // to revert that: "keep all the buttons and cards on the left
+  // including recap and points... landscape mode will just shift the
+  // compartments to the right." REF_SIDE_W stays a single shared
+  // constant (not renamed back to REF_BUTTONS_W) since it's still
+  // accurate -- there's still exactly one side column, it just now holds
+  // more than buttons alone.
   const REF_COMPARTMENTS_W = 550;
   const REF_SIDE_W = 279; // the no-truncation floor already established live in an earlier pass
   const REF_GAP = 10;
-  const naturalRowWidth = REF_SIDE_W * 2 + REF_COMPARTMENTS_W + REF_GAP * 2;
+  const naturalRowWidth = REF_SIDE_W + REF_COMPARTMENTS_W + REF_GAP;
   const { ref: scaleWrapRef, width: availableRowWidth } = useElementWidth<HTMLDivElement>();
   // 0 = "not measured yet" (first paint, before the ResizeObserver's
   // initial read) -- fall back to natural size (scale 1) rather than a
@@ -1640,25 +1639,19 @@ const lastProductInfoById = useMemo(() => {
         </div>
       )}
 
-      {/* Preset dial -- portrait only here (full-width, directly under the
-          tab bar, same spot it's always had). Landscape moves it into the
-          RIGHT-hand column instead (see rightStack below, part of the
-          "Plan Slots, Recap, Points, Reload Button shift to the right
-          side" follow-up) -- reversed from an even earlier version of
-          this pass that kept it full-width so its own centering landed
-          under the Planner tab, then a later one that put it above the
-          LEFT column instead. Both of those predate the header itself
-          shrinking (the tab bar now lives inline in the icon row in
-          landscape, see CalculatorLayoutClient.tsx's Header) and the
-          buttons/recap column swap (buttons now left, not right) --
-          the dial living in the right column is what's actually
-          consistent with the current layout, not a further compromise on
-          top of it. */}
-      {!isLandscape && (
-        <div>
-          {presetDialEl}
-        </div>
-      )}
+      {/* Preset dial -- full-width, directly under the tab bar, same spot
+          in every orientation, "just like portrait mode" per explicit
+          follow-up. This is the third and (for now) final home for this
+          element within this session's landscape work -- it briefly
+          lived above the left column, then inside a landscape-only
+          right-hand column, before this reverted back to matching
+          portrait exactly. The shared header's own TabBar got a `thin`
+          variant instead (see CalculatorLayoutClient.tsx) as the actual
+          "reduce header height" lever this time, rather than moving or
+          shrinking the dial itself. */}
+      <div>
+        {presetDialEl}
+      </div>
 
       <PresetActionSheet
         open={presetSheetSlot != null}
@@ -1720,15 +1713,16 @@ const lastProductInfoById = useMemo(() => {
         );
       })()}
 
-      {/* Landscape: buttons (Equipment/Location/Temp) left, compartments
-          centered, Plan Slots + Load + recap/points right -- three fixed-
-          width columns, always, at every landscape width. In portrait the
-          outer/inner wrappers below collapse to plain unstyled block-level
-          divs (no flex, no transform), reproducing today's plain
-          sequential stack exactly (children keep their own existing
-          marginTop values for spacing) -- no doubled gap+margin, no
-          scaling logic in play at all. `order` places each column without
-          touching where its block actually sits in the JSX/DOM.
+      {/* Landscape: buttons+cards (Equipment/Location/Temp/Load/recap/
+          points), all of it, stay together on the LEFT; compartments
+          shift to the RIGHT -- two fixed-width columns, always, at every
+          landscape width. In portrait the outer/inner wrappers below
+          collapse to plain unstyled block-level divs (no flex, no
+          transform), reproducing today's plain sequential stack exactly
+          (children keep their own existing marginTop values for spacing)
+          -- no doubled gap+margin, no scaling logic in play at all.
+          `order` places each column without touching where its block
+          actually sits in the JSX/DOM.
 
           **Sizing model: fixed-width + uniform scale**, not percentage-
           flex -- per explicit follow-up, with real screenshots showing an
@@ -1737,12 +1731,9 @@ const lastProductInfoById = useMemo(() => {
           are still stretching the width and getting the compartments out
           of proportion with different size screens... it is a
           representation of the side profile of a trailer. If anything
-          scales up, everything scales up, buttons included." Every column
-          gets a FIXED reference pixel width (REF_COMPARTMENTS_W center,
-          REF_SIDE_W both sides -- the SAME value on both sides, not two
-          different ones, is what makes compartments genuinely centered
-          rather than merely squeezed between two differently-sized
-          neighbors) instead of a % of the container, and the whole
+          scales up, everything scales up, buttons included." Both columns
+          get a FIXED reference pixel width (REF_COMPARTMENTS_W/
+          REF_SIDE_W) instead of a % of the container, and the whole
           fixed-size block is wrapped in one CSS `transform:scale(rowScale)`
           sized to fit whatever width is actually available (measured live
           via useElementWidth, not approximated from viewport width -- see
@@ -1752,19 +1743,23 @@ const lastProductInfoById = useMemo(() => {
           bar height, font size, gaps -- everything inside grows or
           shrinks by the exact same factor, so the compartments always
           keep the same real-world-proportioned shape regardless of
-          screen size, and the side columns scale right along with them
+          screen size, and the side column scales right along with them
           ("everything scales up... buttons included") instead of being
           negotiated independently via flex-grow.
 
-          A real device's own follow-up moved Plan Slots (the preset
-          dial), the Load button, and recap/points from the LEFT column to
-          the RIGHT one (previously the dial lived above Equipment, and
-          recap/points were either a third column or a below-row
-          depending on an isWide breakpoint that no longer exists --
-          every landscape width now gets this same 3-column composition,
-          just uniformly scaled to fit, per "Compartments remain
-          centered... Plan Slots, Recap, Points, Reload Button shift to
-          the right side"). */}
+          This 2-column shape is a reversion, not the original design --
+          a same-day detour went to 3 columns (compartments centered
+          between a left buttons column and a right Plan-Slots/Load/
+          recap/points column) before explicit follow-up asked to
+          simplify back: "keep all the buttons and cards on the left
+          including recap and points... landscape mode will just shift
+          the compartments to the right." The preset dial also reverted
+          to its original full-width spot above this row (see its own
+          render site) rather than living inside either column -- "sub
+          tabs/plan slots below them just like portrait mode." The real
+          "reduce header height" change this time is in the shared
+          header's own TabBar `thin` variant (CalculatorLayoutClient.tsx),
+          not a restructuring of this row. */}
       {/* ref is always attached, not just isLandscape ? ... : undefined --
           useElementWidth's ResizeObserver setup runs once on mount with an
           empty dependency array, so if the ref were only conditionally set
@@ -1781,8 +1776,8 @@ const lastProductInfoById = useMemo(() => {
           assumed working from a clean typecheck. margin:auto only
           correctly centers a box NARROWER than its container; once
           rowScale actually needs to shrink this block (naturalRowWidth >
-          available width -- the common case on a real phone, where 1128
-          exceeds most landscape widths), the pre-scale layout box is
+          available width -- a common case on a real phone, at whatever
+          naturalRowWidth currently computes to), the pre-scale layout box is
           WIDER than its parent, and auto margins resolve the (negative)
           overflow to zero rather than splitting it evenly -- so the box
           silently sits flush against its container's left edge instead
@@ -2209,63 +2204,28 @@ const lastProductInfoById = useMemo(() => {
               <span style={chevron}>›</span>
             </button>
 
-            {/* Portrait only -- Load button, its blocked-message, recap/
-                points, and the footnote all move to the right-hand column
-                in landscape instead (see rightStack below). Extracted as
-                loadButtonEl/loadBlockedMsgEl/footnoteEl, plain consts, so
-                the exact same elements render in whichever one of the two
-                spots actually applies for this orientation, never both. */}
-            {!isLandscape && (
-              <>
-                {loadButtonEl}
-                {loadBlockedMsgEl}
-                {recapPointsEl()}
-                {footnoteEl}
-              </>
-            )}
-
-          </div>
-        );
-
-        // Right-hand column, landscape only -- Plan Slots (the preset
-        // dial), the Load button, its blocked-message, recap/points, and
-        // the footnote. Per explicit follow-up against a real device:
-        // "Plan Slots, Recap, Points, Reload Button shift to the right
-        // side... this allows a wide gap in the header... [and lets]
-        // compartments remain centered." Always rendered as a real
-        // column now (previously this was isWide-conditional -- a third
-        // column on wide screens, a full-width row underneath on
-        // narrower ones) -- the "row" layout mode recapPointsEl used to
-        // support for that below-row case is gone along with it (see its
-        // own simplified signature above), since every landscape width
-        // now gets the same 3-column composition, just uniformly scaled
-        // to fit like the rest of this block.
-        const rightStack = (
-          <div style={{ width: REF_SIDE_W, flexShrink: 0, order: 3, display: "flex", flexDirection: "column", gap: 10 }}>
-            {presetDialEl}
+            {/* Load button, its blocked-message, recap/points, and the
+                footnote -- always rendered right here now, in every
+                orientation. Reverted from a two-pass detour (first a
+                landscape-only right-hand column, before that a
+                conditional third/below-row split) per explicit follow-up
+                asking to go back to keeping everything except
+                compartments together on one side: "keep all the buttons
+                and cards on the left including recap and points...
+                landscape mode will just shift the compartments to the
+                right." Extracted as loadButtonEl/loadBlockedMsgEl/
+                footnoteEl consts purely so this block's own JSX doesn't
+                repeat itself -- not because they render anywhere else
+                anymore. */}
             {loadButtonEl}
             {loadBlockedMsgEl}
             {recapPointsEl()}
             {footnoteEl}
+
           </div>
         );
 
-        // Fragment, not a bare object -- this whole IIFE is itself a JSX
-        // child of the scaled row below, so its return value has to be a
-        // valid React node. Bundling both possible pieces (mainInfoStack
-        // always; rightStack landscape-only) into one Fragment from this
-        // one IIFE, rather than hoisting them out to real component-scope
-        // consts above the render's `return`, keeps every closure-local
-        // value above (loadReport, recapValid, recapLabel, incentiveEnabled,
-        // etc.) in the one scope that already computes them -- no need to
-        // thread a second return value through the component body just for
-        // this.
-        return (
-          <>
-            {mainInfoStack}
-            {isLandscape && rightStack}
-          </>
-        );
+        return mainInfoStack;
       })()}
       </div>
       </div>

@@ -82,7 +82,7 @@ function activeTabFor(pathname: string | null): string | "none" {
   return "planner";
 }
 
-function TabBar({ compact, inline }: { compact?: boolean; inline?: boolean }) {
+function TabBar({ compact, thin }: { compact?: boolean; thin?: boolean }) {
   const pathname = usePathname();
   const router = useRouter();
   const shell = useCalculatorShell();
@@ -140,35 +140,35 @@ function TabBar({ compact, inline }: { compact?: boolean; inline?: boolean }) {
     }, 80);
   }
 
-  // inline (landscape only, see Header) renders a smaller, denser variant
-  // that sits INSIDE the icon row itself (between the hamburger and
-  // bell/gear), not as its own separate row underneath -- per explicit
-  // device feedback ("this allows a wide gap in the header between the
-  // nav hamburger and the bell/sprocket. Shift the Tabs up in between
-  // them by reducing the header height"). Same tab list, same click/
-  // scroll-snap-centering logic (centerTab/onScroll below don't hardcode
-  // a tab width, they read real element rects, so they adapt to either
-  // size automatically) -- just a smaller per-tab slot (84px, not 120),
-  // smaller text, no marginTop (it's a flex child of the icon row now,
-  // not a stacked block below it), and no underline row (the active tab
-  // is still readable from its own bolder/brighter text alone, and the
-  // underline's own height was exactly the kind of vertical space this
-  // mode exists to reclaim).
-  const tabW = inline ? 84 : 120;
+  // thin (landscape only, see Header) is a smaller, denser variant of
+  // this SAME full-width row -- reduced padding/font/marginTop -- not a
+  // structural change. An earlier version of this pass merged the tab
+  // bar inline into the icon row instead (sharing space with the
+  // hamburger/bell/gear); explicit follow-up rejected that outright in
+  // favor of keeping this row's own existing full-width centering
+  // ("tabs centered on screen... sub tabs/plan slots below them just
+  // like portrait mode... just shifted up into a thin header row") --
+  // still its own row, still keeps the underline (unlike that earlier
+  // attempt, which dropped it), just tighter. Tab slot width (tabW)
+  // itself is untouched -- 120px works fine full-width on a phone
+  // screen at any orientation, it was never the source of the height
+  // problem.
+  const tabW = 120;
 
   // marginTop is the historical "icon row to tab bar" gap; when the outage
   // banner is showing directly above instead (compact), that gap is
   // redundant/excessive and gets collapsed down to near nothing, per
-  // explicit direction ("remove the space under it"). Inline mode ignores
-  // both -- it's never stacked below anything, so there's no gap to tune.
+  // explicit direction ("remove the space under it"). thin uses an even
+  // smaller gap than compact's own 2px -- this is the real "reduce header
+  // height" lever for landscape.
   return (
-    <div style={{ marginTop: inline ? 0 : (compact ? 2 : 18), flexShrink: 0 }}>
+    <div style={{ marginTop: thin ? 2 : (compact ? 2 : 18), flexShrink: 0 }}>
       <div
         ref={scrollRef}
         onScroll={onScroll}
         className="pt-tabscroll"
         style={{
-          display: "flex", gap: inline ? 4 : 8, overflowX: "auto", scrollSnapType: "x mandatory",
+          display: "flex", gap: 8, overflowX: "auto", scrollSnapType: "x mandatory",
           padding: `0 calc(50% - ${tabW / 2}px)`, WebkitOverflowScrolling: "touch",
         }}
       >
@@ -181,10 +181,10 @@ function TabBar({ compact, inline }: { compact?: boolean; inline?: boolean }) {
               style={{ flex: `0 0 ${tabW}px`, scrollSnapAlign: "center", display: "flex", justifyContent: "center", cursor: "pointer" }}
             >
               <div style={{
-                padding: inline ? "4px 2px" : "14px 2px",
+                padding: thin ? "6px 2px" : "14px 2px",
                 font: isActive
-                  ? `500 ${inline ? 13 : 16}px Outfit`
-                  : `400 ${inline ? 12 : 14}px Outfit`,
+                  ? `500 ${thin ? 14 : 16}px Outfit`
+                  : `400 ${thin ? 13 : 14}px Outfit`,
                 color: isActive ? themeTabActive(darkMode) : themeTabInactive(darkMode),
                 transition: "all 150ms ease",
                 whiteSpace: "nowrap" as const,
@@ -206,15 +206,14 @@ function TabBar({ compact, inline }: { compact?: boolean; inline?: boolean }) {
           tabs there were -- always centered on the row as a whole, never
           actually scoped to one tab. Nudged up slightly (negative
           marginTop into the label's own bottom padding) and thickened so
-          it reads as clearly attached to the tab text above it. Skipped
-          entirely in inline mode -- see the header comment above. */}
-      {!inline && (
-        <div style={{ display: "flex", alignItems: "center", marginTop: -4 }}>
-          <div style={{ flex: 1, height: 1, background: themeUnderlineTrack(darkMode) }} />
-          <div style={{ flex: `0 0 ${tabW}px`, height: 3, borderRadius: 2, background: themeUnderlineActive(darkMode) }} />
-          <div style={{ flex: 1, height: 1, background: themeUnderlineTrack(darkMode) }} />
-        </div>
-      )}
+          it reads as clearly attached to the tab text above it. Always
+          rendered now, thin included -- "just like portrait mode" means
+          keeping this, not dropping it. */}
+      <div style={{ display: "flex", alignItems: "center", marginTop: -4 }}>
+        <div style={{ flex: 1, height: 1, background: themeUnderlineTrack(darkMode) }} />
+        <div style={{ flex: `0 0 ${tabW}px`, height: 3, borderRadius: 2, background: themeUnderlineActive(darkMode) }} />
+        <div style={{ flex: 1, height: 1, background: themeUnderlineTrack(darkMode) }} />
+      </div>
     </div>
   );
 }
@@ -251,11 +250,17 @@ function Header({ onOpenSettings }: { onOpenSettings: () => void }) {
   const { darkMode, accentColor } = shell.theme;
   const iconStroke = themeIconStroke(darkMode);
   const pathname = usePathname();
-  // Landscape: tabs move inline into this same icon row (see the render
-  // below and TabBar's own `inline` prop) instead of their own row
-  // underneath -- applies across every tab (Dispatch/Insights/Planner/
-  // Cards/Vault), not just Planner, since Header is the one shared shell
-  // component every route renders through.
+  // Landscape: TabBar stays a genuinely separate row below the icon row
+  // (reverted -- an earlier version of this pass merged it inline with
+  // the hamburger/bell/gear instead, which explicit follow-up rejected:
+  // "let's try tabs centered on screen, sub tabs/plan slots below them
+  // just like portrait mode... just shifted up into a thin header row" --
+  // a full-width row is what actually centers on the true screen center,
+  // the way TabBar's own scroll-snap-centering has always worked;
+  // sharing a row with two unequal-width icon groups doesn't). What DOES
+  // change from portrait is TabBar's own `thin` variant (smaller padding/
+  // font, tighter marginTop -- see its own definition) -- that's the
+  // real "reduce header height" lever this time, not a structural merge.
   const isLandscape = useIsLandscape();
 
   // Fetched once here (not inside TerminalOutageBanner itself) so Header
@@ -308,16 +313,6 @@ function Header({ onOpenSettings }: { onOpenSettings: () => void }) {
     }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 16px" }}>
         <NavMenu darkMode={darkMode} />
-        {/* Landscape: the inline tab bar fills the gap between the
-            hamburger and bell/gear right here, on the same row -- the
-            full-width TabBar row below is skipped entirely in this mode
-            (see the render further down), which is what actually
-            shrinks the header's total height. */}
-        {isLandscape && (
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <TabBar inline />
-          </div>
-        )}
         <div style={{ display: "flex", gap: 26, flexShrink: 0, alignItems: "center" }}>
           <BellIcon count={shell.expirations.expiredCount + shell.expirations.warningCount} onClick={() => shell.setExpModalOpen(true)} stroke={iconStroke} />
           <GearIcon onClick={onOpenSettings} stroke={iconStroke} />
@@ -329,7 +324,7 @@ function Header({ onOpenSettings }: { onOpenSettings: () => void }) {
         timeZone={outageBanner.timeZone}
         refresh={outageBanner.refresh}
       />
-      {!isLandscape && <TabBar compact={!!outageBanner.tickerMessage} />}
+      <TabBar compact={!!outageBanner.tickerMessage} thin={isLandscape} />
     </div>
   );
 }

@@ -7298,6 +7298,72 @@ the centering fix actually resolves what the device screenshot showed
 theory, per the reasoning above, but still not proven on real hardware
 from this session).
 
+### Landscape layout, fourth pass: simplified back to 2 columns, header tabs revert to their own (thinner) row (2026-09-02, later same day)
+
+Same real-device thread, one more follow-up -- the 3-column composition
+from the immediately preceding entry didn't land: "lets try tabs
+centered on screen, sub tabs/plan slots below them just like portrait
+mode. just shifted up into a thin header row. then lets just keep all
+the buttons and cards on the left including recap and points... landscape
+mode will just shift the compartments to the right, center tabs, reduce
+header height and remove space." Implemented as a deliberate revert-and-
+refine rather than layering further changes on top of an already-
+churned structure.
+
+**`app/planner/page.tsx` -- back to 2 columns.** `rightStack` removed
+entirely; `loadButtonEl`/`loadBlockedMsgEl`/`recapPointsEl()`/`footnoteEl`
+all fold back into `mainInfoStack` unconditionally (previously split
+between "portrait inline" and "landscape rightStack" branches) --
+Equipment, Location, Temp, Load, its blocked-message, recap, points, and
+the footnote are ALL one left column again, exactly matching portrait's
+own stacking order, just narrower. `naturalRowWidth` back to
+`REF_SIDE_W + REF_COMPARTMENTS_W + REF_GAP` (was `REF_SIDE_W*2 +
+REF_COMPARTMENTS_W + REF_GAP*2` for the 3-column shape). `presetDialEl`
+reverted to its original full-width render site, above the two-column
+row, unconditional on orientation -- its third home this session (full-
+width -> above the left column only -> inside the right column -> back
+to full-width), each one superseding the last rather than compounding.
+
+**`app/planner/CalculatorLayoutClient.tsx` -- inline-tabs-in-icon-row
+reverted, `TabBar` gets a `thin` variant instead.** The previous pass's
+`inline` prop (tabs sharing the icon row with the hamburger/bell/gear,
+no underline) is gone. `TabBar` now takes `thin` -- same full-width row
+as portrait (still gets its own row below the icon row, still keeps the
+underline, still uses the same 120px tab slots so `centerTab`/`onScroll`
+need no changes), just tighter: smaller padding (`"6px 2px"` vs
+`"14px 2px"`), smaller font (14/13px vs 16/14px active/inactive), and a
+smaller `marginTop` (2px vs 18px) between the icon row and this row.
+`Header` passes `thin={isLandscape}` alongside the existing `compact`
+outage-banner prop. This is the actual "reduce header height" lever
+this pass -- a real, visible reduction, but a tightened STANDALONE row
+rather than a structural merge with the icon row, which is what
+correctly keeps the tab bar's own centering aligned to the true screen
+center (a row sharing space with two unequal icon groups doesn't center
+the same way a full-width row does) and satisfies "sub tabs/plan slots
+below them just like portrait mode" -- same shape as portrait, just
+thinner.
+
+**Live-verified** via the demo login route at 844x390 and 1400x800: left
+column (buttons+cards+recap+points, order:1) and right column
+(compartments, order:2) both render with zero truncation and zero
+horizontal overflow at both widths; bar aspect ratio still exactly
+2.103/0.714/2.443 (unchanged from the previous two passes -- the
+fixed-width + uniform-scale mechanism and the `left:50%` +
+`translateX(-50%)` centering fix both carried over untouched, only the
+column composition and dial placement reverted). Preset dial confirmed
+full-width above the row, its own centering intact. Header confirmed
+visibly shorter than the original two-full-row header while keeping
+tabs on their own row with the underline. Portrait re-checked at
+375x812, pixel-unaffected (`thin` only applies when `isLandscape`, and
+the dial/column code paths for portrait were never touched by any of
+today's landscape passes). `tsc --noEmit` and `next build` clean
+throughout. Not independently verified on a real device this pass --
+this is the fourth landscape iteration in one day driven entirely by
+real-device screenshots the user captured and described; each pass
+narrowed in on what actually worked in practice rather than what looked
+reasonable in the Browser pane alone, so a fifth round of feedback
+wouldn't be surprising.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.
