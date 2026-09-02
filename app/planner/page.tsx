@@ -44,6 +44,7 @@ import { useFuelTempPrediction } from "./hooks/useFuelTempPrediction";
 import PlannerControls from "./sections/PlannerControls";
 import PresetDial from "./sections/PresetDial";
 import { useIsLandscape } from "./hooks/useOrientation";
+import { useElementWidth } from "./hooks/useElementWidth";
 import PresetActionSheet from "./components/PresetActionSheet";
 
 // ── Modals ─────────────────────────────────────────────────────────────────────
@@ -240,6 +241,44 @@ export default function CalculatorPage() {
   // screens"). Same hook, just a second call with a bigger minWidth --
   // no changes needed in useOrientation.ts itself.
   const isWide = useIsLandscape(1024);
+
+  // Landscape sizing model, replacing the percentage-flex-basis approach
+  // from earlier passes entirely -- per explicit follow-up rejecting that
+  // whole direction with real screenshots of the distortion it caused:
+  // "we are still stretching the width and getting the compartments out
+  // of proportion with different size screens... it is a representation
+  // of the side profile of a trailer. If anything scales up, everything
+  // scales up, buttons included." A percentage-of-container width paired
+  // with a FIXED bar height (from the prior pass's own revert) is exactly
+  // what produced that -- width kept growing independently of height as
+  // the container widened, flattening the bars more and more on a wider
+  // screen. The fix: compartments and the info-card column each get a
+  // FIXED, unconditional reference pixel width (not a %), and the whole
+  // block (both columns, plus the recap/points column when isWide) is
+  // wrapped in one CSS transform:scale() sized to fit whatever width is
+  // actually available -- a uniform scale preserves every internal
+  // proportion (bar aspect ratio, font-to-container fit, gaps) exactly,
+  // at any screen size, which independent per-axis flex growth can't
+  // guarantee. This also incidentally solves the truncation problem the
+  // percentage approach kept fighting (minWidth floors, etc.): text and
+  // its container now scale together, so whatever fits at the reference
+  // 1x size fits at any scale.
+  const REF_COMPARTMENTS_W = 550;
+  const REF_BUTTONS_W = 279; // the no-truncation floor already established live in the previous pass
+  const REF_RECAP_W = 240;
+  const REF_GAP = 10;
+  const naturalRowWidth = isWide
+    ? REF_COMPARTMENTS_W + REF_BUTTONS_W + REF_RECAP_W + REF_GAP * 2
+    : REF_COMPARTMENTS_W + REF_BUTTONS_W + REF_GAP;
+  const { ref: scaleWrapRef, width: availableRowWidth } = useElementWidth<HTMLDivElement>();
+  // 0 = "not measured yet" (first paint, before the ResizeObserver's
+  // initial read) -- fall back to natural size (scale 1) rather than a
+  // near-zero scale for that one frame. Bounded [0.5, 1.6] so a very
+  // narrow embed or a very wide ultrawide monitor both stay legible/
+  // sane rather than unbounded.
+  const rowScale = isLandscape && availableRowWidth > 0
+    ? Math.min(Math.max(availableRowWidth / naturalRowWidth, 0.5), 1.6)
+    : 1;
 
   // Dispatch's real home is the Dispatch tab, not this one -- but whatever
   // actually lands the app on bare /planner (e.g. a login redirect that
@@ -1663,58 +1702,72 @@ const lastProductInfoById = useMemo(() => {
 
       {/* Landscape: compartments+slider and the info-card stack sit side by
           side instead of stacked -- see useOrientation.ts. In portrait
-          this row collapses to flexDirection:"column" with gap:0, which
-          reproduces today's plain sequential stack exactly (the children
-          keep their own existing marginTop values for spacing, same as
-          before this wrapper existed -- no doubled gap+margin). `order`
-          swaps which one is visually on which side without touching
-          where each block actually sits in the JSX/DOM -- compartments
-          go right, info-cards go left. The preset dial (above,
-          full-width) is unaffected by this swap either way.
+          the outer/inner wrappers below collapse to plain unstyled
+          block-level divs (no flex, no transform), reproducing today's
+          plain sequential stack exactly (children keep their own
+          existing marginTop values for spacing) -- no doubled gap+margin,
+          no scaling logic in play at all. `order` swaps which one is
+          visually on which side without touching where each block
+          actually sits in the JSX/DOM -- compartments go right,
+          info-cards go left. The preset dial (above, full-width) is
+          unaffected by this swap either way.
 
-          Compartments hold a FIXED 65% in every landscape width tier,
-          narrow phone-landscape or wide desktop alike -- per explicit
-          follow-up rejecting an earlier version of this pass that
-          shrank it to 50% on wide screens to make room for a third
-          column: "we definitely don't want to stretch the compartment
-          height at all. The compartment section needs to stay in the
-          same proportion, same ratio no matter the screen size... just
-          shift it over. Take space out of the buttons." So on isWide
-          (>=1024px -- tablet/desktop, wider than any real phone's
-          landscape width), the third column (order:3, recap + incentive-
-          points cards, see below) and its own extra width come entirely
-          out of the info-card column's share (35% -> 18%, third column
-          17%), never out of compartments'. Below isWide, that same pair
-          instead renders as its own full-width row underneath this whole
-          two-column row (order:4, see recapPointsEl below) rather than
-          competing for room in an already-tight phone-landscape width.
-          alignItems:"stretch" only matches the CONTAINER heights between
-          columns -- PlannerControls.tsx's own bar height is a fixed
-          clamp regardless of orientation (also reverted this same pass,
-          see its own header comment), so a taller sibling column just
-          leaves harmless blank space below the bars, never stretches
-          them.
+          **Sizing model, rewritten from percentage-flex to fixed-width
+          + uniform scale** -- per explicit follow-up, with real
+          screenshots showing the previous (percentage-basis) approach
+          visibly distorting the compartment bars wider and flatter as
+          the screen got wider: "we are still stretching the width and
+          getting the compartments out of proportion with different size
+          screens... it is a representation of the side profile of a
+          trailer. If anything scales up, everything scales up, buttons
+          included." A percentage-of-container width paired with a FIXED
+          bar height (the previous pass's own revert) is exactly what
+          caused that -- width kept growing independently of height as
+          the container widened. Fixed here by giving every column a
+          FIXED reference pixel width (REF_COMPARTMENTS_W/REF_BUTTONS_W/
+          REF_RECAP_W above) instead of a % of the container, then
+          wrapping the whole fixed-size block in one CSS
+          `transform:scale(rowScale)` sized to fit whatever width is
+          actually available (measured live via useElementWidth, not
+          approximated from viewport width the way an earlier pass's
+          `calc(100vh - 200px)` guess was -- see that pass's own
+          post-mortem in CLAUDE.md for why a measured value beats a
+          guessed one here). A uniform scale can't distort anything: bar
+          width, bar height, font size, gaps -- everything inside grows
+          or shrinks by the exact same factor, so the compartments always
+          keep the same real-world-proportioned shape regardless of
+          screen size, and buttons/recap scale right along with them
+          ("everything scales up... buttons included") instead of being
+          negotiated independently via flex-grow.
 
-          flexWrap:"wrap" is what lets the below-row (order:4,
-          flex-basis 100%) fall onto its own line under the two/three
-          columns instead of needing to render outside this wrapper
-          entirely. The columns themselves use grow-RATIO flex values
-          with flex-basis 0% (`"65 1 0%"`, not `"1 1 65%"`) rather than
-          percentage bases -- a real bug hit wiring this up: with wrap
-          enabled, percentage bases that sum to exactly 100% still
-          overflow once the row's own `gap` is added on top, and a
-          wrapping container resolves an overflowing line by giving EACH
-          item its own line rather than shrinking to fit (shrink only
-          applies within an already-decided line) -- every column ended
-          up full-width and stacked. flex-basis 0% sidesteps this
-          entirely: a 0% hypothetical size always fits on the current
-          line regardless of gap, and the grow ratio still distributes
-          the real leftover width correctly afterward. */}
-      <div style={{
-        display: "flex", flexDirection: isLandscape ? "row" : "column", flexWrap: isLandscape ? "wrap" : "nowrap",
-        gap: isLandscape ? 10 : 0, alignItems: isLandscape ? "stretch" : "flex-start",
-      }}>
-      <div style={isLandscape ? { flex: "65 1 0%", minWidth: 0, order: 2 } : { width: "100%" }}>
+          flexWrap:"wrap" (on the fixed-width, ALREADY-scaled inner
+          container -- transform doesn't change an element's own layout
+          box size, so flex-wrap's fit calculations still see the true
+          pre-scale `naturalRowWidth`, entirely unaffected by whatever
+          rowScale happens to be) is what lets the below-row (order:4,
+          flex-basis 100%, non-wide only) fall onto its own line under
+          the two columns, still fully inside the scaled block -- it
+          scales right along with everything else, it just doesn't need
+          its own dedicated reference width the way the 3 side-by-side
+          columns do, since flex-basis 100% is unambiguous regardless of
+          the container's fixed width. */}
+      {/* ref is always attached, not just isLandscape ? ... : undefined --
+          useElementWidth's ResizeObserver setup runs once on mount with an
+          empty dependency array, so if the ref were only conditionally set
+          (attached the first time isLandscape flips true, on a LATER
+          render than mount, e.g. after the SSR-safe portrait-default
+          hook resolves) that one-time effect would already have run and
+          returned early against a still-null ref, permanently starving
+          rowScale of any real measurement. Always attaching it means the
+          observer is live from the very first render regardless of which
+          orientation that render happens to be. */}
+      <div ref={scaleWrapRef} style={isLandscape ? { width: "100%" } : undefined}>
+      <div style={isLandscape ? {
+        width: naturalRowWidth, margin: "0 auto",
+        transform: `scale(${rowScale})`, transformOrigin: "top center",
+        display: "flex", flexDirection: "row", flexWrap: "wrap", gap: REF_GAP,
+      } : { display: "flex", flexDirection: "column" }}>
+      <div style={isLandscape ? { width: REF_COMPARTMENTS_W, flexShrink: 0, order: 2 } : { width: "100%" }}>
       <PlannerControls
         styles={styles}
         selectedTrailerId={selectedTrailerId}
@@ -1947,22 +2000,14 @@ const lastProductInfoById = useMemo(() => {
         const mainInfoStack = (
           <div style={{
             marginTop: 6, display: "flex", flexDirection: "column", gap: 10,
-            // Wide only: the row is now taller than this stack's own
-            // natural content height (see minHeight on the row wrapper
-            // above), and its cards shouldn't stretch to fill that --
-            // center them as a group instead of leaving all the extra
-            // space stacked at the bottom.
-            // minWidth 279px (not 0) on isWide -- the same real ceiling
-            // found for the non-wide 65/35 split (a smaller flex-basis
-            // than that, in ABSOLUTE pixels, truncates this column's own
-            // two-field rows regardless of what % it computes to on a
-            // given screen). A percentage alone can't guarantee that
-            // floor at every width -- confirmed live at 1400px wide, 18%
-            // (252px) already truncated "Truck · 25184-A" down to
-            // "Truck · 2...". Below that floor, this column simply keeps
-            // more than its nominal 18% share; the recap/points column
-            // (which has less text per line) absorbs the difference.
-            ...(isLandscape ? { flex: `${isWide ? 18 : 35} 1 0%`, minWidth: isWide ? 279 : 0, order: 1 } : {}),
+            // Fixed reference width (REF_BUTTONS_W), not a percentage --
+            // see the sizing-model comment above the row wrapper. Scales
+            // uniformly with everything else via the shared
+            // transform:scale on the enclosing fixed-width row, so this
+            // never needs its own truncation-avoidance floor the way the
+            // percentage approach did -- text and container scale
+            // together by construction.
+            ...(isLandscape ? { width: REF_BUTTONS_W, flexShrink: 0, order: 1 } : {}),
           }}>
 
             {/* Equipment card — two-up Truck / Trailer */}
@@ -2130,7 +2175,7 @@ const lastProductInfoById = useMemo(() => {
         );
 
         // Fragment, not a bare object -- this whole IIFE is itself a JSX
-        // child of the row wrapper below, so its return value has to be a
+        // child of the scaled row below, so its return value has to be a
         // valid React node. Bundling all three possible placements
         // (mainInfoStack always; the wide third column; the non-wide
         // below-row) into one Fragment from this one IIFE, rather than
@@ -2139,20 +2184,24 @@ const lastProductInfoById = useMemo(() => {
         // value above (loadReport, recapValid, recapLabel, incentiveEnabled,
         // etc.) in the one scope that already computes them -- no need to
         // thread a second return value through the component body just for
-        // this. The below-row (order:4, flex-basis 100%) relies on the row
-        // wrapper's flexWrap:"wrap" (see below) to fall onto its own new
-        // line instead of trying to squeeze into the same row.
+        // this. The below-row (order:4, flex-basis 100%) relies on the
+        // scaled row's own flexWrap:"wrap" (see the sizing-model comment
+        // above) to fall onto its own new line instead of trying to
+        // squeeze into the same row -- still fully inside the fixed-width,
+        // scaled block, so it scales along with everything else even
+        // though it doesn't need its own reference width the way the
+        // side-by-side columns do.
         return (
           <>
             {mainInfoStack}
             {isWide && (
-              <div style={{ flex: "17 1 0%", minWidth: 240, order: 3, display: "flex", flexDirection: "column", justifyContent: "center" }}>
+              <div style={{ width: REF_RECAP_W, flexShrink: 0, order: 3, display: "flex", flexDirection: "column", justifyContent: "center" }}>
                 {recapPointsEl("column")}
               </div>
             )}
             {isLandscape && !isWide && (
-              <div style={{ flex: "1 1 100%", order: 4 }}>
-                {/* No marginTop here -- the row wrapper's own flex "gap"
+              <div style={{ flexBasis: "100%", order: 4 }}>
+                {/* No marginTop here -- the scaled row's own flex "gap"
                     already spaces wrapped lines apart (row-gap applies to
                     wrapped flex lines the same as grid), so an explicit
                     margin on top of that would double the spacing. */}
@@ -2162,6 +2211,7 @@ const lastProductInfoById = useMemo(() => {
           </>
         );
       })()}
+      </div>
       </div>
 
 

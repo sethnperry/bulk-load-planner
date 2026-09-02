@@ -6996,6 +6996,90 @@ and 844px — zero truncated nodes and no wrapped stat lines at any of the
 three. Portrait re-checked at 375x812, pixel-unaffected. `tsc --noEmit`
 and `next build` clean throughout.
 
+### Landscape sizing rewritten again: fixed-width block + uniform CSS scale, replacing percentage-flex entirely (2026-09-02, same day)
+
+The fixed-percentage-plus-fixed-height compromise from the previous
+entry was itself rejected the same day, with two real desktop
+screenshots as evidence: "we are still stretching the width and getting
+the compartments out of proportion with different size screens... it is
+a representation of the side profile of a trailer. If anything scales
+up, everything scales up, buttons included." Root cause: compartments'
+width was still a flex-grow RATIO (`"65 1 0%"`) with no upper bound,
+while height was a plain fixed clamp (the previous entry's own revert)
+-- on a genuinely wide desktop window, width kept growing to fill
+available space while height stayed pinned, visibly flattening the bars
+more the wider the window got. The two earlier landscape passes'
+underlying model -- percentage-of-container sizing -- was the thing that
+had to go, not just one more tuning pass on top of it.
+
+**New model**: every column (compartments, buttons, and recap when
+isWide) gets a fixed REFERENCE pixel width (`REF_COMPARTMENTS_W = 550`,
+`REF_BUTTONS_W = 279` -- the no-truncation floor already established
+live in the prior pass, `REF_RECAP_W = 240`), laid out in a
+`naturalRowWidth`-wide flex row (839px for compartments+buttons, 1089px
+with recap on isWide). That whole fixed-width row is wrapped in one CSS
+`transform: scale(rowScale)` (`transformOrigin: "top center"`, so it
+stays visually centered at any scale), where `rowScale =
+availableWidth / naturalRowWidth`, clamped to [0.5, 1.6]. A uniform
+transform can't distort anything -- bar width, bar height, font size,
+gaps, all multiply by the exact same factor -- so the compartments keep
+the same real-world-proportioned shape at every screen size, and
+buttons/recap scale right along with them instead of being negotiated
+independently through flex-grow. This also incidentally solves the
+truncation problem the percentage approach kept fighting with minWidth
+floors: text and its container now scale together by construction, so
+whatever fits at the 1x reference size fits at any scale.
+
+**`PlannerControls.tsx`**: `barH`'s landscape branch changed from
+`clamp(70px, 22vh, 130px)` to a flat `"100px"`. The vh-clamp was a
+SECOND, uncoordinated scaling mechanism (varies with viewport HEIGHT)
+layered on top of the new WIDTH-driven outer scale -- exactly what was
+still producing different bar aspect ratios at different screen sizes
+even after the fixed-width rewrite above, confirmed live (aspect ratios
+differed between 844px and 1400px viewports until this was fixed, and
+matched exactly afterward). One fixed pre-scale reference value is all
+the outer transform needs.
+
+**`app/planner/hooks/useElementWidth.ts`** (new) -- measures the fixed-
+width block's actual available container width live via a callback ref
+(not a plain `useRef` + one-time `useEffect`, which would miss the
+element being replaced by a different DOM node later) plus a
+`ResizeObserver`. **A second real bug found and fixed while verifying
+this against real values, not assumed working from a clean typecheck**:
+in this session's own browser-automation test environment,
+`ResizeObserver` fired exactly once (for the element's initial size) and
+never again despite a real, confirmed subsequent resize of that same
+element (page.tsx's `isLandscape`/`isWide` hooks resolve asynchronously
+after their SSR-safe portrait-default first paint, and that resolution
+changes the element's parent's `maxWidth`/padding -- a genuine layout-
+affecting size change) -- debug-logged directly (`sync:1068` once, zero
+`ro:` entries, ever) rather than guessed at. Worked around with two
+redundant fallbacks matching this codebase's own established pattern
+(`FitHeading.tsx` already uses a `window.resize` listener for exactly
+this class of problem): a `window` `"resize"` listener, and a short
+burst of settle-timers after mount (0/50/150/400/1000ms) that re-measure
+regardless of whether `ResizeObserver` itself ever fires again. Confirmed
+live this fully fixes it: the debug readout went from a permanently
+stuck `avail=1068` (which is exactly what `styles.page`'s OLD
+maxWidth:1100/padding:16 would produce at that viewport -- the
+observer's one-and-only reading, taken before the corrected wide-mode
+page style ever applied) to the correct, live `avail=1364` matching the
+DOM's actual current `clientWidth` at that same moment.
+
+**Live-verified** via the demo login route, the definitive check this
+whole rewrite needed -- bar aspect ratio (width÷height) measured
+identical to three decimal places across every tested width: 2.103 /
+0.714 / 2.443 (three compartments) at 844px, 1024px (the isWide
+boundary), AND 1400px, all matching exactly -- confirming genuinely
+uniform scaling with zero distortion at any screen size, the actual
+literal ask. Zero truncated nodes at any of the three widths either.
+Portrait re-checked at 375x812, pixel-unaffected (untouched code path).
+`tsc --noEmit` and `next build` clean throughout. Temporary debug
+instrumentation (a visible on-screen readout, plus a
+`window.__ewDebug` log array in the hook) was added to actually observe
+the `ResizeObserver` bug directly rather than guess at it, then removed
+before this was considered done.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.

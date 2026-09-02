@@ -74,15 +74,22 @@ export default function PlannerControls(props: any) {
           }}>
             {(() => {
               const n = compartments.length;
-              // In landscape this strip sits in a narrower side column (see
-              // page.tsx), not the full viewport width -- and vertical
-              // space, not horizontal, is what's actually scarce there. The
-              // vw-based formula below grows exactly backwards for that
-              // case (wider viewport => taller bars, right when height is
-              // tightest), so landscape gets its own vh-based clamp instead
-              // of just a narrower slice of the same vw formula.
+              // Landscape: a single FIXED reference height (not a vh- or
+              // vw-based formula) -- page.tsx's own uniform transform:scale
+              // on the whole compartments+buttons(+recap) block is what
+              // adapts this to the actual screen size now, and it needs
+              // ONE stable pre-scale value to scale correctly. A
+              // viewport-relative formula here would be a SECOND,
+              // uncoordinated scaling mechanism layered on top of the
+              // outer one -- exactly what caused the bars to visibly
+              // distort (different aspect ratios at different screen
+              // sizes) in an earlier pass: this component's own vh-clamp
+              // varied with viewport HEIGHT while the outer wrapper scaled
+              // by WIDTH, so the two compounded into a shape that changed
+              // with screen size instead of staying locked. 100px is the
+              // reference value the outer scale multiplies from.
               const barH = isLandscape
-                ? "clamp(70px, 22vh, 130px)"
+                ? "100px"
                 : n >= 5 ? "min(110px, 20vw)" : n >= 4 ? "min(120px, 22vw)" : "min(130px, 25vw)";
 
               const ordered = [...compartments]
