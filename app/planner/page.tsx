@@ -231,6 +231,15 @@ export default function CalculatorPage() {
   // useOrientation.ts. Computed once here and passed down (to
   // PlannerControls) rather than each consumer calling matchMedia itself.
   const isLandscape = useIsLandscape();
+  // A second, much wider threshold -- tablet/desktop, not just a phone
+  // turned sideways (the largest real phones still land under ~930px in
+  // landscape). Below this, the recap/points cards live in their own row
+  // under the two-column layout; at or above it there's enough real width
+  // to give them a third column of their own instead, per explicit
+  // follow-up direction ("slide them to the far right ... on really wide
+  // screens"). Same hook, just a second call with a bigger minWidth --
+  // no changes needed in useOrientation.ts itself.
+  const isWide = useIsLandscape(1024);
 
   // Dispatch's real home is the Dispatch tab, not this one -- but whatever
   // actually lands the app on bare /planner (e.g. a login redirect that
@@ -1668,9 +1677,62 @@ const lastProductInfoById = useMemo(() => {
           narrower; 65/35 was the narrowest info-card column (~279px at
           844px wide) that still measured 0 truncated nodes in a live
           check -- the actual ceiling on how far this split can go, not
-          an arbitrary number. */}
-      <div style={{ display: "flex", flexDirection: isLandscape ? "row" : "column", gap: isLandscape ? 10 : 0, alignItems: isLandscape ? "stretch" : "flex-start" }}>
-      <div style={isLandscape ? { flex: "1 1 65%", minWidth: 0, order: 2, display: "flex", flexDirection: "column" } : { width: "100%" }}>
+          an arbitrary number.
+
+          isWide (>=1024px -- tablet/desktop, wider than any real phone's
+          landscape width) adds a THIRD column, order:3, for the recap +
+          incentive-points cards -- per explicit follow-up ("drop the
+          recap and points to be under the buttons and compartments side
+          by side then slide them to the far right ... on really wide
+          screens"). Below isWide, that same pair instead renders as its
+          own full-width row underneath this whole two-column row (see
+          recapPointsEl / the render call below) rather than competing
+          for room in an already-tight phone-landscape width. Either way,
+          pulling those two cards out of the info-card stack is what lets
+          compartments' alignItems:stretch match a SHORTER stack now
+          (Equipment/Location/Temp/Load button only) -- confirmed against
+          the user's own observation that in portrait, the compartment
+          strip's height already roughly matches that same shorter stack
+          once recap/points are excluded from the comparison.
+
+          flexWrap:"wrap" is what lets the below-row (order:4,
+          flex-basis 100%) fall onto its own line under the two/three
+          columns instead of needing to render outside this wrapper
+          entirely. The three columns themselves use grow-RATIO flex
+          values with flex-basis 0% (`"65 1 0%"`, not `"1 1 65%"`) rather
+          than percentage bases -- a real bug hit wiring this up: with
+          wrap enabled, percentage bases that sum to exactly 100% still
+          overflow once the row's own `gap` is added on top, and a
+          wrapping container resolves an overflowing line by giving EACH
+          item its own line rather than shrinking to fit (shrink only
+          applies within an already-decided line) -- every column ended
+          up full-width and stacked. flex-basis 0% sidesteps this
+          entirely: a 0% hypothetical size always fits on the current
+          line regardless of gap, and the grow ratio still distributes
+          the real leftover width correctly afterward. */}
+      <div style={{
+        display: "flex", flexDirection: isLandscape ? "row" : "column", flexWrap: isLandscape ? "wrap" : "nowrap",
+        gap: isLandscape ? 10 : 0, alignItems: isLandscape ? "stretch" : "flex-start",
+        // Wide only: without this, the row's own height is only ever as
+        // tall as its shortest-content column naturally needs (the
+        // Equipment/Location/Temp/Load-button stack, a few hundred px),
+        // leaving most of a genuinely tall desktop viewport as dead black
+        // space below -- confirmed live at 1400x800, ~340px of empty
+        // space under a 299px-tall row. This pulls the row down to
+        // (roughly) fill the viewport instead, which -- combined with
+        // alignItems:stretch above and the compartments column's own
+        // flex:1 chain in PlannerControls.tsx -- is what actually makes
+        // the compartment bars grow to fill that space too ("zoom the
+        // whole thing in"), not just a cosmetic height on an empty div.
+        // 200px is an approximation of the header + tab bar + bottom
+        // breathing room above/below this row, not an exact measurement
+        // of either (both vary with banners/content) -- deliberately not
+        // applied to narrower landscape (a real phone turned sideways
+        // already has genuinely little vertical room and needs to
+        // scroll normally, not stretch into space that doesn't exist).
+        ...(isWide ? { minHeight: "calc(100vh - 200px)" } : {}),
+      }}>
+      <div style={isLandscape ? { flex: `${isWide ? 50 : 65} 1 0%`, minWidth: 0, order: 2, display: "flex", flexDirection: "column" } : { width: "100%" }}>
       <div style={isLandscape ? { flex: 1, display: "flex", flexDirection: "column" } : undefined}>
       <PlannerControls
         styles={styles}
@@ -1691,6 +1753,7 @@ const lastProductInfoById = useMemo(() => {
         }}
         selectedTerminalId={location.selectedTerminalId ?? ""}
         isLandscape={isLandscape}
+        isWide={isWide}
       />
       </div>
 
@@ -1835,8 +1898,82 @@ const lastProductInfoById = useMemo(() => {
 
         const hasEquipment = Boolean(equipment.selectedCombo);
 
-        return (
-          <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 10, ...(isLandscape ? { flex: "1 1 35%", minWidth: 0, order: 1 } : {}) }}>
+        // Recap + incentive-points cards, extracted out of the main
+        // stack below so they can render in one of three spots (see the
+        // two-/three-column comment above the row wrapper): inline in
+        // portrait (mode "column", exactly where they always were),
+        // stacked in the new wide-mode third column (mode "column"
+        // again -- same look, just relocated), or side by side in their
+        // own full-width row under the two-column layout on a narrower
+        // landscape screen (mode "row"). One render function instead of
+        // three copies, so a future edit to either card can't drift
+        // between spots the way this project has hit before with
+        // duplicated UI (see CustomSelect.tsx's own header comment).
+        const recapPointsEl = (mode: "row" | "column") => (
+          <div style={{ display: "flex", flexDirection: mode, gap: 10 }}>
+            <div style={{ borderRadius: 16, background: "rgba(255,255,255,0.03)", padding: "10px 14px", ...(mode === "row" ? { flex: 1, minWidth: 0 } : {}) }}>
+              {recapLabel && (
+                <button
+                  type="button"
+                  onClick={handleRecallLastLoad}
+                  style={{
+                    background: "none", border: "none", padding: 0, marginBottom: 6, cursor: "pointer",
+                    fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.4)",
+                    textTransform: "uppercase" as const, letterSpacing: 0.4, textAlign: "left" as const,
+                  }}
+                >
+                  {recapLabel}
+                </button>
+              )}
+              <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8 }}>
+                <div style={{ fontSize: 20, fontWeight: 700, color: "#fff" }}>{plannedGalText}</div>
+                <div style={{ fontSize: 20, fontWeight: 700, color: actualColor, textAlign: "right" as const }}>{actualText}</div>
+              </div>
+              <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 4 }}>
+                <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", textAlign: "right" as const }}>
+                  Target {targetText} · <span style={{ color: diffColor, fontWeight: 600 }}>Diff {diffText}</span>
+                </div>
+              </div>
+              {planUsesReferenceApi && planRows.length > 0 && (
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#fb923c", marginTop: 4 }}>⚠ using ref API</div>
+              )}
+            </div>
+
+            {/* Incentive running-average card -- see the effects that
+                compute incentiveEnabled/payPeriodType/avgRecoveredPoints
+                above. Only rendered once the company has actually turned
+                the incentive system on. */}
+            {incentiveEnabled && (
+              <div style={{ borderRadius: 16, background: "rgba(255,255,255,0.03)", padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center", ...(mode === "row" ? { flex: 1, minWidth: 0 } : {}) }}>
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.4)", textTransform: "uppercase" as const, letterSpacing: 0.4 }}>This Load</div>
+                  <div style={{ fontSize: 20, fontWeight: 700, color: "#4ade80" }}>
+                    {loadReport?.recovered_points != null ? loadReport.recovered_points.toFixed(1) : "—"} pts
+                  </div>
+                </div>
+                <div style={{ textAlign: "right" as const }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.4)", textTransform: "uppercase" as const, letterSpacing: 0.4 }}>
+                    {PERIOD_TYPE_LABELS[payPeriodType]} Avg
+                  </div>
+                  <div style={{ fontSize: 20, fontWeight: 700, color: "#fff" }}>
+                    {avgRecoveredPoints != null ? `${avgRecoveredPoints.toFixed(1)} pts` : "—"}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+
+        const mainInfoStack = (
+          <div style={{
+            marginTop: 6, display: "flex", flexDirection: "column", gap: 10,
+            // Wide only: the row is now taller than this stack's own
+            // natural content height (see minHeight on the row wrapper
+            // above), and its cards shouldn't stretch to fill that --
+            // center them as a group instead of leaving all the extra
+            // space stacked at the bottom.
+            ...(isLandscape ? { flex: `${isWide ? 27 : 35} 1 0%`, minWidth: 0, order: 1, ...(isWide ? { justifyContent: "center" } : {}) } : {}),
+          }}>
 
             {/* Equipment card — two-up Truck / Trailer */}
             {(() => {
@@ -1987,58 +2124,12 @@ const lastProductInfoById = useMemo(() => {
               <div style={{ ...styles.error, textAlign: "center" as const }}>{loadBlockedMsg}</div>
             )}
 
-            {/* Load summary -- recalls the last COMPLETED load, see
-                recapValid's comment above for the full reasoning. */}
-            <div style={{ borderRadius: 16, background: "rgba(255,255,255,0.03)", padding: "10px 14px" }}>
-              {recapLabel && (
-                <button
-                  type="button"
-                  onClick={handleRecallLastLoad}
-                  style={{
-                    background: "none", border: "none", padding: 0, marginBottom: 6, cursor: "pointer",
-                    fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.4)",
-                    textTransform: "uppercase" as const, letterSpacing: 0.4, textAlign: "left" as const,
-                  }}
-                >
-                  {recapLabel}
-                </button>
-              )}
-              <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8 }}>
-                <div style={{ fontSize: 20, fontWeight: 700, color: "#fff" }}>{plannedGalText}</div>
-                <div style={{ fontSize: 20, fontWeight: 700, color: actualColor, textAlign: "right" as const }}>{actualText}</div>
-              </div>
-              <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 4 }}>
-                <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", textAlign: "right" as const }}>
-                  Target {targetText} · <span style={{ color: diffColor, fontWeight: 600 }}>Diff {diffText}</span>
-                </div>
-              </div>
-              {planUsesReferenceApi && planRows.length > 0 && (
-                <div style={{ fontSize: 10, fontWeight: 700, color: "#fb923c", marginTop: 4 }}>⚠ using ref API</div>
-              )}
-            </div>
-
-            {/* Incentive running-average card -- see the effects that
-                compute incentiveEnabled/payPeriodType/avgRecoveredPoints
-                above. Only rendered once the company has actually turned
-                the incentive system on. */}
-            {incentiveEnabled && (
-              <div style={{ borderRadius: 16, background: "rgba(255,255,255,0.03)", padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.4)", textTransform: "uppercase" as const, letterSpacing: 0.4 }}>This Load</div>
-                  <div style={{ fontSize: 20, fontWeight: 700, color: "#4ade80" }}>
-                    {loadReport?.recovered_points != null ? loadReport.recovered_points.toFixed(1) : "—"} pts
-                  </div>
-                </div>
-                <div style={{ textAlign: "right" as const }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.4)", textTransform: "uppercase" as const, letterSpacing: 0.4 }}>
-                    {PERIOD_TYPE_LABELS[payPeriodType]} Avg
-                  </div>
-                  <div style={{ fontSize: 20, fontWeight: 700, color: "#fff" }}>
-                    {avgRecoveredPoints != null ? `${avgRecoveredPoints.toFixed(1)} pts` : "—"}
-                  </div>
-                </div>
-              </div>
-            )}
+            {/* Recap + incentive-points cards -- only rendered inline here
+                in portrait (mode "column", their original spot). In
+                landscape they move to the third column or the below-row
+                instead -- see the render call below and the two-/
+                three-column comment above the row wrapper. */}
+            {!isLandscape && recapPointsEl("column")}
 
             {/* Footnote */}
             <div style={{ fontSize: 10, color: "rgba(255,255,255,0.32)", textAlign: "center" as const, lineHeight: 1.4 }}>
@@ -2046,6 +2137,39 @@ const lastProductInfoById = useMemo(() => {
             </div>
 
           </div>
+        );
+
+        // Fragment, not a bare object -- this whole IIFE is itself a JSX
+        // child of the row wrapper below, so its return value has to be a
+        // valid React node. Bundling all three possible placements
+        // (mainInfoStack always; the wide third column; the non-wide
+        // below-row) into one Fragment from this one IIFE, rather than
+        // hoisting mainInfoStack/recapPointsEl out to real component-scope
+        // consts above the render's `return`, keeps every closure-local
+        // value above (loadReport, recapValid, recapLabel, incentiveEnabled,
+        // etc.) in the one scope that already computes them -- no need to
+        // thread a second return value through the component body just for
+        // this. The below-row (order:4, flex-basis 100%) relies on the row
+        // wrapper's flexWrap:"wrap" (see below) to fall onto its own new
+        // line instead of trying to squeeze into the same row.
+        return (
+          <>
+            {mainInfoStack}
+            {isWide && (
+              <div style={{ flex: "23 1 0%", minWidth: 0, order: 3, display: "flex", flexDirection: "column", justifyContent: "center" }}>
+                {recapPointsEl("column")}
+              </div>
+            )}
+            {isLandscape && !isWide && (
+              <div style={{ flex: "1 1 100%", order: 4 }}>
+                {/* No marginTop here -- the row wrapper's own flex "gap"
+                    already spaces wrapped lines apart (row-gap applies to
+                    wrapped flex lines the same as grid), so an explicit
+                    margin on top of that would double the spacing. */}
+                {recapPointsEl("row")}
+              </div>
+            )}
+          </>
         );
       })()}
       </div>

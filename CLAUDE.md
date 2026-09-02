@@ -6805,6 +6805,115 @@ expected). Portrait re-checked at 375x812 and confirmed pixel-unaffected
 -- the padding override and both flex-basis changes are landscape-only.
 `tsc --noEmit` and `next build` both clean throughout.
 
+### Recap/points cards relocated out of the info stack; new wide (desktop) tier fills vertical space too (2026-09-02, same day)
+
+User's phone auto-rotate doesn't trigger this app's landscape layout at
+all (confirmed this session it's very likely the installed-PWA manifest
+cache, not a code bug -- `public/manifest.json`'s `orientation` was
+already fixed to `"any"` earlier this session, and a repo-wide grep found
+zero `screen.orientation.lock()` or other JS-side lock anywhere in the
+app; Android/iOS caches a PWA's declared orientation at *install* time,
+so an existing home-screen shortcut keeps the old portrait-locked
+behavior baked in until removed and re-added -- told the user to try
+that). With rotation unavailable, desktop became the only real test
+surface this session -- and at genuine desktop width the two-column
+layout from the round-one/round-two passes looked wrong for a different
+reason: proportions that read fine on a narrow phone-landscape strip
+looked cramped and empty-feeling on a much wider window.
+
+User's own proposed fix, implemented close to verbatim: drop the RECAP +
+incentive-points cards out of the info-card stack entirely (their combined
+height is roughly what made that stack taller than the compartments
+needed to match, per the user's own observation comparing portrait's
+compartment-strip height to the stack "without recap and points"), place
+them side by side in their own row under the two-column layout on a
+normal phone-landscape width, then relocate that same side-by-side pair
+into a third column next to compartments once the screen is genuinely
+wide ("really wide screens... fill up the empty space... zoom the whole
+thing in").
+
+**New `isWide` tier** (`app/planner/page.tsx`): a second call to the same
+`useIsLandscape(minWidth)` hook from the round-one pass, just a bigger
+threshold -- `useIsLandscape(1024)` -- no changes needed in
+`useOrientation.ts` itself. 1024px was picked because the largest real
+phones still land under ~930px in landscape, so this tier can only ever
+be reached by a genuine tablet or desktop window, never a phone turned
+sideways.
+
+**`recapPointsEl(mode: "row" | "column")`**: the RECAP card and the
+incentive running-average card, extracted out of the inline IIFE that
+builds the info-card stack into one render function taking a layout mode
+-- one implementation instead of three independent copies (portrait's
+original spot, the wide third column, the narrower-landscape below-row),
+matching this project's own established "duplicating this is how the bug
+creeps back in" precedent. The whole info-cards IIFE now returns a
+Fragment (`<>{mainInfoStack}{isWide && <div order:3>...}{isLandscape &&
+!isWide && <div order:4>...}</>`) instead of a single div, since it needs
+to place up to three independent pieces into the row now, not one.
+
+**A real, non-obvious CSS bug hit and fixed while wiring the below-row
+in**: giving the row wrapper `flexWrap: "wrap"` (so the order:4 below-row
+element, `flex-basis: 100%`, could fall onto its own line) at first broke
+the two EXISTING columns too -- every column rendered full-width and
+stacked on its own separate line instead of sharing one. Root cause:
+percentage `flex-basis` values that sum to exactly 100% (65%+35%) still
+overflow once the row's own `gap` is added on top, and a *wrapping* flex
+container resolves an overflowing line by giving each item its own line
+(shrink only applies within a line the browser has already decided on --
+it doesn't get a chance to prevent the wrap in the first place). Fixed by
+switching every column from a basis-driven `flex: "1 1 65%"` to a
+grow-RATIO value with `flex-basis: 0%` -- `flex: "65 1 0%"` -- the
+standard pattern for exactly this "N columns that split available width
+by ratio, with gaps" case: a 0% hypothetical size always fits on the
+current line regardless of gap, and the ratio still distributes the real
+leftover width correctly once placed.
+
+**Column split retuned for the new isWide tier**: compartments 50%
+(down from 65, since there's now a third column competing for room),
+info-card stack 27% (down from 35), new recap/points third column 23%,
+vertically centered (`justifyContent: "center"`) rather than stretched --
+two small cards stretching across a much taller matched row height would
+otherwise leave an awkward gap, not fill it meaningfully.
+
+**Filling the actual vertical dead space, the "zoom in" ask**: even after
+the column relocation, wide mode still had a lot of empty space below the
+row -- confirmed live at 1400x800, the row's own height (299px) was only
+ever as tall as its shortest-content column (Equipment/Location/Temp/Load
+button) naturally needed, regardless of how much taller the real
+viewport was, leaving ~340px of dead black space underneath. Root cause:
+`alignItems: stretch` only matches columns to each OTHER's natural
+height within the row -- it says nothing about the row's own height
+relative to the viewport. Fixed with a wide-only `minHeight: "calc(100vh
+- 200px)"` on the row wrapper (200px approximates the header + tab bar +
+bottom breathing room above/below the row, not an exact measurement of
+either -- both vary with banners/content) -- combined with
+`alignItems: stretch` and the compartments column's pre-existing
+`flex: 1` chain (from the round-one pass's height-fill work in
+`PlannerControls.tsx`), this is what actually grows the compartment bars
+themselves to fill the reclaimed space, not just a taller empty div.
+`mainInfoStack` gained `justifyContent: "center"` (wide only) so its
+now-shorter-than-the-row card stack centers as a group in the extra
+height instead of leaving all the slack pinned at the bottom.
+Deliberately NOT applied to narrower landscape -- a real phone turned
+sideways already has genuinely little vertical room and needs to scroll
+normally; forcing it to stretch into a `100vh` that's already fully
+occupied would just be wrong.
+
+**Live-verified** via the demo login route: at 1400x800, the row's
+height grew from 299px to 600px and the previously-~340px gap below it
+dropped to 38px, with no scrollbar introduced (`document.body.scrollHeight
+=== window.innerHeight`); compartment bars visibly much taller in the
+resulting screenshot, RECAP/points column correctly positioned to the
+right of compartments and vertically centered. Re-checked the narrower
+845x390 landscape tier -- unchanged from the round-two pass, below-row
+still renders correctly side by side under the two columns. Re-checked
+right at the isWide boundary (1060x600) -- three columns fit without
+truncation (0 truncated nodes in the same `scrollWidth>clientWidth`
+sweep used for the earlier width-tuning passes). Portrait re-checked at
+375x812 -- pixel-unaffected, RECAP/points render inline in their
+original spot exactly as before. `tsc --noEmit` and `next build` both
+clean throughout.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.
