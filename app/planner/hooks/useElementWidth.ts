@@ -27,10 +27,26 @@
 // subsequent change (debug-logged and confirmed: one "sync" entry, zero
 // "ro" entries, ever). Rather than trust ResizeObserver alone, this also
 // re-measures on a window "resize" listener (the same fallback
-// FitHeading.tsx already uses successfully in this codebase) and on a
-// short burst of settle-timers after mount (0/50/150/400/1000ms) to
-// catch a late layout correction regardless of what caused it or
-// whether ResizeObserver noticed.
+// FitHeading.tsx already uses successfully in this codebase), on
+// visualViewport's own "resize"/"scroll" events (see below), and on a
+// burst of settle-timers after mount, extended further (up to 3s) than
+// the original 1s window -- a real device's hydration/layout settle can
+// plausibly run slower than this session's own test environment, and a
+// timer schedule that ends too early just freezes on whatever the layout
+// happened to look like at that moment, same failure shape as the
+// ResizeObserver gap above.
+//
+// Reported width is capped at window.visualViewport's own width when
+// available, never just the measured element's clientWidth alone --
+// found live, on a real Android phone in landscape: the OS's own
+// on-screen navigation bar rotates to a vertical strip on one edge of
+// the screen in landscape, and can overlap web content the page's own
+// box-model layout has no way to know about (the DOM's clientWidth
+// reflects the CSS layout viewport, which doesn't necessarily shrink for
+// this the way it does for an on-screen keyboard). visualViewport is
+// specifically the API for "how much is actually visible right now,"
+// which is what this hook is really trying to answer -- clientWidth
+// alone can report more room than genuinely exists on-screen.
 //
 // SSR/first-paint-safe: width starts at 0 ("not measured yet" -- callers
 // should treat 0 as a sentinel, not a real width) and only ever changes
@@ -38,13 +54,13 @@
 
 import { useCallback, useRef, useState } from "react";
 
-const SETTLE_DELAYS_MS = [0, 50, 150, 400, 1000];
+const SETTLE_DELAYS_MS = [0, 50, 150, 400, 1000, 2000, 3000];
 
 export function useElementWidth<T extends HTMLElement>() {
   const [width, setWidth] = useState(0);
   const observerRef = useRef<ResizeObserver | null>(null);
   const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
-  const resizeListenerRef = useRef<(() => void) | null>(null);
+  const cleanupFnsRef = useRef<(() => void)[]>([]);
 
   const ref = useCallback((el: T | null) => {
     if (observerRef.current) {
@@ -53,13 +69,14 @@ export function useElementWidth<T extends HTMLElement>() {
     }
     timersRef.current.forEach(clearTimeout);
     timersRef.current = [];
-    if (resizeListenerRef.current) {
-      window.removeEventListener("resize", resizeListenerRef.current);
-      resizeListenerRef.current = null;
-    }
+    cleanupFnsRef.current.forEach((fn) => fn());
+    cleanupFnsRef.current = [];
     if (!el) return;
 
-    const measure = () => setWidth(el.clientWidth);
+    const measure = () => {
+      const vv = typeof window !== "undefined" ? window.visualViewport : null;
+      setWidth(vv ? Math.min(el.clientWidth, vv.width) : el.clientWidth);
+    };
     measure();
 
     const ro = new ResizeObserver(() => measure());
@@ -67,7 +84,17 @@ export function useElementWidth<T extends HTMLElement>() {
     observerRef.current = ro;
 
     window.addEventListener("resize", measure);
-    resizeListenerRef.current = measure;
+    cleanupFnsRef.current.push(() => window.removeEventListener("resize", measure));
+
+    if (window.visualViewport) {
+      const vv = window.visualViewport;
+      vv.addEventListener("resize", measure);
+      vv.addEventListener("scroll", measure);
+      cleanupFnsRef.current.push(() => {
+        vv.removeEventListener("resize", measure);
+        vv.removeEventListener("scroll", measure);
+      });
+    }
 
     timersRef.current = SETTLE_DELAYS_MS.map((ms) => setTimeout(measure, ms));
   }, []);

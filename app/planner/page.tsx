@@ -275,9 +275,15 @@ export default function CalculatorPage() {
   // initial read) -- fall back to natural size (scale 1) rather than a
   // near-zero scale for that one frame. Bounded [0.5, 1.6] so a very
   // narrow embed or a very wide ultrawide monitor both stay legible/
-  // sane rather than unbounded.
+  // sane rather than unbounded. A small fixed margin (ROW_SAFETY_MARGIN_PX)
+  // is subtracted from the measured width before computing scale -- an
+  // exact-fit calculation risks a 1px overflow (and a real, unwanted
+  // horizontal scrollbar/clipped edge) from nothing more than subpixel
+  // rounding; this keeps the scaled block a hair inside the true
+  // available width instead of flush against it.
+  const ROW_SAFETY_MARGIN_PX = 8;
   const rowScale = isLandscape && availableRowWidth > 0
-    ? Math.min(Math.max(availableRowWidth / naturalRowWidth, 0.5), 1.6)
+    ? Math.min(Math.max((availableRowWidth - ROW_SAFETY_MARGIN_PX) / naturalRowWidth, 0.5), 1.6)
     : 1;
 
   // Dispatch's real home is the Dispatch tab, not this one -- but whatever
@@ -1624,21 +1630,24 @@ const lastProductInfoById = useMemo(() => {
         </div>
       )}
 
-      {/* Preset dial -- sits directly under the Planner/Cards/Vault tab bar,
-          same spot in both orientations. Deliberately full-width here (not
-          nested into the narrower landscape compartments column below) --
-          this row spans the same horizontal extent as the tab bar above
-          it, so PresetDial's own "center the active slot within this
-          scroll container" logic lands the active letter under whichever
-          tab is horizontally centered in the header, i.e. Planner, in
-          both orientations, with no extra alignment math needed. Nesting
-          it into the narrower right-hand compartments column (an earlier
-          version of this) put its own center under Cards instead of
-          Planner, since that column is offset right, not centered on the
-          page -- reverted. */}
-      <div>
-        {presetDialEl}
-      </div>
+      {/* Preset dial -- portrait only here (full-width, directly under the
+          tab bar, same spot it's always had). Landscape moves it INSIDE
+          the buttons column instead (see mainInfoStack below) -- reversed
+          from an earlier version of this pass that deliberately kept it
+          full-width so its own centering landed under the Planner tab.
+          Explicit follow-up, from a real device, prioritized reclaiming
+          vertical space over that alignment: "the header portion takes up
+          way too much space... keep the header portion just above the
+          left buttons only" -- on a real phone's landscape height, the
+          empty band this row's full width used to leave above the
+          (taller) compartments column was real, visible dead space; the
+          dial no longer being centered under a specific tab is an
+          accepted tradeoff for reclaiming it. */}
+      {!isLandscape && (
+        <div>
+          {presetDialEl}
+        </div>
+      )}
 
       <PresetActionSheet
         open={presetSheetSlot != null}
@@ -2009,6 +2018,14 @@ const lastProductInfoById = useMemo(() => {
             // together by construction.
             ...(isLandscape ? { width: REF_BUTTONS_W, flexShrink: 0, order: 1 } : {}),
           }}>
+
+            {/* Preset dial, landscape only -- see the comment at its
+                portrait render site above for why it moved here. Sits
+                right above the Equipment card, confined to this column's
+                own REF_BUTTONS_W width (scrollable within that, same as
+                it's always been within any width) rather than spanning
+                the full row. */}
+            {isLandscape && presetDialEl}
 
             {/* Equipment card — two-up Truck / Trailer */}
             {(() => {

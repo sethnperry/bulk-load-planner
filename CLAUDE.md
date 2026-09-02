@@ -7080,6 +7080,94 @@ instrumentation (a visible on-screen readout, plus a
 the `ResizeObserver` bug directly rather than guess at it, then removed
 before this was considered done.
 
+### First real-device landscape test: auto-rotate fixed, dial repositioned, width measurement hardened (2026-09-02, later same day)
+
+User's phone auto-rotate had never worked for this app all session --
+resolved by asking two clarifying questions (install state, platform)
+rather than guessing: installed to the home screen, Android. Confirmed
+both prerequisites were already correct and already deployed to
+production (Vercel auto-deploys `main`, confirmed the latest deploy was
+~19 minutes old at the time) -- `manifest.json`'s `orientation: "any"`
+(this session, earlier) and the service worker's network-first
+`manifest.json` fetch (a pre-existing fix from 2026-08-11, well before
+this session). Neither needed a code change; Android caches a PWA's
+declared orientation at the moment "Add to Home Screen" is tapped, and
+doesn't re-read the manifest for an already-installed shortcut just
+because the site changed later. Fix was device-side: remove the home
+screen icon, revisit the site, re-add it. Confirmed working -- this
+produced the first-ever real-device screenshot of the landscape layout,
+surfacing two real problems no amount of Browser-pane testing could
+have caught.
+
+**1. Header/dial consumed too much vertical space.** On a real phone's
+actual landscape height (much shorter than this session's own
+844x390/1400x800 test viewports, screenshot showed OS status bar + app
+header + tab bar + the full-width preset dial all stacked before any
+real content began -- roughly half the visible screen). The preset dial
+being full-width (a deliberate choice from earlier in this session, so
+its own centering landed under the Planner tab) was the reclaimable
+piece: "the header portion takes up way too much space... keep the
+header portion just above the left buttons only." `presetDialEl` (the
+same element, unchanged) now renders in one of two spots depending on
+`isLandscape` -- portrait keeps its original full-width slot; landscape
+moves it inside `mainInfoStack`, as the first child above the Equipment
+card, confined to that column's own `REF_BUTTONS_W`. This reverses the
+under-Planner-tab centering from earlier in the session -- an accepted,
+explicit tradeoff per this follow-up, not an oversight -- and lets
+compartments start right at the top of the scaled row, immediately under
+the tab bar, with no dial-height gap above it.
+
+**2. Compartments appeared to run off the edge of the screen** -- the
+screenshot showed Android's own on-screen navigation bar rotated to a
+vertical strip on the right edge in landscape (a well-documented Android
+behavior), with app content extending toward or under it. Two defensive
+fixes to `useElementWidth.ts`, since this can't be reproduced or verified
+from this session's own test environment (a real device's Android
+Chrome, not the Browser pane):
+- Measured width is now capped at `window.visualViewport`'s own width
+  (via `Math.min(el.clientWidth, visualViewport.width)`) wherever
+  `visualViewport` is available, not just the observed element's
+  `clientWidth` alone -- `clientWidth` reflects the CSS layout viewport,
+  which doesn't necessarily shrink for an overlapping nav-bar strip the
+  way it does for an on-screen keyboard; `visualViewport` is specifically
+  the API for "how much is actually visible right now." Also now
+  re-measures on `visualViewport`'s own `resize`/`scroll` events, not
+  just `window`'s.
+- The settle-timer schedule (this session's own earlier fix for the
+  `ResizeObserver`-not-firing-again bug) extended from ending at 1s to
+  ending at 3s (`[0, 50, 150, 400, 1000, 2000, 3000]`) -- a real device's
+  hydration/layout settle can plausibly run slower than this session's
+  own test environment, and a schedule that ends too early just freezes
+  on whatever the layout happened to look like at that moment, the exact
+  same failure shape as the original bug.
+- `app/planner/page.tsx`'s `rowScale` calculation now subtracts a fixed
+  8px safety margin from the measured available width before dividing --
+  an exact-fit calculation risks a 1px overflow from nothing more than
+  subpixel rounding, which is a real horizontal scrollbar/clipped edge
+  on a device, not just a cosmetic rounding artifact.
+
+**Explicitly not done, flagged rather than guessed at**: a more
+aggressive fix -- setting `viewport-fit: "cover"` plus explicit
+`env(safe-area-inset-*)` padding, the standard PWA pattern for content
+genuinely rendering *underneath* notches/nav-bars -- was considered and
+deliberately not made. That's a global, page-wide viewport behavior
+change (affecting every route, not just landscape Planner), and doing it
+wrong risks the opposite regression (content that used to correctly
+avoid unsafe areas suddenly extending into them without correct
+compensating padding) -- a materially higher-risk change than hardening
+this hook's own measurement, with no way to verify either direction from
+this session. Worth revisiting specifically if the visualViewport-based
+cap above turns out not to be enough on a real retest.
+
+Not independently live-verified against a real device this pass (no
+access from this session) -- re-checked at 844x390, 1400x800, and
+375x812 in the Browser pane: dial correctly confined to the left column
+in both landscape tiers (portrait unaffected), zero horizontal overflow,
+zero truncated text, bar aspect ratio still exactly 2.103/0.714/2.443 at
+every width (the uniform-scale fix from the previous entry still holds).
+`tsc --noEmit` and `next build` both clean. Genuinely worth a second
+real-device look once redeployed.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.
