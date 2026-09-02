@@ -15,6 +15,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { cardStateFor, type CardState } from "@/app/planner/cards/cardTheme";
 import { formatMDYWithCountdown_, addDaysISO_ } from "@/app/planner/utils/dates";
+import { useTerminalsCatalog } from "@/lib/queries/useTerminalsCatalog";
 
 // cardTheme.ts's EXP_COLOR is calibrated for the light/pearl card-wallet
 // background (Cards tab) -- "valid" there is near-black text, which would
@@ -28,7 +29,7 @@ const DARK_EXP_COLOR: Record<CardState, string> = {
   inactive: "rgba(255,255,255,0.35)",
 };
 
-type TerminalOption = { terminal_id: string; terminal_name: string; city: string | null; state: string | null; renewal_days: number | null };
+type TerminalOption = { terminal_id: string; terminal_name: string | null; city: string | null; state: string | null; renewal_days?: number | null };
 type DriverStatus = { user_id: string; display_name: string; cardedOn: string | null; expiresISO: string | null };
 
 type Props = {
@@ -39,7 +40,12 @@ type Props = {
 
 export default function FleetCardsModal({ open, onClose, companyId }: Props) {
   const [search, setSearch] = useState("");
-  const [terminals, setTerminals] = useState<TerminalOption[]>([]);
+  // Sourced from the shared cached catalog (lib/queries/useTerminalsCatalog.ts)
+  // instead of this modal's own supabase.from("terminals") fetch on every
+  // open -- that shared fetch is also correctly paginated past
+  // PostgREST's 1000-row cap, which this modal's own prior fetch never
+  // was (the live catalog is 1,238+ terminals).
+  const { data: terminals = [] } = useTerminalsCatalog();
   const [picked, setPicked] = useState<TerminalOption | null>(null);
   const [drivers, setDrivers] = useState<DriverStatus[]>([]);
   const [loading, setLoading] = useState(false);
@@ -49,8 +55,6 @@ export default function FleetCardsModal({ open, onClose, companyId }: Props) {
     setSearch("");
     setPicked(null);
     setDrivers([]);
-    supabase.from("terminals").select("terminal_id, terminal_name, city, state, renewal_days")
-      .then(({ data }) => setTerminals((data ?? []) as TerminalOption[]));
   }, [open]);
 
   const filtered = useMemo(() => {

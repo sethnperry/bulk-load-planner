@@ -8,6 +8,7 @@ import { supabase } from "@/lib/supabase/client";
 import type { SetupSession } from "@/lib/setupSession";
 import type { TerminalCatalogRow, TerminalRow } from "../types";
 import { addDaysISO_, isPastISO_ } from "../utils/dates";
+import { useTerminalsCatalog } from "@/lib/queries/useTerminalsCatalog";
 import {
   getTerminalAccess,
   setTerminalAccess,
@@ -93,9 +94,22 @@ export function useTerminals(
   const [termLoading, setTermLoading]   = useState(false);
   const [termError,   setTermError]     = useState<string | null>(null);
 
-  const [terminalCatalog,  setTerminalCatalog]  = useState<TerminalCatalogRow[]>([]);
-  const [catalogLoading,   setCatalogLoading]   = useState(false);
-  const [catalogError,     setCatalogError]     = useState<string | null>(null);
+  // Sourced from the shared cached catalog (lib/queries/useTerminalsCatalog.ts)
+  // instead of this hook's own supabase.from("terminals") fetch on every
+  // mount -- this hook is mounted twice independently (CalculatorShellContext.tsx
+  // and app/planner/cards/page.tsx's dispatch-context instance), so both
+  // now share one underlying fetch. `active !== false` filter applied
+  // here via useMemo, preserving this hook's exact prior behavior (the
+  // raw catalog fetch itself has no active filter -- same "canonical
+  // unfiltered, each consumer decides" precedent as products).
+  const { data: rawTerminalCatalog, isLoading: catalogLoading, error: catalogQueryError } = useTerminalsCatalog();
+  const terminalCatalog = useMemo(
+    () => rawTerminalCatalog.filter((t) => t.active !== false) as TerminalCatalogRow[],
+    [rawTerminalCatalog]
+  );
+  const catalogError = catalogQueryError
+    ? friendlyErrorMessage((catalogQueryError as any)?.message, "Failed to load terminal catalog.")
+    : null;
 
   const [accessDateByTerminalId, setAccessDateByTerminalId] = useState<Record<string, string>>({});
   const [cardingBusyId, setCardingBusyId] = useState<string | null>(null);
@@ -132,27 +146,6 @@ export function useTerminals(
     setTermLoading(false);
   }, [effectiveUserId, isSetup]);
 
-  // ── Load terminal catalog (public — no user scope, direct query is fine) ──
-
-  const loadTerminalCatalog = useCallback(async () => {
-    setCatalogError(null);
-    setCatalogLoading(true);
-    const { data, error } = await supabase
-      .from("terminals")
-      .select("terminal_id, state, city, terminal_name, timezone, active, renewal_days")
-      .order("state",         { ascending: true })
-      .order("city",          { ascending: true })
-      .order("terminal_name", { ascending: true })
-      .returns<TerminalCatalogRow[]>();
-    if (error) {
-      setCatalogError(friendlyErrorMessage(error.message, "Failed to load terminal catalog."));
-      setTerminalCatalog([]);
-    } else {
-      setTerminalCatalog((data ?? []).filter((t) => t.active !== false));
-    }
-    setCatalogLoading(false);
-  }, []);
-
   // ── Refresh terminal access dates ─────────────────────────────────────────
 
   const refreshTerminalAccessForUser = useCallback(async () => {
@@ -180,7 +173,6 @@ export function useTerminals(
   useEffect(() => {
     if (!effectiveUserId) return;
     loadMyTerminals();
-    loadTerminalCatalog();
     refreshTerminalAccessForUser();
   }, [effectiveUserId]); // eslint-disable-line react-hooks/exhaustive-deps
 

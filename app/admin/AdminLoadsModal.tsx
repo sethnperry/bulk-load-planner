@@ -7,6 +7,7 @@ import React, { useEffect, useState } from "react";
 import MyLoadsModal from "@/app/planner/modals/MyLoadsModal";
 import { useLoadHistory } from "@/app/planner/hooks/useLoadHistory";
 import { supabase } from "@/lib/supabase/client";
+import { useTerminalsCatalog } from "@/lib/queries/useTerminalsCatalog";
 
 type Props = {
   open: boolean;
@@ -17,16 +18,16 @@ type Props = {
 
 export default function AdminLoadsModal({ open, onClose, targetUserId, targetDisplayName }: Props) {
   const loadHistory = useLoadHistory(targetUserId);
-  const [terminalCatalog, setTerminalCatalog] = useState<any[]>([]);
+  // Sourced from the shared cached catalog (lib/queries/useTerminalsCatalog.ts)
+  // instead of this modal's own supabase.from("terminals") fetch on every
+  // open -- MyLoadsModal only needs terminal_id/terminal_name for label
+  // resolution, a subset of the shared catalog's columns.
+  const { data: terminalCatalog = [] } = useTerminalsCatalog();
   const [combos, setCombos] = useState<any[]>([]);
 
-  // Load terminal catalog + combos once so MyLoadsModal can resolve labels
+  // Load combos once per open so MyLoadsModal can resolve equipment labels
   useEffect(() => {
     if (!open) return;
-    supabase
-      .from("terminals")
-      .select("terminal_id, terminal_name")
-      .then(({ data }) => setTerminalCatalog(data ?? []));
     supabase
       .from("equipment_combos")
       .select("combo_id, combo_name, truck_id, trailer_id")
