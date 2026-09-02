@@ -22,7 +22,7 @@ export default function PlannerControls(props: any) {
     styles, selectedTrailerId, compLoading, compartments, compError,
     persistedCapForComp, effectiveMaxGallonsForComp, plannedGallonsByComp,
     compPlan, setCompPlan, terminalProducts, selectedComp, onSelectComp,
-    selectedTerminalId,
+    selectedTerminalId, isLandscape,
   } = props;
 
   const shell = useCalculatorShell();
@@ -66,7 +66,16 @@ export default function PlannerControls(props: any) {
           }}>
             {(() => {
               const n = compartments.length;
-              const barH = n >= 5 ? "min(110px, 20vw)" : n >= 4 ? "min(120px, 22vw)" : "min(130px, 25vw)";
+              // In landscape this strip sits in a narrower side column (see
+              // page.tsx), not the full viewport width -- and vertical
+              // space, not horizontal, is what's actually scarce there. The
+              // vw-based formula below grows exactly backwards for that
+              // case (wider viewport => taller bars, right when height is
+              // tightest), so landscape gets its own vh-based clamp instead
+              // of just a narrower slice of the same vw formula.
+              const barH = isLandscape
+                ? "clamp(70px, 22vh, 130px)"
+                : n >= 5 ? "min(110px, 20vw)" : n >= 4 ? "min(120px, 22vw)" : "min(130px, 25vw)";
 
               const ordered = [...compartments]
                 .sort((a: any, b: any) => Number(a.comp_number) - Number(b.comp_number))

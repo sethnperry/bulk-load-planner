@@ -6583,6 +6583,90 @@ re-verified `cancelReset()` in both states it can be reached from
 -> lands on "Vault Locked") -- both correct. Console clean on a
 genuinely fresh tab throughout. `tsc --noEmit` and `next build` clean.
 
+## Landscape layout for the Planner (2026-09-02)
+
+Per explicit direction: rearrange to use the space better when the screen
+is wider than it is tall, instead of just stretching the portrait layout
+sideways. Confirmed via a full grep first that this was genuinely
+greenfield -- zero orientation detection anywhere in the app, no
+`matchMedia`/`innerWidth`/orientation `@media` queries outside the
+marketing site and one unrelated iOS-zoom fix in `/admin`, and
+`public/manifest.json` hard-locked the installed PWA to
+`"orientation": "portrait"` -- so an installed app couldn't reach
+landscape at all regardless of what the CSS did.
+
+**Scoped to the Planner page only** (`app/planner/page.tsx` +
+`app/planner/sections/PlannerControls.tsx`) -- the app's main screen, and
+the one with both a real rearrangement opportunity (compartments and the
+info-card stack have no reason to be one long vertical column) and an
+actively-wrong-for-landscape formula already in the code (compartment bar
+height was `vw`-based, which grows exactly backwards once width is
+abundant and height is scarce). Cards/Vault/Terminal stay simple vertical
+lists for now -- not broken in landscape, just not optimized -- flagged
+as natural follow-ups once this pattern proves out, not built
+speculatively here.
+
+`public/manifest.json`: `"orientation": "portrait"` -> `"any"`. Can only
+be verified on a real installed PWA on a physical device, not from this
+session -- same category as other things (like real email delivery) this
+project has always had to leave unverified from here.
+
+`app/planner/hooks/useOrientation.ts` (new) -- `useIsLandscape(minWidth =
+640)`, following the exact SSR-safe pattern already established for
+`useNow()`/`useTheme.ts` (neutral default on server and the client's
+first paint, resolved only in a client-only effect) to avoid the same
+class of hydration mismatch this project has hit and fixed twice before.
+Uses `matchMedia("(orientation: landscape) and (min-width: 640px)")` with
+a `change` listener so a real device rotation is caught, not just a
+resize. The 640px floor is a deliberate addition beyond the literal
+"wider than tall" ask -- a small phone in landscape (~650px CSS width) is
+often too cramped for two columns to actually look better than the
+existing stack; easy to loosen later if it proves too conservative.
+
+`app/planner/page.tsx`: wrapped `<PlannerControls>` + the CG-slider block
+in one new "compartment column" `<div>`, and added conditional flex
+sizing to the existing info-card stack's `<div>` (already a single
+returned element, no new wrapper needed there) -- both sit inside one new
+parent `<div>` whose `flexDirection` is `isLandscape ? "row" : "column"`.
+In portrait, `gap: 0` and each child keeps its own pre-existing
+`marginTop` values, so the rendered output is provably identical to
+before this change (same DOM structure, same styles, just now reached
+through one pass-through wrapper) -- no JSX was extracted or duplicated,
+which is what makes this safe on the app's single most-used screen.
+
+`PlannerControls.tsx`: new `isLandscape` prop (computed once in
+`page.tsx`, passed down -- not a second `matchMedia` call). Only the bar-
+height formula branches on it: `isLandscape ? "clamp(70px, 22vh, 130px)"
+: <existing vw formula, untouched>`. The file's other `vw`-based font-size
+`clamp()`s were left alone -- font size scaling with viewport width is a
+normal, harmless pattern; height was the one thing landscape actually
+broke.
+
+**Live-verified** via the demo login route, using the Browser pane's
+`resize_window` at a real iPhone-landscape dimension (844×390): portrait
+(`mobile` preset, 375×812) confirmed pixel-identical to the pre-change
+stacked layout; landscape correctly shows compartments (left, ~55%) and
+the info-card stack (right, ~45%) side by side, with the RELOAD button
+and Recap card both fully visible and correctly positioned (`x:468.6,
+width:347.4`, confirmed via `getBoundingClientRect()` -- fits cleanly
+inside the 844px viewport) and zero horizontal overflow
+(`document.body.scrollWidth === clientWidth`). Confirmed the bar-height
+fix is genuinely active, not just present in the code: measured compart-
+ment bar height at 85.8px, exactly `22vh` of the 390px viewport height
+(within the `clamp(70,...,130)` range) -- the old `vw` formula would have
+produced a different value (110px) at this width, so this proves the
+landscape branch is really the one executing, not a coincidence.
+
+A stale Turbopack parse-error message appeared in one long-lived test
+tab's console buffer after these edits, surviving even a `.next` cache
+wipe and full dev-server restart -- but the *page itself* rendered
+completely and correctly (a genuine unrecovered parse error blocks the
+whole page, not just logs a console line) both in that tab and,
+conclusively, in a brand-new tab with zero console errors at all. Same
+category as this project's other documented dev-server staleness
+quirks -- not a real regression, `tsc --noEmit` and `next build` were
+clean throughout and after.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.
