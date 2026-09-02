@@ -275,7 +275,7 @@ export default function CalculatorPage() {
   const REF_SIDE_W = 279; // the no-truncation floor already established live in an earlier pass
   const REF_GAP = 10;
   const naturalRowWidth = REF_SIDE_W + REF_COMPARTMENTS_W + REF_GAP;
-  const { ref: scaleWrapRef, width: availableRowWidth } = useElementWidth<HTMLDivElement>();
+  const { ref: scaleWrapRef, width: availableRowWidth, availableHeight: availableRowHeight } = useElementWidth<HTMLDivElement>();
   // 0 = "not measured yet" (first paint, before the ResizeObserver's
   // initial read) -- fall back to natural size (scale 1) rather than a
   // near-zero scale for that one frame. Bounded [0.5, 1.6] so a very
@@ -290,6 +290,28 @@ export default function CalculatorPage() {
   const rowScale = isLandscape && availableRowWidth > 0
     ? Math.min(Math.max((availableRowWidth - ROW_SAFETY_MARGIN_PX) / naturalRowWidth, 0.5), 1.6)
     : 1;
+  // Per-column scroll bound, landscape only -- per explicit follow-up:
+  // "can we just split the vertical scrolling so each column scrolls
+  // independently? the comps should stay when I scroll down the
+  // buttons." Each column gets its own overflowY:"auto" with this as its
+  // maxHeight, so the taller of the two (usually the buttons/cards
+  // column) scrolls internally instead of the whole page scrolling both
+  // columns together. This is in PRE-scale units (divided by rowScale),
+  // not the true on-screen pixel count -- the column lives INSIDE the
+  // transform:scale(rowScale) block, which doesn't affect flex/scroll
+  // LAYOUT math for its children (only the final visual paint), so a
+  // column's own overflow/maxHeight is resolved in the block's own
+  // unscaled coordinate space; dividing the true available height by
+  // rowScale converts it into that space so the RESULT, after the whole
+  // block gets visually scaled back down/up, correctly fits the real
+  // screen. availableRowHeight itself is measured (useElementWidth's
+  // window.innerHeight/visualViewport.height minus this row's own
+  // getBoundingClientRect().top), not approximated from a guessed
+  // header-height constant -- the same lesson already learned twice this
+  // session for width.
+  const columnMaxHeight = isLandscape && availableRowHeight > 0
+    ? Math.max(0, availableRowHeight - ROW_SAFETY_MARGIN_PX) / rowScale
+    : undefined;
 
   // Dispatch's real home is the Dispatch tab, not this one -- but whatever
   // actually lands the app on bare /planner (e.g. a login redirect that
@@ -1608,8 +1630,16 @@ const lastProductInfoById = useMemo(() => {
   // 1.6x, see rowScale above), so a generous maxWidth here just means a
   // narrow phone's own physical width remains the real limit, same as
   // before.
+  // paddingTop/paddingBottom are ALSO trimmed here now (6px, was still the
+  // original 16px -- a real, found-live gap, not a guess: `...styles.page`
+  // spreads padding:16 on all four sides first, and the paddingLeft/Right
+  // override above only ever touched two of them, silently leaving 16px
+  // of unclaimed vertical space above the preset dial on every landscape
+  // load). Per explicit follow-up: "there's a bunch of empty space above
+  // the equipment button... shift the whole thing up to just below the
+  // header."
   const pageStyle = isLandscape
-    ? { ...styles.page, paddingLeft: 6, paddingRight: 6, maxWidth: 1800 }
+    ? { ...styles.page, padding: 6, maxWidth: 1800 }
     : styles.page;
   return (
     <div style={pageStyle}>
@@ -1799,7 +1829,7 @@ const lastProductInfoById = useMemo(() => {
         transform: `translateX(-50%) scale(${rowScale})`, transformOrigin: "top center",
         display: "flex", flexDirection: "row", gap: REF_GAP,
       } : { display: "flex", flexDirection: "column" }}>
-      <div style={isLandscape ? { width: REF_COMPARTMENTS_W, flexShrink: 0, order: 2 } : { width: "100%" }}>
+      <div className={isLandscape ? "pt-tabscroll" : undefined} style={isLandscape ? { width: REF_COMPARTMENTS_W, flexShrink: 0, order: 2, maxHeight: columnMaxHeight, overflowY: "auto" } : { width: "100%" }}>
       <PlannerControls
         styles={styles}
         selectedTrailerId={selectedTrailerId}
@@ -2070,7 +2100,7 @@ const lastProductInfoById = useMemo(() => {
         );
 
         const mainInfoStack = (
-          <div style={{
+          <div className={isLandscape ? "pt-tabscroll" : undefined} style={{
             marginTop: 6, display: "flex", flexDirection: "column", gap: 10,
             // Fixed reference width (REF_SIDE_W), not a percentage --
             // see the sizing-model comment above the row wrapper. Scales
@@ -2078,8 +2108,17 @@ const lastProductInfoById = useMemo(() => {
             // transform:scale on the enclosing fixed-width row, so this
             // never needs its own truncation-avoidance floor the way the
             // percentage approach did -- text and container scale
-            // together by construction.
-            ...(isLandscape ? { width: REF_SIDE_W, flexShrink: 0, order: 1 } : {}),
+            // together by construction. maxHeight+overflowY (landscape
+            // only) is what actually gives this column its own
+            // independent scroll region -- see columnMaxHeight above --
+            // and the "pt-tabscroll" className (this app's existing
+            // hidden-scrollbar convention, see CalculatorLayoutClient.tsx)
+            // is load-bearing here, not cosmetic: a real, VISIBLE
+            // scrollbar reserves layout width from this already-tight
+            // fixed column, which re-truncated text that was right at
+            // the established no-truncation floor -- confirmed live
+            // before adding this.
+            ...(isLandscape ? { width: REF_SIDE_W, flexShrink: 0, order: 1, maxHeight: columnMaxHeight, overflowY: "auto" as const } : {}),
           }}>
 
             {/* Equipment card — two-up Truck / Trailer */}

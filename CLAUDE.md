@@ -7364,6 +7364,80 @@ narrowed in on what actually worked in practice rather than what looked
 reasonable in the Browser pane alone, so a fifth round of feedback
 wouldn't be surprising.
 
+### Landscape layout, fifth pass: independent per-column scroll, closed a real 16px padding gap (2026-09-02, later same day)
+
+User confirmed the 2-column layout from the previous pass "actually
+looks good," then asked for two more refinements: "can we just split the
+vertical scrolling so each column scrolls independently? the comps
+should stay when I scroll down the buttons. also there's a bunch of
+empty space above the equipment button. can we shift the whole thing up
+to just below the header?"
+
+**The empty-space bug, found by direct measurement, not guessed at**:
+`pageStyle`'s landscape override (`{ ...styles.page, paddingLeft: 6,
+paddingRight: 6, maxWidth: 1800 }`) only ever overrode two of the four
+sides `...styles.page`'s own `padding: 16` spread in first --
+`paddingTop`/`paddingBottom` silently stayed at the original 16px this
+whole time, on every landscape pass so far. Confirmed live before
+touching anything: the preset dial's own content started exactly 16px
+below where it should have. Changed to a single `padding: 6` (all four
+sides), closing the gap. This is a small, honest fix -- 16px isn't most
+of what "a bunch of empty space" described, but it's real and it was
+never intentional.
+
+**Independent column scroll**: `app/planner/hooks/useElementWidth.ts`
+extended to also report `availableHeight` -- not the measured element's
+own `clientHeight` (which would just report however tall its content
+naturally is, unbounded and useless for sizing a scroll region), but
+`(visualViewport?.height ?? window.innerHeight) - element.getBoundingClientRect().top`,
+i.e. "how much of the true viewport is left below wherever this row
+actually starts." This sidesteps needing to restructure the whole page
+into a height-bounded flex chain just to make one measurement possible
+-- the row can keep its natural, content-driven height in the DOM;
+`availableHeight` is computed independently via direct measurement,
+same reasoning and same redundant re-measurement triggers (ResizeObserver
++ window/visualViewport resize+scroll listeners + settle-timers) already
+established for `width` two passes ago.
+
+`app/planner/page.tsx`'s new `columnMaxHeight = (availableRowHeight -
+ROW_SAFETY_MARGIN_PX) / rowScale` -- divided by `rowScale`, not the raw
+measured value, because each column lives INSIDE the
+`transform:scale(rowScale)` block, which doesn't affect flex/scroll
+LAYOUT math for its children (only the final visual paint) -- a column's
+own `overflowY`/`maxHeight` resolve in the block's own UNSCALED
+coordinate space, so the true available height has to be converted into
+that space first for the post-scale visual result to actually fit the
+real screen. Applied to both columns' own `maxHeight`/`overflowY:"auto"`
+(not just the buttons/cards column) for symmetry -- confirmed live that
+compartments' own content already fits without needing to engage its
+scroll (`scrollHeight === clientHeight`), so in practice only the
+buttons/cards column engages, exactly matching "the comps should stay
+when I scroll down the buttons."
+
+**A second real bug found live while verifying this, not shipped
+blind**: adding a real, visible scrollbar to the buttons column
+re-truncated "Card # 4111222233334444 / Exp. 57 days" -- a genuine
+regression from the no-truncation floor two passes ago, since a default
+scrollbar reserves real layout width from an already-tight fixed-width
+column. Fixed by giving both new scroll containers this app's own
+existing `"pt-tabscroll"` className (already used everywhere else in
+this codebase specifically to hide scrollbars via `scrollbar-width:none`
++ `::-webkit-scrollbar{display:none}`) -- a zero-width hidden scrollbar
+can't steal layout space the way a visible one does, and it's visually
+consistent with how every other scrollable region in this app already
+looks.
+
+**Live-verified** via the demo login route: scrolling the buttons
+column's own `scrollTop` to 150 left the compartments column's
+`getBoundingClientRect().top` and `scrollTop` completely unchanged --
+genuinely independent scroll, not just visually similar. Confirmed at
+844x390 that the buttons/cards column has real overflow needing scroll
+(`scrollHeight` 480 vs `clientHeight` 277) while compartments exactly
+fits (`scrollHeight === clientHeight`, 277). Zero truncated text at
+844x390 and 1400x800 after the scrollbar-hiding fix. Portrait re-checked
+at 375x812, pixel-unaffected. `tsc --noEmit` and `next build` clean
+throughout. Not independently verified on a real device this pass.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.

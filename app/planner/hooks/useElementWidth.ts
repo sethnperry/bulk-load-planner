@@ -1,14 +1,26 @@
 "use client";
 // app/planner/hooks/useElementWidth.ts
 //
-// Measures an element's own live rendered width -- used by the Planner's
+// Measures an element's own live rendered width AND how much vertical
+// space is left below it in the viewport -- used by the Planner's
 // landscape scale-to-fit block (page.tsx) to know how much real width is
-// actually available, rather than approximating it from window.innerWidth
-// minus a guessed set of paddings. That approximation approach already
-// bit this project once (the landscape row's own maxWidth:1100 cap went
-// unaccounted-for in an earlier pass, see CLAUDE.md's landscape-
-// refinement history) -- measuring the real DOM box directly can't drift
-// out of sync with whatever CSS actually constrains it.
+// actually available (for the width-driven uniform scale), and how much
+// real height is left below the row (for each column's own independent
+// scroll region), rather than approximating either from a guessed
+// constant. That approximation approach already bit this project once
+// (the landscape row's own maxWidth:1100 cap went unaccounted-for in an
+// earlier pass, see CLAUDE.md's landscape-refinement history) --
+// measuring the real DOM box directly can't drift out of sync with
+// whatever CSS actually constrains it.
+//
+// availableHeight is deliberately NOT "this element's own clientHeight"
+// (which would just report however tall its content naturally is,
+// unbounded and useless for sizing a scroll region) -- it's
+// `window.innerHeight - element's own top`, i.e. "how much of the
+// viewport is left below wherever this row actually starts," which
+// stays meaningful without requiring the whole page to be restructured
+// into a height-bounded flex chain just to make one measurement
+// possible.
 //
 // Callback ref, not a plain useRef + one-time useEffect -- a plain ref's
 // setup effect (empty dependency array) only ever runs once per mount,
@@ -46,11 +58,13 @@
 // this the way it does for an on-screen keyboard). visualViewport is
 // specifically the API for "how much is actually visible right now,"
 // which is what this hook is really trying to answer -- clientWidth
-// alone can report more room than genuinely exists on-screen.
+// alone can report more room than genuinely exists on-screen. The same
+// reasoning applies to availableHeight -- visualViewport.height, when
+// available, wins over window.innerHeight.
 //
-// SSR/first-paint-safe: width starts at 0 ("not measured yet" -- callers
-// should treat 0 as a sentinel, not a real width) and only ever changes
-// from real client-side measurements.
+// SSR/first-paint-safe: width/availableHeight start at 0 ("not measured
+// yet" -- callers should treat 0 as a sentinel, not a real value) and
+// only ever change from real client-side measurements.
 
 import { useCallback, useRef, useState } from "react";
 
@@ -58,6 +72,7 @@ const SETTLE_DELAYS_MS = [0, 50, 150, 400, 1000, 2000, 3000];
 
 export function useElementWidth<T extends HTMLElement>() {
   const [width, setWidth] = useState(0);
+  const [availableHeight, setAvailableHeight] = useState(0);
   const observerRef = useRef<ResizeObserver | null>(null);
   const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const cleanupFnsRef = useRef<(() => void)[]>([]);
@@ -76,6 +91,9 @@ export function useElementWidth<T extends HTMLElement>() {
     const measure = () => {
       const vv = typeof window !== "undefined" ? window.visualViewport : null;
       setWidth(vv ? Math.min(el.clientWidth, vv.width) : el.clientWidth);
+      const viewportH = vv ? vv.height : window.innerHeight;
+      const top = el.getBoundingClientRect().top;
+      setAvailableHeight(Math.max(0, viewportH - top));
     };
     measure();
 
@@ -99,5 +117,5 @@ export function useElementWidth<T extends HTMLElement>() {
     timersRef.current = SETTLE_DELAYS_MS.map((ms) => setTimeout(measure, ms));
   }, []);
 
-  return { ref, width };
+  return { ref, width, availableHeight };
 }
