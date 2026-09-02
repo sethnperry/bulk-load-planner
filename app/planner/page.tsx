@@ -43,6 +43,7 @@ import { useFuelTempPrediction } from "./hooks/useFuelTempPrediction";
 // ── Sections ───────────────────────────────────────────────────────────────────
 import PlannerControls from "./sections/PlannerControls";
 import PresetDial from "./sections/PresetDial";
+import { useIsLandscape } from "./hooks/useOrientation";
 import PresetActionSheet from "./components/PresetActionSheet";
 
 // ── Modals ─────────────────────────────────────────────────────────────────────
@@ -226,6 +227,10 @@ export default function CalculatorPage() {
   const shell = useCalculatorShell();
   const { authUserId, setupSession, effectiveUserId, equipment, location, terminals, expirations } = shell;
   const router = useRouter();
+  // Wider-than-tall with enough room for a real two-column layout -- see
+  // useOrientation.ts. Computed once here and passed down (to
+  // PlannerControls) rather than each consumer calling matchMedia itself.
+  const isLandscape = useIsLandscape();
 
   // Dispatch's real home is the Dispatch tab, not this one -- but whatever
   // actually lands the app on bare /planner (e.g. a login redirect that
@@ -1612,6 +1617,14 @@ const lastProductInfoById = useMemo(() => {
         );
       })()}
 
+      {/* Landscape: compartments+slider and the info-card stack sit side by
+          side instead of stacked -- see useOrientation.ts. In portrait
+          this row collapses to flexDirection:"column" with gap:0, which
+          reproduces today's plain sequential stack exactly (the children
+          keep their own existing marginTop values for spacing, same as
+          before this wrapper existed -- no doubled gap+margin). */}
+      <div style={{ display: "flex", flexDirection: isLandscape ? "row" : "column", gap: isLandscape ? 16 : 0, alignItems: "flex-start" }}>
+      <div style={isLandscape ? { flex: "1 1 55%", minWidth: 0 } : { width: "100%" }}>
       <PlannerControls
         styles={styles}
         selectedTrailerId={selectedTrailerId}
@@ -1630,6 +1643,7 @@ const lastProductInfoById = useMemo(() => {
           setSelectedComp(n);
         }}
         selectedTerminalId={location.selectedTerminalId ?? ""}
+        isLandscape={isLandscape}
       />
 
       <CompartmentModal
@@ -1686,7 +1700,7 @@ const lastProductInfoById = useMemo(() => {
           <span style={{ fontSize: 10, fontWeight: 500, color: "rgba(255,255,255,0.3)" }}>Front</span>
         </div>
       </div>
-
+      </div>
       {/* ── Info cards, Load button, Load summary ── */}
       {(() => {
         const { loadReport } = loadWorkflow;
@@ -1774,7 +1788,7 @@ const lastProductInfoById = useMemo(() => {
         const hasEquipment = Boolean(equipment.selectedCombo);
 
         return (
-          <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 10, ...(isLandscape ? { flex: "1 1 45%", minWidth: 0 } : {}) }}>
 
             {/* Equipment card — two-up Truck / Trailer */}
             {(() => {
@@ -1986,6 +2000,7 @@ const lastProductInfoById = useMemo(() => {
           </div>
         );
       })()}
+      </div>
 
 
       <SetupGate
