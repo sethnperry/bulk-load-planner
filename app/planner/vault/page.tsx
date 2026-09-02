@@ -36,7 +36,7 @@
 // - Fields reordered to read like a real password manager: Label,
 //   Website (new), Username, Password, Category, Notes.
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useCalculatorShell } from "../CalculatorShellContext";
 import { supabase } from "@/lib/supabase/client";
 import PatternLock, { LockIcon } from "./PatternLock";
@@ -164,6 +164,12 @@ export default function VaultPage() {
   const [fSecret, setFSecret] = useState("");
   const [fNotes, setFNotes] = useState("");
 
+  // resetTokenRef mirrors resetToken state but is read (not reacted to) by
+  // the lock-resolution effect below -- see that effect's own comment for
+  // why a ref instead of the state itself is what determines whether the
+  // reset-confirm screen shows.
+  const resetTokenRef = useRef<string | null>(null);
+
   // ── Detect a one-time reset link on mount ─────────────────────────────────
   // Deliberately does NOT call confirm-reset here -- only capture the raw
   // token and strip it from the visible URL. The actual verification only
@@ -173,6 +179,7 @@ export default function VaultPage() {
       const params = new URLSearchParams(window.location.search);
       const t = params.get("resetToken");
       if (t) {
+        resetTokenRef.current = t;
         setResetToken(t);
         params.delete("resetToken");
         const rest = params.toString();
@@ -181,19 +188,39 @@ export default function VaultPage() {
     } catch {}
   }, []);
 
+  // Shared DB-driven resolution -- also called directly from cancelReset()
+  // below, not just this effect.
+  async function resolveLockState() {
+    if (!userId) return;
+    const { data } = await supabase.from("user_vault_pin").select("pin_hash").eq("user_id", userId).maybeSingle();
+    if (!data) { setPhase("create"); return; }
+    setPinHash(data.pin_hash);
+    let unlocked = false;
+    try { unlocked = sessionStorage.getItem(UNLOCK_KEY) === "1"; } catch {}
+    setPhase(unlocked ? "unlocked" : "locked");
+  }
+
   // ── Resolve lock state ────────────────────────────────────────────────────
+  // Deliberately keyed on `[userId]` only, NOT `resetToken` -- a real bug,
+  // found live: confirmResetTap() (below) clears resetToken as part of
+  // moving to phase "create" so a fresh pattern can be drawn. With
+  // `resetToken` in this effect's dependency array, that clear re-ran this
+  // effect, which (since a pin_hash row from BEFORE the reset still exists
+  // in the DB) immediately queried it and overwrote the just-set "create"
+  // phase back to "locked" -- the user saw the reset-confirm screen, tapped
+  // Continue, and landed straight back on a lock screen instead of ever
+  // getting to draw a new pattern. Reading resetTokenRef (set synchronously
+  // by the effect above, on the very first commit, before this effect's own
+  // first run) instead of the resetToken *state* means later clearing that
+  // state can no longer re-trigger this branch -- the reset-confirm ->
+  // create -> unlocked sequence is now driven entirely by explicit phase
+  // transitions in confirmResetTap()/handlePatternSet(), never re-derived
+  // from the DB mid-flow.
   useEffect(() => {
     if (!userId) return;
-    if (resetToken) { setPhase("reset-confirm"); return; }
-    (async () => {
-      const { data } = await supabase.from("user_vault_pin").select("pin_hash").eq("user_id", userId).maybeSingle();
-      if (!data) { setPhase("create"); return; }
-      setPinHash(data.pin_hash);
-      let unlocked = false;
-      try { unlocked = sessionStorage.getItem(UNLOCK_KEY) === "1"; } catch {}
-      setPhase(unlocked ? "unlocked" : "locked");
-    })();
-  }, [userId, resetToken]);
+    if (resetTokenRef.current) { setPhase("reset-confirm"); return; }
+    void resolveLockState();
+  }, [userId]);
 
   async function fetchEntries() {
     setEntriesLoading(true);
@@ -286,6 +313,7 @@ export default function VaultPage() {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json?.error ?? "Failed to confirm reset.");
+      resetTokenRef.current = null;
       setResetToken(null);
       setForgotMode(true);
       setPinHash(null);
@@ -298,8 +326,10 @@ export default function VaultPage() {
   }
 
   function cancelReset() {
+    resetTokenRef.current = null;
     setResetToken(null);
     setResetConfirmError(null);
+    void resolveLockState();
   }
 
   // ── Entry CRUD ─────────────────────────────────────────────────────────────

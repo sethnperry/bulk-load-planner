@@ -6535,6 +6535,54 @@ something left unverified by choice.
 
 `tsc --noEmit` and `next build` both clean throughout every phase.
 
+### Vault reset flow: real bug from the user's first live email test, fixed same day (2026-09-02)
+
+The user's actual first real-world use of the reset-email flow (email
+genuinely arrived and worked -- the one piece that couldn't be tested
+from this session) hit a real bug: tapping "Continue" on the reset-
+confirm screen correctly moved to "Set a new Vault pattern," but
+immediately bounced back to "Vault Locked" instead of staying put for
+the two-step confirm draw.
+
+**Root cause**: the lock-resolution `useEffect` was keyed on
+`[userId, resetToken]`. `confirmResetTap()` clears `resetToken` (via
+`setResetToken(null)`) as part of moving to phase `"create"` -- which
+re-triggered that same effect (since `resetToken` was one of its
+dependencies), and since a `pin_hash` row from *before* the reset still
+existed in the DB, the effect's own DB-driven branch fired, re-fetched
+it, and overwrote the just-set `"create"` phase back to `"locked"` --
+all within what read to the user as a single tap.
+
+**Fixed**: the effect now depends on `[userId]` only. Whether to show
+the reset-confirm screen is decided once, from a `resetTokenRef` set
+synchronously by the URL-detection effect (which runs first, in the same
+initial commit) -- not from the `resetToken` *state*, so clearing that
+state later can no longer re-trigger the DB-driven branch. From
+`"reset-confirm"` onward, phase transitions are driven entirely by
+explicit calls in `confirmResetTap()`/`handlePatternSet()`, never
+re-derived mid-flow. The DB-driven resolution itself was extracted into
+a shared `resolveLockState()` function, also called directly by
+`cancelReset()` (previously relied on the same effect re-firing when
+`resetToken` cleared -- would have gone silent/inert under the fix above
+without this).
+
+**Live-verified** (since a real token can't be produced from this dev
+environment without triggering an actual email send): navigated to
+`/planner/vault?resetToken=<mock>`, confirmed the reset-confirm screen
+renders, then mocked `window.fetch` to return a successful
+`/api/vault/confirm-reset` response (isolating exactly the client-side
+race that caused the bug, independent of server-side token validity) --
+tapping Continue now lands on "Set a new Vault pattern" and **stays
+there** (re-checked after a 2s wait, previously would have already
+bounced by then). Completed the full two-step draw -- correctly showed
+"Draw it again to confirm," matched, saved, and unlocked. Confirmed the
+new pattern is genuinely live in the DB: the OLD pattern was rejected
+("Incorrect pattern"), the NEW one unlocked successfully. Also
+re-verified `cancelReset()` in both states it can be reached from
+(sessionStorage already unlocked -> lands on "unlocked"; freshly locked
+-> lands on "Vault Locked") -- both correct. Console clean on a
+genuinely fresh tab throughout. `tsc --noEmit` and `next build` clean.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.
