@@ -45,6 +45,7 @@ import PlannerControls from "./sections/PlannerControls";
 import PresetDial from "./sections/PresetDial";
 import { useIsLandscape } from "./hooks/useOrientation";
 import { useElementWidth } from "./hooks/useElementWidth";
+import { useNaturalHeight } from "./hooks/useNaturalHeight";
 import PresetActionSheet from "./components/PresetActionSheet";
 
 // ── Modals ─────────────────────────────────────────────────────────────────────
@@ -276,19 +277,46 @@ export default function CalculatorPage() {
   const REF_GAP = 10;
   const naturalRowWidth = REF_SIDE_W + REF_COMPARTMENTS_W + REF_GAP;
   const { ref: scaleWrapRef, width: availableRowWidth, availableHeight: availableRowHeight } = useElementWidth<HTMLDivElement>();
+  // Natural (uncapped, unscaled) content height of the compartments
+  // column specifically -- not the whole row, and not mainInfoStack,
+  // which is explicitly ALLOWED to exceed available height and scroll
+  // internally (see columnMaxHeight below); that's independent of what
+  // "fits the screen" means for compartments. Ref'd on an inner wrapper
+  // with no height constraint of its own -- see useNaturalHeight.ts's own
+  // header comment for why (the outer column div's maxHeight would
+  // otherwise report a CLAMPED height back into the very calculation
+  // that clamp is derived from).
+  const { ref: compartmentsContentRef, height: compartmentsNaturalHeight } = useNaturalHeight<HTMLDivElement>();
   // 0 = "not measured yet" (first paint, before the ResizeObserver's
   // initial read) -- fall back to natural size (scale 1) rather than a
   // near-zero scale for that one frame. Bounded [0.5, 1.6] so a very
   // narrow embed or a very wide ultrawide monitor both stay legible/
   // sane rather than unbounded. A small fixed margin (ROW_SAFETY_MARGIN_PX)
-  // is subtracted from the measured width before computing scale -- an
-  // exact-fit calculation risks a 1px overflow (and a real, unwanted
-  // horizontal scrollbar/clipped edge) from nothing more than subpixel
-  // rounding; this keeps the scaled block a hair inside the true
-  // available width instead of flush against it.
+  // is subtracted from the measured width/height before computing scale --
+  // an exact-fit calculation risks a 1px overflow (and a real, unwanted
+  // scrollbar/clipped edge) from nothing more than subpixel rounding;
+  // this keeps the scaled block a hair inside the true available space
+  // instead of flush against it.
   const ROW_SAFETY_MARGIN_PX = 8;
+  // Height-aware ceiling, alongside the original width-aware one -- a true
+  // "contain" fit (like object-fit:contain), not width-only. Per explicit
+  // live-device follow-up: "we are still stretching things wide and it
+  // leaves a space below the CG slider" -- rowScale was purely
+  // width-driven, so a device with generous width but only middling
+  // height would scale up to fill the width regardless of whether that
+  // made the block taller than the space actually available, and the
+  // compartments column (see align-items below) got stretched to match
+  // mainInfoStack's own taller, independently-scrolling height, leaving
+  // real dead space below its own (shorter) natural content. Takes the
+  // SMALLER of the two candidate scales -- whichever dimension is the
+  // binding constraint wins, exactly like fitting an image inside a box
+  // without distorting it.
+  const widthScale = availableRowWidth > 0 ? (availableRowWidth - ROW_SAFETY_MARGIN_PX) / naturalRowWidth : Infinity;
+  const heightScale = availableRowHeight > 0 && compartmentsNaturalHeight > 0
+    ? (availableRowHeight - ROW_SAFETY_MARGIN_PX) / compartmentsNaturalHeight
+    : Infinity;
   const rowScale = isLandscape && availableRowWidth > 0
-    ? Math.min(Math.max((availableRowWidth - ROW_SAFETY_MARGIN_PX) / naturalRowWidth, 0.5), 1.6)
+    ? Math.min(Math.max(Math.min(widthScale, heightScale), 0.5), 1.6)
     : 1;
   // Per-column scroll bound, landscape only -- per explicit follow-up:
   // "can we just split the vertical scrolling so each column scrolls
@@ -1605,7 +1633,12 @@ const lastProductInfoById = useMemo(() => {
       onSave={(n) => { planSlots.saveToSlot(n); setBaselineOverrides(overridesSnapshot(compPlan, cgSlider)); }}
       onActiveChange={setActiveSlotLetter}
       syncTo={presetDialSyncTo}
-      compact={isLandscape}
+      // No longer compact in landscape -- that shrink existed only to
+      // save vertical space when the dial rendered full-width above BOTH
+      // columns; now that it's scoped to just the compartments column
+      // (see its own render site), there's no more space pressure driving
+      // it, and the user asked directly to "bring the plan letter sizes
+      // back up." Portrait was never affected either way.
     />
   );
 
@@ -1844,8 +1877,25 @@ const lastProductInfoById = useMemo(() => {
         width: naturalRowWidth, position: "relative", left: "50%",
         transform: `translateX(-50%) scale(${rowScale})`, transformOrigin: "top center",
         display: "flex", flexDirection: "row", gap: REF_GAP,
+        // flex-start, not the default stretch -- stretch was forcing
+        // compartments to match mainInfoStack's own (often taller, since
+        // it independently scrolls when it needs more room) height,
+        // leaving real dead space below compartments' own shorter natural
+        // content -- exactly the "space below the CG slider" reported
+        // live. Each column now takes only the height its own content
+        // needs, up to its own maxHeight ceiling (unaffected by
+        // align-items, still the independent-scroll safety net for
+        // whichever column genuinely needs it).
+        alignItems: "flex-start",
       } : { display: "flex", flexDirection: "column" }}>
       <div className={isLandscape ? "pt-tabscroll" : undefined} style={isLandscape ? { width: REF_COMPARTMENTS_W, flexShrink: 0, order: 2, maxHeight: columnMaxHeight, overflowY: "auto" } : { width: "100%" }}>
+      {/* ref is always attached, same reasoning as scaleWrapRef above --
+          this inner wrapper carries no height constraint of its own (the
+          outer column div, not this one, has maxHeight+overflow), so its
+          own rendered height is always this column's TRUE natural
+          content size, which heightScale (above) needs to compute the
+          right scale. */}
+      <div ref={compartmentsContentRef}>
       {/* Landscape only -- see presetDialEl/actionRowEl's own definitions
           above for why these live here now instead of full-width above
           the whole two-column row: neither one has anything to do with
@@ -1933,6 +1983,7 @@ const lastProductInfoById = useMemo(() => {
           <span style={{ fontSize: 10, fontWeight: 500, color: "rgba(255,255,255,0.3)" }}>Rear</span>
           <span style={{ fontSize: 10, fontWeight: 500, color: "rgba(255,255,255,0.3)" }}>Front</span>
         </div>
+      </div>
       </div>
       </div>
       {/* ── Info cards, Load button, Load summary ── */}

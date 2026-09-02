@@ -7732,6 +7732,90 @@ identical to before, dial and action row both still render full-width
 in their original spot. `npx tsc --noEmit` and `npx next build` both
 clean.
 
+### Height-aware scale (true "contain" fit) + dial reverted to full size (2026-09-02, same day)
+
+User confirmed the previous fix worked, then flagged the real remaining
+issue with a live screenshot: "bring the plan letter sizes back up and
+try to fix the size of the compartments so it fits the screen better. It
+looks like we are still stretching things wide and it leaves a space
+below the CG slider."
+
+**Root cause, found by measuring, not guessed**: `rowScale` was purely
+WIDTH-driven (`availableRowWidth / naturalRowWidth`) -- on a device with
+generous width but only middling height, it would scale up to fill the
+width regardless of whether that made the block taller than the actual
+available height. Separately, the row wrapper's flex `align-items`
+defaulted to `stretch`, which forced the compartments column to match
+`mainInfoStack`'s own height whenever mainInfoStack was taller (it often
+is, and is explicitly ALLOWED to exceed its budget and scroll
+internally, per the earlier independent-scroll feature) -- stretching
+compartments beyond its own natural content left real, visible dead
+space below the CG slider, exactly as reported.
+
+**Two fixes, addressing each half**:
+- `app/planner/hooks/useNaturalHeight.ts` (new) -- same measurement-
+  robustness pattern as `useElementWidth.ts` (callback ref, ResizeObserver
+  + window/visualViewport listeners + a settle-timer burst), but reports
+  an element's own natural `getBoundingClientRect().height` instead of
+  width. `page.tsx` refs it on a NEW inner wrapper inside the
+  compartments column (`compartmentsContentRef`, wrapping
+  presetDialEl+actionRowEl+PlannerControls+CompartmentModal+CG-slider) --
+  deliberately not the outer column div, which carries `maxHeight`+
+  `overflowY:auto` and would report a CLAMPED height back into the very
+  calculation that clamp is derived from (the circularity this hook
+  exists to avoid). `rowScale` is now `min(widthScale, heightScale)`,
+  clamped to the same `[0.5, 1.6]` range as before -- a genuine "contain"
+  fit (like `object-fit:contain`), not width-only: whichever dimension is
+  the binding constraint wins, and the block never grows past what BOTH
+  the available width and the available height allow.
+- The row wrapper's `alignItems` changed from the flex default (`stretch`)
+  to `"flex-start"` in landscape -- each column now takes only the height
+  its own content needs, up to its own `maxHeight` ceiling (still the
+  independent-scroll safety net for whichever column genuinely needs it,
+  unaffected by this change) -- instead of being forced to match
+  whichever sibling is taller.
+- `PresetDial.tsx`'s `compact` prop is no longer passed from `page.tsx`
+  at all -- per explicit direction ("bring the plan letter sizes back
+  up"). The shrink existed only to save vertical space when the dial
+  rendered full-width above BOTH columns; now that it's scoped to just
+  the compartments column, there's no more space pressure motivating it.
+  `compact` itself stays in `PresetDial.tsx` (unused for now, not
+  deleted) in case a future narrower-device case wants it again.
+
+**Live-verified** at two widths, both showing the fit genuinely binding
+on whichever dimension is tighter (not guessed, read directly off the
+scaled block's own `transform`/rect): 844×390 -> `scale(0.9535)`, block
+bottom at 382px of a 390px-tall viewport (height was the binding
+constraint here); 1000×420 -> `scale(1.1395)`, block bottom at 412px of
+420px (again height-bound, tight to the same 8px safety margin on both
+tests). Confirmed compartments and mainInfoStack now render at
+genuinely DIFFERENT heights (345.8px vs 358.0px at 1000×420) -- direct
+proof `align-items:flex-start` is working, not just theorized. Dial
+letters confirmed back to full/portrait size in both landscape tests.
+Portrait re-checked at 375×812, pixel-identical to before -- none of
+this pass's changes are reachable outside `isLandscape`. `npx tsc
+--noEmit` and `npx next build` both clean.
+
+### On "why don't we go truly full screen like other apps" (2026-09-02, same day)
+
+User asked directly, alongside a real screenshot of a native phone-call
+app rendering genuinely edge-to-edge on the same device: "is it because
+its a pwa?" Answered directly rather than hedged further, since this
+project has now exhausted what it can verify from its own side (the
+`<meta name="viewport">` tag is confirmed correct, the safe-area CSS is
+confirmed correct, a genuine reinstall didn't change anything) -- the
+most likely explanation is a device/OS-level setting that treats an
+installed PWA (a Chrome-generated WebAPK) differently from a
+pre-authorized native/system app by default. Samsung devices in
+particular (the call-app screenshot's UI strongly suggests Samsung One
+UI) have exactly this under **Settings -> Display -> Full screen apps**
+-- newly installed apps, including WebAPKs, commonly default to a boxed/
+letterboxed aspect ratio there until manually toggled to full screen,
+entirely independent of what the app's own manifest or CSS declares.
+Given to the user as the concrete next thing to check on-device, not a
+further code change -- nothing left to iterate on this project's own
+side without more device-specific information.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.
