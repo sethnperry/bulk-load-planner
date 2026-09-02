@@ -6387,7 +6387,7 @@ back-of-card edit view -- previously the grid alone forced it to
 expected `company_subscriptions` 404. `tsc --noEmit` and `next build`
 both clean.
 
-## Vault redesign: pattern lock, email recovery, Work/Personal categories (2026-09-02) -- in progress, branch `feature/vault-redesign`
+## Vault redesign: pattern lock, email recovery, Work/Personal categories (2026-09-02)
 
 Per explicit direction: the numeric PIN "stood out like a sore thumb"
 color-wise (the plain 🔒 emoji's native gold/yellow rendering was the one
@@ -6493,14 +6493,45 @@ migration exists; saving a Work-category entry correctly surfaces
 (no stray console errors) on a genuinely fresh tab both before and after
 the error-surfacing fix.
 
-**Not yet live-verified -- blocked on the migration**: actual entry
-creation/category grouping/Work-vs-Personal card theming with real rows,
-and a full reset-email round trip (also needs `RESEND_API_KEY`/
-`INVITE_FROM_EMAIL` confirmed available, same limitation this project has
-always had for testing email flows from this side). Once
-`20260902000000_vault_reset_and_website.sql` is applied via the Supabase
-SQL editor, these are the next things to verify before merging
-`feature/vault-redesign` to `main`.
+**Migration applied 2026-09-02** (user ran it in the Supabase SQL
+editor). Full follow-up live-verification pass against real data,
+same demo/QA account:
+- Added a real Work-category entry (label, website, username, password)
+  -- saved successfully, rendered with the light card/black-text
+  treatment exactly as designed, grouped under a "WORK" section header.
+  Expanded it: website line, masked password with a working Show/Hide
+  toggle, Edit/Delete buttons all correctly re-themed for the light
+  background (previously only ever styled for the dark theme).
+- Added a Personal entry and a custom-category entry ("Retirement") --
+  both correctly grouped into their own sections (Work, then Personal,
+  then custom categories alphabetically) and both share the app's
+  existing dark styling, confirming custom categories deliberately do
+  NOT get a third color scheme.
+- Re-tested "Forgot Pattern" post-migration: the token row now
+  genuinely inserts into `vault_reset_tokens` (confirmed by the failure
+  point moving from "table doesn't exist" to `RESEND_API_KEY not set` --
+  this local dev environment doesn't have Resend credentials, same
+  long-standing limitation already documented for the early-access
+  form; Production has them). This confirms the auth + token-creation
+  path works end-to-end, just not literal email delivery from this
+  session.
+- Tested `/planner/vault?resetToken=<bogus>` post-migration: lands on
+  the informational confirm screen without auto-consuming anything (URL
+  correctly stripped via `history.replaceState`, confirmed via
+  `window.location.href`); tapping Continue now runs a REAL query
+  against the live table and correctly returns "This reset link is
+  invalid," with the "Send another email" fallback appearing.
+- Test entries cleaned up afterward (deleted via the real UI, using the
+  same Delete/Confirm-delete flow -- also verified live) -- demo account
+  left at 0 entries, matching its state before this pass.
+- Console clean throughout (only the two deliberately-triggered test
+  failures above, both already handled with visible error UI, no
+  unhandled rejections).
+
+**Merged to `main`** the same day, on the strength of this pass -- the
+one remaining gap (literal email delivery) is an environment limitation
+this project has always had for testing Resend-based flows locally, not
+something left unverified by choice.
 
 `tsc --noEmit` and `next build` both clean throughout every phase.
 
