@@ -44,12 +44,14 @@
 // with two different "current" equipment views at once.
 
 import React, { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
 import { startSetupSession } from "@/lib/setupSession";
 import { useCalculatorShell } from "../CalculatorShellContext";
 import DriverPicker from "../components/DriverPicker";
 import { useTerminalsCatalog } from "@/lib/queries/useTerminalsCatalog";
 import { addDaysISO_, daysUntilISO_, formatMDYWithCountdown_ } from "../utils/dates";
+import { canReachDestination } from "@/lib/ui/driver/navDestinations";
 
 // This page deliberately does NOT use cardTheme.ts's shared cardStateFor --
 // that function fades anything expired more than 7 days ago from "expired"
@@ -152,8 +154,27 @@ function ExpirationLine({ label, iso }: { label: string; iso: string | null }) {
 
 export default function DispatchPage() {
   const shell = useCalculatorShell();
+  const router = useRouter();
   const { selectedDriverId, setSelectedDriverId, companyId, effectiveUserId, authUserId } = shell;
   const canUseAppAs = shell.role === "admin" || shell.isSuperAdmin;
+
+  // This page had NO access gate at all before this -- a driver/lead hitting
+  // this URL directly wasn't blocked, only kept off it by the (now-removed)
+  // tab bar simply not showing this tab to them. Now that this is admin/
+  // dispatch's real Planner (see the role-restructure this shipped
+  // alongside), a real gate is needed: driver/lead don't belong here at all,
+  // symmetric with the new gate on Cards (app/planner/cards/layout.tsx)
+  // blocking admin/dispatch the other direction. Gated on
+  // isSuperAdminResolved for the same race-condition reason page.tsx's own
+  // landing redirect is -- role resolves independently of isSuperAdmin, with
+  // no ordering guarantee.
+  useEffect(() => {
+    if (shell.role == null) return;
+    if (!shell.isSuperAdminResolved) return;
+    if (!canReachDestination("dispatch", shell.role, shell.isSuperAdmin)) {
+      router.replace("/planner");
+    }
+  }, [shell.role, shell.isSuperAdmin, shell.isSuperAdminResolved, router]);
   // Sourced from the shared cached catalog (lib/queries/useTerminalsCatalog.ts)
   // instead of this page's own .in("terminal_id", terminalIds) network
   // lookup below -- the full catalog is already cached, so this is a

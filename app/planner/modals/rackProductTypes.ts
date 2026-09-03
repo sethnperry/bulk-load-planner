@@ -1,34 +1,24 @@
-// app/planner/terminal/types.ts
-// Shared types for the Terminal tab (racks/lanes/arms). See CLAUDE.md
-// "Terminal Tier — Build Spec" for the full design.
+// app/planner/modals/rackProductTypes.ts
+// Shared types for the relocated rack-status action modals
+// (RackProductStatusModal / EditTerminalModal) -- moved here from the
+// now-deleted app/planner/terminal/ page, since STUD + Edit Terminal now
+// live inside MyTerminalsModal.tsx's expanded terminal-card view instead of
+// a dedicated Terminal tab. Named rackProductTypes.ts, not types.ts --
+// app/planner/types.ts already exists one level up with unrelated content
+// (ActiveComp, CompPlanInput, etc.), and reusing the bare "types.ts" name in
+// this directory risked exactly the relative-vs-absolute import mix-up that
+// name collision invites.
+//
+// RackLane/RackArm (the old per-arm status model) were dropped in this move
+// -- they've been dead since the Lane/Arm Layout view was removed on
+// 2026-08-31 (see CLAUDE.md's "Terminal tab pivot"), confirmed via a
+// repo-wide grep to have no remaining importer.
 
 export type TerminalRack = {
   rack_id: string;
   terminal_id: string;
   rack_name: string;
   created_at: string;
-};
-
-export type RackLane = {
-  rack_id: string;
-  lane_number: number;
-  label: string | null;
-  is_down: boolean;
-  updated_at: string;
-  updated_by: string | null;
-};
-
-export type RackArm = {
-  arm_id: string;
-  rack_id: string;
-  lane_number: number;
-  arm_number: number;
-  label: string | null;
-  product_ids: string[];
-  is_down: boolean;
-  out_product_ids: string[];
-  status_updated_at: string | null;
-  status_updated_by: string | null;
 };
 
 export type RackProductStatusRow = {

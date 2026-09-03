@@ -7816,6 +7816,159 @@ Given to the user as the concrete next thing to check on-device, not a
 further code change -- nothing left to iterate on this project's own
 side without more device-specific information.
 
+## Nav restructure: tabs into the hamburger menu, role-based Planner routing, Terminal/Insights removed (2026-09-03)
+
+Planned via Plan Mode (approved plan preserved at `wild-discovering-plum.md`),
+across a multi-message design conversation about the landscape icon-rail
+mockup for lead/driver's Planner -- this pass shipped the parts that were
+concrete and settled, deliberately **not** the icon-rail visual redesign
+itself (still being mocked up further, a separate future pass). Three real
+decisions:
+
+1. **The visible tab bar is gone entirely.** Every destination it held
+   (Dispatch/Insights/Planner/Cards/Vault) now lives in `NavMenu`'s own
+   dropdown instead -- "do away with the tabs and put the pages in the nav
+   hamburger with reports etc."
+2. **Admin and dispatch's "Planner" is now the existing Dispatch page**
+   (`app/planner/dispatch/page.tsx`) outright, not a shared page with
+   role-conditional tabs -- "let's use the current dispatch page as the
+   planner for admin and dispatchers." They no longer reach the
+   driver-style `/planner` page at all. This directly reverses a
+   2026-08-04 decision ("the only role that should default to the
+   dispatch tab on open is the dispatch role... admin roles just get a
+   backstrip button") -- that reasoning is superseded now that admin's
+   Planner genuinely IS the Dispatch page, not a shared page admin and
+   driver/lead both used to land on.
+3. **Super admins get both** `/planner` and `/planner/dispatch` reachable,
+   never auto-redirected either way -- matches this project's standing
+   "one account can verify every role's view without reassigning roles"
+   precedent. **Cards** narrowed to driver/lead (+ super admin, for the
+   same QA-precedent reason) -- admin/dispatch's own Dispatch page already
+   shows a selected driver's Terminal Cards/Badges/Credentials inline, so
+   a separate Cards destination for them was redundant. **Vault** stays
+   universal, unchanged.
+
+Separately, and combined into the same pass since both were part of the
+same design conversation: the Terminal/Insights page (`/planner/terminal`
+-- rack picker, product-status list, STUD, Edit Terminal, plus the
+Volume/Trends/Recovery sub-tabs from the 2026-08-31 pivot) is **deleted
+outright**, confirmed explicitly with the user that Volume's real, shipped
+chart goes too, nothing on that page survives. STUD and Edit Terminal
+relocate into `MyTerminalsModal.tsx`'s existing (previously read-only)
+expanded terminal-card view, alongside a new rack quick-pick dropdown --
+"check/update a terminal's rack status" is now something done from the
+Location modal already used to pick a terminal, not a separate tab.
+
+**New shared util, `lib/ui/driver/navDestinations.ts`** -- both the
+landing-redirect effect and `NavMenu` were about to independently
+re-implement "who can reach what," a duplication class this project has
+hit and fixed before (`CustomSelect.tsx`/`ServiceTypeManager.tsx`'s own
+precedent, and this very session's TabBar/PresetDial centering-bug lesson
+-- the same fix existed in one place and simply wasn't ported to its
+second copy). `canReachDestination(dest, role, isSuperAdmin)` and
+`defaultLandingPath(role, isSuperAdmin)` are the one place these rules
+live now.
+
+**Terminal/Insights removal, file-by-file**: `RackProductStatusModal.tsx`
+and `EditTerminalModal.tsx` moved to `app/planner/modals/` (their only
+call site, confirmed via repo-wide grep before touching anything, was the
+now-deleted `terminal/page.tsx`). Their shared types moved to
+`app/planner/modals/rackProductTypes.ts` -- deliberately not
+`modals/types.ts`, which would collide/confuse with the unrelated
+`app/planner/types.ts` one level up -- dropping the already-dead
+`RackLane`/`RackArm` types along the way (grep-confirmed no importer since
+the 2026-08-31 Lane Map removal). `labels.ts` deleted outright (same
+grep-confirmed dead status). `VolumeChart.tsx` and `page.tsx` deleted with
+no relocation. The now-empty `app/planner/terminal/` directory removed.
+
+**`MyTerminalsModal.tsx`** gained two new props (`authUserId`, `myRole`,
+threaded from `ShellChrome`'s existing mount, mirroring how
+`EquipmentModal` already receives `myRole={shell.role}` there) and new
+local state scoped to whichever card is expanded: fetches
+`terminal_racks` (same `select("*").eq("terminal_id",...).order("rack_name")`
+shape already used twice elsewhere in this codebase) when a card expands,
+then `rack_product_status` for whichever rack is picked. Deliberately
+**local state, not wired into `shell.chooseTerminal`/`rackPickerOpen`/
+`RackSelectSheet`** -- checking a terminal's rack status must never change
+the driver's actively-selected planning terminal/rack as a side effect
+(the terminal being expanded may not even be the one currently selected
+for loading at all). The rack dropdown uses `CustomSelect`, not a native
+`<select>`, matching this app's own established fix for native selects
+ignoring dark theme. The "Edit card details from the Cards tab." footer
+is now conditional on `myRole === "driver" || "lead"` (or unresolved) --
+false for admin/dispatch, since Cards is no longer reachable for them at
+all after this same pass.
+
+**A genuine race condition, found while verifying the plan's own claims
+before writing code, not left hypothetical**: `shell.role` and
+`shell.isSuperAdmin` resolve via two fully independent effects in
+`CalculatorShellContext.tsx` (confirmed by reading both directly) with no
+ordering guarantee -- a real super admin whose own company role happens
+to be `admin` could get redirected to `/planner/dispatch` before their
+super-admin flag resolves `true`. Fixed with a new `isSuperAdminResolved`
+field (flips `true` once the `is_super_admin` RPC settles, regardless of
+result), gating the landing-redirect effect in `page.tsx` and the new
+route gates on `app/planner/dispatch/page.tsx` (blocks driver/lead --
+this page had **no access gate at all before this pass**, confirmed via
+grep; a driver/lead hitting the URL directly wasn't blocked, only kept
+off it by the now-removed tab bar not showing the tab) and the new
+`app/planner/cards/layout.tsx` (one shared gate for all three Cards
+routes -- `page.tsx`/`badges/page.tsx`/`credentials/page.tsx` all shared
+the identical `isDispatchContext` pattern before this, so one layout-level
+gate replaces what would otherwise have been the same redirect effect
+tripled across three files). Blocked visits redirect to whichever
+destination is actually valid for that role (driver/lead off Dispatch ->
+`/planner`; admin/dispatch off Cards -> `/planner/dispatch`), not a
+generic fallback that might not be reachable either.
+
+**Deliberately left alone**: Cards' now-dead `isDispatchContext` branch
+(all three routes) -- inert once admin/dispatch can't reach Cards at all,
+but removing it touches meaningfully more render logic per file than the
+rest of this pass; flagged as a clean, optional follow-up, not bundled in.
+"⟵ Back to Planner" in `NavMenu` is unchanged -- still the only way back
+into the Planner section from `/admin`/`/superadmin`/`/learn`, even though
+it now overlaps with the new Planner link while already inside that
+section (harmless, same destination either way).
+
+**Live-verified** via the demo login route (`/api/demo/start?persona=alpha`,
+role: admin) after a full dev-server restart and a fresh `next build`:
+bare `/planner` correctly redirected to `/planner/dispatch`; the hamburger
+menu showed exactly Vault/Reports/Company Admin/Learn/Sign Out (no
+Planner/Dispatch/Cards links -- Dispatch is current, Planner unreachable,
+Cards unreachable), confirming `canReachDestination` gates correctly;
+navigating directly to `/planner/cards` by URL correctly redirected to
+`/planner/dispatch`, confirming the new Cards gate actually blocks direct
+URL access, not just hides the nav entry. Reached `MyTerminalsModal`'s
+expanded card via the bell icon's Expirations modal (admin/dispatch have
+no other path to it now that Planner's own "Select Terminal" card is
+unreachable) and confirmed the full relocated flow end-to-end against
+real data: rack dropdown populated ("Main Rack"), STUD opened
+`RackProductStatusModal` prefilled with a real product's live API/temp
+reading (Regular Unleaded E10 87, 60.4 API / 87°F), Edit Terminal opened
+correctly scoped to the right terminal ("Racks at **Chevron**") showing
+its real Access Renewal Period (90 days) and rack list. No writes were
+made (both modals closed without saving, to avoid touching real demo
+data unnecessarily) -- the read-path/wiring is what this check confirmed.
+Console clean beyond one stray 401 traceable to this session's own
+diagnostic `fetch()` call against the Supabase REST API directly (not
+app code).
+
+**Real, honest limitation, not glossed over**: this demo company's only
+two members (Seth Perry, Test Testerson) both resolved to admin/dispatch
+roles when impersonated via "Use app as {driver}" -- confirmed live by
+impersonating each in turn and observing `/planner` still redirect to
+`/planner/dispatch` both times, rather than assumed. This means the
+**driver/lead side of this pass was never empirically exercised**: the
+new Dispatch-page gate blocking driver/lead, Cards actually working for
+a driver/lead, and the landing redirect correctly doing *nothing* for
+that role are all architecturally verified against the actual gate code
+(same `canReachDestination`/`defaultLandingPath` calls checked live for
+admin), not independently confirmed live. Worth a real check with a
+genuine driver or lead account before considering this fully closed.
+
+`npx tsc --noEmit` and `npx next build` clean after every area of the
+plan, not just once at the end.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.

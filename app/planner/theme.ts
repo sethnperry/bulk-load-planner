@@ -46,15 +46,7 @@ export function themeTextOnFill(darkMode: boolean): string {
 export function themeIconStroke(darkMode: boolean): string {
   return darkMode ? "rgba(255,255,255,0.85)" : "rgba(0,0,0,0.85)";
 }
-export function themeTabActive(darkMode: boolean): string {
-  return darkMode ? "#fff" : "#111";
-}
-export function themeTabInactive(darkMode: boolean): string {
-  return darkMode ? "rgba(255,255,255,0.35)" : "rgba(0,0,0,0.35)";
-}
-export function themeUnderlineTrack(darkMode: boolean): string {
-  return darkMode ? "rgba(255,255,255,0.15)" : "rgba(0,0,0,0.15)";
-}
-export function themeUnderlineActive(darkMode: boolean): string {
-  return darkMode ? "#fff" : "#111";
-}
+// themeTabActive/themeTabInactive/themeUnderlineTrack/themeUnderlineActive
+// were removed here -- they only ever styled the visible tab bar
+// (CalculatorLayoutClient.tsx's TabBar), deleted along with it once every
+// destination it held moved into NavMenu's own dropdown instead.

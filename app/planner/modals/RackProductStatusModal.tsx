@@ -1,20 +1,24 @@
 "use client";
-// app/planner/terminal/RackProductStatusModal.tsx
+// app/planner/modals/RackProductStatusModal.tsx
 //
-// The bottom "STUD" button on a rack screen -- rack-level Product Status
-// Update (the per-arm Lane Map/LaneStatusModal this used to sit alongside
-// was removed 2026-08-31, per explicit direction -- see page.tsx's own
-// header comment; this modal is unrelated to that removal and unchanged).
-// Marks a product out (or back in) across the whole rack, and -- when API/temp are
-// supplied -- feeds the *existing* fuel-temp-bias system
-// (update_terminal_temp_bias RPC) via the same predicted-temp/error
-// computation useLoadWorkflow.ts already does after a load completes. No new
-// bias-tracking path is introduced here, per the Terminal Tier spec.
+// The "STUD" button -- rack-level Product Status Update. Marks a product out
+// (or back in) across the whole rack, and -- when API/temp are supplied --
+// feeds the existing fuel-temp-bias system (update_terminal_temp_bias RPC)
+// via the same predicted-temp/error computation useLoadWorkflow.ts already
+// does after a load completes. No new bias-tracking path is introduced here,
+// per the Terminal Tier spec.
+//
+// Relocated here from the now-deleted app/planner/terminal/ page -- STUD (and
+// Edit Terminal, its sibling) now open from MyTerminalsModal.tsx's expanded
+// terminal-card view instead of a dedicated Terminal tab, per explicit
+// direction ("take the whole section out of the terminal page for product
+// status... put that in the location modal in the expanded view of the
+// terminal card"). Behavior is otherwise unchanged from the original.
 
 import React, { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { FullscreenModal } from "@/lib/ui/FullscreenModal";
-import type { TerminalRack, RackProductStatusRow, ProductLite } from "./types";
+import type { TerminalRack, RackProductStatusRow, ProductLite } from "./rackProductTypes";
 
 export default function RackProductStatusModal({
   open,

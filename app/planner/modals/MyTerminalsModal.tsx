@@ -1,6 +1,13 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import { supabase } from "@/lib/supabase/client";
+import { useProductsCatalog } from "@/lib/queries/useProductsCatalog";
+import { CustomSelect } from "@/lib/ui/CustomSelect";
+import type { Role } from "@/lib/ui/driver/role";
+import RackProductStatusModal from "./RackProductStatusModal";
+import EditTerminalModal from "./EditTerminalModal";
+import type { TerminalRack, RackProductStatusRow } from "./rackProductTypes";
 
 // ── Terminal avatar helpers ───────────────────────────────────────────────────
 // No fill, thin white stroke -- placeholder until real per-operator logos
@@ -21,7 +28,18 @@ type CardData = { cardNumber: string; privateNote: string; pin: string; };
 // the current plan. Card editing (number/PIN/private note/last visit/
 // sourcing/deactivate/remove) now lives on the back of each card in the
 // Cards tab (app/planner/cards/page.tsx), which is the source of truth
-// for that data; this expanded panel is read-only.
+// for that data; this expanded panel is read-only for card data.
+//
+// STUD + Edit Terminal + a rack quick-pick relocated here from the
+// now-deleted /planner/terminal page, per explicit direction ("take the
+// whole section out of the terminal page for product status... put that in
+// the location modal in the expanded view of the terminal card"). Deliberately
+// LOCAL state, not wired into shell.chooseTerminal/rackPickerOpen/
+// RackSelectSheet -- checking/updating a terminal's rack status here must
+// never change the driver's actively selected planning terminal/rack as a
+// side effect (the terminal being expanded may not even be the one currently
+// selected for loading -- e.g. checking status somewhere you're not loading
+// today).
 
 export default function MyTerminalsModal(props: {
   open: boolean;
@@ -44,6 +62,8 @@ export default function MyTerminalsModal(props: {
   setSelectedTerminalId: (id: string) => void;
   setTermOpen: (open: boolean) => void;
   onChangeLocation?: () => void;
+  authUserId: string;
+  myRole: Role | null;
 }) {
   const {
     open, onClose,
@@ -56,9 +76,83 @@ export default function MyTerminalsModal(props: {
     myTerminalIds, setMyTerminalIds,
     setSelectedTerminalId, setTermOpen,
     onChangeLocation,
+    authUserId, myRole,
   } = props;
 
   const isoToday = () => new Date().toISOString().slice(0, 10);
+
+  // ── Relocated rack status/edit state, scoped to whichever card is expanded ──
+  const [expandedRacks, setExpandedRacks] = useState<TerminalRack[]>([]);
+  const [expandedRackId, setExpandedRackId] = useState("");
+  const [expandedRackProducts, setExpandedRackProducts] = useState<RackProductStatusRow[]>([]);
+  const [racksLoading, setRacksLoading] = useState(false);
+  const [racksError, setRacksError] = useState<string | null>(null);
+  const [studOpen, setStudOpen] = useState(false);
+  const [editTerminalOpen, setEditTerminalOpen] = useState(false);
+
+  const loadExpandedRacks = React.useCallback(async (terminalId: string, opts?: { keepRackId?: string }) => {
+    if (!terminalId) {
+      setExpandedRacks([]);
+      setExpandedRackId("");
+      setRacksError(null);
+      return;
+    }
+    setRacksLoading(true);
+    setRacksError(null);
+    const { data, error: err } = await supabase
+      .from("terminal_racks")
+      .select("*")
+      .eq("terminal_id", terminalId)
+      .order("rack_name", { ascending: true });
+    if (err) {
+      setRacksError(err.message);
+      setExpandedRacks([]);
+    } else {
+      const rows = (data ?? []) as TerminalRack[];
+      setExpandedRacks(rows);
+      // Keep the previously-picked rack selected across a refetch (e.g. after
+      // an Edit Terminal rename) if it still exists; otherwise fall back to
+      // the first row, same as the initial pick.
+      const keep = opts?.keepRackId;
+      setExpandedRackId(keep && rows.some((r) => r.rack_id === keep) ? keep : (rows[0]?.rack_id ?? ""));
+    }
+    setRacksLoading(false);
+  }, []);
+
+  useEffect(() => {
+    if (!expandedTerminalId) {
+      setExpandedRacks([]);
+      setExpandedRackId("");
+      setExpandedRackProducts([]);
+      setRacksError(null);
+      return;
+    }
+    loadExpandedRacks(expandedTerminalId);
+  }, [expandedTerminalId, loadExpandedRacks]);
+
+  const loadExpandedRackProducts = React.useCallback(async (rackId: string) => {
+    if (!rackId) { setExpandedRackProducts([]); return; }
+    const { data, error: err } = await supabase
+      .from("rack_product_status").select("*").eq("rack_id", rackId).eq("active", true);
+    if (err) { setRacksError(err.message); return; }
+    setExpandedRackProducts((data ?? []) as RackProductStatusRow[]);
+  }, []);
+
+  useEffect(() => {
+    loadExpandedRackProducts(expandedRackId);
+  }, [expandedRackId, loadExpandedRackProducts]);
+
+  const { data: productsCatalog = [] } = useProductsCatalog();
+  const productsById = useMemo(
+    () => Object.fromEntries(productsCatalog.map((p) => [p.product_id, p])),
+    [productsCatalog]
+  );
+
+  const canEditTerminal = myRole === "lead" || myRole === "dispatch" || myRole === "admin";
+  const canSeeCardsFooter = myRole === "driver" || myRole === "lead" || myRole == null;
+
+  const activeRack = expandedRacks.find((r) => r.rack_id === expandedRackId) ?? null;
+  const expandedTerminalRow = terminalsFiltered.find((t: any) => String(t.terminal_id) === expandedTerminalId);
 
   const handleSelect = (tid: string) => {
     if (!myTerminalIds.has(tid)) setMyTerminalIds(prev => new Set([...prev, tid]));
@@ -183,8 +277,62 @@ export default function MyTerminalsModal(props: {
                           <span className="text-white/40 font-medium">PIN</span>
                           <span className="text-white/70 font-semibold tabular-nums">{card?.pin || "—"}</span>
                         </div>
-                        <div className="pt-1 text-[11px] text-white/25">
-                          Edit card details from the Cards tab.
+                        {canSeeCardsFooter && (
+                          <div className="pt-1 text-[11px] text-white/25">
+                            Edit card details from the Cards tab.
+                          </div>
+                        )}
+
+                        {/* Rack status/edit -- relocated from the deleted
+                            Terminal tab. Only meaningful once this row's own
+                            rack fetch has resolved. */}
+                        <div className="pt-2 mt-2 border-t border-white/10 space-y-2">
+                          {racksLoading && (
+                            <div className="text-xs text-white/35">Loading racks…</div>
+                          )}
+                          {racksError && (
+                            <div className="text-xs text-red-400">{racksError}</div>
+                          )}
+                          {!racksLoading && expandedRacks.length === 0 && !racksError && (
+                            <div className="text-xs text-white/35">
+                              No racks configured yet{canEditTerminal ? " — use Edit Terminal below to add one." : "."}
+                            </div>
+                          )}
+                          {!racksLoading && expandedRacks.length > 0 && (
+                            <CustomSelect
+                              value={expandedRackId}
+                              onChange={setExpandedRackId}
+                              options={expandedRacks.map((r) => ({ value: r.rack_id, label: r.rack_name }))}
+                            />
+                          )}
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              disabled={!expandedRackId}
+                              onClick={() => setStudOpen(true)}
+                              style={{
+                                flex: 1, fontSize: 12, fontWeight: 700, padding: "8px 10px", borderRadius: 6,
+                                border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.06)",
+                                color: "#fff", cursor: expandedRackId ? "pointer" : "not-allowed",
+                                opacity: expandedRackId ? 1 : 0.4,
+                              }}
+                            >
+                              STUD
+                            </button>
+                            {canEditTerminal && (
+                              <button
+                                type="button"
+                                onClick={() => setEditTerminalOpen(true)}
+                                style={{
+                                  flex: 1, fontSize: 12, fontWeight: 700, padding: "8px 10px", borderRadius: 6,
+                                  border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.06)",
+                                  color: "#fff", cursor: "pointer",
+                                }}
+                              >
+                                Edit Terminal
+                              </button>
+                            )}
+                          </div>
                         </div>
                       </div>
                     )}
@@ -194,6 +342,36 @@ export default function MyTerminalsModal(props: {
             </div>
           )}
         </div>
+      )}
+
+      {activeRack && (
+        <RackProductStatusModal
+          open={studOpen}
+          onClose={() => setStudOpen(false)}
+          rack={activeRack}
+          terminalCity={expandedTerminalRow?.city ?? ""}
+          terminalState={expandedTerminalRow?.state ?? ""}
+          rackProducts={expandedRackProducts}
+          productsById={productsById}
+          authUserId={authUserId}
+          onSaved={() => loadExpandedRackProducts(expandedRackId)}
+        />
+      )}
+
+      {expandedTerminalId && canEditTerminal && (
+        <EditTerminalModal
+          open={editTerminalOpen}
+          onClose={() => setEditTerminalOpen(false)}
+          terminalId={expandedTerminalId}
+          terminalName={expandedTerminalRow?.terminal_name}
+          onChanged={() => {
+            // Re-fetch racks (a rename/add/delete may have changed the list,
+            // or renewal_days changed) -- keeps the currently-picked rack
+            // selected if it still exists. The rack-products effect above
+            // re-fires on its own once expandedRackId resolves.
+            if (expandedTerminalId) loadExpandedRacks(expandedTerminalId, { keepRackId: expandedRackId });
+          }}
+        />
       )}
     </FullscreenModal>
   );

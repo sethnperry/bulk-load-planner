@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
-import { ROLE_LABELS, type Role } from "./driver/role";
+import { ROLE_LABELS, isRole, type Role } from "./driver/role";
+import { canReachDestination } from "./driver/navDestinations";
 
 type Membership = {
   company_id: string;
@@ -37,6 +38,24 @@ export default function NavMenu({ darkMode, anchor }: { darkMode?: boolean; anch
   const isSuperAdmin_ = pathname === "/superadmin";
   const isReports_ = pathname === "/planner/reports";
   const isAdmin   = myRole === "admin" || myRole === "lead" || myRole === "dispatch";
+
+  // Destination links (Planner/Dispatch/Cards/Vault), now that the visible
+  // tab bar is gone and every page lives in this menu instead -- see
+  // lib/ui/driver/navDestinations.ts for the role rules. `role` narrows the
+  // raw fetched string (which could be anything, since `role` has no DB
+  // CHECK constraint -- see role.ts's own comment) to the app-level Role
+  // union, falling back to null for anything unrecognized, same graceful
+  // fallback every other role-check in this codebase already uses.
+  //
+  // isPlannerPage is deliberately narrower than the existing isPlanner flag
+  // above -- isPlanner means "anywhere inside the Planner section at all"
+  // (drives the hamburger icon's own styling/anchor default) and would
+  // incorrectly hide the new Planner link while on, say, /planner/vault.
+  const role: Role | null = isRole(myRole) ? myRole : null;
+  const isPlannerPage = pathname === "/planner";
+  const isDispatchPage = Boolean(pathname?.startsWith("/planner/dispatch"));
+  const isCardsPage = Boolean(pathname?.startsWith("/planner/cards"));
+  const isVaultPage = Boolean(pathname?.startsWith("/planner/vault"));
 
   useEffect(() => {
     let cancelled = false;
@@ -201,6 +220,24 @@ export default function NavMenu({ darkMode, anchor }: { darkMode?: boolean; anch
 
           {/* Nav links */}
           <div style={{ padding: "8px 6px" }}>
+            {/* Destination links -- the primary nav now that the tab bar is
+                gone. "Back to Planner" right below stays as-is (its own
+                purpose, the only way back into the Planner section from
+                Admin/Super Admin/Learn) even though it now overlaps with
+                the Planner link here while already inside that section --
+                harmless, same destination either way. */}
+            {canReachDestination("planner", role, isSuperAdmin) && !isPlannerPage && (
+              <NavLink href="/planner" icon="▤" label="Planner" onClick={() => setOpen(false)} />
+            )}
+            {canReachDestination("dispatch", role, isSuperAdmin) && !isDispatchPage && (
+              <NavLink href="/planner/dispatch" icon="◫" label="Dispatch" onClick={() => setOpen(false)} />
+            )}
+            {canReachDestination("cards", role, isSuperAdmin) && !isCardsPage && (
+              <NavLink href="/planner/cards" icon="▥" label="Cards" onClick={() => setOpen(false)} />
+            )}
+            {canReachDestination("vault", role, isSuperAdmin) && !isVaultPage && (
+              <NavLink href="/planner/vault" icon="🔒" label="Vault" onClick={() => setOpen(false)} />
+            )}
             {!isPlanner && (
               <NavLink href="/planner" icon="⟵" label="Back to Planner" onClick={() => setOpen(false)} />
             )}

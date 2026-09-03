@@ -1,17 +1,22 @@
 "use client";
-// app/planner/terminal/EditTerminalModal.tsx
+// app/planner/modals/EditTerminalModal.tsx
 //
 // Structural configuration for a terminal's racks -- separate from the STUD
-// status actions (LaneStatusModal/RackProductStatusModal). Hidden entirely
-// from drivers by the parent page (canEditTerminal check before rendering
-// the entry button); lead/dispatch/admin only. RLS itself is wide open
-// (matches the terminals/terminal_products precedent -- see the migration's
-// own comment), so this is a UI-only gate, same risk profile as equipment
-// CRUD carried before its 2026-08-07 permission-split migration.
+// status action (RackProductStatusModal). Hidden entirely from drivers by
+// the caller (canEditTerminal check before rendering the entry button);
+// lead/dispatch/admin only. RLS itself is wide open (matches the terminals/
+// terminal_products precedent -- see the migration's own comment), so this
+// is a UI-only gate, same risk profile as equipment CRUD carried before its
+// 2026-08-07 permission-split migration.
 //
-// Four internal views rather than four stacked modals -- simpler than
+// Two internal views rather than two stacked modals -- simpler than
 // juggling overlapping FullscreenModal instances for what's really just
 // content-swapping within one sheet.
+//
+// Relocated here from the now-deleted app/planner/terminal/ page -- Edit
+// Terminal (and STUD, its sibling) now open from MyTerminalsModal.tsx's
+// expanded terminal-card view instead of a dedicated Terminal tab, per
+// explicit direction. Content/behavior unchanged from the original.
 //
 // 2026-08-31: the Lane/Arm Layout view (bulk lane/arm relabeling, per-arm
 // product assignment, LayoutView/LaneRow/LaneArmProductsView/
@@ -28,7 +33,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { FullscreenModal } from "@/lib/ui/FullscreenModal";
 import { useProductsCatalog } from "@/lib/queries/useProductsCatalog";
-import type { TerminalRack, RackProductStatusRow, ProductLite } from "./types";
+import type { TerminalRack, ProductLite } from "./rackProductTypes";
 
 type View = "racks" | "products";
 
@@ -70,7 +75,7 @@ export default function EditTerminalModal({
   // terminal card shows up (Planner, Fleet Cards, Dispatch tab, etc, all via
   // terminals.renewal_days, default 90). It was previously only editable in
   // the old /admin terminal editor; this is the same column, surfaced here
-  // too since fleet staff manage terminals from the Terminal tab now.
+  // too since fleet staff manage terminals from here now.
   const [renewalDays, setRenewalDays] = useState<number | null>(null);
 
   async function loadRacks() {
@@ -448,4 +453,3 @@ function ProductsView({ rack, onChanged }: { rack: TerminalRack; onChanged: () =
     </div>
   );
 }
-

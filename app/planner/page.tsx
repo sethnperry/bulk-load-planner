@@ -24,6 +24,7 @@ import { useCalculatorShell } from "./CalculatorShellContext";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { supabase } from "@/lib/supabase/client";
+import { defaultLandingPath } from "@/lib/ui/driver/navDestinations";
 
 // Module-level (not component state) so it survives this page component
 // unmounting/remounting on every route change, but still resets on a true
@@ -341,33 +342,34 @@ export default function CalculatorPage() {
     ? Math.max(0, availableRowHeight - ROW_SAFETY_MARGIN_PX) / rowScale
     : undefined;
 
-  // Dispatch's real home is the Dispatch tab, not this one -- but whatever
-  // actually lands the app on bare /planner (e.g. a login redirect that
-  // doesn't know about roles) doesn't know that. Admin/super-admin are
-  // deliberately excluded here per explicit user direction (2026-08-04):
-  // "the only role that should default to the dispatch tab on open is the
-  // dispatch role. all other roles should open to the planner." Admin's
-  // route into the Dispatch tab's driver-scoped view is the Dispatch tab
-  // itself (a permanent, always-available tab, not a default landing);
-  // this redirect previously also fired for admin/super-admin and was the
-  // actual cause of a real reported bug ("twitches back to dispatch" when
-  // tapping Planner) -- if this page's own JS chunk got re-evaluated after
-  // a route away and back (e.g. under memory pressure on mobile), the
-  // module-level hasCheckedDefaultLanding flag reset, so the "one-time"
-  // redirect silently refired on what the admin experienced as a deliberate
-  // Planner visit. Scoping this to dispatch-only doesn't fix that
-  // re-evaluation risk in the abstract, but it does mean the one role that
-  // can hit it (dispatch) has no Planner tab to be bounced away from in the
-  // first place -- the whole bug class no longer has a visible symptom for
-  // any role that experiences it.
+  // Reverses a 2026-08-04 decision that only dispatch should ever redirect
+  // off bare /planner ("the only role that should default to the dispatch
+  // tab on open is the dispatch role. all other roles should open to the
+  // planner") -- that reasoning is superseded now that admin's Planner IS
+  // the Dispatch page (app/planner/dispatch/page.tsx), not a shared page
+  // admin and driver/lead both used to land on. admin now redirects the
+  // same way dispatch already did; isSuperAdmin never redirects either way
+  // (gets both /planner and /planner/dispatch reachable, on purpose, via
+  // NavMenu -- see lib/ui/driver/navDestinations.ts).
+  //
+  // Gated on shell.isSuperAdminResolved, not just shell.role != null --
+  // role and isSuperAdmin resolve via two fully independent effects in
+  // CalculatorShellContext.tsx with no ordering guarantee, so without this
+  // a real super admin whose own company role happens to be "admin" could
+  // get redirected to /planner/dispatch before their super-admin flag
+  // resolves true. This is the same "re-evaluation can silently re-fire the
+  // one-time redirect" class of bug the module-level hasCheckedDefaultLanding
+  // flag already exists to guard against, just a second, independent way
+  // for that guard's own precondition to be wrong -- worth closing properly
+  // rather than leaving a narrower version of the same bug in place.
   useEffect(() => {
     if (hasCheckedDefaultLanding) return;
     if (shell.role == null) return;
+    if (!shell.isSuperAdminResolved) return;
     hasCheckedDefaultLanding = true;
-    if (shell.role === "dispatch") {
-      router.replace("/planner/dispatch");
-    }
-  }, [shell.role, router]);
+    const target = defaultLandingPath(shell.role, shell.isSuperAdmin);
+    if (target) router.replace(target);
+  }, [shell.role, shell.isSuperAdmin, shell.isSuperAdminResolved, router]);
 
   // ── Card data (card number + PIN + private note, per terminal, per user) ──
   // Owned in CalculatorShellContext now -- the new Cards tab route needs the

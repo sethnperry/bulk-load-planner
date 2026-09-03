@@ -79,14 +79,25 @@ type ShellValue = {
   setCardDataForTerminal_: (terminalId: string, data: CardData) => Promise<void>;
   theme: ReturnType<typeof useTheme>;
   // Role of effectiveUserId in their active company -- null until resolved.
-  // Drives which tabs CalculatorLayoutClient's tabsFor() shows (Dispatch/
-  // Planner for admin, Dispatch only for dispatch, Planner only otherwise).
+  // Drives NavMenu's destination links (lib/ui/driver/navDestinations.ts)
+  // and the landing-redirect effect in page.tsx (admin/dispatch -> their
+  // Dispatch-page Planner; driver/lead -> this page).
   role: Role | null;
   companyId: string | null;
   // Super admins (is_super_admin() RPC, same one NavMenu.tsx already uses)
-  // get the same Dispatch+Planner tab set as admin, regardless of their own
-  // company role -- lets one account verify both without reassigning roles.
+  // get BOTH Planner and Dispatch reachable, regardless of their own company
+  // role -- lets one account verify both without reassigning roles.
   isSuperAdmin: boolean;
+  // True once the is_super_admin() RPC has settled, regardless of result --
+  // distinct from isSuperAdmin itself (which starts false and could mean
+  // "confirmed not a super admin" OR "still loading"). page.tsx's
+  // landing-redirect effect needs this: role and isSuperAdmin resolve via
+  // two fully independent effects with no ordering guarantee, so a real
+  // super admin whose own company role happens to be "admin" could
+  // otherwise get redirected to /planner/dispatch before their super-admin
+  // flag has had a chance to resolve true -- a real race, not hypothetical
+  // (confirmed by reading both effects' own dependency arrays directly).
+  isSuperAdminResolved: boolean;
   // Which driver a dispatch/admin user currently has selected -- shared so
   // the Dispatch tab, the contextual Cards tab, and the Terminal tab's
   // auto-open-to-their-terminal behavior all agree on the same driver
@@ -329,12 +340,18 @@ export function CalculatorShellProvider({ children }: { children: React.ReactNod
   // Super-admin status is about the REAL signed-in account, not whoever
   // they're impersonating -- keyed on authUserId, not effectiveUserId.
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  // Flips true once the RPC settles, regardless of result -- see this
+  // field's own comment on the ShellValue type above for the race it exists
+  // to close.
+  const [isSuperAdminResolved, setIsSuperAdminResolved] = useState(false);
   useEffect(() => {
     if (!authUserId) return;
     let cancelled = false;
     (async () => {
       const { data } = await supabase.rpc("is_super_admin");
-      if (!cancelled) setIsSuperAdmin(Boolean(data));
+      if (cancelled) return;
+      setIsSuperAdmin(Boolean(data));
+      setIsSuperAdminResolved(true);
     })();
     return () => { cancelled = true; };
   }, [authUserId]);
@@ -481,7 +498,7 @@ export function CalculatorShellProvider({ children }: { children: React.ReactNod
     stateOptions, selectedStateLabel, selectedStateName, cities, topCities, allCities,
     cardDataByTerminalId, setCardDataForTerminal_,
     theme,
-    role, companyId, isSuperAdmin,
+    role, companyId, isSuperAdmin, isSuperAdminResolved,
     selectedDriverId, setSelectedDriverId,
     plannedProductIds, setPlannedProductIds,
     chooseTerminal, rackPickerOpen, rackPickerRacks, resolveRackPick,
@@ -497,7 +514,7 @@ export function CalculatorShellProvider({ children }: { children: React.ReactNod
     stateOptions, selectedStateLabel, selectedStateName, cities, topCities, allCities,
     cardDataByTerminalId, setCardDataForTerminal_,
     theme,
-    role, companyId, isSuperAdmin,
+    role, companyId, isSuperAdmin, isSuperAdminResolved,
     selectedDriverId, setSelectedDriverId,
     plannedProductIds, setPlannedProductIds,
     chooseTerminal, rackPickerOpen, rackPickerRacks, resolveRackPick,

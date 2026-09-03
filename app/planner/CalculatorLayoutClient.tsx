@@ -1,25 +1,25 @@
 "use client";
 // app/planner/CalculatorLayoutClient.tsx
 //
-// Redesign shell (Phase 1 of the "ProTankr mobile app design" handoff):
-// full-bleed gradient header (hamburger/bell/gear + alerts cluster) and a
-// Planner/Cards/Vault tab bar, shared across three real routes
-// (/planner, /planner/cards, /planner/vault) rather than in-page
-// tab state -- gets back/forward navigation for free and matches this
-// app's existing multi-route convention.
+// Redesign shell: full-bleed gradient header (hamburger/bell/gear + alerts
+// cluster), shared across every /planner/* route via this one layout client
+// component rather than in-page chrome -- gets back/forward navigation for
+// free and matches this app's existing multi-route convention.
 //
-// The preset-letter watermark from the design is deliberately omitted here
-// -- "which preset is currently loaded" is Planner-only state that doesn't
-// exist yet in the real app (usePlanSlots has no "active letter" concept
-// today); wiring that up is part of a later phase, not this shell pass.
+// The visible tab bar (Dispatch/Insights/Planner/Cards/Vault) that used to
+// render below/inline with this header is gone entirely -- every
+// destination it held now lives in NavMenu's own dropdown instead, per
+// explicit direction ("do away with the tabs and put the pages in the nav
+// hamburger with reports etc."). See lib/ui/NavMenu.tsx and
+// lib/ui/driver/navDestinations.ts for where that logic moved.
 //
 // Split out from layout.tsx (which is now a server component exporting its
 // own `viewport.themeColor`) because Next's Metadata API requires viewport/
 // metadata exports to live in a server component -- this client component
 // holds all the actual interactive shell logic.
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import React, { useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
 import NavMenu from "@/lib/ui/NavMenu";
 import EquipmentModal from "./modals/EquipmentModal";
 import ExpirationModal from "./modals/ExpirationModal";
@@ -32,219 +32,7 @@ import { useActiveOutageBanner } from "./hooks/useTerminalOutageReports";
 import { CalculatorShellProvider, useCalculatorShell } from "./CalculatorShellContext";
 import { addDaysISO_, isPastISO_, formatMDYWithCountdown_ } from "./utils/dates";
 import { normState } from "./utils/normalize";
-import {
-  themeFill, themeHeaderGradient, themeIconStroke, themeTabActive, themeTabInactive,
-  themeUnderlineTrack, themeUnderlineActive,
-} from "./theme";
-import type { Role } from "@/lib/ui/driver/role";
-import { useIsLandscape } from "./hooks/useOrientation";
-
-// Terminal Tier pivot (2026-08-03, see CLAUDE.md "Terminal Tier — Build
-// Spec"). Every tab now has a stable, unique id regardless of role --
-// Dispatch and Planner used to share id "planner" so the tab bar could
-// toggle between them for admin, which caused a real bug: landing on bare
-// /planner (Planner's route) while the tab bar's "Dispatch" slot
-// highlighted itself (same shared id) made it look like Dispatch was
-// showing when Planner content actually was. Fixed by giving admin real,
-// separate Dispatch AND Planner tabs (no more toggle) instead of trying to
-// keep one shared slot honest.
-//
-// Dispatch never gets a Planner tab -- dispatchers don't get in a truck.
-// Admin and super admins get both, since "admins should have the planner
-// used by lead drivers."
-// Label only, per explicit direction (2026-08-31 Terminal tab pivot --
-// Lane Map removed, Volume/Trends/Recovery analytics added) -- id/href
-// deliberately unchanged, same "route/label only, internal identifiers
-// untouched" precedent as the /calculator -> /planner rename.
-const TERMINAL_TAB = { id: "terminal", label: "Insights", href: "/planner/terminal" };
-const DISPATCH_TAB = { id: "dispatch", label: "Dispatch", href: "/planner/dispatch" };
-const PLANNER_TAB = { id: "planner", label: "Planner", href: "/planner" };
-const CARDS_TAB = { id: "cards", label: "Cards", href: "/planner/cards" };
-const VAULT_TAB = { id: "vault", label: "Vault", href: "/planner/vault" };
-
-function tabsFor(role: Role | null, isSuperAdmin: boolean) {
-  // Terminal and Dispatch swapped 2026-08-06 (per explicit direction) so
-  // Terminal sits next to Planner.
-  if (role === "dispatch") return [DISPATCH_TAB, TERMINAL_TAB, CARDS_TAB, VAULT_TAB];
-  if (role === "admin" || isSuperAdmin) return [DISPATCH_TAB, TERMINAL_TAB, PLANNER_TAB, CARDS_TAB, VAULT_TAB];
-  return [TERMINAL_TAB, PLANNER_TAB, CARDS_TAB, VAULT_TAB]; // driver, lead, or unresolved
-}
-
-function activeTabFor(pathname: string | null): string | "none" {
-  if (pathname?.startsWith("/planner/terminal")) return "terminal";
-  if (pathname?.startsWith("/planner/dispatch")) return "dispatch";
-  if (pathname?.startsWith("/planner/cards")) return "cards";
-  if (pathname?.startsWith("/planner/vault")) return "vault";
-  // Reports is a nav-menu destination, not a peer of Planner/Cards/Vault --
-  // "none" leaves every tab unhighlighted instead of falsely bolding
-  // Planner while Reports content is what's actually showing.
-  if (pathname?.startsWith("/planner/reports")) return "none";
-  return "planner";
-}
-
-function TabBar({ compact, inline }: { compact?: boolean; inline?: boolean }) {
-  const pathname = usePathname();
-  const router = useRouter();
-  const shell = useCalculatorShell();
-  const darkMode = shell.theme.darkMode;
-  const tabs = useMemo(() => tabsFor(shell.role, shell.isSuperAdmin), [shell.role, shell.isSuperAdmin]);
-  const active = activeTabFor(pathname);
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const suppressScrollNavRef = useRef(false);
-
-  const centerTab = (id: string, smooth: boolean) => {
-    const container = scrollRef.current;
-    if (!container) return;
-    const idx = tabs.findIndex((t) => t.id === id);
-    const el = container.children[idx] as HTMLElement | undefined;
-    if (!el) return;
-    // Bounding-rect deltas, not el.offsetLeft -- the exact same latent bug
-    // already found and fixed in PresetDial.tsx's centerSlot() (see that
-    // file's own comment), just never ported over here. offsetLeft
-    // resolves against the nearest POSITIONED ancestor (offsetParent),
-    // which for a tab nested in `inline` mode is Header's own
-    // `position:"relative"` wrapper -- NOT this scroll container, which
-    // has no `position` of its own. That produced a target inflated by
-    // the scroll container's own static offset within Header (52px from
-    // NavMenu, in the inline case) each time, silently shifting every
-    // "centered" tab left by exactly that much. This bug existed in
-    // portrait too, but was invisible there: the full-width, non-inline
-    // TabBar's scroll container always sat flush against Header's own
-    // left edge (offsetLeft-vs-Header and offsetLeft-vs-container
-    // happened to be the same reference frame), so it took `inline`
-    // mode's nonzero nesting to finally expose it. Confirmed live: the
-    // Planner tab (2nd tab index) measured a real ~88px leftward
-    // centering error at 844px wide before this fix. getBoundingClientRect()
-    // is always viewport-relative regardless of positioning context,
-    // matching the already-correct approach onScroll() below (and
-    // PresetDial's own centerSlot) already use -- this makes all three
-    // agree.
-    const containerRect = container.getBoundingClientRect();
-    const elRect = el.getBoundingClientRect();
-    const target = container.scrollLeft + (elRect.left - containerRect.left) + elRect.width / 2 - containerRect.width / 2;
-    suppressScrollNavRef.current = true;
-    container.scrollTo({ left: target, behavior: smooth ? "smooth" : "auto" });
-    setTimeout(() => { suppressScrollNavRef.current = false; }, smooth ? 400 : 50);
-  };
-
-  useEffect(() => { centerTab(active, false); }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { centerTab(active, true); }, [active, tabs.length]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Prefetch every tab's route so router.push below is served from cache
-  // instead of waiting on a fresh RSC round trip -- this is most of what
-  // actually reads as "glitchy" switching tabs (a real network/render delay
-  // before the new route settles), separate from the theme-flash fix in
-  // useTheme.ts.
-  useEffect(() => {
-    tabs.forEach((t) => router.prefetch(t.href));
-  }, [tabs, router]);
-
-  function onScroll() {
-    if (suppressScrollNavRef.current) return;
-    // "none" means we're on a non-tab destination (e.g. Reports) where no
-    // tab is meant to be highlighted -- scroll-driven auto-navigation would
-    // otherwise treat every settle as "closest tab != none" and push away.
-    if (active === "none") return;
-    const container = scrollRef.current;
-    if (!container) return;
-    if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current);
-    scrollTimerRef.current = setTimeout(() => {
-      const rect = container.getBoundingClientRect();
-      const centerX = rect.left + rect.width / 2;
-      let best = 0, bestDist = Infinity;
-      Array.from(container.children).forEach((child, i) => {
-        const r = (child as HTMLElement).getBoundingClientRect();
-        const d = Math.abs(r.left + r.width / 2 - centerX);
-        if (d < bestDist) { bestDist = d; best = i; }
-      });
-      const id = tabs[best]?.id;
-      if (id && id !== active) router.push(tabs[best].href);
-    }, 80);
-  }
-
-  // inline (landscape only, see Header) renders a smaller, denser variant
-  // that sits INSIDE the icon row itself, sharing space with the
-  // hamburger/bell/gear, instead of as its own full-width row underneath
-  // -- per explicit follow-up: "shift the tabs up in between the nav and
-  // bell/sprocket to shorten the header more." This is the second time
-  // this exact idea has been built -- a previous pass built it, a later
-  // one reverted it back to a standalone (if tightened) row reasoning
-  // that a shared row can't center the way a full-width one does; this
-  // follow-up explicitly re-prioritized header height over that
-  // centering, so it's back. Same tab list, same click/scroll-snap-
-  // centering logic (centerTab/onScroll above don't hardcode a tab
-  // width, they read real element rects, so they adapt to either size
-  // automatically) -- just a smaller per-tab slot (84px, not 120),
-  // smaller text, no marginTop (it's a flex child of the icon row now,
-  // not a stacked block below it), and no underline row (the active tab
-  // is still readable from its own bolder/brighter text alone, and the
-  // underline's own height was exactly the kind of vertical space this
-  // mode exists to reclaim).
-  const tabW = inline ? 84 : 120;
-
-  // marginTop is the historical "icon row to tab bar" gap; when the outage
-  // banner is showing directly above instead (compact), that gap is
-  // redundant/excessive and gets collapsed down to near nothing, per
-  // explicit direction ("remove the space under it"). Inline mode ignores
-  // both -- it's never stacked below anything, so there's no gap to tune.
-  return (
-    <div style={{ marginTop: inline ? 0 : (compact ? 2 : 18), flexShrink: 0 }}>
-      <div
-        ref={scrollRef}
-        onScroll={onScroll}
-        className="pt-tabscroll"
-        style={{
-          display: "flex", gap: inline ? 4 : 8, overflowX: "auto", scrollSnapType: "x mandatory",
-          padding: `0 calc(50% - ${tabW / 2}px)`, WebkitOverflowScrolling: "touch",
-        }}
-      >
-        {tabs.map((t) => {
-          const isActive = t.id === active;
-          return (
-            <div
-              key={t.id}
-              onClick={() => { if (t.id !== active) router.push(t.href); else centerTab(t.id, true); }}
-              style={{ flex: `0 0 ${tabW}px`, scrollSnapAlign: "center", display: "flex", justifyContent: "center", cursor: "pointer" }}
-            >
-              <div style={{
-                padding: inline ? "4px 2px" : "14px 2px",
-                font: isActive
-                  ? `500 ${inline ? 13 : 16}px Outfit`
-                  : `400 ${inline ? 12 : 14}px Outfit`,
-                color: isActive ? themeTabActive(darkMode) : themeTabInactive(darkMode),
-                transition: "all 150ms ease",
-                whiteSpace: "nowrap" as const,
-              }}>
-                {t.label}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-      {/* The active segment is a FIXED tabW -- matching each tab's own
-          `flex: "0 0 <tabW>px"` slot width above -- instead of a flex:1
-          third of the whole bar. Scroll-snap-center guarantees the active
-          tab is always horizontally centered in this scroll container, so
-          a fixed-width bar centered the same way lands exactly under it,
-          whatever tab that happens to be, with no per-tab position
-          tracking needed. Previously flex:1 made this segment ~1/3 of the
-          *entire* tab row regardless of which tab was active or how many
-          tabs there were -- always centered on the row as a whole, never
-          actually scoped to one tab. Nudged up slightly (negative
-          marginTop into the label's own bottom padding) and thickened so
-          it reads as clearly attached to the tab text above it. Skipped
-          entirely in inline mode -- see the header comment above. */}
-      {!inline && (
-        <div style={{ display: "flex", alignItems: "center", marginTop: -4 }}>
-          <div style={{ flex: 1, height: 1, background: themeUnderlineTrack(darkMode) }} />
-          <div style={{ flex: `0 0 ${tabW}px`, height: 3, borderRadius: 2, background: themeUnderlineActive(darkMode) }} />
-          <div style={{ flex: 1, height: 1, background: themeUnderlineTrack(darkMode) }} />
-        </div>
-      )}
-    </div>
-  );
-}
+import { themeFill, themeHeaderGradient, themeIconStroke } from "./theme";
 
 function BellIcon({ count, onClick, stroke }: { count: number; onClick: () => void; stroke: string }) {
   return (
@@ -278,21 +66,11 @@ function Header({ onOpenSettings }: { onOpenSettings: () => void }) {
   const { darkMode, accentColor } = shell.theme;
   const iconStroke = themeIconStroke(darkMode);
   const pathname = usePathname();
-  // Landscape: tabs move back inline into the icon row, sharing space
-  // with the hamburger/bell/gear -- reverses the PREVIOUS follow-up's own
-  // reversal of this exact idea (that pass wanted tabs "centered on
-  // screen... just like portrait mode," reasoning a full-width row
-  // centers correctly where a row split with unequal icon groups
-  // doesn't). This pass explicitly asked to go back: "shift the tabs up
-  // in between the nav and bell/sprocket to shorten the header more" --
-  // perfect centering under a specific tab was traded for a shorter
-  // header, a real tradeoff made twice in a row now, not an oversight
-  // either time. See TabBar's own `inline` prop.
-  const isLandscape = useIsLandscape();
 
-  // Fetched once here (not inside TerminalOutageBanner itself) so Header
-  // can also collapse TabBar's own spacing when the banner actually has
-  // something to show -- see TabBar's `compact` prop.
+  // Fetched once here (not inside TerminalOutageBanner itself), same as
+  // before the tab bar was removed -- kept at Header's level since the
+  // outage banner still needs to render across every route this shared
+  // Header covers, not just the Planner page.
   const terminalId = shell.location.selectedTerminalId ? String(shell.location.selectedTerminalId) : null;
   const outageBanner = useActiveOutageBanner(terminalId, shell.effectiveUserId || null, shell.plannedProductIds);
 
@@ -352,15 +130,6 @@ function Header({ onOpenSettings }: { onOpenSettings: () => void }) {
         padding: "0 calc(env(safe-area-inset-right, 0px) + 16px) 0 calc(env(safe-area-inset-left, 0px) + 16px)",
       }}>
         <NavMenu darkMode={darkMode} />
-        {/* Landscape: the tab bar fills the gap between the hamburger and
-            bell/gear right here -- see TabBar's own `inline` prop and the
-            isLandscape comment above. Portrait renders TabBar as its own
-            full row below instead (unchanged). */}
-        {isLandscape && (
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <TabBar inline />
-          </div>
-        )}
         <div style={{ display: "flex", gap: 26, flexShrink: 0, alignItems: "center" }}>
           <BellIcon count={shell.expirations.expiredCount + shell.expirations.warningCount} onClick={() => shell.setExpModalOpen(true)} stroke={iconStroke} />
           <GearIcon onClick={onOpenSettings} stroke={iconStroke} />
@@ -369,17 +138,24 @@ function Header({ onOpenSettings }: { onOpenSettings: () => void }) {
       {/* Outage banner still renders right after the icon row either way
           -- when there's nothing to show it contributes zero height
           (see TerminalOutageBanner's own conditional return), so the
-          collapsed/inline header stays maximally thin; when there IS an
-          active outage, this is what makes the header expand downward to
-          show it, per explicit direction ("expand down when there's a
-          terminal outage banner otherwise keep collapsed"). */}
+          header stays maximally thin; when there IS an active outage,
+          this is what makes the header expand downward to show it, per
+          explicit direction ("expand down when there's a terminal
+          outage banner otherwise keep collapsed"). The tab bar that used
+          to render below this (its own row in portrait, inline with the
+          icon row in landscape) is gone entirely -- every destination it
+          used to hold (Dispatch/Insights/Planner/Cards/Vault) now lives
+          in NavMenu's own dropdown instead, per explicit direction ("do
+          away with the tabs and put the pages in the nav hamburger with
+          reports etc."). This also retires the just-fixed centerTab
+          offsetLeft bug and the inline/compact variants along with it --
+          no other caller, nothing left to keep working. */}
       <TerminalOutageBanner
         tickerMessage={outageBanner.tickerMessage}
         reports={outageBanner.reports}
         timeZone={outageBanner.timeZone}
         refresh={outageBanner.refresh}
       />
-      {!isLandscape && <TabBar compact={!!outageBanner.tickerMessage} />}
     </div>
   );
 }
@@ -490,6 +266,8 @@ function ShellChrome({ children }: { children: React.ReactNode }) {
         setSelectedTerminalId={shell.chooseTerminal}
         setTermOpen={shell.setTermOpen}
         onChangeLocation={() => { shell.setTermOpen(false); shell.setLocOpen(true); }}
+        authUserId={shell.effectiveUserId}
+        myRole={shell.role}
       />
 
       <RackSelectSheet
