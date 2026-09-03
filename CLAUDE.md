@@ -7969,6 +7969,34 @@ genuine driver or lead account before considering this fully closed.
 `npx tsc --noEmit` and `npx next build` clean after every area of the
 plan, not just once at the end.
 
+### Follow-up same day: the rack product list itself never made the move (2026-09-03)
+
+User caught a real gap right after the pass above shipped: "It looks like
+we lost the visual product status in the transfer over to the my
+terminals modal." Correct -- the relocation moved the STUD/Edit-Terminal
+ACTIONS but never the read-only product LIST they act on (dot color,
+button code, name, `is_out` strikethrough+dim, API/temp with "API —"/
+"—°F" placeholders) -- `expandedRackProducts`/`productsById` were already
+being fetched (the STUD modal needs them), just never rendered anywhere
+themselves.
+
+Fixed by porting the deleted Status tab's own rendering verbatim (pulled
+from git history at the pre-deletion commit, not rewritten from memory) into
+`MyTerminalsModal.tsx`'s expanded card, between the rack picker dropdown and
+the STUD/Edit Terminal button row -- same order the original page used
+(picker -> list -> actions). No new data fetching needed, since the
+underlying state already existed for the STUD modal's own use.
+
+**Live-verified** via the same demo login route + bell-icon path used to
+verify the original relocation: expanded Chevron's card, confirmed the full
+real product list renders correctly under "Main Rack" -- 87 Regular
+Unleaded (API 60.4 / 87°F), D2 ULSD Diesel #2 (API 36.5 / 84.9°F), and four
+more products including two genuinely showing the "API —"/"—°F" placeholder
+state, each with the correct product-color dot. Console clean beyond the
+same stale 401 already documented in the entry above (this session's own
+diagnostic fetch, not app code). `npx tsc --noEmit` and `npx next build`
+both clean.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.
