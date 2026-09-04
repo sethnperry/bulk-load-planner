@@ -166,9 +166,10 @@ export default function PresetQuickPick({
                     ) : (
                       // Name and dots share one row now (was name, then a
                       // second line of dots underneath) -- dots sized up a
-                      // little (9px -> 12px) and placed right next to the
-                      // name per explicit follow-up.
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                      // little (9px -> 12px). Gap widened again the same
+                      // day (8px -> 16px) per explicit follow-up ("shift
+                      // them to the right away from the label a bit").
+                      <div style={{ display: "flex", alignItems: "center", gap: 16, minWidth: 0 }}>
                         <div style={{ fontSize: 14, fontWeight: 600, color: name ? "#fff" : "rgba(255,255,255,0.35)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const, flexShrink: 1 }}>
                           {name || `Preset ${letter}`}
                         </div>

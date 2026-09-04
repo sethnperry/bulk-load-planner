@@ -68,7 +68,15 @@ export default function PlannerControls(props: any) {
           <div style={{
             display: "flex",
             justifyContent: "center",
-            gap: 12,
+            // Widened for portrait -- per explicit direction ("the
+            // compartments are too close and cluttered looking in
+            // portrait mode") -- landscape untouched (its own fixed-width
+            // + uniform-scale sizing model, unrelated to this and
+            // explicitly deferred: "next we can fix the landscape").
+            // BAR_GAP below (used for the width calc) must stay in sync
+            // with this value or the bars would overflow/underflow their
+            // container.
+            gap: isLandscape ? 12 : 20,
             flexWrap: "nowrap",
             width: "100%",
             alignItems: "flex-end",
@@ -101,7 +109,7 @@ export default function PlannerControls(props: any) {
               // reflect the compartment's real size on the trailer, not a
               // temporarily-adjusted cap.
               const totalCap = ordered.reduce((sum: number, c: any) => sum + Number(c.max_gallons ?? 0), 0);
-              const gapPx = 12;
+              const gapPx = isLandscape ? 12 : 20;
 
               return ordered.map((c: any) => {
                 const trueMax = Number(c.max_gallons ?? 0);

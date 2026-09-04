@@ -8546,6 +8546,79 @@ reverted after, confirmed via grep) in both landscape-ish and portrait
 widths for every change above except the specific black-dot case noted.
 `npx tsc --noEmit` and `npx next build` both clean.
 
+### Sixth Planner follow-up: dot order/count fix, more portrait spacing, rack/pin color reverts (2026-09-03, same day)
+
+Sixth pass in the same day's thread. Seven items, one clarified via
+`AskUserQuestion` rather than guessed.
+
+**Preset dots: fixed order, always match the real compartment count.**
+Two real, related bugs, both found by the user against real data (Global
+South, a 3-compartment trailer), not guessed at:
+1. Dots rendered in ascending comp-number order (1, 2, 3 left to right)
+   -- backwards relative to how the actual compartment bars render
+   (`PlannerControls.tsx`'s own `ordered = [...compartments].sort(asc).reverse()`,
+   "right-to-left display" -- comp1 is the RIGHTMOST bar, matching the
+   physical trailer viewed from the passenger side). `colorsForSlot`
+   (`page.tsx`) now sorts descending so the dots visually match the bars.
+2. Dot count only reflected however many keys happened to exist in the
+   saved plan SNAPSHOT, not the equipment's real compartment count -- a
+   preset saved before a compartment existed, or one whose snapshot never
+   recorded it, showed fewer dots than the trailer actually has.
+   `colorsForSlot` now iterates the equipment's own live `compartments`
+   list (reading each real comp number's plan entry, defaulting to black
+   if missing) instead of `Object.entries(plan)` -- dot count can no
+   longer drift from the truth. Live-verified together: Global South
+   North Rack, comp3=D2/comp2=MT/comp1=D2 -- Presets A/B now show exactly
+   3 dots, yellow-black-yellow left to right (comp1's yellow dot correctly
+   rightmost), the black middle dot for the genuinely empty compartment.
+
+**PresetQuickPick: dots pushed further from the name.** Gap between the
+preset name and its dot row widened 8px -> 16px, per "shift them to the
+right away from the label a bit."
+
+**More vertical space around the location line.** `locationLineEl` gained
+`marginTop: 10` (was 0) alongside its existing `marginBottom` (12 -> 18).
+
+**Compartment bars: wider gap in portrait, landscape untouched.** Per
+"the compartments are too close and cluttered looking in portrait mode"
+(explicitly NOT landscape -- "next we can fix the landscape" flags that
+as separate, later work): `PlannerControls.tsx`'s inter-bar `gap` (and
+the matching `gapPx` used in the bar-width calc, which has to stay in
+sync or the bars overflow/underflow) went from a flat 12px to
+`isLandscape ? 12 : 20`.
+
+**Rack label reverted to gray.** Per "the rack label on the right can go
+back to grey" -- this reverses only the immediately preceding pass's
+color/weight change (white/700 -> back to `rgba(255,255,255,0.45)`/500);
+it stays on the same line as the terminal, pushed to the far right --
+that part of the preceding pass is unchanged.
+
+**Location pin icon: white, not red.** `SolidPinIcon`'s fixed color in
+`headerIconsEl` changed from `#ef4444` to `#ffffff`.
+
+**Load button font-weight -- investigated, no code difference found.**
+"The load button should have the same weight as the reload" -- both
+states render from the exact same button element/style object (confirmed
+via `getComputedStyle` on both a disabled "RELOAD" and, live at Global
+South, a genuinely ENABLED "LOAD" -- `fontWeight: 700`, `fontSize: 16px`,
+same bg/text colors, identical in every property). Asked the user via
+`AskUserQuestion` rather than guess at a code change with nothing to
+actually change; they confirmed they'd seen an apparent boldness
+difference. Left as a flagged, unresolved observation rather than a
+blind edit -- most likely explanation is the disabled-state 50% opacity
+(a real, intentional dimming) being mistaken for a weight difference,
+but not confirmed either way this pass.
+
+**Live-verified** via the demo login route (temporary redirect bypass,
+reverted after, confirmed via grep), all in portrait: pin icon white,
+wider compartment gaps, visible extra space above/below the location
+line; switched to Global South/North Rack and confirmed via
+`getComputedStyle` the rack name reads back at `rgba(255,255,255,0.45)`/
+500/13px (still same line, still far right) while the terminal/city-
+state stayed white/700/15px; the dot fixes confirmed as described above
+against real mixed-compartment data. `npx tsc --noEmit` and `npx next
+build` both clean.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.

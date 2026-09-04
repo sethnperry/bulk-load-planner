@@ -1158,28 +1158,39 @@ export default function CalculatorPage() {
   // PresetQuickPick's per-row colored-dot readout -- per explicit direction
   // ("instead of describing the plan just use colored dots for a quick
   // visual representation... the product selection, and each [compartment]")
-  // -- one dot per compartment (every entry in the saved plan, not just the
-  // filled ones -- see the same-day follow-up on this function itself),
-  // comp-number order (so the dots line up the same way across every
-  // preset row), reusing the same productColorFor family-coding the
-  // outage banner's detail cards already use (diesel yellow / premium red
-  // / else white). An empty compartment (or one with no product selected)
-  // renders black; a compartment whose product isn't resolvable at the
-  // current terminal (see summaryForSlot's own "unavailable product" case)
-  // still gets a real dot -- productColorFor("") falls through to white --
-  // rather than silently disappearing from the readout.
-  // One dot per compartment now, not just the filled ones -- per explicit
-  // follow-up ("empty compartments should get a black dot") -- so the dot
-  // count always matches the equipment's real compartment count instead of
-  // varying with how many happen to be planned.
+  // -- reusing the same productColorFor family-coding the outage banner's
+  // detail cards already use (diesel yellow / premium red / else white).
+  // An empty compartment (or one with no product selected) renders black;
+  // a compartment whose product isn't resolvable at the current terminal
+  // (see summaryForSlot's own "unavailable product" case) still gets a
+  // real dot -- productColorFor("") falls through to white -- rather than
+  // silently disappearing from the readout.
+  //
+  // Iterates over the equipment's own real `compartments` list now, not
+  // just whatever keys happen to exist in the saved plan snapshot -- per
+  // explicit follow-up ("on this trailer, 3 comps, all plans should have
+  // 3 dots"): a preset saved before this pass, or one whose snapshot never
+  // recorded a since-added compartment, previously produced fewer dots
+  // than the trailer actually has. Reading real compartment numbers
+  // instead means the dot count can never drift from the truth, and a
+  // missing plan entry for a real compartment (not just one explicitly
+  // marked empty) also correctly renders black rather than being skipped.
+  //
+  // Order: DESCENDING comp number, not ascending -- matches
+  // PlannerControls.tsx's own physical display order exactly (see that
+  // file's `ordered = [...compartments].sort(asc).reverse()`, "right-to-
+  // left display" comment) -- per explicit correction ("comp 1 is on the
+  // right, looking at the passenger side... the dots are backwards").
   const colorsForSlot = useCallback((slot: number): string[] => {
     const plan = planSlots.peekSlot(slot)?.compPlan;
-    if (!plan) return [];
-    return Object.entries(plan)
-      .filter(([, v]) => v != null)
-      .sort((a, b) => Number(a[0]) - Number(b[0]))
-      .map(([, v]) => (v!.empty || !v!.productId) ? "#000000" : productColorFor(productNameById.get(v!.productId!) ?? ""));
-  }, [planSlots, productNameById]);
+    return [...compartments]
+      .map((c: any) => Number(c.comp_number))
+      .sort((a, b) => b - a)
+      .map((n) => {
+        const v = plan?.[n];
+        return (!v || v.empty || !v.productId) ? "#000000" : productColorFor(productNameById.get(v.productId) ?? "");
+      });
+  }, [planSlots, productNameById, compartments]);
 
   // Compartments whose planned product isn't sold at the currently selected
   // terminal -- almost always the result of loading a preset saved at a
@@ -1741,7 +1752,7 @@ const lastProductInfoById = useMemo(() => {
       onClick={() => { if (locationStep === "location") setLocOpen(true); else setTermOpen(true); }}
       style={{
         width: "100%", boxSizing: "border-box" as const, textAlign: "left" as const,
-        border: "none", background: "none", padding: "0 2px", marginBottom: 12,
+        border: "none", background: "none", padding: "0 2px", marginTop: 10, marginBottom: 18,
         cursor: "pointer", display: "flex", minWidth: 0,
       }}
     >
@@ -1755,8 +1766,12 @@ const lastProductInfoById = useMemo(() => {
               · {location.locationLabel}
             </span>
           </div>
+          {/* Reverted to gray/500 the same day -- "the rack label on the
+              right can go back to grey" -- stays on the same line, far
+              right (see the row's own justify-content:space-between),
+              just no longer white/700 like the terminal/city-state. */}
           {selectedRackName && (
-            <span style={{ fontSize: 15, fontWeight: 700, color: "#fff", flexShrink: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
+            <span style={{ fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.45)", flexShrink: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
               {selectedRackName}
             </span>
           )}
@@ -2267,7 +2282,9 @@ const lastProductInfoById = useMemo(() => {
                 // card layoutId too.
                 style: { background: "none", border: "none", borderRadius: 0, boxShadow: "none", padding: 0, cursor: "pointer" as const, display: "flex", alignItems: "center" },
               };
-              const locTermChildren = <SolidPinIcon color="#ef4444" size={19} />;
+              // White, not red, per explicit same-day follow-up ("the
+              // location icon can go white instead of red").
+              const locTermChildren = <SolidPinIcon color="#ffffff" size={19} />;
               return mounted ? (
                 <motion.button {...locTermBtnProps} layoutId={step === "location" ? "setup-location-btn" : "setup-terminal-btn"}>{locTermChildren}</motion.button>
               ) : (
