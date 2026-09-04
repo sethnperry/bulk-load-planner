@@ -45,8 +45,6 @@ import { useFuelTempPrediction } from "./hooks/useFuelTempPrediction";
 // ── Sections ───────────────────────────────────────────────────────────────────
 import PlannerControls from "./sections/PlannerControls";
 import { useIsLandscape } from "./hooks/useOrientation";
-import { useElementWidth } from "./hooks/useElementWidth";
-import { useNaturalHeight } from "./hooks/useNaturalHeight";
 import PresetActionSheet from "./components/PresetActionSheet";
 import PresetQuickPick from "./components/PresetQuickPick";
 import { SolidPinIcon } from "./components/PlannerIcons";
@@ -238,111 +236,39 @@ export default function CalculatorPage() {
   const isLandscape = useIsLandscape();
   // A second, much wider threshold -- tablet/desktop, not just a phone
   // turned sideways (the largest real phones still land under ~930px in
-  // landscape). Below this, the recap/points cards live in their own row
-  // under the two-column layout; at or above it there's enough real width
-  // to give them a third column of their own instead, per explicit
-  // follow-up direction ("slide them to the far right ... on really wide
-  // screens"). Same hook, just a second call with a bigger minWidth --
-  // no changes needed in useOrientation.ts itself.
-  // Landscape sizing model, replacing the percentage-flex-basis approach
-  // from earlier passes entirely -- per explicit follow-up rejecting that
-  // whole direction with real screenshots of the distortion it caused:
-  // "we are still stretching the width and getting the compartments out
-  // of proportion with different size screens... it is a representation
-  // of the side profile of a trailer. If anything scales up, everything
-  // scales up, buttons included." A percentage-of-container width paired
-  // with a FIXED bar height (from the prior pass's own revert) is exactly
-  // what produced that -- width kept growing independently of height as
-  // the container widened, flattening the bars more and more on a wider
-  // screen. The fix: compartments and the side column each get a FIXED,
-  // unconditional reference pixel width (not a %), and the whole block is
-  // wrapped in one CSS transform:scale() sized to fit whatever width is
-  // actually available -- a uniform scale preserves every internal
-  // proportion (bar aspect ratio, font-to-container fit, gaps) exactly,
-  // at any screen size, which independent per-axis flex growth can't
-  // guarantee. This also incidentally solves the truncation problem the
-  // percentage approach kept fighting (minWidth floors, etc.): text and
-  // its container now scale together, so whatever fits at the reference
-  // 1x size fits at any scale.
-  //
-  // Back to a 2-column composition (buttons+cards+recap+points left,
-  // compartments right -- see mainInfoStack below) after a same-day
-  // detour through 3 columns (compartments centered, a dedicated right
-  // column for Plan Slots/Load/recap/points). Explicit follow-up asked
-  // to revert that: "keep all the buttons and cards on the left
-  // including recap and points... landscape mode will just shift the
-  // compartments to the right." REF_SIDE_W stays a single shared
-  // constant (not renamed back to REF_BUTTONS_W) since it's still
-  // accurate -- there's still exactly one side column, it just now holds
-  // more than buttons alone.
-  const REF_COMPARTMENTS_W = 550;
-  const REF_SIDE_W = 279; // the no-truncation floor already established live in an earlier pass
-  const REF_GAP = 10;
-  const naturalRowWidth = REF_SIDE_W + REF_COMPARTMENTS_W + REF_GAP;
-  const { ref: scaleWrapRef, width: availableRowWidth, availableHeight: availableRowHeight } = useElementWidth<HTMLDivElement>();
-  // Natural (uncapped, unscaled) content height of the compartments
-  // column specifically -- not the whole row, and not mainInfoStack,
-  // which is explicitly ALLOWED to exceed available height and scroll
-  // internally (see columnMaxHeight below); that's independent of what
-  // "fits the screen" means for compartments. Ref'd on an inner wrapper
-  // with no height constraint of its own -- see useNaturalHeight.ts's own
-  // header comment for why (the outer column div's maxHeight would
-  // otherwise report a CLAMPED height back into the very calculation
-  // that clamp is derived from).
-  const { ref: compartmentsContentRef, height: compartmentsNaturalHeight } = useNaturalHeight<HTMLDivElement>();
-  // 0 = "not measured yet" (first paint, before the ResizeObserver's
-  // initial read) -- fall back to natural size (scale 1) rather than a
-  // near-zero scale for that one frame. Bounded [0.5, 1.6] so a very
-  // narrow embed or a very wide ultrawide monitor both stay legible/
-  // sane rather than unbounded. A small fixed margin (ROW_SAFETY_MARGIN_PX)
-  // is subtracted from the measured width/height before computing scale --
-  // an exact-fit calculation risks a 1px overflow (and a real, unwanted
-  // scrollbar/clipped edge) from nothing more than subpixel rounding;
-  // this keeps the scaled block a hair inside the true available space
-  // instead of flush against it.
-  const ROW_SAFETY_MARGIN_PX = 8;
-  // Height-aware ceiling, alongside the original width-aware one -- a true
-  // "contain" fit (like object-fit:contain), not width-only. Per explicit
-  // live-device follow-up: "we are still stretching things wide and it
-  // leaves a space below the CG slider" -- rowScale was purely
-  // width-driven, so a device with generous width but only middling
-  // height would scale up to fill the width regardless of whether that
-  // made the block taller than the space actually available, and the
-  // compartments column (see align-items below) got stretched to match
-  // mainInfoStack's own taller, independently-scrolling height, leaving
-  // real dead space below its own (shorter) natural content. Takes the
-  // SMALLER of the two candidate scales -- whichever dimension is the
-  // binding constraint wins, exactly like fitting an image inside a box
-  // without distorting it.
-  const widthScale = availableRowWidth > 0 ? (availableRowWidth - ROW_SAFETY_MARGIN_PX) / naturalRowWidth : Infinity;
-  const heightScale = availableRowHeight > 0 && compartmentsNaturalHeight > 0
-    ? (availableRowHeight - ROW_SAFETY_MARGIN_PX) / compartmentsNaturalHeight
-    : Infinity;
-  const rowScale = isLandscape && availableRowWidth > 0
-    ? Math.min(Math.max(Math.min(widthScale, heightScale), 0.5), 1.6)
-    : 1;
-  // Per-column scroll bound, landscape only -- per explicit follow-up:
-  // "can we just split the vertical scrolling so each column scrolls
-  // independently? the comps should stay when I scroll down the
-  // buttons." Each column gets its own overflowY:"auto" with this as its
-  // maxHeight, so the taller of the two (usually the buttons/cards
-  // column) scrolls internally instead of the whole page scrolling both
-  // columns together. This is in PRE-scale units (divided by rowScale),
-  // not the true on-screen pixel count -- the column lives INSIDE the
-  // transform:scale(rowScale) block, which doesn't affect flex/scroll
-  // LAYOUT math for its children (only the final visual paint), so a
-  // column's own overflow/maxHeight is resolved in the block's own
-  // unscaled coordinate space; dividing the true available height by
-  // rowScale converts it into that space so the RESULT, after the whole
-  // block gets visually scaled back down/up, correctly fits the real
-  // screen. availableRowHeight itself is measured (useElementWidth's
-  // window.innerHeight/visualViewport.height minus this row's own
-  // getBoundingClientRect().top), not approximated from a guessed
-  // header-height constant -- the same lesson already learned twice this
-  // session for width.
-  const columnMaxHeight = isLandscape && availableRowHeight > 0
-    ? Math.max(0, availableRowHeight - ROW_SAFETY_MARGIN_PX) / rowScale
-    : undefined;
+  // landscape). Below this, recap/points stay merged into one inline
+  // stats row with the Load button on its own row below (see
+  // recapPointsEl's "row" mode); at or above it there's enough real
+  // width to give recap, points, and the Load button one equal-width/
+  // equal-height row each, per explicit direction ("on obnoxiously wide
+  // screens we can shift the load button over to the right of points...
+  // one row of equal width and height for each"). Same hook, just a
+  // second call with a bigger minWidth -- no changes needed in
+  // useOrientation.ts itself.
+  const isUltraWideLandscape = useIsLandscape(1600);
+
+  // Landscape composition, replacing the old fixed-width-two-column +
+  // transform:scale system entirely (see CLAUDE.md's own landscape
+  // history for how many rounds that took to land -- REF_COMPARTMENTS_W/
+  // REF_SIDE_W/rowScale/useElementWidth/useNaturalHeight and the whole
+  // measured-then-scaled machinery are gone). With Equipment/Location/
+  // Temperature/the plan-letter cluster moved OUT of this page into the
+  // shared header's own vertical rail in landscape
+  // (CalculatorLayoutClient.tsx), there's no second column left to keep
+  // legible alongside compartments -- this can just be ONE flowing
+  // column now, compartments/CG-slider/recap+points/Load button in that
+  // order, same as portrait, capped at a fixed max width so nothing
+  // stretches to an absurd size on a huge monitor ("stretch the comps
+  // and load button to fit, up to a reasonable width"). Per explicit
+  // direction: "move the icon strip into a vertical column and put it
+  // all the way left... keep everything else on the right and take all
+  // (most) space out between cards and comp/location etc." Compartment
+  // bars themselves need no special width handling here -- they're
+  // already percentage-of-container (PlannerControls.tsx), so they
+  // naturally stretch to fill whatever width this column has; barH's
+  // own fixed 100px landscape height (unchanged) is what keeps them a
+  // sensible rectangular shape instead of growing tall as they widen.
+  const LANDSCAPE_MAX_W = 1100;
 
   // Reverses a 2026-08-04 decision that only dispatch should ever redirect
   // off bare /planner ("the only role that should default to the dispatch
@@ -1940,132 +1866,17 @@ const lastProductInfoById = useMemo(() => {
           per explicit direction that locationLineEl should be the top row
           with everything else -- including this -- below it. */}
 
-      {/* Landscape: buttons+cards (Equipment/Location/Temp/Load/recap/
-          points), all of it, stay together on the LEFT; compartments
-          shift to the RIGHT -- two fixed-width columns, always, at every
-          landscape width. In portrait the outer/inner wrappers below
-          collapse to plain unstyled block-level divs (no flex, no
-          transform), reproducing today's plain sequential stack exactly
-          (children keep their own existing marginTop values for spacing)
-          -- no doubled gap+margin, no scaling logic in play at all.
-          `order` places each column without touching where its block
-          actually sits in the JSX/DOM.
-
-          **Sizing model: fixed-width + uniform scale**, not percentage-
-          flex -- per explicit follow-up, with real screenshots showing an
-          earlier percentage-basis approach visibly distorting the
-          compartment bars wider and flatter as the screen got wider: "we
-          are still stretching the width and getting the compartments out
-          of proportion with different size screens... it is a
-          representation of the side profile of a trailer. If anything
-          scales up, everything scales up, buttons included." Both columns
-          get a FIXED reference pixel width (REF_COMPARTMENTS_W/
-          REF_SIDE_W) instead of a % of the container, and the whole
-          fixed-size block is wrapped in one CSS `transform:scale(rowScale)`
-          sized to fit whatever width is actually available (measured live
-          via useElementWidth, not approximated from viewport width -- see
-          that hook's own header comment and CLAUDE.md's landscape-
-          refinement history for why a measured value beats a guessed
-          one here). A uniform scale can't distort anything: bar width,
-          bar height, font size, gaps -- everything inside grows or
-          shrinks by the exact same factor, so the compartments always
-          keep the same real-world-proportioned shape regardless of
-          screen size, and the side column scales right along with them
-          ("everything scales up... buttons included") instead of being
-          negotiated independently via flex-grow.
-
-          This 2-column shape is a reversion, not the original design --
-          a same-day detour went to 3 columns (compartments centered
-          between a left buttons column and a right Plan-Slots/Load/
-          recap/points column) before explicit follow-up asked to
-          simplify back: "keep all the buttons and cards on the left
-          including recap and points... landscape mode will just shift
-          the compartments to the right." The preset dial also reverted
-          to its original full-width spot above this row (see its own
-          render site) rather than living inside either column -- "sub
-          tabs/plan slots below them just like portrait mode." The real
-          "reduce header height" change this time is in the shared
-          header's own TabBar `thin` variant (CalculatorLayoutClient.tsx),
-          not a restructuring of this row. */}
-      {/* ref is always attached, not just isLandscape ? ... : undefined --
-          useElementWidth's ResizeObserver setup runs once on mount with an
-          empty dependency array, so if the ref were only conditionally set
-          (attached the first time isLandscape flips true, on a LATER
-          render than mount, e.g. after the SSR-safe portrait-default
-          hook resolves) that one-time effect would already have run and
-          returned early against a still-null ref, permanently starving
-          rowScale of any real measurement. Always attaching it means the
-          observer is live from the very first render regardless of which
-          orientation that render happens to be. */}
-      <div ref={scaleWrapRef} style={isLandscape ? { width: "100%" } : undefined}>
-      {/* Centering: `left: 50%` + `translateX(-50%)`, NOT `margin: "0
-          auto"` -- a real bug, found live via direct measurement, not
-          assumed working from a clean typecheck. margin:auto only
-          correctly centers a box NARROWER than its container; once
-          rowScale actually needs to shrink this block (naturalRowWidth >
-          available width -- a common case on a real phone, at whatever
-          naturalRowWidth currently computes to), the pre-scale layout box is
-          WIDER than its parent, and auto margins resolve the (negative)
-          overflow to zero rather than splitting it evenly -- so the box
-          silently sits flush against its container's left edge instead
-          of centered, and transform:scale() then shrinks it around THAT
-          off-center point, visibly shifting the whole block to the
-          right. Confirmed live: the block's own rendered center landed
-          160px right of the true container center at 844px wide, with
-          the right (recap/points) column's edge extending past the
-          visible viewport -- clipped silently by ShellChrome's own
-          overflow:hidden rather than producing a scrollbar, which is
-          exactly what read as "shifted off screen." `left:50%` resolves
-          against the PARENT's width (always correct, any box size);
-          `translateX(-50%)` then shifts back by half of THIS element's
-          own layout width (also always correct, any box size) -- the
-          standard pattern for centering an element that may be larger
-          than its container, unlike margin:auto. */}
-      <div style={isLandscape ? {
-        width: naturalRowWidth, position: "relative", left: "50%",
-        transform: `translateX(-50%) scale(${rowScale})`, transformOrigin: "top center",
-        display: "flex", flexDirection: "row", gap: REF_GAP,
-        // flex-start, not the default stretch -- stretch was forcing
-        // compartments to match mainInfoStack's own (often taller, since
-        // it independently scrolls when it needs more room) height,
-        // leaving real dead space below compartments' own shorter natural
-        // content -- exactly the "space below the CG slider" reported
-        // live. Each column now takes only the height its own content
-        // needs, up to its own maxHeight ceiling (unaffected by
-        // align-items, still the independent-scroll safety net for
-        // whichever column genuinely needs it).
-        alignItems: "flex-start",
-      } : { display: "flex", flexDirection: "column" }}>
-      <div className={isLandscape ? "pt-tabscroll" : undefined} style={isLandscape ? { width: REF_COMPARTMENTS_W, flexShrink: 0, order: 2, maxHeight: columnMaxHeight, overflowY: "auto" } : { width: "100%" }}>
-      {/* ref is always attached, same reasoning as scaleWrapRef above --
-          this inner wrapper carries no height constraint of its own (the
-          outer column div, not this one, has maxHeight+overflow), so its
-          own rendered height is always this column's TRUE natural
-          content size, which heightScale (above) needs to compute the
-          right scale. */}
-      <div ref={compartmentsContentRef}>
-      {/* Top cluster, unconditional on orientation -- locationLineEl is
-          the top row, then stabilityBannerEl (the "Unstable load"
-          warning, moved up out of the CG-slider block), then actionRowEl
-          ("Save plan {letter}" / "Edit Comp N Product", moved up from its
-          old portrait-only early render site) -- per explicit direction:
-          "this [locationLineEl] should be the top row, everything else
-          will be below it: the stability banner, then the save plan and
-          edit product button." Scoping all of this to the compartments
-          column (rather than full-width above the whole two-column row)
-          is what lets the left (buttons/cards) column's own content start
-          right under the header instead of being pushed down by content
-          that was never really "its" own -- same reasoning this column
-          already had for actionRowEl alone before this pass unconditioned
-          it. (The old swipeable PresetDial used to render here too --
-          removed along with its full render site, replaced by the
-          plan-letter icon in the header cluster, see headerIconsEl.)
-          locationLineEl itself briefly moved down into mainInfoStack
-          (after recap/points) per the header-merge mockup's own order --
-          reverted the same day, per explicit follow-up ("put the
-          location back above the compartments where you had it, your way
-          looks better") -- back to its original spot, common to both
-          orientations. */}
+      {/* Single content column, both orientations -- see LANDSCAPE_MAX_W's
+          own comment above for why the old fixed-width two-column +
+          transform:scale system is gone. locationLineEl/stabilityBannerEl/
+          actionRowEl/compartments/CG-slider all live in this first block;
+          recap+points/Load button are a second sibling block below (see
+          the IIFE further down) -- two adjacent margin:auto divs at the
+          same maxWidth read as one continuous column, so splitting them
+          this way (rather than merging the second IIFE's body up into
+          this one) needed no change to how either block's own internals
+          are written. */}
+      <div style={isLandscape ? { maxWidth: LANDSCAPE_MAX_W, margin: "0 auto" } : undefined}>
       {locationLineEl}
       {stabilityBannerEl}
       {actionRowEl}
@@ -2143,7 +1954,6 @@ const lastProductInfoById = useMemo(() => {
           <span style={{ fontSize: 10, fontWeight: 500, color: "rgba(255,255,255,0.3)" }}>Rear</span>
           <span style={{ fontSize: 10, fontWeight: 500, color: "rgba(255,255,255,0.3)" }}>Front</span>
         </div>
-      </div>
       </div>
       </div>
       {/* ── Info cards, Load button, Load summary ── */}
@@ -2298,33 +2108,40 @@ const lastProductInfoById = useMemo(() => {
           </>
         );
 
-        // Recap + incentive-points cards, extracted out of the main
-        // stack below so they can render in one of three spots (see the
-        // two-/three-column comment above the row wrapper): inline in
-        // portrait (mode "column", exactly where they always were),
-        // stacked in the new wide-mode third column (mode "column"
-        // again -- same look, just relocated), or side by side in their
-        // own full-width row under the two-column layout on a narrower
-        // landscape screen (mode "row"). One render function instead of
-        // three copies, so a future edit to either card can't drift
-        // between spots the way this project has hit before with
-        // duplicated UI (see CustomSelect.tsx's own header comment).
-        // Simplified from an earlier version that took a "row" | "column"
-        // mode -- "row" (RECAP and points side by side) only ever served
-        // the below-row layout a narrower landscape used before every
-        // landscape width converged on the same 3-column composition (see
-        // rightStack below). Nothing calls this with "row" anymore, so
-        // the parameter and its conditional styling are gone rather than
-        // left as dead, never-taken branches. Both cards' own backgrounds
-        // are now "transparent" (were a faint rgba(255,255,255,0.03) fill)
-        // per explicit direction ("the recap and points card backgrounds
-        // can be fully transparent, or all black") -- transparent, since
-        // it reads identically to a solid #0b0b0b fill against this page's
-        // own #0b0b0b background anyway, without hardcoding a color that'd
-        // need to be kept in sync if the page background ever changes.
-        const recapPointsEl = () => (
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <div style={{ borderRadius: 16, background: "transparent", padding: "10px 14px" }}>
+        // Recap + incentive-points cards. mode "column" (portrait, and
+        // normal landscape's own recap/points-together spot) stacks them
+        // exactly as before; mode "row" (normal landscape only) merges
+        // them into one inline stats band instead of two stacked cards --
+        // per the landscape mockup: label + gal/lbs on the left, target/
+        // diff underneath, then This-Load/Period-Avg points as two more
+        // columns in the same row, all sharing the same big-number-on-top/
+        // small-label-below shape so the row reads as one consistent
+        // strip. mode "boxed" (ultra-wide landscape only) is a third,
+        // narrower shape used ONLY inside the 3-equal-box row further
+        // down (recap box / points box / Load box) -- returns the SAME
+        // two pieces of content, just each wrapped in its own bordered
+        // box instead of a shared unbordered band, since at that width
+        // they're meant to read as separate, equal-weight tiles next to
+        // the Load button rather than one continuous strip. One render
+        // function for all three shapes (not three copies), so a future
+        // edit to either the recap or points figures can't drift between
+        // shapes the way this project has hit before with duplicated UI
+        // (see CustomSelect.tsx's own header comment). Both cards' own
+        // backgrounds are "transparent" in column/row mode (were a faint
+        // rgba(255,255,255,0.03) fill) per explicit direction ("the
+        // recap and points card backgrounds can be fully transparent, or
+        // all black") -- transparent, since it reads identically to a
+        // solid #0b0b0b fill against this page's own #0b0b0b background
+        // anyway. "boxed" mode gets a real border/background back, since
+        // at that width they need to read as distinct tiles.
+        const statBoxStyle: React.CSSProperties = {
+          flex: 1, minWidth: 0, borderRadius: 12, border: "1px solid rgba(255,255,255,0.10)",
+          background: "rgba(255,255,255,0.03)", padding: "14px 16px",
+          display: "flex", flexDirection: "column", justifyContent: "center",
+        };
+        const recapPointsEl = (mode: "column" | "row" | "boxed") => {
+          const recapInner = (
+            <>
               {recapLabel && (
                 <button
                   type="button"
@@ -2338,44 +2155,63 @@ const lastProductInfoById = useMemo(() => {
                   {recapLabel}
                 </button>
               )}
-              <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8 }}>
-                <div style={{ fontSize: 20, fontWeight: 700, color: "#fff" }}>{plannedGalText}</div>
-                <div style={{ fontSize: 20, fontWeight: 700, color: actualColor, textAlign: "right" as const }}>{actualText}</div>
-              </div>
-              <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 4 }}>
-                <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", textAlign: "right" as const }}>
-                  Target {targetText} · <span style={{ color: diffColor, fontWeight: 600 }}>Diff {diffText}</span>
+              <div style={{ display: "flex", alignItems: "baseline", gap: mode === "row" ? 28 : 8, justifyContent: mode === "row" ? "flex-start" : "space-between" }}>
+                <div style={{ fontSize: mode === "boxed" ? 18 : 20, fontWeight: 700, color: "#fff" }}>{plannedGalText}</div>
+                <div>
+                  <div style={{ fontSize: mode === "boxed" ? 18 : 20, fontWeight: 700, color: actualColor, textAlign: mode === "row" ? "left" as const : "right" as const }}>{actualText}</div>
+                  <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", textAlign: mode === "row" ? "left" as const : "right" as const, marginTop: 4 }}>
+                    Target {targetText} · <span style={{ color: diffColor, fontWeight: 600 }}>Diff {diffText}</span>
+                  </div>
                 </div>
               </div>
               {planUsesReferenceApi && planRows.length > 0 && (
                 <div style={{ fontSize: 10, fontWeight: 700, color: "#fb923c", marginTop: 4 }}>⚠ using ref API</div>
               )}
-            </div>
+            </>
+          );
 
-            {/* Incentive running-average card -- see the effects that
-                compute incentiveEnabled/payPeriodType/avgRecoveredPoints
-                above. Only rendered once the company has actually turned
-                the incentive system on. */}
-            {incentiveEnabled && (
-              <div style={{ borderRadius: 16, background: "transparent", padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.4)", textTransform: "uppercase" as const, letterSpacing: 0.4 }}>This Load</div>
-                  <div style={{ fontSize: 20, fontWeight: 700, color: "#4ade80" }}>
-                    {loadReport?.recovered_points != null ? loadReport.recovered_points.toFixed(1) : "—"} pts
-                  </div>
-                </div>
-                <div style={{ textAlign: "right" as const }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.4)", textTransform: "uppercase" as const, letterSpacing: 0.4 }}>
-                    {PERIOD_TYPE_LABELS[payPeriodType]} Avg
-                  </div>
-                  <div style={{ fontSize: 20, fontWeight: 700, color: "#fff" }}>
-                    {avgRecoveredPoints != null ? `${avgRecoveredPoints.toFixed(1)} pts` : "—"}
-                  </div>
+          const pointsInner = incentiveEnabled ? (
+            <div style={{ display: "flex", gap: mode === "row" ? 28 : undefined, justifyContent: mode === "row" ? "flex-start" : "space-between", alignItems: "center" }}>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.4)", textTransform: "uppercase" as const, letterSpacing: 0.4 }}>This Load</div>
+                <div style={{ fontSize: mode === "boxed" ? 18 : 20, fontWeight: 700, color: "#4ade80" }}>
+                  {loadReport?.recovered_points != null ? loadReport.recovered_points.toFixed(1) : "—"} pts
                 </div>
               </div>
-            )}
-          </div>
-        );
+              <div style={{ textAlign: mode === "row" ? "left" as const : "right" as const }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.4)", textTransform: "uppercase" as const, letterSpacing: 0.4 }}>
+                  {PERIOD_TYPE_LABELS[payPeriodType]} Avg
+                </div>
+                <div style={{ fontSize: mode === "boxed" ? 18 : 20, fontWeight: 700, color: "#fff" }}>
+                  {avgRecoveredPoints != null ? `${avgRecoveredPoints.toFixed(1)} pts` : "—"}
+                </div>
+              </div>
+            </div>
+          ) : null;
+
+          if (mode === "boxed") {
+            return (
+              <>
+                <div style={statBoxStyle}>{recapInner}</div>
+                {pointsInner && <div style={statBoxStyle}>{pointsInner}</div>}
+              </>
+            );
+          }
+          if (mode === "row") {
+            return (
+              <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", gap: 28, padding: "10px 14px" }}>
+                {recapInner}
+                {pointsInner}
+              </div>
+            );
+          }
+          return (
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              <div style={{ borderRadius: 16, background: "transparent", padding: "10px 14px" }}>{recapInner}</div>
+              {pointsInner && <div style={{ borderRadius: 16, background: "transparent", padding: "10px 14px" }}>{pointsInner}</div>}
+            </div>
+          );
+        };
 
         const loadButtonEl = (
           <button type="button"
@@ -2396,7 +2232,8 @@ const lastProductInfoById = useMemo(() => {
               // was themeFill/themeTextOnFill (graphite or accent-colored
               // fill with white text in dark mode); this button no longer
               // follows the accent color at all.
-              borderRadius: 6, border: "none", background: "#ffffff", padding: "10px 14px", width: "100%",
+              borderRadius: 6, border: "none", background: "#ffffff",
+              padding: "10px 14px", width: "100%", height: isUltraWideLandscape ? "100%" : undefined,
               cursor: loadDisabled ? "not-allowed" : "pointer", opacity: loadDisabled ? 0.5 : 1,
               display: "flex", alignItems: "center", justifyContent: "center",
             }}
@@ -2415,73 +2252,48 @@ const lastProductInfoById = useMemo(() => {
           </div>
         );
 
-        const mainInfoStack = (
-          <div className={isLandscape ? "pt-tabscroll" : undefined} style={{
-            marginTop: isLandscape ? 0 : 18, display: "flex", flexDirection: "column", gap: 16,
-            // Fixed reference width (REF_SIDE_W), not a percentage --
-            // see the sizing-model comment above the row wrapper. Scales
-            // uniformly with everything else via the shared
-            // transform:scale on the enclosing fixed-width row, so this
-            // never needs its own truncation-avoidance floor the way the
-            // percentage approach did -- text and container scale
-            // together by construction. maxHeight+overflowY (landscape
-            // only) is what actually gives this column its own
-            // independent scroll region -- see columnMaxHeight above --
-            // and the "pt-tabscroll" className (this app's existing
-            // hidden-scrollbar convention, see CalculatorLayoutClient.tsx)
-            // is load-bearing here, not cosmetic: a real, VISIBLE
-            // scrollbar reserves layout width from this already-tight
-            // fixed column, which re-truncated text that was right at
-            // the established no-truncation floor -- confirmed live
-            // before adding this.
-            ...(isLandscape ? { width: REF_SIDE_W, flexShrink: 0, order: 1, maxHeight: columnMaxHeight, overflowY: "auto" as const } : {}),
-          }}>
-
-            {/* The plan-letter/Equipment/Location/Temperature cluster that
-                used to render as its own icon row right here now portals
-                into the shared header (see headerIconsSlot above and
-                CalculatorLayoutClient.tsx's own comment on the slot div) --
-                per explicit direction to try it merged with the nav/bell/
-                gear row. headerIconsEl is defined further down (it needs
-                tempSubColor/hasEquipment/locationSelected, computed just
-                above the old row's position) and portaled from there;
-                nothing renders in this column for it anymore.
-                locationLineEl briefly rendered here (after recap/points)
-                per the header-merge mockup's own order -- reverted the
-                same day, back to its original spot above the
-                compartments (see that render site's own comment).
-
-                Load button, its blocked-message, recap/points, and the
-                footnote -- always rendered right here now, in every
-                orientation. Reverted from a two-pass detour (first a
-                landscape-only right-hand column, before that a
-                conditional third/below-row split) per explicit follow-up
-                asking to go back to keeping everything except
-                compartments together on one side: "keep all the buttons
-                and cards on the left including recap and points...
-                landscape mode will just shift the compartments to the
-                right." Extracted as loadButtonEl/loadBlockedMsgEl/
-                footnoteEl consts purely so this block's own JSX doesn't
-                repeat itself -- not because they render anywhere else
-                anymore. */}
-            {recapPointsEl()}
+        // Composition: portrait and normal landscape both stack recap/
+        // points (as a merged inline row in landscape, as two cards in
+        // portrait) above a full-width Load button, same as this page has
+        // always done. Ultra-wide landscape (isUltraWideLandscape) is the
+        // one genuinely different shape -- per explicit direction ("on
+        // obnoxiously wide screens we can shift the load button over to
+        // the right of points, all in one row of equal width and height
+        // for each"): recap, points, and the Load button become three
+        // equal-width, equal-height boxes in a single CSS grid row
+        // (alignItems:"stretch" is what makes the Load button's own box
+        // match the taller stat boxes' height, not a hardcoded number).
+        // The intermediate "points splits into its own box but Load stays
+        // full-width below" state described in the same message ("until
+        // it makes sense to shift the points out and over") was left out
+        // deliberately -- a third distinct breakpoint the user's own
+        // phrasing hedged on ("if possible... if that makes sense") and
+        // this pass didn't have a mockup for; easy to add later as a
+        // width band between isLandscape and isUltraWideLandscape if it
+        // turns out to be wanted.
+        const statsAndLoadEl = isUltraWideLandscape ? (
+          <div style={{ display: "grid", gridTemplateColumns: incentiveEnabled ? "1fr 1fr 1fr" : "1fr 1fr", gap: 16, alignItems: "stretch" }}>
+            {recapPointsEl("boxed")}
             {loadButtonEl}
-            {loadBlockedMsgEl}
-            {footnoteEl}
-
           </div>
+        ) : (
+          <>
+            {recapPointsEl(isLandscape ? "row" : "column")}
+            {loadButtonEl}
+          </>
         );
 
         return (
           <>
-            {mainInfoStack}
+            <div style={isLandscape ? { maxWidth: LANDSCAPE_MAX_W, margin: "0 auto", marginTop: 14, display: "flex", flexDirection: "column", gap: 12 } : { marginTop: 18, display: "flex", flexDirection: "column", gap: 16 }}>
+              {statsAndLoadEl}
+              {loadBlockedMsgEl}
+              {footnoteEl}
+            </div>
             {headerIconsSlot && createPortal(headerIconsEl, headerIconsSlot)}
           </>
         );
       })()}
-      </div>
-      </div>
-
 
       <SetupGate
         comboSelected={!!equipment.selectedComboId}

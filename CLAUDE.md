@@ -8619,6 +8619,154 @@ state stayed white/700/15px; the dot fixes confirmed as described above
 against real mixed-compartment data. `npx tsc --noEmit` and `npx next
 build` both clean.
 
+## Landscape rebuild: vertical icon rail, single stretching column, ultra-wide 3-box row (2026-09-04)
+
+The deferred "Phase 2" from the very first icon-rail pass ("the whole
+strip... eventually becoming a left-edge rail in landscape... expect to
+move that around until we get it right") -- finally built once the user
+sent a real landscape mockup screenshot (matching the portrait one from
+earlier the same thread). Per explicit direction: "move the icon strip
+into a vertical column and put it all the way left. then keep everything
+else on the right and take all (most) space out between cards and
+comp/location etc. we shift the recap and points cards side by side and
+stretch the comps and load button to fit, up to a reasonable width...
+keep the recap/points cards in line until it makes sense to shift the
+points out and over, then on obnoxiously wide screens we can shift the
+load button over to the right of points all in one row of equal width
+and height for each."
+
+**This replaces the ENTIRE previous landscape system.** Every session
+before this one spent many rounds building a fixed-width-two-column +
+`transform:scale` composition (`REF_COMPARTMENTS_W`/`REF_SIDE_W`/
+`rowScale`/`useElementWidth`/`useNaturalHeight`/`columnMaxHeight`, the
+whole measured-then-scaled machinery) specifically to keep a
+buttons-and-cards side column legible next to compartments. With
+Equipment/Location/Temperature/the plan-letter cluster moved OUT of the
+page entirely (into the header, see below), there's no second column
+left to protect -- the whole system became unnecessary, not just
+outdated, so it was deleted rather than adapted. `app/planner/hooks/useElementWidth.ts`
+and `useNaturalHeight.ts` are now fully unused anywhere in the app and
+were deleted outright.
+
+### The vertical rail (`CalculatorLayoutClient.tsx`)
+
+`Header` now takes an `isLandscape` prop and branches its entire return:
+portrait is byte-for-byte the same horizontal row as before; landscape
+returns a narrow (84px) full-height column with `flexDirection:"column"`
+and the same `justify-content:space-between` trick already used for the
+horizontal row's even icon spacing, just rotated -- `NavMenu`, `BellIcon`,
+the portal slot (`display:"contents"`, unchanged), and `GearIcon` are the
+exact same four children in both orientations. The portaled plan-letter/
+EQ/pin/temp cluster (`page.tsx`'s `headerIconsEl`) needed **zero changes**
+to work vertically -- none of its own buttons hardcoded a row-only
+layout, so they just follow whichever direction the parent flex
+container is in. Live-verified via direct `getBoundingClientRect()`
+measurement: all seven icons render with genuinely even 86-87px gaps
+top to bottom.
+
+This applies to **every** `/planner/*` route, not just the Planner page
+-- Header/ShellChrome are shared shell components, and the rail is an
+orientation-driven property of the shell itself, not something scoped to
+one page. Live-verified on `/planner/dispatch`: the rail correctly shows
+just hamburger/bell/gear (3 evenly-spaced items, empty portal slot),
+same as the portrait header already did for that route.
+
+**Outage banner**: `useActiveOutageBanner` moved from being called
+inside `Header` to being called once in `ShellChrome`, with the result
+passed to `Header` as a prop -- portrait still renders it inline in
+`Header` itself (unchanged spot, right after the icon row); landscape's
+narrow vertical rail has no room for a horizontal ticker, so `ShellChrome`
+renders it separately, above the scrollable content column, only when
+`isLandscape`. One fetch either way, just consumed from two different
+render sites depending on orientation.
+
+`ShellChrome`'s own outer div switches `flexDirection` between `"column"`
+(portrait, unchanged) and `"row"` (landscape, rail + content side by
+side) via the same `useIsLandscape()` hook every other orientation
+decision in this app already uses (default `minWidth: 640`, matching
+`page.tsx`'s own call so the two conditions can't disagree).
+
+### Single stretching column (`page.tsx`)
+
+With no second column to negotiate against, the Planner's own landscape
+composition collapsed to the SAME single-column flow portrait already
+uses -- `locationLineEl → stabilityBannerEl → actionRowEl → compartments
+→ CG slider → recap+points → Load button → footnote` -- wrapped in a div
+capped at a new `LANDSCAPE_MAX_W = 1100` constant and centered
+(`margin:"0 auto"`), so nothing stretches to an absurd width on a huge
+monitor ("stretch the comps and load button to fit, up to a reasonable
+width") while still filling normal landscape widths naturally. Compartment
+bars needed no new width handling at all -- they're already percentage-
+of-container in `PlannerControls.tsx`, so they stretch on their own; that
+file's existing fixed 100px landscape bar height (unchanged) is what
+keeps them a sensible rectangle instead of growing tall as they widen.
+
+Structurally this is two adjacent top-level divs (compartments block,
+then a second block for recap+points+Load), each independently
+`maxWidth`+`margin:auto`, rather than one merged block -- avoided
+needing to move code across the large IIFE boundary that computes
+`loadReport`/`recapLabel`/etc., and two adjacent centered divs at the
+same max-width read as one continuous column regardless.
+
+**`recapPointsEl` gained a real `"row"` mode** (previously stripped down
+to just `"column"` in an earlier pass, with a comment explaining "row"
+had been removed as dead -- reintroduced for real this time, not
+resurrected blindly): recap's label/gal/lbs/target/diff and the
+incentive points card's This-Load/Period-Avg merge into one inline flex
+row instead of two stacked cards, matching the mockup's "one continuous
+stats band" look. A third mode, `"boxed"`, returns the same two pieces
+of content each wrapped in its own bordered tile -- used only by the
+ultra-wide composition below.
+
+### Ultra-wide breakpoint: recap/points/Load as three equal boxes
+
+A second `useIsLandscape(1600)` call (`isUltraWideLandscape`, matching
+the already-established pattern of a second threshold call on the same
+hook, e.g. the earlier `isWide`/`isUltraWideLandscape`-style checks this
+project has used before) drives a genuinely different composition at
+that width: recap, points, and the Load button become a CSS grid
+(`gridTemplateColumns: "1fr 1fr 1fr"`, `alignItems:"stretch"`) of three
+equal-width tiles -- `alignItems:"stretch"` is what makes the Load
+button's own tile match the taller stat tiles' height, not a hardcoded
+number; the button's own style gained `height:"100%"` (only when
+`isUltraWideLandscape`) so it fills that stretched tile instead of
+sitting at its natural shorter height inside it. Live-verified via
+`getBoundingClientRect()` at 1800px width: all three tiles measured
+**identically** (356×102px each), grid itself measured exactly 1100px
+(the `LANDSCAPE_MAX_W` cap), centered with no horizontal overflow.
+
+**Explicitly not built**: the user's own message described a third,
+intermediate state ("keep recap/points... in line until it makes sense
+to shift the points out and over, then on obnoxiously wide screens...")
+-- i.e. points splitting into its own box while the Load button stays
+full-width below, as a separate step between "merged inline" and "three
+equal boxes." Left out deliberately, not missed -- the user's own
+phrasing hedged twice ("if possible... if that makes sense"), no mockup
+showed this specific state, and this pass already had two clear
+reference points (the mockup itself, and the plainly-described ultra-wide
+end state) to build against. Flagged as a real, addressable follow-up if
+wanted -- would slot in as a width band between `isLandscape` and
+`isUltraWideLandscape`.
+
+**Live-verified** via the demo login route across three widths: 1280px
+(normal landscape -- rail + stretched compartments + merged recap/points
+row + full-width Load, matching the mockup closely), 1800px (ultra-wide
+-- confirmed three equal boxes as above), and 375×812 portrait (confirmed
+**pixel-identical** to before this entire rebuild -- zero regression,
+the mockup/rebuild only ever touched the `isLandscape`-gated branches).
+Equipment icon confirmed still opens the real Equipment modal from the
+rail; Location icon confirmed still opens the real terminal/rack picker,
+tested through a full real flow (Global South → North Rack, real D2
+diesel data rendering in the stretched compartment bars and the merged
+stats row). Console confirmed clean on a genuinely fresh tab (a batch of
+alarming-looking errors seen mid-session -- `themeFill is not defined`,
+a parse error citing an extra `</div>`, a `useEffect` dependency-array
+size warning -- were all confirmed stale/buffered noise from earlier
+edit states, per this project's own well-documented "console never
+resets for a tab's lifetime" behavior, not live issues; a fresh tab
+showed zero errors). `npx tsc --noEmit` and `npx next build` both clean
+throughout every stage of this rebuild.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.

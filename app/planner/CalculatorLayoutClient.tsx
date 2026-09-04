@@ -29,6 +29,7 @@ import MyTerminalsModal from "./modals/MyTerminalsModal";
 import RackSelectSheet from "./components/RackSelectSheet";
 import TerminalOutageBanner from "./components/TerminalOutageBanner";
 import { useActiveOutageBanner } from "./hooks/useTerminalOutageReports";
+import { useIsLandscape } from "./hooks/useOrientation";
 import { CalculatorShellProvider, useCalculatorShell } from "./CalculatorShellContext";
 import { addDaysISO_, isPastISO_, formatMDYWithCountdown_ } from "./utils/dates";
 import { normState } from "./utils/normalize";
@@ -61,18 +62,21 @@ function GearIcon({ onClick, stroke }: { onClick: () => void; stroke: string }) 
   );
 }
 
-function Header({ onOpenSettings }: { onOpenSettings: () => void }) {
+// outageBanner is now a prop, not fetched inside Header itself -- landscape
+// mode needs the SAME data rendered in a different spot (ShellChrome, above
+// the content column, since the vertical rail has no room for a horizontal
+// ticker) that Header can't reach from inside its own returned tree, so
+// useActiveOutageBanner moved up to ShellChrome (called once there) and
+// both Header (portrait) and ShellChrome (landscape) consume the one result.
+function Header({ onOpenSettings, isLandscape, outageBanner }: {
+  onOpenSettings: () => void;
+  isLandscape: boolean;
+  outageBanner: ReturnType<typeof useActiveOutageBanner>;
+}) {
   const shell = useCalculatorShell();
   const { darkMode } = shell.theme;
   const iconStroke = themeIconStroke(darkMode);
   const pathname = usePathname();
-
-  // Fetched once here (not inside TerminalOutageBanner itself), same as
-  // before the tab bar was removed -- kept at Header's level since the
-  // outage banner still needs to render across every route this shared
-  // Header covers, not just the Planner page.
-  const terminalId = shell.location.selectedTerminalId ? String(shell.location.selectedTerminalId) : null;
-  const outageBanner = useActiveOutageBanner(terminalId, shell.effectiveUserId || null, shell.plannedProductIds);
 
   // The OS status bar / PWA chrome strip above this header is drawn by the
   // browser from <meta name="theme-color">, not from any CSS on the page --
@@ -106,6 +110,43 @@ function Header({ onOpenSettings }: { onOpenSettings: () => void }) {
     // ("turn the background black so it looks like there's no header").
     if (meta) meta.setAttribute("content", "#0b0b0b");
   }, [pathname]);
+
+  // Landscape: the whole header collapses into a vertical rail pinned to
+  // the far left of the screen -- hamburger/bell/plan-letter/EQ/pin/temp/
+  // gear all stack top-to-bottom instead of left-to-right, per explicit
+  // direction ("move the icon strip into a vertical column and put it
+  // all the way left"). This is the deferred "Phase 2" from the original
+  // icon-rail pass ("the whole strip... eventually becoming a left-edge
+  // rail in landscape... expect to move that around until we get it
+  // right") -- finally built once a real mockup existed to match. Every
+  // child here (NavMenu, BellIcon, the portal slot, GearIcon) is the
+  // exact same element as the portrait row; only this wrapping div's own
+  // flexDirection/padding changed, plus justify-content:space-between
+  // now spaces them evenly down the column the same way it did across
+  // the row -- the portaled plan-letter/EQ/pin/temp cluster (page.tsx's
+  // headerIconsEl) needed no changes at all, since none of its own
+  // buttons hardcode a row-only layout; they just follow whichever
+  // direction this parent flex container is in. No outage banner in
+  // this rail -- narrow and tall, no room for a horizontal ticker;
+  // ShellChrome renders it separately, above the content column, when
+  // isLandscape (see that component).
+  if (isLandscape) {
+    return (
+      <div style={{
+        width: 84, flexShrink: 0, background: "#0b0b0b",
+        paddingTop: "calc(env(safe-area-inset-top, 0px) + 16px)",
+        paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 16px)",
+        paddingLeft: "env(safe-area-inset-left, 0px)",
+        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "space-between",
+        height: "100%",
+      }}>
+        <NavMenu darkMode={darkMode} />
+        <BellIcon count={shell.expirations.expiredCount + shell.expirations.warningCount} onClick={() => shell.setExpModalOpen(true)} stroke={iconStroke} />
+        <div id="planner-header-icons-slot" style={{ display: "contents" }} />
+        <GearIcon onClick={onOpenSettings} stroke={iconStroke} />
+      </div>
+    );
+  }
 
   return (
     <div style={{
@@ -192,28 +233,64 @@ function Header({ onOpenSettings }: { onOpenSettings: () => void }) {
 function ShellChrome({ children }: { children: React.ReactNode }) {
   const shell = useCalculatorShell();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Default (unresolved SSR/first-paint) is false -- same neutral-first
+  // pattern this codebase already established for useIsLandscape's own
+  // consumers elsewhere (page.tsx, PlannerControls.tsx), so the initial
+  // render never mismatches between server and client.
+  const isLandscape = useIsLandscape();
+  const terminalId = shell.location.selectedTerminalId ? String(shell.location.selectedTerminalId) : null;
+  const outageBanner = useActiveOutageBanner(terminalId, shell.effectiveUserId || null, shell.plannedProductIds);
   return (
-    <div style={{ height: "100dvh", background: "#0b0b0b", color: "#fff", display: "flex", flexDirection: "column", overflow: "hidden" }}>
-      <Header onOpenSettings={() => setSettingsOpen(true)} />
-      {/* Left/right padding adds the device's safe-area inset (real,
-          non-zero now that layout.tsx declares viewportFit:"cover") ON TOP
-          of the existing 12px, same reasoning as Header's own icon-row
-          padding above -- background stays #0b0b0b all the way to the
-          physical edge (this div's own width is never constrained, so it
-          already reaches as far as the now-extended layout viewport does),
-          only CONTENT gets pushed clear of the unsafe strip. Bottom keeps
-          its own existing safe-area handling wherever it already existed
-          (unaffected here) -- this fix is specifically the left/right
-          "black bars" the user pointed at, not a bottom-inset change. */}
-      <div
-        className="pt-tabscroll"
-        style={{
-          flex: 1, overflowY: "auto", background: "#0b0b0b",
-          padding: "0px calc(env(safe-area-inset-right, 0px) + 12px) 12px calc(env(safe-area-inset-left, 0px) + 12px)",
-        }}
-      >
-        {children}
-      </div>
+    <div style={{ height: "100dvh", background: "#0b0b0b", color: "#fff", display: "flex", flexDirection: isLandscape ? "row" : "column", overflow: "hidden" }}>
+      <Header onOpenSettings={() => setSettingsOpen(true)} isLandscape={isLandscape} outageBanner={outageBanner} />
+      {/* Landscape: everything besides the rail -- the outage banner (see
+          Header's own comment on why it can't render inside the rail
+          itself) and the scrollable content -- lives in this second
+          column, which takes up the rest of the screen's width. Portrait
+          needs no such wrapper (Header's own row + this content div were
+          already correctly stacked as direct children of the outer
+          flexDirection:"column" div above), so it's only introduced when
+          isLandscape to avoid adding an extra DOM layer/any layout
+          difference for the unchanged portrait case. */}
+      {isLandscape ? (
+        <div style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0, overflow: "hidden" }}>
+          <TerminalOutageBanner
+            tickerMessage={outageBanner.tickerMessage}
+            reports={outageBanner.reports}
+            timeZone={outageBanner.timeZone}
+            refresh={outageBanner.refresh}
+          />
+          <div
+            className="pt-tabscroll"
+            style={{
+              flex: 1, overflowY: "auto", background: "#0b0b0b",
+              padding: "12px calc(env(safe-area-inset-right, 0px) + 12px) 12px 12px",
+            }}
+          >
+            {children}
+          </div>
+        </div>
+      ) : (
+        // Left/right padding adds the device's safe-area inset (real,
+        // non-zero now that layout.tsx declares viewportFit:"cover") ON TOP
+        // of the existing 12px, same reasoning as Header's own icon-row
+        // padding above -- background stays #0b0b0b all the way to the
+        // physical edge (this div's own width is never constrained, so it
+        // already reaches as far as the now-extended layout viewport does),
+        // only CONTENT gets pushed clear of the unsafe strip. Bottom keeps
+        // its own existing safe-area handling wherever it already existed
+        // (unaffected here) -- this fix is specifically the left/right
+        // "black bars" the user pointed at, not a bottom-inset change.
+        <div
+          className="pt-tabscroll"
+          style={{
+            flex: 1, overflowY: "auto", background: "#0b0b0b",
+            padding: "0px calc(env(safe-area-inset-right, 0px) + 12px) 12px calc(env(safe-area-inset-left, 0px) + 12px)",
+          }}
+        >
+          {children}
+        </div>
+      )}
 
       <EquipmentModal
         open={shell.equipOpen}
