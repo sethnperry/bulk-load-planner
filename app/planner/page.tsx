@@ -1704,7 +1704,7 @@ const lastProductInfoById = useMemo(() => {
       onClick={() => { if (locationStep === "location") setLocOpen(true); else setTermOpen(true); }}
       style={{
         width: "100%", boxSizing: "border-box" as const, textAlign: "left" as const,
-        border: "none", background: "none", padding: "0 2px", marginBottom: 4,
+        border: "none", background: "none", padding: "0 2px", marginBottom: 12,
         cursor: "pointer", display: "flex", flexDirection: "column" as const, gap: 4, minWidth: 0,
       }}
     >
@@ -1985,10 +1985,14 @@ const lastProductInfoById = useMemo(() => {
           header instead of being pushed down by content that was never
           really "its" own. (The old swipeable PresetDial used to render
           here too -- removed along with its full render site, replaced by
-          the plan-letter icon in the header cluster, see headerIconsEl.
-          locationLineEl itself also used to render right above this --
-          moved down into mainInfoStack, after recap/points, per the
-          mockup's own order.) */}
+          the plan-letter icon in the header cluster, see headerIconsEl.)
+          locationLineEl briefly moved down into mainInfoStack (after
+          recap/points) per the header-merge mockup's own order -- reverted
+          the same day, per explicit follow-up ("put the location back
+          above the compartments where you had it, your way looks
+          better") -- back to its original spot, common to both
+          orientations. */}
+      {locationLineEl}
       {isLandscape && actionRowEl}
       <PlannerControls
         styles={styles}
@@ -2028,7 +2032,7 @@ const lastProductInfoById = useMemo(() => {
       />
 
       {/* CG Slider — always visible */}
-      <div style={{ marginTop: 8 }}>
+      <div style={{ marginTop: 18 }}>
         {unstableLoad && (
           <div style={{ ...styles.error, marginTop: 0, marginBottom: 10, textAlign: "center" }}>
             ⚠️ Unstable load (rear of neutral)
@@ -2236,7 +2240,7 @@ const lastProductInfoById = useMemo(() => {
         // the parameter and its conditional styling are gone rather than
         // left as dead, never-taken branches.
         const recapPointsEl = () => (
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <div style={{ borderRadius: 16, background: "rgba(255,255,255,0.03)", padding: "10px 14px" }}>
               {recapLabel && (
                 <button
@@ -2326,7 +2330,7 @@ const lastProductInfoById = useMemo(() => {
 
         const mainInfoStack = (
           <div className={isLandscape ? "pt-tabscroll" : undefined} style={{
-            marginTop: isLandscape ? 0 : 6, display: "flex", flexDirection: "column", gap: 10,
+            marginTop: isLandscape ? 0 : 18, display: "flex", flexDirection: "column", gap: 16,
             // Fixed reference width (REF_SIDE_W), not a percentage --
             // see the sizing-model comment above the row wrapper. Scales
             // uniformly with everything else via the shared
@@ -2355,25 +2359,25 @@ const lastProductInfoById = useMemo(() => {
                 tempSubColor/hasEquipment/locationSelected, computed just
                 above the old row's position) and portaled from there;
                 nothing renders in this column for it anymore.
+                locationLineEl briefly rendered here (after recap/points)
+                per the header-merge mockup's own order -- reverted the
+                same day, back to its original spot above the
+                compartments (see that render site's own comment).
 
-                Load button, its blocked-message, location line, recap/
-                points, and the footnote -- always rendered right here now,
-                in every orientation. Order matches the mockup: recap +
-                points first, then the location line (moved down from
-                above the compartments -- see the old locationLineEl
-                render site, now removed), then the Load button. Reverted
-                from a two-pass detour (first a landscape-only right-hand
-                column, before that a conditional third/below-row split)
-                per explicit follow-up asking to go back to keeping
-                everything except compartments together on one side: "keep
-                all the buttons and cards on the left including recap and
-                points... landscape mode will just shift the compartments
-                to the right." Extracted as loadButtonEl/loadBlockedMsgEl/
+                Load button, its blocked-message, recap/points, and the
+                footnote -- always rendered right here now, in every
+                orientation. Reverted from a two-pass detour (first a
+                landscape-only right-hand column, before that a
+                conditional third/below-row split) per explicit follow-up
+                asking to go back to keeping everything except
+                compartments together on one side: "keep all the buttons
+                and cards on the left including recap and points...
+                landscape mode will just shift the compartments to the
+                right." Extracted as loadButtonEl/loadBlockedMsgEl/
                 footnoteEl consts purely so this block's own JSX doesn't
                 repeat itself -- not because they render anywhere else
                 anymore. */}
             {recapPointsEl()}
-            {locationLineEl}
             {loadButtonEl}
             {loadBlockedMsgEl}
             {footnoteEl}

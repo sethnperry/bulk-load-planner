@@ -11,17 +11,6 @@
 export const GRAPHITE = "#2a2a2c";
 export const GRAPHITE_DARKER = "#1c1c1e";
 
-function darken(hex: string, amount: number): string {
-  const h = hex.replace("#", "");
-  const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
-  const num = parseInt(full, 16);
-  if (Number.isNaN(num)) return hex;
-  const r = Math.max(0, ((num >> 16) & 0xff) - amount);
-  const g = Math.max(0, ((num >> 8) & 0xff) - amount);
-  const b = Math.max(0, (num & 0xff) - amount);
-  return `#${[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
-}
-
 // Solid fill for the Load button, compartment handles, and CG puck. Each
 // caller passes its OWN current light-mode color (they aren't all the same
 // shade today -- e.g. the CG puck is "#d9d9d9", not pure white) so light
@@ -32,12 +21,11 @@ export function themeFill(darkMode: boolean, accentColor: string | null, lightDe
   return accentColor || (darkMode ? GRAPHITE : lightDefault);
 }
 
-// Two-tone gradient for the header/tab-bar band.
-export function themeHeaderGradient(darkMode: boolean, accentColor: string | null): string {
-  const top = themeFill(darkMode, accentColor, "#ffffff");
-  const bottom = accentColor ? darken(accentColor, 24) : darkMode ? GRAPHITE_DARKER : "#f2f2f2";
-  return `linear-gradient(180deg, ${top} 0%, ${bottom} 100%)`;
-}
+// themeHeaderGradient (a two-tone graphite/accent gradient for the header
+// band) was removed here -- per explicit direction, the shared Header
+// (CalculatorLayoutClient.tsx) now uses a flat black background matching
+// the page body exactly ("turn the background black so it looks like
+// there's no header"), not a themed gradient.
 
 // Text/icon colors -- driven by dark/light only, never the accent color.
 export function themeTextOnFill(darkMode: boolean): string {

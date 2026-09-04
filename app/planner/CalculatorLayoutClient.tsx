@@ -32,7 +32,7 @@ import { useActiveOutageBanner } from "./hooks/useTerminalOutageReports";
 import { CalculatorShellProvider, useCalculatorShell } from "./CalculatorShellContext";
 import { addDaysISO_, isPastISO_, formatMDYWithCountdown_ } from "./utils/dates";
 import { normState } from "./utils/normalize";
-import { themeFill, themeHeaderGradient, themeIconStroke } from "./theme";
+import { themeIconStroke } from "./theme";
 
 function BellIcon({ count, onClick, stroke }: { count: number; onClick: () => void; stroke: string }) {
   return (
@@ -63,7 +63,7 @@ function GearIcon({ onClick, stroke }: { onClick: () => void; stroke: string }) 
 
 function Header({ onOpenSettings }: { onOpenSettings: () => void }) {
   const shell = useCalculatorShell();
-  const { darkMode, accentColor } = shell.theme;
+  const { darkMode } = shell.theme;
   const iconStroke = themeIconStroke(darkMode);
   const pathname = usePathname();
 
@@ -101,52 +101,68 @@ function Header({ onOpenSettings }: { onOpenSettings: () => void }) {
   // change too, not just every theme change.
   useEffect(() => {
     const meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) meta.setAttribute("content", themeFill(darkMode, accentColor, "#ffffff"));
-  }, [darkMode, accentColor, pathname]);
+    // Flat black, matching the header's own background exactly (see below)
+    // -- not themeFill/accentColor-driven anymore, per explicit direction
+    // ("turn the background black so it looks like there's no header").
+    if (meta) meta.setAttribute("content", "#0b0b0b");
+  }, [pathname]);
 
   return (
     <div style={{
       // iOS's translucent status bar (see layout.tsx) shows whatever this
       // div paints underneath it -- extending the padding (and therefore
-      // this gradient background) up through the safe area is what actually
-      // makes the status bar match the current theme instead of leaving a
+      // this background) up through the safe area is what actually makes
+      // the status bar match the rest of the app instead of leaving a
       // seam; the icon row below is unaffected since it's a separate nested
-      // div with its own fixed padding.
+      // div with its own fixed padding. Flat black (matching ShellChrome's
+      // own content-area background below, #0b0b0b) instead of the old
+      // themed gradient -- per explicit direction, the header should read
+      // as an extension of the page, not a visibly separate band.
       paddingTop: "calc(env(safe-area-inset-top, 0px) + 12px)",
-      background: themeHeaderGradient(darkMode, accentColor), flexShrink: 0, position: "relative", overflow: "visible",
-      transition: "background 200ms ease",
+      background: "#0b0b0b", flexShrink: 0, position: "relative", overflow: "visible",
     }}>
       {/* Left/right safe-area padding, added alongside the existing top
           one -- per explicit follow-up with a real device screenshot
           showing black bars down both edges in landscape (a soft-nav-bar
           strip on one side, confirmed live). Without viewportFit:"cover"
           (layout.tsx) these env() calls are always 0 and this is a no-op;
-          with it, the gradient BACKGROUND still paints the full physical
-          width (padding never shrinks an element's own background), only
-          the icon row's actual CONTENT gets pushed in from the unsafe
-          edges. */}
+          with it, the background still paints the full physical width
+          (padding never shrinks an element's own background), only the
+          icon row's actual CONTENT gets pushed in from the unsafe edges.
+
+          All seven icons (hamburger, bell, and whatever the Planner page's
+          own portal slot below contributes) are now direct children of
+          this ONE flex row with justify-content:space-between, per
+          explicit direction ("evenly space all seven icons in the
+          header") -- previously NavMenu sat alone on the left against a
+          separately-grouped bell/slot/gear cluster on the right, which
+          only evenly spaced within that right cluster, not across the
+          whole row. */}
       <div style={{
         display: "flex", alignItems: "center", justifyContent: "space-between",
         padding: "0 calc(env(safe-area-inset-right, 0px) + 16px) 0 calc(env(safe-area-inset-left, 0px) + 16px)",
       }}>
         <NavMenu darkMode={darkMode} />
-        <div style={{ display: "flex", gap: 16, flexShrink: 0, alignItems: "center", minWidth: 0 }}>
-          <BellIcon count={shell.expirations.expiredCount + shell.expirations.warningCount} onClick={() => shell.setExpModalOpen(true)} stroke={iconStroke} />
-          {/* Portal target for the Planner page's own plan-letter/Equipment/
-              Location/Temperature cluster -- per explicit direction to try
-              it merged into this shared header row for a few days ("I think
-              I'll like it best at the top but want to play with it"). Empty
-              on every other /planner/* route (only page.tsx ever portals
-              content in here), so it costs nothing when not on Planner.
-              Deliberately a portal target rather than lifting that state
-              into CalculatorShellContext -- these four controls' underlying
-              state (activeSlotLetter, tempF, presetQuickPickOpen, etc.) is
-              genuinely Planner-page-local, and a portal makes this trivial
-              to revert (delete the portal call, nothing to unwind here) if
-              the header placement doesn't stick. */}
-          <div id="planner-header-icons-slot" style={{ display: "flex", alignItems: "center", gap: 16, minWidth: 0 }} />
-          <GearIcon onClick={onOpenSettings} stroke={iconStroke} />
-        </div>
+        <BellIcon count={shell.expirations.expiredCount + shell.expirations.warningCount} onClick={() => shell.setExpModalOpen(true)} stroke={iconStroke} />
+        {/* Portal target for the Planner page's own plan-letter/Equipment/
+            Location/Temperature cluster -- per explicit direction to try
+            it merged into this shared header row for a few days ("I think
+            I'll like it best at the top but want to play with it"). Empty
+            on every other /planner/* route (only page.tsx ever portals
+            content in here), so it costs nothing when not on Planner.
+            Deliberately a portal target rather than lifting that state
+            into CalculatorShellContext -- these four controls' underlying
+            state (activeSlotLetter, tempF, presetQuickPickOpen, etc.) is
+            genuinely Planner-page-local, and a portal makes this trivial
+            to revert (delete the portal call, nothing to unwind here) if
+            the header placement doesn't stick. display:"contents" makes
+            this div invisible to layout -- its portaled children become
+            direct flex items of the row above, so justify-content:
+            space-between spaces all seven icons evenly instead of
+            grouping the four portaled ones into their own sub-cluster
+            with a smaller, separately-set gap between them. */}
+        <div id="planner-header-icons-slot" style={{ display: "contents" }} />
+        <GearIcon onClick={onOpenSettings} stroke={iconStroke} />
       </div>
       {/* Outage banner still renders right after the icon row either way
           -- when there's nothing to show it contributes zero height

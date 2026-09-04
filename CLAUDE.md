@@ -8281,6 +8281,80 @@ mockup. Confirmed the header slot is empty (no leftover cluster) on
 `/planner/dispatch`, a non-Planner route sharing the same `Header`.
 `npx tsc --noEmit` and `npx next build` both clean.
 
+### Header follow-up: location reverted above compartments, all 7 icons evenly spaced, flat black header, more page spacing (2026-09-03, same day)
+
+Fast follow to the header-merge pass above: "put the location back above
+the compartments where you had it, your way looks better. then, evenly
+space, all seven icons in the header and turn the background black. So
+it looks like there's no header. then, add a little more vertical space
+between everything on the page."
+
+**Location line reverted.** `locationLineEl`'s render site moved back to
+directly above `<PlannerControls>` (its original spot, common to both
+orientations) and its own 2-line city/state + terminal/rack restyling
+from the header-merge pass is otherwise untouched -- only the render
+POSITION reverted, not the styling. Removed from `mainInfoStack` (it had
+briefly sat there, after recap/points, per the earlier mockup's own
+order).
+
+**All seven icons evenly spaced.** The header's icon row was previously
+two groups -- `NavMenu` alone on the left against a `justify-content:
+space-between`, with Bell/portal-slot/Gear clustered together on the
+right at their own fixed `gap: 16`. That only evenly spaced *within* the
+right cluster, not across the whole row. Restructured
+(`CalculatorLayoutClient.tsx`) so `NavMenu`, `BellIcon`, the portal slot,
+and `GearIcon` are all direct children of ONE flex row with
+`justify-content: space-between` -- the portal slot div itself switched
+from `display: "flex"` to `display: "contents"`, which makes it
+invisible to layout so `page.tsx`'s four portaled buttons (plan-letter/
+EQ/pin/temp) become direct flex items of that same row instead of a
+nested sub-group. Live-verified via direct `getBoundingClientRect()`
+measurement: all six real inter-icon gaps read 29-30px, consistently
+even. On a non-Planner route (nothing portaled into the slot), the same
+row correctly falls back to 3 evenly-spaced items (hamburger/bell/gear)
+with zero leftover footprint from the empty slot.
+
+**Flat black header.** `themeHeaderGradient()` (the two-tone graphite/
+accent gradient the header band used) is removed from `theme.ts`
+entirely, along with the `darken()` helper only it called -- confirmed
+via grep neither had any other caller. `Header`'s own background is now
+a flat `#0b0b0b`, exactly matching `ShellChrome`'s content-area
+background, so the header reads as a continuation of the page rather
+than a visibly separate band ("so it looks like there's no header") --
+confirmed live via `getComputedStyle` (`rgb(11, 11, 11)`, no
+`backgroundImage`). The `<meta name="theme-color">` sync effect
+(keeps the OS status bar in sync) was simplified the same way -- flat
+`"#0b0b0b"` unconditionally instead of `themeFill(darkMode, accentColor,
+...)`, confirmed live via the actual meta tag's `content` attribute.
+`accentColor` is now unused in this component (only `darkMode` still
+feeds `themeIconStroke`/`NavMenu`) and was dropped from the destructure;
+`themeFill`'s import here went with it since nothing else in this file
+called it.
+
+**More vertical spacing**, per "a little more... between everything on
+the page" -- a general breathing-room pass across the Planner's main
+section boundaries in `page.tsx`, all modest bumps, not a redesign:
+compartments-to-CG-slider gap 8px→18px; `locationLineEl`'s own
+`marginBottom` 4px→12px (space before compartments start);
+`mainInfoStack`'s portrait `marginTop` 6px→18px and its internal `gap`
+10px→16px (space between the recap card, points card, and Load button);
+`recapPointsEl`'s own internal gap (between the RECAP card and the
+points card) 10px→14px. Landscape's `mainInfoStack` `marginTop` stays 0
+-- that column sits side-by-side with compartments, not stacked below
+them, so it wasn't part of this ask.
+
+**Live-verified** via the demo login route (same temporary redirect
+bypass as the immediately preceding pass, reverted after, confirmed via
+grep): screenshot-confirmed the reordered/respaced portrait layout
+(location line above compartments, visibly more room between each
+section down to RELOAD/footnote), the header's flat black band blending
+into the page with no visible seam, and all seven icons evenly spaced in
+both a landscape-ish width and portrait. Equipment icon re-confirmed
+still opens the real Equipment modal after the restructure. Dispatch (a
+non-Planner route) re-checked and still renders its 3-icon header
+correctly, evenly spaced, flat black, nothing leftover from the empty
+portal slot. `npx tsc --noEmit` and `npx next build` both clean.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.
