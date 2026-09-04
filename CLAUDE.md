@@ -8767,6 +8767,51 @@ resets for a tab's lifetime" behavior, not live issues; a fresh tab
 showed zero errors). `npx tsc --noEmit` and `npx next build` both clean
 throughout every stage of this rebuild.
 
+### Landscape follow-up: recap/points reverted to real portrait-style cards, just placed side by side (2026-09-04, same day)
+
+Immediate follow-up against a real device screenshot: the landscape
+rebuild's "row" mode (merged recap+points into one continuous inline
+stats band, no card boundaries) looked bad live -- a lot of dead space,
+no visual separation between the two cards' own figures. Per explicit
+direction: "keep the cards the way that they look in portrait mode. And
+just shift the card over, so they're side by side."
+
+Reversed the over-engineered part of the previous pass: `recapCard`/
+`pointsCard` are now built ONCE, with zero mode-dependent field styling
+left in them at all -- exactly portrait's own card content/layout (label,
+gal/lbs baseline row, right-aligned target/diff, This-Load/Period-Avg
+space-between row), each just gaining `flex: 1, minWidth: 0` so two of
+them can share a row's width evenly. The only thing that changes across
+portrait/landscape/ultra-wide is how these two whole, unchanged cards get
+ARRANGED:
+- Portrait: `flexDirection:"column"` (unchanged from before any of this
+  landscape work).
+- Normal landscape: `flexDirection:"row"` -- side by side, each card
+  keeping its full portrait-style look, just at roughly half width.
+  Live-verified via `getBoundingClientRect()`: both cards measured
+  identically, 543×100.5px, genuinely evenly split.
+- Ultra-wide landscape (`isUltraWideLandscape`): unchanged in structure
+  (the same 3-column grid with the Load button), but the grid cells are
+  now these same plain `recapCard`/`pointsCard` elements instead of a
+  separate bordered "boxed" variant that existed only for this case --
+  one fewer visual language to keep in sync, and consistent with "keep
+  the cards the way they look in portrait mode" as a general rule rather
+  than a normal-landscape-only fix. Re-verified still genuinely equal:
+  356×101px per tile at 1800px width.
+
+The now-fully-unused `statBoxStyle` const (the bordered-tile styling only
+"boxed" mode used) was removed along with "boxed" mode itself -- `recapPointsEl`
+as a mode-taking function is gone entirely, replaced by the two plain
+card consts.
+
+**Live-verified** via the demo login route against real data (Global
+South/North Rack, real D2 diesel compartments): normal landscape (1280px)
+now shows the recap card and points card cleanly side by side, each
+looking exactly like its portrait counterpart; ultra-wide (1800px)
+confirmed the 3-tile grid still works with the simplified card content,
+all three tiles measuring identically; portrait (375×812) re-confirmed
+pixel-unaffected. `npx tsc --noEmit` and `npx next build` both clean.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.

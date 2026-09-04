@@ -2108,110 +2108,72 @@ const lastProductInfoById = useMemo(() => {
           </>
         );
 
-        // Recap + incentive-points cards. mode "column" (portrait, and
-        // normal landscape's own recap/points-together spot) stacks them
-        // exactly as before; mode "row" (normal landscape only) merges
-        // them into one inline stats band instead of two stacked cards --
-        // per the landscape mockup: label + gal/lbs on the left, target/
-        // diff underneath, then This-Load/Period-Avg points as two more
-        // columns in the same row, all sharing the same big-number-on-top/
-        // small-label-below shape so the row reads as one consistent
-        // strip. mode "boxed" (ultra-wide landscape only) is a third,
-        // narrower shape used ONLY inside the 3-equal-box row further
-        // down (recap box / points box / Load box) -- returns the SAME
-        // two pieces of content, just each wrapped in its own bordered
-        // box instead of a shared unbordered band, since at that width
-        // they're meant to read as separate, equal-weight tiles next to
-        // the Load button rather than one continuous strip. One render
-        // function for all three shapes (not three copies), so a future
-        // edit to either the recap or points figures can't drift between
-        // shapes the way this project has hit before with duplicated UI
-        // (see CustomSelect.tsx's own header comment). Both cards' own
-        // backgrounds are "transparent" in column/row mode (were a faint
-        // rgba(255,255,255,0.03) fill) per explicit direction ("the
-        // recap and points card backgrounds can be fully transparent, or
-        // all black") -- transparent, since it reads identically to a
-        // solid #0b0b0b fill against this page's own #0b0b0b background
-        // anyway. "boxed" mode gets a real border/background back, since
-        // at that width they need to read as distinct tiles.
-        const statBoxStyle: React.CSSProperties = {
-          flex: 1, minWidth: 0, borderRadius: 12, border: "1px solid rgba(255,255,255,0.10)",
-          background: "rgba(255,255,255,0.03)", padding: "14px 16px",
-          display: "flex", flexDirection: "column", justifyContent: "center",
-        };
-        const recapPointsEl = (mode: "column" | "row" | "boxed") => {
-          const recapInner = (
-            <>
-              {recapLabel && (
-                <button
-                  type="button"
-                  onClick={handleRecallLastLoad}
-                  style={{
-                    background: "none", border: "none", padding: 0, marginBottom: 6, cursor: "pointer",
-                    fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.4)",
-                    textTransform: "uppercase" as const, letterSpacing: 0.4, textAlign: "left" as const,
-                  }}
-                >
-                  {recapLabel}
-                </button>
-              )}
-              <div style={{ display: "flex", alignItems: "baseline", gap: mode === "row" ? 28 : 8, justifyContent: mode === "row" ? "flex-start" : "space-between" }}>
-                <div style={{ fontSize: mode === "boxed" ? 18 : 20, fontWeight: 700, color: "#fff" }}>{plannedGalText}</div>
-                <div>
-                  <div style={{ fontSize: mode === "boxed" ? 18 : 20, fontWeight: 700, color: actualColor, textAlign: mode === "row" ? "left" as const : "right" as const }}>{actualText}</div>
-                  <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", textAlign: mode === "row" ? "left" as const : "right" as const, marginTop: 4 }}>
-                    Target {targetText} · <span style={{ color: diffColor, fontWeight: 600 }}>Diff {diffText}</span>
-                  </div>
-                </div>
-              </div>
-              {planUsesReferenceApi && planRows.length > 0 && (
-                <div style={{ fontSize: 10, fontWeight: 700, color: "#fb923c", marginTop: 4 }}>⚠ using ref API</div>
-              )}
-            </>
-          );
-
-          const pointsInner = incentiveEnabled ? (
-            <div style={{ display: "flex", gap: mode === "row" ? 28 : undefined, justifyContent: mode === "row" ? "flex-start" : "space-between", alignItems: "center" }}>
-              <div>
-                <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.4)", textTransform: "uppercase" as const, letterSpacing: 0.4 }}>This Load</div>
-                <div style={{ fontSize: mode === "boxed" ? 18 : 20, fontWeight: 700, color: "#4ade80" }}>
-                  {loadReport?.recovered_points != null ? loadReport.recovered_points.toFixed(1) : "—"} pts
-                </div>
-              </div>
-              <div style={{ textAlign: mode === "row" ? "left" as const : "right" as const }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.4)", textTransform: "uppercase" as const, letterSpacing: 0.4 }}>
-                  {PERIOD_TYPE_LABELS[payPeriodType]} Avg
-                </div>
-                <div style={{ fontSize: mode === "boxed" ? 18 : 20, fontWeight: 700, color: "#fff" }}>
-                  {avgRecoveredPoints != null ? `${avgRecoveredPoints.toFixed(1)} pts` : "—"}
-                </div>
+        // Recap + incentive-points cards. Per explicit follow-up against a
+        // real device screenshot of the previous "merged into one inline
+        // stats band" landscape treatment ("that looks bad... keep the
+        // cards the way they look in portrait mode, just shift the card
+        // over so they're side by side") -- recapCard/pointsCard below are
+        // now EXACTLY portrait's own card content/layout (label, gal/lbs
+        // baseline row, right-aligned target/diff, This-Load/Period-Avg
+        // space-between row) with zero mode-dependent field styling left
+        // in them at all. The only thing that changes across portrait/
+        // landscape/ultra-wide is how the two whole cards are ARRANGED
+        // (stacked, side by side, or grid cell) -- never their own
+        // internal look. `flex:1, minWidth:0` on each card is what makes
+        // them share width evenly when placed in a row; harmless (and
+        // simply unused) when they're stacked in a column instead.
+        const recapCard = (
+          <div style={{ borderRadius: 16, background: "transparent", padding: "10px 14px", flex: 1, minWidth: 0 }}>
+            {recapLabel && (
+              <button
+                type="button"
+                onClick={handleRecallLastLoad}
+                style={{
+                  background: "none", border: "none", padding: 0, marginBottom: 6, cursor: "pointer",
+                  fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.4)",
+                  textTransform: "uppercase" as const, letterSpacing: 0.4, textAlign: "left" as const,
+                }}
+              >
+                {recapLabel}
+              </button>
+            )}
+            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8 }}>
+              <div style={{ fontSize: 20, fontWeight: 700, color: "#fff" }}>{plannedGalText}</div>
+              <div style={{ fontSize: 20, fontWeight: 700, color: actualColor, textAlign: "right" as const }}>{actualText}</div>
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 4 }}>
+              <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", textAlign: "right" as const }}>
+                Target {targetText} · <span style={{ color: diffColor, fontWeight: 600 }}>Diff {diffText}</span>
               </div>
             </div>
-          ) : null;
+            {planUsesReferenceApi && planRows.length > 0 && (
+              <div style={{ fontSize: 10, fontWeight: 700, color: "#fb923c", marginTop: 4 }}>⚠ using ref API</div>
+            )}
+          </div>
+        );
 
-          if (mode === "boxed") {
-            return (
-              <>
-                <div style={statBoxStyle}>{recapInner}</div>
-                {pointsInner && <div style={statBoxStyle}>{pointsInner}</div>}
-              </>
-            );
-          }
-          if (mode === "row") {
-            return (
-              <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", gap: 28, padding: "10px 14px" }}>
-                {recapInner}
-                {pointsInner}
+        // Incentive running-average card -- see the effects that compute
+        // incentiveEnabled/payPeriodType/avgRecoveredPoints above. Only
+        // rendered once the company has actually turned the incentive
+        // system on.
+        const pointsCard = incentiveEnabled ? (
+          <div style={{ borderRadius: 16, background: "transparent", padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center", flex: 1, minWidth: 0 }}>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.4)", textTransform: "uppercase" as const, letterSpacing: 0.4 }}>This Load</div>
+              <div style={{ fontSize: 20, fontWeight: 700, color: "#4ade80" }}>
+                {loadReport?.recovered_points != null ? loadReport.recovered_points.toFixed(1) : "—"} pts
               </div>
-            );
-          }
-          return (
-            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-              <div style={{ borderRadius: 16, background: "transparent", padding: "10px 14px" }}>{recapInner}</div>
-              {pointsInner && <div style={{ borderRadius: 16, background: "transparent", padding: "10px 14px" }}>{pointsInner}</div>}
             </div>
-          );
-        };
+            <div style={{ textAlign: "right" as const }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.4)", textTransform: "uppercase" as const, letterSpacing: 0.4 }}>
+                {PERIOD_TYPE_LABELS[payPeriodType]} Avg
+              </div>
+              <div style={{ fontSize: 20, fontWeight: 700, color: "#fff" }}>
+                {avgRecoveredPoints != null ? `${avgRecoveredPoints.toFixed(1)} pts` : "—"}
+              </div>
+            </div>
+          </div>
+        ) : null;
 
         const loadButtonEl = (
           <button type="button"
@@ -2252,37 +2214,54 @@ const lastProductInfoById = useMemo(() => {
           </div>
         );
 
-        // Composition: portrait and normal landscape both stack recap/
-        // points (as a merged inline row in landscape, as two cards in
-        // portrait) above a full-width Load button, same as this page has
-        // always done. Ultra-wide landscape (isUltraWideLandscape) is the
-        // one genuinely different shape -- per explicit direction ("on
-        // obnoxiously wide screens we can shift the load button over to
-        // the right of points, all in one row of equal width and height
-        // for each"): recap, points, and the Load button become three
-        // equal-width, equal-height boxes in a single CSS grid row
-        // (alignItems:"stretch" is what makes the Load button's own box
-        // match the taller stat boxes' height, not a hardcoded number).
-        // The intermediate "points splits into its own box but Load stays
-        // full-width below" state described in the same message ("until
-        // it makes sense to shift the points out and over") was left out
-        // deliberately -- a third distinct breakpoint the user's own
-        // phrasing hedged on ("if possible... if that makes sense") and
-        // this pass didn't have a mockup for; easy to add later as a
-        // width band between isLandscape and isUltraWideLandscape if it
-        // turns out to be wanted.
+        // Composition: portrait stacks recapCard/pointsCard exactly as
+        // it always has. Normal landscape places the same two cards SIDE
+        // BY SIDE instead (flex row, each card's own flex:1 splitting the
+        // width evenly) -- reverses the immediately preceding pass's
+        // "merge everything into one inline stats band" attempt, which
+        // looked bad live (confirmed via a real device screenshot: a lot
+        // of dead space, no visual separation between the two cards'
+        // figures). Ultra-wide landscape (isUltraWideLandscape) goes one
+        // step further, per explicit direction ("on obnoxiously wide
+        // screens we can shift the load button over to the right of
+        // points, all in one row of equal width and height for each"):
+        // recapCard, pointsCard, and the Load button become three
+        // grid cells of genuinely equal width AND height
+        // (alignItems:"stretch" is what makes the Load button's own cell
+        // match the taller card cells' height -- paired with the button's
+        // own height:"100%" above -- not a hardcoded number). The same
+        // intermediate "points splits into its own box but Load stays
+        // full-width below" state described in the user's own message
+        // ("until it makes sense to shift the points out and over") is
+        // still deliberately not built -- hedged twice in their own
+        // phrasing ("if possible... if that makes sense"), no mockup for
+        // it, and this pass already has two clear reference points (the
+        // side-by-side mockup, and the plainly-described ultra-wide end
+        // state) to build against; a real width band to add later if
+        // wanted, between isLandscape and isUltraWideLandscape.
         const statsAndLoadEl = isUltraWideLandscape ? (
           <div style={{ display: "grid", gridTemplateColumns: incentiveEnabled ? "1fr 1fr 1fr" : "1fr 1fr", gap: 16, alignItems: "stretch" }}>
-            {recapPointsEl("boxed")}
+            {recapCard}
+            {pointsCard}
             {loadButtonEl}
           </div>
+        ) : isLandscape ? (
+          <>
+            <div style={{ display: "flex", flexDirection: "row", gap: 14 }}>
+              {recapCard}
+              {pointsCard}
+            </div>
+            {loadButtonEl}
+          </>
         ) : (
           <>
-            {recapPointsEl(isLandscape ? "row" : "column")}
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              {recapCard}
+              {pointsCard}
+            </div>
             {loadButtonEl}
           </>
         );
-
         return (
           <>
             <div style={isLandscape ? { maxWidth: LANDSCAPE_MAX_W, margin: "0 auto", marginTop: 14, display: "flex", flexDirection: "column", gap: 12 } : { marginTop: 18, display: "flex", flexDirection: "column", gap: 16 }}>
