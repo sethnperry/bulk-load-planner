@@ -1691,12 +1691,16 @@ const lastProductInfoById = useMemo(() => {
   // Terminal) so tapping the line behaves identically to tapping the pin
   // icon.
   //
-  // Restyled per the header-merge mockup into a 2-line block -- city/state
-  // on its own line, then terminal name + rack name (right-aligned, gray)
-  // on the line below -- and moved down into mainInfoStack (after recap/
-  // points, before the Load button) instead of sitting above the
-  // compartments. Rack name reuses selectedRackName (already fetched
-  // above for PlannerControls' own use), not a new query.
+  // Restyled per the header-merge mockup into a 2-line block, then
+  // reordered again per explicit same-day follow-up ("put the terminal
+  // first and the city state separated by a dot... the rack underneath
+  // the terminal"): terminal name leads, followed by "· City, State" on
+  // the same line (the "·" matches this app's own established separator
+  // convention -- e.g. the RECAP label's "· {date}"), then the rack name
+  // on its own line underneath, left-aligned under the terminal rather
+  // than right-aligned as the mockup-era version had it. Rack name reuses
+  // selectedRackName (already fetched above for PlannerControls' own
+  // use), not a new query.
   const locationStep: "location" | "terminal" = location.selectedCity && location.selectedState ? "terminal" : "location";
   const locationLineEl = (
     <button
@@ -1705,24 +1709,24 @@ const lastProductInfoById = useMemo(() => {
       style={{
         width: "100%", boxSizing: "border-box" as const, textAlign: "left" as const,
         border: "none", background: "none", padding: "0 2px", marginBottom: 12,
-        cursor: "pointer", display: "flex", flexDirection: "column" as const, gap: 4, minWidth: 0,
+        cursor: "pointer", display: "flex", flexDirection: "column" as const, gap: 2, minWidth: 0,
       }}
     >
       {location.selectedTerminalId ? (
         <>
-          <span style={{ fontSize: 15, fontWeight: 700, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
-            {location.locationLabel}
-          </span>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 6, minWidth: 0 }}>
             <span style={{ fontSize: 15, fontWeight: 700, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
               {terminalLabel}
             </span>
-            {selectedRackName && (
-              <span style={{ fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.45)", flexShrink: 0 }}>
-                {selectedRackName}
-              </span>
-            )}
+            <span style={{ fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.45)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
+              · {location.locationLabel}
+            </span>
           </div>
+          {selectedRackName && (
+            <span style={{ fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.45)" }}>
+              {selectedRackName}
+            </span>
+          )}
         </>
       ) : (
         <span style={{ fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,0.35)" }}>

@@ -8355,6 +8355,27 @@ non-Planner route) re-checked and still renders its 3-icon header
 correctly, evenly spaced, flat black, nothing leftover from the empty
 portal slot. `npx tsc --noEmit` and `npx next build` both clean.
 
+### Location line: terminal first, "· City, State" same line, rack underneath (2026-09-03, same day)
+
+Third fast follow-up against `locationLineEl`: "put the terminal first
+and the city state separated by a dot... the rack underneath the
+terminal." Reworked from the header-merge pass's 2-line block (city/
+state on its own line, then terminal + right-aligned rack on the line
+below) into: terminal name leads, followed by "· City, State" on the
+SAME line (the "·" matches this app's own established separator
+convention -- e.g. the RECAP label's own "· {date}"), then the rack name
+on its own line underneath, left-aligned under the terminal rather than
+right-aligned. `selectedRackName` (already fetched for `PlannerControls`'
+own use) is unchanged -- only the layout around it moved.
+
+Live-verified via the demo login route (temporary redirect bypass,
+reverted after, confirmed via grep): "Chevron · Fort Lauderdale, FL"
+renders correctly in both portrait and landscape-ish widths -- this
+particular demo terminal has no rack selected, so the rack line
+correctly doesn't render at all (same conditional as before, unchanged
+logic, just repositioned). `npx tsc --noEmit` and `npx next build` both
+clean.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.
