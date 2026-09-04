@@ -22,7 +22,8 @@ import { useCalculatorShell } from "./CalculatorShellContext";
 
 
 
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { supabase } from "@/lib/supabase/client";
 import { defaultLandingPath } from "@/lib/ui/driver/navDestinations";
 
@@ -48,7 +49,7 @@ import { useElementWidth } from "./hooks/useElementWidth";
 import { useNaturalHeight } from "./hooks/useNaturalHeight";
 import PresetActionSheet from "./components/PresetActionSheet";
 import PresetQuickPick from "./components/PresetQuickPick";
-import { TruckIcon, PinIcon, ThermometerIcon } from "./components/PlannerIcons";
+import { SolidPinIcon } from "./components/PlannerIcons";
 
 // ── Modals ─────────────────────────────────────────────────────────────────────
 // LocationModal/MyTerminalsModal now mount once in ShellChrome
@@ -386,6 +387,16 @@ export default function CalculatorPage() {
   // motion.button post-mount, so hydration always diffs identical DOM.
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
+
+  // Portal target for the plan-letter/Equipment/Location/Temperature
+  // cluster, rendered by CalculatorLayoutClient.tsx's shared Header --
+  // see that file's own comment on the slot div for why this is a portal
+  // rather than lifting this state into the shell context. Grabbed once
+  // on mount (Header is always already mounted above this page's own
+  // content by the time this effect runs, since it lives in the same
+  // layout that renders {children}).
+  const [headerIconsSlot, setHeaderIconsSlot] = useState<HTMLElement | null>(null);
+  useEffect(() => { setHeaderIconsSlot(document.getElementById("planner-header-icons-slot")); }, []);
 
   // ── Modal open/close flags ─────────────────────────────────────────────────
   // equipOpen/expModalOpen/termOpen live in the shared shell context now --
@@ -1675,9 +1686,17 @@ const lastProductInfoById = useMemo(() => {
   // earlier design conversation: "it would be nice to at least display the
   // location on the planner as that is the thing that changes most
   // frequently" -- everywhere else tried didn't look right, this was the
-  // best-found position. Same step-based open logic as the old Location
-  // card (Select Location -> Select Terminal) so tapping the line behaves
-  // identically to tapping the pin icon.
+  // best-found position (since superseded, see below). Same step-based
+  // open logic as the old Location card (Select Location -> Select
+  // Terminal) so tapping the line behaves identically to tapping the pin
+  // icon.
+  //
+  // Restyled per the header-merge mockup into a 2-line block -- city/state
+  // on its own line, then terminal name + rack name (right-aligned, gray)
+  // on the line below -- and moved down into mainInfoStack (after recap/
+  // points, before the Load button) instead of sitting above the
+  // compartments. Rack name reuses selectedRackName (already fetched
+  // above for PlannerControls' own use), not a new query.
   const locationStep: "location" | "terminal" = location.selectedCity && location.selectedState ? "terminal" : "location";
   const locationLineEl = (
     <button
@@ -1685,18 +1704,25 @@ const lastProductInfoById = useMemo(() => {
       onClick={() => { if (locationStep === "location") setLocOpen(true); else setTermOpen(true); }}
       style={{
         width: "100%", boxSizing: "border-box" as const, textAlign: "left" as const,
-        border: "none", background: "none", padding: "0 2px", marginBottom: 8,
-        cursor: "pointer", display: "flex", alignItems: "baseline", gap: 6, minWidth: 0,
+        border: "none", background: "none", padding: "0 2px", marginBottom: 4,
+        cursor: "pointer", display: "flex", flexDirection: "column" as const, gap: 4, minWidth: 0,
       }}
     >
       {location.selectedTerminalId ? (
         <>
-          <span style={{ fontSize: 13, fontWeight: 700, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
-            {terminalLabel}
-          </span>
-          <span style={{ fontSize: 12, fontWeight: 500, color: "rgba(255,255,255,0.45)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
+          <span style={{ fontSize: 15, fontWeight: 700, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
             {location.locationLabel}
           </span>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, minWidth: 0 }}>
+            <span style={{ fontSize: 15, fontWeight: 700, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
+              {terminalLabel}
+            </span>
+            {selectedRackName && (
+              <span style={{ fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.45)", flexShrink: 0 }}>
+                {selectedRackName}
+              </span>
+            )}
+          </div>
         </>
       ) : (
         <span style={{ fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,0.35)" }}>
@@ -1959,8 +1985,10 @@ const lastProductInfoById = useMemo(() => {
           header instead of being pushed down by content that was never
           really "its" own. (The old swipeable PresetDial used to render
           here too -- removed along with its full render site, replaced by
-          the plan-letter icon in the new compact row, see mainInfoStack.) */}
-      {locationLineEl}
+          the plan-letter icon in the header cluster, see headerIconsEl.
+          locationLineEl itself also used to render right above this --
+          moved down into mainInfoStack, after recap/points, per the
+          mockup's own order.) */}
       {isLandscape && actionRowEl}
       <PlannerControls
         styles={styles}
@@ -2103,20 +2131,91 @@ const lastProductInfoById = useMemo(() => {
 
         const locationSelected = Boolean(location.selectedCity && location.selectedState);
         const terminalSelected = Boolean(location.selectedTerminalId);
-
-        // Shared by all four buttons in the new compact icon row (plan-
-        // letter/Equipment/Location/Temperature) -- replaces the old
-        // per-card infoCard/chevron styling (both now unused: the card
-        // sub-labels/chevrons they styled are gone, equipment/card-number/
-        // expiration detail moved to locationLineEl and LoadingModal's own
-        // new safety block instead of living on this row).
-        const iconRowBtnStyle: React.CSSProperties = {
-          flex: 1, aspectRatio: "1", borderRadius: 12, border: "1px solid rgba(255,255,255,0.10)",
-          background: "rgba(255,255,255,0.03)", display: "flex", alignItems: "center", justifyContent: "center",
-          boxShadow: "none",
-        };
-
         const hasEquipment = Boolean(equipment.selectedCombo);
+
+        // Plan-letter / Equipment / Location / Temperature cluster --
+        // portaled into the shared header's slot div (see headerIconsSlot
+        // above and CalculatorLayoutClient.tsx's own comment) instead of
+        // rendering as its own row in the page body. Styling matches the
+        // mockup exactly: plan letter is bold text with a small active
+        // dot underneath (not a boxed icon button), Equipment is a plain
+        // "EQ" label (a flat muted tone regardless of hasEquipment -- the
+        // mockup shows this gray even with real equipment selected;
+        // Location/Temperature are the two that carry live state through
+        // color), Location is a solid/filled pin (not the stroke outline
+        // used elsewhere), and Temperature shows the real numeric value
+        // now, not just a bare icon -- color alone still carries
+        // confidence (tempSubColor), matching the reference's green "80°F".
+        const headerIconsEl = (
+          <>
+            {(() => {
+              const letter = String.fromCharCode(64 + activeSlotLetter);
+              const presetDisabled = !location.selectedTerminalId || !planSlots.presetsReady;
+              return (
+                <button
+                  type="button"
+                  disabled={presetDisabled}
+                  onClick={() => setPresetQuickPickOpen(true)}
+                  title="Presets"
+                  style={{
+                    background: "none", border: "none", padding: 0, display: "flex", flexDirection: "column",
+                    alignItems: "center", gap: 3, cursor: presetDisabled ? "not-allowed" : "pointer",
+                    opacity: presetDisabled ? 0.4 : 1,
+                  }}
+                >
+                  <span style={{ fontSize: 19, fontWeight: 800, color: "#fff", lineHeight: 1 }}>{letter}</span>
+                  <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#fff" }} />
+                </button>
+              );
+            })()}
+
+            {(() => {
+              const equipBtnProps = {
+                type: "button" as const,
+                onClick: () => setEquipOpen(true),
+                title: "Equipment",
+                // boxShadow/borderRadius explicitly zeroed -- SetupGate's
+                // own version of this shared-layoutId button has a real
+                // card boxShadow (see SetupGate.tsx), and framer-motion's
+                // layoutId crossfade carries that value into whichever
+                // element the id lands on next unless the destination
+                // gives it something explicit to animate all the way to;
+                // without this it was a permanent, not just transient,
+                // faint box around "EQ" in the header.
+                style: { background: "none", border: "none", borderRadius: 0, boxShadow: "none", padding: 0, cursor: "pointer" as const, display: "flex", alignItems: "center" },
+              };
+              const equipChildren = <span style={{ fontSize: 14, fontWeight: 800, letterSpacing: 0.5, color: "rgba(255,255,255,0.55)" }}>EQ</span>;
+              return mounted ? (
+                <motion.button {...equipBtnProps} layoutId="setup-equipment-btn">{equipChildren}</motion.button>
+              ) : (
+                <button {...equipBtnProps}>{equipChildren}</button>
+              );
+            })()}
+
+            {(() => {
+              const step: "location" | "terminal" = locationSelected ? "terminal" : "location";
+              const locTermBtnProps = {
+                type: "button" as const,
+                onClick: () => { if (step === "location") setLocOpen(true); else setTermOpen(true); },
+                title: "Location",
+                // Same boxShadow/borderRadius zeroing as the Equipment
+                // button above, same reason -- this shares SetupGate's
+                // card layoutId too.
+                style: { background: "none", border: "none", borderRadius: 0, boxShadow: "none", padding: 0, cursor: "pointer" as const, display: "flex", alignItems: "center" },
+              };
+              const locTermChildren = <SolidPinIcon color="#ef4444" size={19} />;
+              return mounted ? (
+                <motion.button {...locTermBtnProps} layoutId={step === "location" ? "setup-location-btn" : "setup-terminal-btn"}>{locTermChildren}</motion.button>
+              ) : (
+                <button {...locTermBtnProps}>{locTermChildren}</button>
+              );
+            })()}
+
+            <button type="button" onClick={() => setTempDialOpen(true)} title="Temperature" style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}>
+              <span style={{ fontSize: 16, fontWeight: 800, color: tempSubColor }}>{Math.round(tempF)}°F</span>
+            </button>
+          </>
+        );
 
         // Recap + incentive-points cards, extracted out of the main
         // stack below so they can render in one of three spots (see the
@@ -2247,103 +2346,47 @@ const lastProductInfoById = useMemo(() => {
             ...(isLandscape ? { width: REF_SIDE_W, flexShrink: 0, order: 1, maxHeight: columnMaxHeight, overflowY: "auto" as const } : {}),
           }}>
 
-            {/* Compact icon row -- plan-letter / Equipment / Location /
-                Temperature, replacing the three stacked cards this used to
-                be. Per the icon-rail design conversation: each icon opens
-                the exact same modal/flow its old card did (verbatim
-                onClick targets, framer-motion layoutIds preserved so
-                SetupGate's shared-element transitions still animate into
-                these), just collapsed to a single tap target with no
-                embedded text -- location detail moved to locationLineEl
-                (rendered separately, directly above the compartments,
-                since it's the value that changes most often and deserves
-                a passive glance-check of its own); equipment detail moved
-                to the Loading Modal's new safety block (see LoadingModal's
-                own props) instead of living on this row at all. */}
-            <div style={{ display: "flex", gap: 8 }}>
-              {(() => {
-                const letter = String.fromCharCode(64 + activeSlotLetter);
-                const presetDisabled = !location.selectedTerminalId || !planSlots.presetsReady;
-                return (
-                  <button
-                    type="button"
-                    disabled={presetDisabled}
-                    onClick={() => setPresetQuickPickOpen(true)}
-                    title="Presets"
-                    style={{ ...iconRowBtnStyle, cursor: presetDisabled ? "not-allowed" : "pointer", opacity: presetDisabled ? 0.4 : 1 }}
-                  >
-                    <span style={{ fontSize: 17, fontWeight: 800, color: "#fff" }}>{letter}</span>
-                  </button>
-                );
-              })()}
+            {/* The plan-letter/Equipment/Location/Temperature cluster that
+                used to render as its own icon row right here now portals
+                into the shared header (see headerIconsSlot above and
+                CalculatorLayoutClient.tsx's own comment on the slot div) --
+                per explicit direction to try it merged with the nav/bell/
+                gear row. headerIconsEl is defined further down (it needs
+                tempSubColor/hasEquipment/locationSelected, computed just
+                above the old row's position) and portaled from there;
+                nothing renders in this column for it anymore.
 
-              {(() => {
-                const equipBtnProps = {
-                  type: "button" as const,
-                  onClick: () => setEquipOpen(true),
-                  title: "Equipment",
-                  style: iconRowBtnStyle,
-                };
-                const equipChildren = <TruckIcon stroke={hasEquipment ? "#fff" : "rgba(255,255,255,0.35)"} />;
-                return mounted ? (
-                  <motion.button {...equipBtnProps} layoutId="setup-equipment-btn">{equipChildren}</motion.button>
-                ) : (
-                  <button {...equipBtnProps}>{equipChildren}</button>
-                );
-              })()}
-
-              {(() => {
-                const step: "location" | "terminal" = locationSelected ? "terminal" : "location";
-                const locTermBtnProps = {
-                  type: "button" as const,
-                  onClick: () => {
-                    if (step === "location") setLocOpen(true);
-                    else setTermOpen(true);
-                  },
-                  title: "Location",
-                  style: iconRowBtnStyle,
-                };
-                const locTermChildren = <PinIcon stroke={terminalSelected ? "#fff" : "rgba(255,255,255,0.35)"} />;
-                return mounted ? (
-                  <motion.button {...locTermBtnProps} layoutId={step === "location" ? "setup-location-btn" : "setup-terminal-btn"}>{locTermChildren}</motion.button>
-                ) : (
-                  <button {...locTermBtnProps}>{locTermChildren}</button>
-                );
-              })()}
-
-              {/* Temperature icon -- color alone carries confidence now (no
-                  more "High/Medium/Low confidence" text label, per explicit
-                  direction: "no more confidence label spelled out, we get
-                  the color scheme only"), reusing the exact same
-                  tempSubColor the old card's sub-label text used to be
-                  colored with. */}
-              <button type="button" onClick={() => setTempDialOpen(true)} title="Temperature" style={iconRowBtnStyle}>
-                <ThermometerIcon stroke={tempSubColor} />
-              </button>
-            </div>
-
-            {/* Load button, its blocked-message, recap/points, and the
-                footnote -- always rendered right here now, in every
-                orientation. Reverted from a two-pass detour (first a
-                landscape-only right-hand column, before that a
-                conditional third/below-row split) per explicit follow-up
-                asking to go back to keeping everything except
-                compartments together on one side: "keep all the buttons
-                and cards on the left including recap and points...
-                landscape mode will just shift the compartments to the
-                right." Extracted as loadButtonEl/loadBlockedMsgEl/
+                Load button, its blocked-message, location line, recap/
+                points, and the footnote -- always rendered right here now,
+                in every orientation. Order matches the mockup: recap +
+                points first, then the location line (moved down from
+                above the compartments -- see the old locationLineEl
+                render site, now removed), then the Load button. Reverted
+                from a two-pass detour (first a landscape-only right-hand
+                column, before that a conditional third/below-row split)
+                per explicit follow-up asking to go back to keeping
+                everything except compartments together on one side: "keep
+                all the buttons and cards on the left including recap and
+                points... landscape mode will just shift the compartments
+                to the right." Extracted as loadButtonEl/loadBlockedMsgEl/
                 footnoteEl consts purely so this block's own JSX doesn't
                 repeat itself -- not because they render anywhere else
                 anymore. */}
+            {recapPointsEl()}
+            {locationLineEl}
             {loadButtonEl}
             {loadBlockedMsgEl}
-            {recapPointsEl()}
             {footnoteEl}
 
           </div>
         );
 
-        return mainInfoStack;
+        return (
+          <>
+            {mainInfoStack}
+            {headerIconsSlot && createPortal(headerIconsEl, headerIconsSlot)}
+          </>
+        );
       })()}
       </div>
       </div>

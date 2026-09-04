@@ -130,8 +130,21 @@ function Header({ onOpenSettings }: { onOpenSettings: () => void }) {
         padding: "0 calc(env(safe-area-inset-right, 0px) + 16px) 0 calc(env(safe-area-inset-left, 0px) + 16px)",
       }}>
         <NavMenu darkMode={darkMode} />
-        <div style={{ display: "flex", gap: 26, flexShrink: 0, alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 16, flexShrink: 0, alignItems: "center", minWidth: 0 }}>
           <BellIcon count={shell.expirations.expiredCount + shell.expirations.warningCount} onClick={() => shell.setExpModalOpen(true)} stroke={iconStroke} />
+          {/* Portal target for the Planner page's own plan-letter/Equipment/
+              Location/Temperature cluster -- per explicit direction to try
+              it merged into this shared header row for a few days ("I think
+              I'll like it best at the top but want to play with it"). Empty
+              on every other /planner/* route (only page.tsx ever portals
+              content in here), so it costs nothing when not on Planner.
+              Deliberately a portal target rather than lifting that state
+              into CalculatorShellContext -- these four controls' underlying
+              state (activeSlotLetter, tempF, presetQuickPickOpen, etc.) is
+              genuinely Planner-page-local, and a portal makes this trivial
+              to revert (delete the portal call, nothing to unwind here) if
+              the header placement doesn't stick. */}
+          <div id="planner-header-icons-slot" style={{ display: "flex", alignItems: "center", gap: 16, minWidth: 0 }} />
           <GearIcon onClick={onOpenSettings} stroke={iconStroke} />
         </div>
       </div>

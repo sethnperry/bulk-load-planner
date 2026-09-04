@@ -1,45 +1,25 @@
 "use client";
 // app/planner/components/PlannerIcons.tsx
 //
-// Equipment/Location/Temperature icons for the Planner's new compact icon
-// row (replacing the old three stacked Equipment/Location/Temperature
-// cards -- see page.tsx's mainInfoStack). Matches the existing house style
-// exactly, same as CalculatorLayoutClient.tsx's BellIcon/GearIcon: plain
-// Feather/Lucide-shape stroke icons, viewBox 0 0 24 24, fill="none",
-// strokeWidth 2, round caps/joins, a `stroke` prop for theming rather than
-// a hardcoded color. Deliberately not pulled from an icon library -- this
-// project has never taken that dependency, these are hand-copied standard
-// Feather paths (truck / map-pin / thermometer) to stay visually
-// consistent with the two icons that already exist.
+// Icons for the Planner's header-merged plan-letter/Equipment/Location/
+// Temperature cluster (page.tsx's headerIconsEl, portaled into
+// CalculatorLayoutClient.tsx's shared Header). Per the mockup, only
+// Location is a real icon glyph now -- plan-letter, Equipment ("EQ"), and
+// Temperature ("86°F") are plain text labels, styled directly in page.tsx.
+// SolidPinIcon is the one glyph this cluster needs: a filled map-pin,
+// matching the mockup exactly (not the stroke-outline style used
+// elsewhere in this app, e.g. CalculatorLayoutClient.tsx's BellIcon/
+// GearIcon).
 
 import React from "react";
 
-type IconProps = { size?: number; stroke: string };
-
-export function TruckIcon({ size = 20, stroke }: IconProps) {
+// Standard "place" pin glyph -- the inner circle is a real hole (opposite
+// path winding under the default nonzero fill rule), not an overlay, so it
+// reads correctly on any background color behind it.
+export function SolidPinIcon({ size = 20, color }: { size?: number; color: string }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="1" y="3" width="15" height="13"></rect>
-      <polygon points="16 8 20 8 23 11 23 16 16 16 16 8"></polygon>
-      <circle cx="5.5" cy="18.5" r="2.5"></circle>
-      <circle cx="18.5" cy="18.5" r="2.5"></circle>
-    </svg>
-  );
-}
-
-export function PinIcon({ size = 20, stroke }: IconProps) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
-      <circle cx="12" cy="10" r="3"></circle>
-    </svg>
-  );
-}
-
-export function ThermometerIcon({ size = 20, stroke }: IconProps) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M14 4v10.54a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0z"></path>
+    <svg width={size} height={size} viewBox="0 0 24 24" fill={color}>
+      <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5S10.62 6.5 12 6.5s2.5 1.12 2.5 2.5S13.38 11.5 12 11.5z"></path>
     </svg>
   );
 }

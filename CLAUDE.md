@@ -8173,6 +8173,114 @@ user's own "expect to move that around" framing, not safe to guess at
 without a real rendered look first (consistent with how many rounds this
 same session's earlier landscape-layout work needed to land).
 
+### Icon-rail follow-up: merged into the shared header, matched to a real mockup (2026-09-03, same day)
+
+User's next round of feedback against the icon-rail work above, with a
+real mockup screenshot this time (the earlier icon-rail pass had been
+built from a design conversation this session's own context-compaction
+lost the reference image for): "these icons look nothing like what I
+mocked up... go ahead and merge with the nav/bell/gear row. I think I'll
+like it best at the top but want to play with it for a few days. the
+temp icon should actually display the temp and the color is confidence
+level."
+
+**Merged into the header, via a portal, not a state migration.**
+`CalculatorLayoutClient.tsx`'s `Header` (shared across every `/planner/*`
+route) gained a new empty `<div id="planner-header-icons-slot">` between
+`BellIcon` and `GearIcon`. `page.tsx` grabs that element once on mount
+(`headerIconsSlot` state) and renders its plan-letter/Equipment/Location/
+Temperature cluster into it via `createPortal` -- deliberately NOT
+lifting `activeSlotLetter`/`tempF`/`presetQuickPickOpen`/etc. into
+`CalculatorShellContext`, since that state is genuinely Planner-page-
+local and a portal makes the whole experiment trivial to reverse (delete
+the portal call, nothing to unwind) if the header placement doesn't
+stick after the explicit "play with it for a few days" trial period.
+Every other route (Dispatch, Cards, Vault) renders nothing into the slot
+at all -- confirmed live, header shows just hamburger/bell/gear there,
+zero footprint when Planner isn't mounted.
+
+**Matched to the mockup, not the previous pass's icon-rail guesses**:
+- Plan-letter: bold white text + a small white dot underneath (not a
+  boxed button) -- same `PresetQuickPick` tap target as before, just
+  restyled.
+- Equipment: a plain "EQ" text label, muted gray -- replaces the
+  `TruckIcon` glyph entirely. Deliberately a flat, non-reactive tone
+  (the mockup shows this same gray even with real equipment already
+  selected) -- Location/Temperature are the two that still carry live
+  state through color, this one doesn't.
+- Location: a new `SolidPinIcon` (`PlannerIcons.tsx`) -- a real filled
+  map-pin glyph (the standard Material "place" icon path, whose inner
+  circle is a genuine hole via opposite path winding under the default
+  nonzero fill rule), colored a fixed brand red, replacing the old
+  stroke-outline `PinIcon`.
+- Temperature: now shows the real value (`{Math.round(tempF)}°F`), not a
+  bare icon -- color still carries confidence via the existing
+  `tempSubColor` (green/yellow/red/orange), per explicit direction ("the
+  color is confidence level").
+- `PlannerIcons.tsx` collapsed down to just `SolidPinIcon` --
+  `TruckIcon`/`PinIcon`/`ThermometerIcon` (all built in the immediately
+  preceding pass) are now fully unused, since plan-letter/Equipment/
+  Temperature all became text and only Location kept a real glyph;
+  removed rather than left as dead exports.
+
+**Body reorder, matching the mockup's own order**: with the icon row
+gone from the page body, `mainInfoStack` (the left-hand card stack)
+reordered from `[loadButtonEl, loadBlockedMsgEl, recapPointsEl(),
+footnoteEl]` to `[recapPointsEl(), locationLineEl, loadButtonEl,
+loadBlockedMsgEl, footnoteEl]` -- recap/points now come first, then the
+location line, then the Load button last. `locationLineEl` itself moved
+down from its old position directly above the compartments (where it
+had rendered since the "it would be nice to at least display the
+location" pass) into this new spot, and was restyled from a single
+baseline-aligned line into the mockup's 2-line block: city/state on its
+own line, then terminal name + rack name (right-aligned, gray) on the
+line below -- reusing the already-fetched `selectedRackName` state
+(previously only used by `PlannerControls`), not a new query. The old
+above-compartments render site was removed outright, not left as a
+duplicate.
+
+**Real bug found and fixed during this pass, not shipped blind**: the
+Equipment and Location buttons both reuse `SetupGate`'s own
+`layoutId="setup-equipment-btn"`/`"setup-location-btn"`/
+`"setup-terminal-btn"` for their shared-element transition (unchanged
+from the previous icon-rail pass) -- but `SetupGate.tsx`'s own version
+of this shared card has a real `boxShadow`/`borderRadius` (its "Select
+Equipment" card look), and framer-motion's layoutId crossfade carries
+that value into whichever element the id lands on next unless the
+destination gives it something explicit to animate all the way to.
+Confirmed live via `getComputedStyle`: the header's "EQ" button showed a
+permanent (not transient -- re-checked after a 2s wait, unchanged) faint
+`box-shadow`/fractional `border-radius`, visible as a small boxed
+outline around "EQ" that had no business being there per the mockup's
+plain flat text. Fixed by explicitly setting `borderRadius: 0,
+boxShadow: "none"` on both buttons' own style objects -- gives
+framer-motion's animation an explicit target to settle at instead of
+holding a leftover value with nothing to override it.
+
+**Live-verified** via the demo login route (temporarily bypassing the
+landing redirect for the duration of testing only, exactly as the
+immediately preceding icon-rail pass did, reverted afterward, confirmed
+via `grep` no trace remains): after the boxShadow fix, `getComputedStyle`
+on the "EQ" button read `boxShadow: "none"`, `borderRadius: "0px"` --
+plain flat text, matching the mockup. All four header icons confirmed
+functional against real data (some via direct DOM `.click()`/prop
+invocation rather than the Browser pane's coordinate-based click, which
+was intermittently timing out on wait-for-idle this session for reasons
+unrelated to the app itself -- confirmed by invoking the exact same
+`onClick` handler extracted from React's fiber props and observing the
+real result each time): Equipment opens the real Equipment modal
+(25184-A/3151-A); Location opens My Terminals showing real Fort
+Lauderdale terminals with real expiry dates/colors; Temperature opens
+the real Product Temp dial; plan-letter opens `PresetQuickPick` showing
+real preset summaries ("unavailable product" on A/B, "Tap to save
+current plan" on C-E). Body reorder confirmed in both portrait
+(375x812) and the pane's own landscape-ish default width: RECAP card,
+THIS LOAD/BIWEEKLY AVG points card, "Fort Lauderdale, FL" / "Chevron"
+location line, RELOAD button, footnote -- in that order, matching the
+mockup. Confirmed the header slot is empty (no leftover cluster) on
+`/planner/dispatch`, a non-Planner route sharing the same `Header`.
+`npx tsc --noEmit` and `npx next build` both clean.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.
