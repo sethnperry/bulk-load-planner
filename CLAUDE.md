@@ -8376,6 +8376,94 @@ correctly doesn't render at all (same conditional as before, unchanged
 logic, just repositioned). `npx tsc --noEmit` and `npx next build` both
 clean.
 
+### Fourth Planner follow-up: top-cluster reorder, white handles, transparent cards, PresetQuickPick redesign (2026-09-03, same day)
+
+Fourth fast follow-up in the same day's thread, a dense multi-part
+message covering five separate changes:
+
+**Location line: city/state now white/bold, matching the terminal.** The
+"· City, State" span's color/weight changed from `rgba(255,255,255,0.45)`/
+500 to `#fff`/700 -- same treatment as the terminal name it follows, per
+explicit direction ("make the city state and dot white, and the same
+weight as the terminal").
+
+**Top cluster reorder.** Per explicit direction ("this [locationLineEl]
+should be the top row, everything else will be below it: the stability
+banner, then the save plan and edit product button"): the "⚠️ Unstable
+load (rear of neutral)" warning (new `stabilityBannerEl` const, same
+`unstableLoad` boolean, just relocated) moved out of the CG-slider block
+up into the same top cluster as `locationLineEl`/`actionRowEl`, and
+`actionRowEl` itself (Save Plan / Edit Comp Product) — previously two
+separate conditional render sites, portrait-only above locationLineEl and
+landscape-only inside the compartments column — collapsed to ONE
+unconditional render site inside the compartments column, used by both
+orientations. Final order, both orientations: locationLineEl ->
+stabilityBannerEl -> actionRowEl -> compartments -> CG slider (still
+computes `unstableLoad`, no longer renders the warning itself).
+
+**White compartment/CG handles.** Per "next change the compartment
+handles, the CG handle to white": `PlannerControls.tsx`'s drag-handle
+pill (`handleFill`) and `page.tsx`'s CG-slider puck both switched from
+`themeFill(darkMode, accentColor, ...)` (graphite, or a custom accent
+color if the user set one) to a fixed `"#ffffff"` -- neither element
+follows the accent color anymore. `themeFill`/`useCalculatorShell` became
+fully unused in `PlannerControls.tsx` once this was the component's only
+caller of either; both imports removed.
+
+**Recap/points card backgrounds now transparent.** Per "the recap and
+points card backgrounds can be fully transparent, or all black" -- picked
+transparent (the two read identically against this page's own solid
+`#0b0b0b` background anyway, and transparent needs no color kept in sync
+if that background ever changes). Both cards' `background:
+"rgba(255,255,255,0.03)"` -> `"transparent"`.
+
+**`PresetQuickPick.tsx` restyled to match the app's theme, colored-dot
+summaries replace text.** Per "we want this thing to match our theme
+better... take the plan slot letters out of the square boxes... instead
+of describing the plan just use colored dots... [for] the product
+selection, and each [compartment]":
+- Sheet container and every row now use the same `GRAPHITE`/
+  `GRAPHITE_DARKER` gradient + `CARD_BG`/`CARD_BORDER`/
+  `CARD_BORDER_SELECTED`/`CARD_SHADOW` tokens every other bottom sheet and
+  card in this app already shares (`CancelLoadSheet.tsx`, the Cards tab,
+  Reports tiles) -- replacing this component's own one-off flat
+  `#111518`/`rgba(255,255,255,0.1)`/`rgba(255,255,255,0.03)` colors.
+- The boxed square letter badge (fixed 32x32 box, border, centered) is
+  gone -- plain bold text now, white when that row is the active/
+  currently-selected plan, dim `rgba(255,255,255,0.55)` otherwise (same
+  active/inactive distinction as before, just no box around it).
+- A filled slot's text summary (product names, or "unavailable product")
+  is replaced by a row of small colored dots -- one per non-empty
+  compartment, comp-number order (so dots line up consistently across
+  every row), colored via the existing `productColorFor()` family-coding
+  (diesel yellow / premium red / else white, the same helper the outage
+  banner's own detail cards already use) -- new `colorsForSlot` callback
+  in `page.tsx` (`getColors` prop), reading each slot's saved `compPlan`
+  the same way `summaryForSlot` already does. The old text summary itself
+  is kept, just moved to the row's `title` attribute (a hover tooltip)
+  rather than deleted outright -- still available, just not the primary
+  visual anymore. An empty slot keeps its plain "Tap to save current
+  plan" text (nothing to represent with dots yet).
+
+**Assumption flagged, not confirmed with the user**: "the stad banner" in
+the reorder request was interpreted as the "Unstable load" stability
+warning -- the only banner-shaped element rendered in this page's own
+body (the outage banner lives in the shared Header, not here). Low-risk,
+cheap to correct if wrong.
+
+**Live-verified** via the demo login route (temporary redirect bypass,
+reverted after, confirmed via grep): screenshot-confirmed in both
+portrait and landscape-ish widths -- white/bold "Chevron · Fort
+Lauderdale, FL", the stability banner now directly below it and above
+compartments, white compartment handles and CG puck, recap/points cards
+blending fully into the page background. Opened `PresetQuickPick` and
+confirmed Preset A/B (both referencing a product unavailable at this demo
+terminal) render two white dots each (matching their 2 non-empty
+compartments, `productColorFor("")`'s white fallback for an unresolvable
+product), no boxed letter badge, active letter (A) white vs. inactive
+dim, graphite card gradient visible on every row. `npx tsc --noEmit` and
+`npx next build` both clean.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.

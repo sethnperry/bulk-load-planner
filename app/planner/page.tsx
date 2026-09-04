@@ -70,6 +70,7 @@ import { addDaysISO_, daysUntilISO_, formatMDYWithCountdown_, formatMDYWithTime_
 import { themeFill, themeTextOnFill } from "./theme";
 import { normState } from "./utils/normalize";
 import { cgSliderToBias, bestLbsPerGallon, planForGallons, CG_NEUTRAL, computeActualLbsForLine } from "./utils/planMath";
+import { productColorFor } from "./utils/productColor";
 import { generatePayPeriods, type PayPeriodType } from "@/app/admin/payPeriods";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -1155,6 +1156,26 @@ export default function CalculatorPage() {
   // already use elsewhere on this page).
   const nameForSlot = useCallback((slot: number) => planSlots.peekSlot(slot)?.name, [planSlots]);
 
+  // PresetQuickPick's per-row colored-dot readout -- per explicit direction
+  // ("instead of describing the plan just use colored dots for a quick
+  // visual representation... the product selection, and each [compartment]")
+  // -- one color per non-empty compartment, comp-number order (so the dots
+  // line up the same way across every preset row), reusing the same
+  // productColorFor family-coding the outage banner's detail cards already
+  // use (diesel yellow / premium red / else white). A compartment whose
+  // product isn't resolvable at the current terminal (see summaryForSlot's
+  // own "unavailable product" case) still gets a dot -- productColorFor("")
+  // falls through to white -- rather than silently disappearing from the
+  // readout.
+  const colorsForSlot = useCallback((slot: number): string[] => {
+    const plan = planSlots.peekSlot(slot)?.compPlan;
+    if (!plan) return [];
+    return Object.entries(plan)
+      .filter(([, v]) => v && !v.empty && v.productId)
+      .sort((a, b) => Number(a[0]) - Number(b[0]))
+      .map(([, v]) => productColorFor(productNameById.get(v!.productId!) ?? ""));
+  }, [planSlots, productNameById]);
+
   // Compartments whose planned product isn't sold at the currently selected
   // terminal -- almost always the result of loading a preset saved at a
   // different terminal (presets are terminal-independent, per the rework
@@ -1673,6 +1694,7 @@ const lastProductInfoById = useMemo(() => {
       disabledReason={!location.selectedTerminalId ? "Select a terminal first" : "Syncing presets…"}
       getSummary={summaryForSlot}
       getName={nameForSlot}
+      getColors={colorsForSlot}
       onLoad={handlePresetLoad}
       onSaveEmpty={handlePresetSaveEmpty}
       onOpenActions={(n) => setPresetSheetSlot(n)}
@@ -1718,7 +1740,7 @@ const lastProductInfoById = useMemo(() => {
             <span style={{ fontSize: 15, fontWeight: 700, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
               {terminalLabel}
             </span>
-            <span style={{ fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.45)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
+            <span style={{ fontSize: 15, fontWeight: 700, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
               · {location.locationLabel}
             </span>
           </div>
@@ -1737,13 +1759,28 @@ const lastProductInfoById = useMemo(() => {
   );
 
   // Extracted alongside presetDialEl for the same reason -- landscape
-  // renders both inside the compartments (right) column instead of
+  // renders it inside the compartments (right) column instead of
   // full-width above the whole two-column row, per explicit follow-up:
   // "the plan slot row extended all the way into the left column. it
   // should only stretch across the right column. the save plan button
-  // should be on the right as well." One definition, two conditional
-  // render sites below (portrait vs. landscape), not two copies of the
-  // JSX itself.
+  // should be on the right as well." Was two conditional render sites
+  // (portrait-only above locationLineEl, landscape-only inside the
+  // compartments column) -- now one unconditional render site inside the
+  // compartments column for both orientations, per the same-day follow-up
+  // below.
+  //
+  // stabilityBannerEl: moved up out of the CG-slider block into this same
+  // top cluster, per
+  // explicit direction ("this should be the top row [locationLineEl].
+  // everything else will be below it: the stability banner, then the
+  // save plan and edit product button") -- unstableLoad itself (computed
+  // above from cgSlider) is unchanged, only where the warning renders.
+  const stabilityBannerEl = unstableLoad ? (
+    <div style={{ ...styles.error, marginTop: 0, marginBottom: 12, textAlign: "center" as const }}>
+      ⚠️ Unstable load (rear of neutral)
+    </div>
+  ) : null;
+
   const currentOverrides = overridesSnapshot(compPlan, cgSlider);
   const isDirty = currentOverrides !== baselineOverrides;
   const activeLetter = String.fromCharCode(64 + activeSlotLetter);
@@ -1869,13 +1906,13 @@ const lastProductInfoById = useMemo(() => {
         onClose={() => setPresetSheetSlot(null)}
       />
 
-      {/* Action row -- left: "Save plan {letter}" once a temporary cap
-          override exists anywhere (a concrete "diverges from saved" signal);
-          right: "Edit Comp N Product" once a compartment bar has been
-          tapped/selected. Portrait only here -- see actionRowEl's own
-          definition above for why landscape renders it inside the
-          compartments column instead. */}
-      {!isLandscape && actionRowEl}
+      {/* Action row ("Save plan {letter}" / "Edit Comp N Product") used to
+          render here, portrait-only, ahead of locationLineEl/compartments
+          -- now renders as part of the single top cluster inside the
+          compartments column below (locationLineEl -> stabilityBannerEl
+          -> actionRowEl -> PlannerControls), unconditional on orientation,
+          per explicit direction that locationLineEl should be the top row
+          with everything else -- including this -- below it. */}
 
       {/* Landscape: buttons+cards (Equipment/Location/Temp/Load/recap/
           points), all of it, stay together on the LEFT; compartments
@@ -1981,23 +2018,31 @@ const lastProductInfoById = useMemo(() => {
           content size, which heightScale (above) needs to compute the
           right scale. */}
       <div ref={compartmentsContentRef}>
-      {/* Landscape only -- see actionRowEl's own definition above for why
-          it lives here now instead of full-width above the whole
-          two-column row: it has nothing to do with the left (buttons/
-          cards) column, so scoping it to the column it actually belongs
-          to is what lets the left column's content start right under the
-          header instead of being pushed down by content that was never
-          really "its" own. (The old swipeable PresetDial used to render
-          here too -- removed along with its full render site, replaced by
-          the plan-letter icon in the header cluster, see headerIconsEl.)
-          locationLineEl briefly moved down into mainInfoStack (after
-          recap/points) per the header-merge mockup's own order -- reverted
-          the same day, per explicit follow-up ("put the location back
-          above the compartments where you had it, your way looks
-          better") -- back to its original spot, common to both
+      {/* Top cluster, unconditional on orientation -- locationLineEl is
+          the top row, then stabilityBannerEl (the "Unstable load"
+          warning, moved up out of the CG-slider block), then actionRowEl
+          ("Save plan {letter}" / "Edit Comp N Product", moved up from its
+          old portrait-only early render site) -- per explicit direction:
+          "this [locationLineEl] should be the top row, everything else
+          will be below it: the stability banner, then the save plan and
+          edit product button." Scoping all of this to the compartments
+          column (rather than full-width above the whole two-column row)
+          is what lets the left (buttons/cards) column's own content start
+          right under the header instead of being pushed down by content
+          that was never really "its" own -- same reasoning this column
+          already had for actionRowEl alone before this pass unconditioned
+          it. (The old swipeable PresetDial used to render here too --
+          removed along with its full render site, replaced by the
+          plan-letter icon in the header cluster, see headerIconsEl.)
+          locationLineEl itself briefly moved down into mainInfoStack
+          (after recap/points) per the header-merge mockup's own order --
+          reverted the same day, per explicit follow-up ("put the
+          location back above the compartments where you had it, your way
+          looks better") -- back to its original spot, common to both
           orientations. */}
       {locationLineEl}
-      {isLandscape && actionRowEl}
+      {stabilityBannerEl}
+      {actionRowEl}
       <PlannerControls
         styles={styles}
         selectedTrailerId={selectedTrailerId}
@@ -2035,13 +2080,12 @@ const lastProductInfoById = useMemo(() => {
         myRole={shell.role}
       />
 
-      {/* CG Slider — always visible */}
+      {/* CG Slider — always visible. The "Unstable load" warning that used
+          to render right here moved up to the top cluster (see
+          stabilityBannerEl, above locationLineEl/actionRowEl) per explicit
+          direction -- unstableLoad itself is unchanged, just read from a
+          different render site now. */}
       <div style={{ marginTop: 18 }}>
-        {unstableLoad && (
-          <div style={{ ...styles.error, marginTop: 0, marginBottom: 10, textAlign: "center" }}>
-            ⚠️ Unstable load (rear of neutral)
-          </div>
-        )}
         <style jsx global>{`
           input.cgRange { -webkit-appearance: none; appearance: none; background: transparent; height: 24px; }
           input.cgRange:focus { outline: none; }
@@ -2055,7 +2099,8 @@ const lastProductInfoById = useMemo(() => {
             onChange={(e) => setCgSlider(Number(e.target.value))}
             style={{ width: "100%" }} disabled={!equipment.selectedCombo}
           />
-          {/* Puck — themed fill (light gray / dark graphite / custom accent), no label, centered on the 4px track */}
+          {/* Puck — fixed white now, per explicit direction ("the CG
+              handle to white"), no longer accent/theme-driven. */}
           <div aria-hidden style={{
             position: "absolute",
             left: `${Math.max(0, Math.min(1, cgSlider)) * 100}%`,
@@ -2063,7 +2108,7 @@ const lastProductInfoById = useMemo(() => {
             transform: "translate(-50%, -50%)",
             width: 22, height: 22,
             borderRadius: "50%",
-            background: themeFill(shell.theme.darkMode, shell.theme.accentColor, "#d9d9d9"),
+            background: "#ffffff",
             pointerEvents: "none",
             boxShadow: "0 1px 4px rgba(0,0,0,0.4)",
           }} />
@@ -2242,10 +2287,16 @@ const lastProductInfoById = useMemo(() => {
         // landscape width converged on the same 3-column composition (see
         // rightStack below). Nothing calls this with "row" anymore, so
         // the parameter and its conditional styling are gone rather than
-        // left as dead, never-taken branches.
+        // left as dead, never-taken branches. Both cards' own backgrounds
+        // are now "transparent" (were a faint rgba(255,255,255,0.03) fill)
+        // per explicit direction ("the recap and points card backgrounds
+        // can be fully transparent, or all black") -- transparent, since
+        // it reads identically to a solid #0b0b0b fill against this page's
+        // own #0b0b0b background anyway, without hardcoding a color that'd
+        // need to be kept in sync if the page background ever changes.
         const recapPointsEl = () => (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <div style={{ borderRadius: 16, background: "rgba(255,255,255,0.03)", padding: "10px 14px" }}>
+            <div style={{ borderRadius: 16, background: "transparent", padding: "10px 14px" }}>
               {recapLabel && (
                 <button
                   type="button"
@@ -2278,7 +2329,7 @@ const lastProductInfoById = useMemo(() => {
                 above. Only rendered once the company has actually turned
                 the incentive system on. */}
             {incentiveEnabled && (
-              <div style={{ borderRadius: 16, background: "rgba(255,255,255,0.03)", padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ borderRadius: 16, background: "transparent", padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div>
                   <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.4)", textTransform: "uppercase" as const, letterSpacing: 0.4 }}>This Load</div>
                   <div style={{ fontSize: 20, fontWeight: 700, color: "#4ade80" }}>

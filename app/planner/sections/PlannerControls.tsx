@@ -1,8 +1,6 @@
 "use client";
 
 import React, { useState } from "react";
-import { useCalculatorShell } from "../CalculatorShellContext";
-import { themeFill } from "../theme";
 import ValueEntryOverlay from "../components/ValueEntryOverlay";
 
 /**
@@ -33,8 +31,11 @@ export default function PlannerControls(props: any) {
   // let's not even scale it, just shift it over"). The bar height is back
   // to a fixed clamp (see barH below) in every orientation; nothing in
   // this component stretches to match a sibling anymore.
-  const shell = useCalculatorShell();
-  const handleFill = themeFill(shell.theme.darkMode, shell.theme.accentColor);
+  // Fixed white now, per explicit direction ("change the compartment
+  // handles... to white") -- was themeFill(darkMode, accentColor), which
+  // rendered graphite/accent-tinted; this element no longer follows the
+  // accent color at all.
+  const handleFill = "#ffffff";
 
   const [draggingComp, setDraggingComp] = useState<number | null>(null);
   const [dragGallonsText, setDragGallonsText] = useState<number | null>(null);

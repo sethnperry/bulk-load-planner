@@ -14,8 +14,25 @@
 // Long-press on a filled row still opens the existing PresetActionSheet
 // (Edit/Clear) rather than duplicating that logic here -- same reuse this
 // component's own predecessor (PresetDial) already established.
+//
+// Restyled per explicit same-day follow-up ("we want this thing to match
+// our theme better"): the sheet container and each row now use the same
+// GRAPHITE/GRAPHITE_DARKER gradient + CARD_BG/CARD_BORDER/CARD_SHADOW
+// tokens every other bottom sheet and card in this app already shares
+// (CancelLoadSheet.tsx, the Cards tab, Reports tiles) instead of this
+// component's own one-off flat colors. The plan-letter badge lost its
+// boxed square (plain bold text now -- white when active, dim otherwise,
+// same as before, just no border/background box around it), and each
+// filled row's text summary was replaced with a row of small colored dots
+// -- one per non-empty compartment, comp-number order, colored via
+// getColors (page.tsx's colorsForSlot, reusing the same product-family
+// color coding productColorFor already gives the outage banner's detail
+// cards) -- "instead of describing the plan just use colored dots for a
+// quick visual representation of the product selection."
 
 import React, { useEffect, useRef, useState } from "react";
+import { GRAPHITE, GRAPHITE_DARKER } from "../theme";
+import { CARD_BG, CARD_BORDER, CARD_BORDER_SELECTED, CARD_SHADOW } from "../cards/cardTheme";
 
 type Props = {
   open: boolean;
@@ -27,6 +44,7 @@ type Props = {
   disabledReason?: string;
   getSummary: (slot: number) => string;
   getName: (slot: number) => string | undefined;
+  getColors: (slot: number) => string[];
   onLoad: (slot: number) => void;
   onSaveEmpty: (slot: number) => void;
   onOpenActions: (slot: number) => void;
@@ -37,7 +55,7 @@ const LONG_PRESS_MS = 600;
 
 export default function PresetQuickPick({
   open, onClose, slots, slotHas, activeSlot, disabled, disabledReason,
-  getSummary, getName, onLoad, onSaveEmpty, onOpenActions, onRename,
+  getSummary, getName, getColors, onLoad, onSaveEmpty, onOpenActions, onRename,
 }: Props) {
   const [renamingSlot, setRenamingSlot] = useState<number | null>(null);
   const [draftName, setDraftName] = useState("");
@@ -59,7 +77,12 @@ export default function PresetQuickPick({
 
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 10300, background: "rgba(0,0,0,0.72)", display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 480, background: "#111518", borderRadius: "16px 16px 0 0", border: "1px solid rgba(255,255,255,0.1)", padding: "18px 16px calc(18px + env(safe-area-inset-bottom))" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{
+        width: "100%", maxWidth: 480,
+        background: `linear-gradient(180deg, ${GRAPHITE} 0%, ${GRAPHITE_DARKER} 100%)`,
+        borderRadius: "16px 16px 0 0", border: "1px solid rgba(255,255,255,0.1)",
+        padding: "18px 16px calc(18px + env(safe-area-inset-bottom))",
+      }}>
         <div style={{ fontSize: 13, fontWeight: 800, color: "rgba(255,255,255,0.4)", textTransform: "uppercase" as const, letterSpacing: 0.5, marginBottom: 12 }}>
           Presets
         </div>
@@ -75,6 +98,7 @@ export default function PresetQuickPick({
             const isActive = slot === activeSlot;
             const isRenaming = renamingSlot === slot;
             const name = getName(slot);
+            const colors = has ? getColors(slot) : [];
 
             const onPressStart = () => {
               if (disabled || !has) return;
@@ -95,8 +119,8 @@ export default function PresetQuickPick({
 
             return (
               <div key={slot} style={{
-                borderRadius: 10, border: `1px solid ${isActive ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.10)"}`,
-                background: isActive ? "rgba(255,255,255,0.06)" : "rgba(255,255,255,0.03)",
+                borderRadius: 10, border: isActive ? CARD_BORDER_SELECTED : CARD_BORDER,
+                background: CARD_BG, boxShadow: CARD_SHADOW,
                 padding: "10px 12px", display: "flex", alignItems: "center", gap: 12,
               }}>
                 <button
@@ -109,11 +133,11 @@ export default function PresetQuickPick({
                     cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.4 : 1,
                   }}
                 >
+                  {/* Plain letter, no boxed badge -- white when this is the
+                      currently-selected/active plan, dim otherwise. */}
                   <span style={{
-                    flexShrink: 0, width: 32, height: 32, borderRadius: 8,
-                    border: `1px solid ${isActive ? "rgba(255,255,255,0.5)" : "rgba(255,255,255,0.2)"}`,
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    fontSize: 15, fontWeight: 800, color: isActive ? "#fff" : "rgba(255,255,255,0.55)",
+                    flexShrink: 0, minWidth: 18, textAlign: "center" as const,
+                    fontSize: 16, fontWeight: 800, color: isActive ? "#fff" : "rgba(255,255,255,0.55)",
                   }}>
                     {letter}
                   </span>
@@ -132,9 +156,22 @@ export default function PresetQuickPick({
                         <div style={{ fontSize: 14, fontWeight: 600, color: name ? "#fff" : "rgba(255,255,255,0.35)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
                           {name || `Preset ${letter}`}
                         </div>
-                        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
-                          {has ? getSummary(slot) : "Tap to save current plan"}
-                        </div>
+                        {/* Colored dots (one per non-empty compartment) replace
+                            the old text summary for a filled slot -- a quick
+                            visual read of the product selection instead of a
+                            name/comma list. Empty slots keep the plain text
+                            prompt, since there's nothing to represent yet. */}
+                        {has ? (
+                          <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 4 }} title={getSummary(slot)}>
+                            {colors.map((c, i) => (
+                              <span key={i} style={{ width: 9, height: 9, borderRadius: "50%", background: c, flexShrink: 0, boxShadow: "0 0 0 1px rgba(0,0,0,0.35)" }} />
+                            ))}
+                          </div>
+                        ) : (
+                          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", marginTop: 1 }}>
+                            Tap to save current plan
+                          </div>
+                        )}
                       </>
                     )}
                   </span>
