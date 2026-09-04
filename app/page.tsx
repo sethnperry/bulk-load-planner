@@ -161,8 +161,7 @@ export default function Home() {
             </p>
           </blockquote>
           <p className="founder-byline">
-            Built by a bulk fuel hauler who lived this problem, not a
-            software company guessing at it.
+            Built by a bulk fuel hauler with boots-on experience.
           </p>
           <p className="founder-patent">Patent pending.</p>
         </div>
