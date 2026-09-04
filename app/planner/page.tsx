@@ -67,7 +67,6 @@ import { styles } from "./ui/styles";
 
 // ── Utils ──────────────────────────────────────────────────────────────────────
 import { addDaysISO_, daysUntilISO_, formatMDYWithCountdown_, formatMDYWithTime_, isPastISO_ } from "./utils/dates";
-import { themeFill, themeTextOnFill } from "./theme";
 import { normState } from "./utils/normalize";
 import { cgSliderToBias, bestLbsPerGallon, planForGallons, CG_NEUTRAL, computeActualLbsForLine } from "./utils/planMath";
 import { productColorFor } from "./utils/productColor";
@@ -1159,21 +1158,27 @@ export default function CalculatorPage() {
   // PresetQuickPick's per-row colored-dot readout -- per explicit direction
   // ("instead of describing the plan just use colored dots for a quick
   // visual representation... the product selection, and each [compartment]")
-  // -- one color per non-empty compartment, comp-number order (so the dots
-  // line up the same way across every preset row), reusing the same
-  // productColorFor family-coding the outage banner's detail cards already
-  // use (diesel yellow / premium red / else white). A compartment whose
-  // product isn't resolvable at the current terminal (see summaryForSlot's
-  // own "unavailable product" case) still gets a dot -- productColorFor("")
-  // falls through to white -- rather than silently disappearing from the
-  // readout.
+  // -- one dot per compartment (every entry in the saved plan, not just the
+  // filled ones -- see the same-day follow-up on this function itself),
+  // comp-number order (so the dots line up the same way across every
+  // preset row), reusing the same productColorFor family-coding the
+  // outage banner's detail cards already use (diesel yellow / premium red
+  // / else white). An empty compartment (or one with no product selected)
+  // renders black; a compartment whose product isn't resolvable at the
+  // current terminal (see summaryForSlot's own "unavailable product" case)
+  // still gets a real dot -- productColorFor("") falls through to white --
+  // rather than silently disappearing from the readout.
+  // One dot per compartment now, not just the filled ones -- per explicit
+  // follow-up ("empty compartments should get a black dot") -- so the dot
+  // count always matches the equipment's real compartment count instead of
+  // varying with how many happen to be planned.
   const colorsForSlot = useCallback((slot: number): string[] => {
     const plan = planSlots.peekSlot(slot)?.compPlan;
     if (!plan) return [];
     return Object.entries(plan)
-      .filter(([, v]) => v && !v.empty && v.productId)
+      .filter(([, v]) => v != null)
       .sort((a, b) => Number(a[0]) - Number(b[0]))
-      .map(([, v]) => productColorFor(productNameById.get(v!.productId!) ?? ""));
+      .map(([, v]) => (v!.empty || !v!.productId) ? "#000000" : productColorFor(productNameById.get(v!.productId!) ?? ""));
   }, [planSlots, productNameById]);
 
   // Compartments whose planned product isn't sold at the currently selected
@@ -1715,14 +1720,20 @@ const lastProductInfoById = useMemo(() => {
   //
   // Restyled per the header-merge mockup into a 2-line block, then
   // reordered again per explicit same-day follow-up ("put the terminal
-  // first and the city state separated by a dot... the rack underneath
-  // the terminal"): terminal name leads, followed by "· City, State" on
-  // the same line (the "·" matches this app's own established separator
-  // convention -- e.g. the RECAP label's "· {date}"), then the rack name
-  // on its own line underneath, left-aligned under the terminal rather
-  // than right-aligned as the mockup-era version had it. Rack name reuses
-  // selectedRackName (already fetched above for PlannerControls' own
-  // use), not a new query.
+  // first and the city state separated by a dot"): terminal name leads,
+  // followed by "· City, State" (the "·" matches this app's own
+  // established separator convention -- e.g. the RECAP label's own
+  // "· {date}"). Rack name moved onto that SAME line per a further
+  // same-day follow-up ("put the rack on the same line with the
+  // terminal, all the way to the right, same weight") -- pushed to the
+  // far right via justify-content:space-between on the row, styled
+  // identically to the terminal/city-state (white, 700) instead of its
+  // old dim gray. The terminal+city/state pair gets its own
+  // overflow:hidden sub-wrapper so IT truncates first on a narrow screen
+  // (ellipsis) rather than squeezing the rack name, which stays
+  // flexShrink:0 so it's never the one that gets clipped. Rack name
+  // reuses selectedRackName (already fetched above for PlannerControls'
+  // own use), not a new query.
   const locationStep: "location" | "terminal" = location.selectedCity && location.selectedState ? "terminal" : "location";
   const locationLineEl = (
     <button
@@ -1731,12 +1742,12 @@ const lastProductInfoById = useMemo(() => {
       style={{
         width: "100%", boxSizing: "border-box" as const, textAlign: "left" as const,
         border: "none", background: "none", padding: "0 2px", marginBottom: 12,
-        cursor: "pointer", display: "flex", flexDirection: "column" as const, gap: 2, minWidth: 0,
+        cursor: "pointer", display: "flex", minWidth: 0,
       }}
     >
       {location.selectedTerminalId ? (
-        <>
-          <div style={{ display: "flex", alignItems: "baseline", gap: 6, minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, width: "100%", minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 6, minWidth: 0, overflow: "hidden" }}>
             <span style={{ fontSize: 15, fontWeight: 700, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
               {terminalLabel}
             </span>
@@ -1745,11 +1756,11 @@ const lastProductInfoById = useMemo(() => {
             </span>
           </div>
           {selectedRackName && (
-            <span style={{ fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.45)" }}>
+            <span style={{ fontSize: 15, fontWeight: 700, color: "#fff", flexShrink: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
               {selectedRackName}
             </span>
           )}
-        </>
+        </div>
       ) : (
         <span style={{ fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,0.35)" }}>
           {locationStep === "location" ? "Select location" : "Select terminal"}
@@ -2364,12 +2375,16 @@ const lastProductInfoById = useMemo(() => {
             }}
             disabled={loadDisabled}
             style={{
-              borderRadius: 6, border: "none", background: themeFill(shell.theme.darkMode, shell.theme.accentColor), padding: "10px 14px", width: "100%",
+              // Fixed white bg / black text now, per explicit direction --
+              // was themeFill/themeTextOnFill (graphite or accent-colored
+              // fill with white text in dark mode); this button no longer
+              // follows the accent color at all.
+              borderRadius: 6, border: "none", background: "#ffffff", padding: "10px 14px", width: "100%",
               cursor: loadDisabled ? "not-allowed" : "pointer", opacity: loadDisabled ? 0.5 : 1,
               display: "flex", alignItems: "center", justifyContent: "center",
             }}
           >
-            <span style={{ fontSize: 16, fontWeight: 700, lineHeight: 1, color: themeTextOnFill(shell.theme.darkMode), letterSpacing: 0.3 }}>{loadLabel}</span>
+            <span style={{ fontSize: 16, fontWeight: 700, lineHeight: 1, color: "#000000", letterSpacing: 0.3 }}>{loadLabel}</span>
           </button>
         );
 

@@ -15,24 +15,27 @@
 // (Edit/Clear) rather than duplicating that logic here -- same reuse this
 // component's own predecessor (PresetDial) already established.
 //
-// Restyled per explicit same-day follow-up ("we want this thing to match
-// our theme better"): the sheet container and each row now use the same
-// GRAPHITE/GRAPHITE_DARKER gradient + CARD_BG/CARD_BORDER/CARD_SHADOW
-// tokens every other bottom sheet and card in this app already shares
-// (CancelLoadSheet.tsx, the Cards tab, Reports tiles) instead of this
-// component's own one-off flat colors. The plan-letter badge lost its
-// boxed square (plain bold text now -- white when active, dim otherwise,
-// same as before, just no border/background box around it), and each
-// filled row's text summary was replaced with a row of small colored dots
-// -- one per non-empty compartment, comp-number order, colored via
-// getColors (page.tsx's colorsForSlot, reusing the same product-family
-// color coding productColorFor already gives the outage banner's detail
-// cards) -- "instead of describing the plan just use colored dots for a
-// quick visual representation of the product selection."
+// Restyled twice, same day. First pass reused this app's GRAPHITE-gradient
+// card look (CancelLoadSheet.tsx/Cards tab/Reports tiles) -- explicit
+// follow-up called that out as having "a [] hue" and pointed at
+// ExpirationModal.tsx as the reference instead: that modal's own rows use
+// plain, genuinely neutral rgba(255,255,255,x) fills over a flat #0b0b0b
+// sheet background (matching lib/ui/FullscreenModal.tsx's own bg-[#0b0b0b]
+// exactly), not a colored gradient -- GRAPHITE/GRAPHITE_DARKER (#2a2a2c/
+// #1c1c1e) aren't perfectly neutral grays, which is what read as a hue.
+// Second pass also moved the colored-dot summary onto the SAME line as
+// the plan name (was its own line underneath) and sized the dots up a
+// little (9px -> 12px).
+//
+// The plan-letter badge lost its boxed square (plain bold text now --
+// white when active, dim otherwise) and each row's text summary was
+// replaced with a row of colored dots -- one per compartment (not just
+// the filled ones, see page.tsx's colorsForSlot), colored via
+// productColorFor's product-family coding, black for an empty compartment
+// -- "instead of describing the plan just use colored dots for a quick
+// visual representation of the product selection."
 
 import React, { useEffect, useRef, useState } from "react";
-import { GRAPHITE, GRAPHITE_DARKER } from "../theme";
-import { CARD_BG, CARD_BORDER, CARD_BORDER_SELECTED, CARD_SHADOW } from "../cards/cardTheme";
 
 type Props = {
   open: boolean;
@@ -52,6 +55,15 @@ type Props = {
 };
 
 const LONG_PRESS_MS = 600;
+
+// Neutral, no-hue palette -- matches ExpirationModal.tsx's own
+// ExpirationCard exactly (ignoring that component's expired/urgent/
+// deferred variants, which don't apply here): plain white-alpha overlays,
+// not a colored gradient.
+const ROW_BG = "rgba(255,255,255,0.03)";
+const ROW_BG_ACTIVE = "rgba(255,255,255,0.06)";
+const ROW_BORDER = "1px solid rgba(255,255,255,0.07)";
+const ROW_BORDER_ACTIVE = "1px solid rgba(255,255,255,0.25)";
 
 export default function PresetQuickPick({
   open, onClose, slots, slotHas, activeSlot, disabled, disabledReason,
@@ -79,7 +91,7 @@ export default function PresetQuickPick({
     <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 10300, background: "rgba(0,0,0,0.72)", display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
       <div onClick={(e) => e.stopPropagation()} style={{
         width: "100%", maxWidth: 480,
-        background: `linear-gradient(180deg, ${GRAPHITE} 0%, ${GRAPHITE_DARKER} 100%)`,
+        background: "#0b0b0b",
         borderRadius: "16px 16px 0 0", border: "1px solid rgba(255,255,255,0.1)",
         padding: "18px 16px calc(18px + env(safe-area-inset-bottom))",
       }}>
@@ -119,8 +131,8 @@ export default function PresetQuickPick({
 
             return (
               <div key={slot} style={{
-                borderRadius: 10, border: isActive ? CARD_BORDER_SELECTED : CARD_BORDER,
-                background: CARD_BG, boxShadow: CARD_SHADOW,
+                borderRadius: 10, border: isActive ? ROW_BORDER_ACTIVE : ROW_BORDER,
+                background: isActive ? ROW_BG_ACTIVE : ROW_BG,
                 padding: "10px 12px", display: "flex", alignItems: "center", gap: 12,
               }}>
                 <button
@@ -152,27 +164,26 @@ export default function PresetQuickPick({
                         style={{ width: "100%", boxSizing: "border-box" as const, padding: "4px 6px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.2)", background: "rgba(255,255,255,0.05)", color: "#fff", fontSize: 14, fontWeight: 600 }}
                       />
                     ) : (
-                      <>
-                        <div style={{ fontSize: 14, fontWeight: 600, color: name ? "#fff" : "rgba(255,255,255,0.35)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
+                      // Name and dots share one row now (was name, then a
+                      // second line of dots underneath) -- dots sized up a
+                      // little (9px -> 12px) and placed right next to the
+                      // name per explicit follow-up.
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                        <div style={{ fontSize: 14, fontWeight: 600, color: name ? "#fff" : "rgba(255,255,255,0.35)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const, flexShrink: 1 }}>
                           {name || `Preset ${letter}`}
                         </div>
-                        {/* Colored dots (one per non-empty compartment) replace
-                            the old text summary for a filled slot -- a quick
-                            visual read of the product selection instead of a
-                            name/comma list. Empty slots keep the plain text
-                            prompt, since there's nothing to represent yet. */}
                         {has ? (
-                          <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 4 }} title={getSummary(slot)}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }} title={getSummary(slot)}>
                             {colors.map((c, i) => (
-                              <span key={i} style={{ width: 9, height: 9, borderRadius: "50%", background: c, flexShrink: 0, boxShadow: "0 0 0 1px rgba(0,0,0,0.35)" }} />
+                              <span key={i} style={{ width: 12, height: 12, borderRadius: "50%", background: c, flexShrink: 0, boxShadow: "0 0 0 1px rgba(255,255,255,0.25)" }} />
                             ))}
                           </div>
                         ) : (
-                          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", marginTop: 1 }}>
+                          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", flexShrink: 0 }}>
                             Tap to save current plan
                           </div>
                         )}
-                      </>
+                      </div>
                     )}
                   </span>
                 </button>

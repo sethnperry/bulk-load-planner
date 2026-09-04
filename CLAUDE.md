@@ -8464,6 +8464,88 @@ product), no boxed letter badge, active letter (A) white vs. inactive
 dim, graphite card gradient visible on every row. `npx tsc --noEmit` and
 `npx next build` both clean.
 
+### Fifth (and, per the user, last-for-a-while) Planner follow-up: rack inline with terminal, white Load button, PresetQuickPick hue fix + inline bigger dots (2026-09-03, same day)
+
+Explicitly flagged by the user as the last pass in this thread for a
+while. Four changes:
+
+**Rack moved onto the same line as the terminal, pushed to the far
+right, same weight.** Per "put the rack on the same line with the
+terminal, all the way to the right, and make it the same weight" --
+`locationLineEl`'s rack name (previously its own line underneath,
+left-aligned, dim gray) now sits on the SAME row as "{Terminal} · {City,
+State}", via `justify-content: space-between`, styled identically (white,
+700) instead of its old `rgba(255,255,255,0.45)`/500. The terminal+city-
+state pair got its own `overflow:hidden` sub-wrapper so THAT'S what
+truncates first on a narrow screen -- the rack name is `flexShrink: 0`,
+never the one that gets clipped. Live-verified against a real multi-rack
+terminal (Global South, picked North Rack): "Global South · Fort
+Lauderdale, FL" left, "North Rack" right, both measured identical color/
+weight/size via `getComputedStyle` (`rgb(255,255,255)` / `700` / `15px`).
+
+**Load button: fixed white background, black text.** Per "change the
+[RELOAD] button to a white background with black letters" -- was
+`themeFill(darkMode, accentColor)` (graphite, or a custom accent color)
+with `themeTextOnFill(darkMode)` (white text in dark mode); both replaced
+with fixed `"#ffffff"`/`"#000000"`. No longer accent-driven at all.
+`themeFill`/`themeTextOnFill` became fully unused in `page.tsx` once this
+was their only remaining caller there; import removed (both functions
+still have other callers elsewhere in the app, e.g.
+`CancelLoadSheet.tsx`, untouched).
+
+**PresetQuickPick's "hue" fixed, dots moved inline + sized up.** The
+immediately preceding pass's "match our theme better" attempt reused this
+app's `GRAPHITE`/`GRAPHITE_DARKER` card gradient (`CancelLoadSheet.tsx`/
+Cards tab/Reports tiles' own look) -- explicit same-day follow-up called
+that out as having "a [] hue" and pointed at `ExpirationModal.tsx` as the
+correct reference instead. Read that file directly rather than guessing:
+its own `ExpirationCard` rows use plain, genuinely neutral
+`rgba(255,255,255,x)` fills over a flat `#0b0b0b` sheet background
+(matching `lib/ui/FullscreenModal.tsx`'s own `bg-[#0b0b0b]` exactly), not
+a colored gradient -- `GRAPHITE`/`GRAPHITE_DARKER` (`#2a2a2c`/`#1c1c1e`)
+aren't perfectly neutral grays, which is what read as a hue against the
+app's genuinely flat-black surfaces. `PresetQuickPick.tsx`'s sheet
+background reverted to flat `#0b0b0b`; each row's background/border
+switched from `CARD_BG`/`CARD_BORDER`/`CARD_BORDER_SELECTED`/`CARD_SHADOW`
+to new local `ROW_BG`/`ROW_BG_ACTIVE`/`ROW_BORDER`/`ROW_BORDER_ACTIVE`
+consts matching `ExpirationCard`'s own neutral palette shape (no import
+from `cardTheme.ts`/`GRAPHITE` needed anymore).
+
+Also per "put the compartment dots next to the plan name and raise the
+size of them up a little": the dot row moved from its own line beneath
+the preset name onto the SAME line (name and dots share one flex row now,
+name gets `flexShrink:1` so it's the one that truncates if space is
+tight), and dot size went from 9px to 12px, with the outline color
+flipped from a near-invisible `rgba(0,0,0,0.35)` to `rgba(255,255,255,0.25)`
+-- the darker outline would have made a genuinely black (empty-
+compartment) dot disappear entirely against the row's own dark
+background.
+
+**Empty compartments get a black dot.** Per "empty compartments should
+get a black dot" -- `colorsForSlot` (`page.tsx`) no longer filters out
+empty/no-product compartments before mapping to colors; every entry in
+the saved plan gets a dot now (comp-number order, same as before), black
+(`"#000000"`) for `v.empty || !v.productId`, `productColorFor(...)`
+otherwise -- so the dot count always matches how many compartments the
+saved plan actually has, not just how many were filled. Live-verified the
+color-resolution half concretely: the SAME two presets that showed white
+dots at Chevron (product not sold there, `productColorFor("")`'s white
+fallback) showed real yellow diesel dots once the terminal was switched
+to Global South, where that product IS sold -- confirms `colorsForSlot`
+re-resolves live against whichever terminal is currently selected, not a
+cached/stale color. The black-dot branch itself (`v.empty` case) was not
+separately exercised live -- this demo account's own `slotHas` semantics
+treat a saved-but-fully-empty plan the same as "never saved" (a
+pre-existing, unrelated app behavior), so a real "some compartments
+filled, some genuinely empty" preset wasn't reproducible without an
+equipment/data setup this session didn't have on hand. Low risk: a
+one-line ternary alongside the already-proven `productColorFor` branch.
+
+**Live-verified** via the demo login route (temporary redirect bypass,
+reverted after, confirmed via grep) in both landscape-ish and portrait
+widths for every change above except the specific black-dot case noted.
+`npx tsc --noEmit` and `npx next build` both clean.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.
