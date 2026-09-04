@@ -131,6 +131,16 @@ export type PlanSnapshot = {
   // fail the type.
   cgSlider?: number;
   compPlan: Record<number, CompPlanInput>;
+  // Optional custom label for a named preset (slots 1-5 only -- slot 0's
+  // autosave/last-load draft has no name concept). Lives inside this same
+  // jsonb-backed snapshot rather than a new DB column -- user_plan_slots'
+  // schema (confirmed directly against its migration) has no name/label
+  // column, and payload is already the flexible place per-slot metadata
+  // like this lives. Set via usePlanSlots.ts's renameSlot(), which touches
+  // ONLY this field on an existing snapshot -- never via buildSnapshot's
+  // normal save path, which would overwrite the slot's actual saved plan
+  // with whatever's currently live on screen.
+  name?: string;
 };
 
 export type LoadReport = {

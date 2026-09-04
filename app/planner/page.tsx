@@ -43,11 +43,12 @@ import { useFuelTempPrediction } from "./hooks/useFuelTempPrediction";
 
 // ── Sections ───────────────────────────────────────────────────────────────────
 import PlannerControls from "./sections/PlannerControls";
-import PresetDial from "./sections/PresetDial";
 import { useIsLandscape } from "./hooks/useOrientation";
 import { useElementWidth } from "./hooks/useElementWidth";
 import { useNaturalHeight } from "./hooks/useNaturalHeight";
 import PresetActionSheet from "./components/PresetActionSheet";
+import PresetQuickPick from "./components/PresetQuickPick";
+import { TruckIcon, PinIcon, ThermometerIcon } from "./components/PlannerIcons";
 
 // ── Modals ─────────────────────────────────────────────────────────────────────
 // LocationModal/MyTerminalsModal now mount once in ShellChrome
@@ -447,14 +448,16 @@ export default function CalculatorPage() {
   // "Save plan {letter}" unchanged.
   const [lastLoadedSlot, setLastLoadedSlot] = useState<number | null>(null);
   const [selectedComp, setSelectedComp] = useState<number | null>(null);
-  // One-shot sync target for PresetDial -- set once the last-completed
-  // load's own plan_slot resolves after mount, so the dial's highlighted
-  // letter agrees with whichever preset's plan was actually restored into
-  // the compartments (previously it always showed A regardless of which
-  // preset the restored plan came from). See the effect below and the
-  // presetDialSyncedRef guard, which stops this from ever overriding a
-  // preset the driver has since manually tapped.
-  const [presetDialSyncTo, setPresetDialSyncTo] = useState<{ slot: number } | null>(null);
+  // presetDialSyncedRef: one-shot guard for the mount-time resync effect
+  // below -- set once the last-completed load's own plan_slot resolves
+  // after mount, so activeSlotLetter agrees with whichever preset's plan
+  // was actually restored into the compartments (previously it always
+  // showed A regardless of which preset the restored plan came from). Name
+  // kept from when this also had to re-center a swipeable dial (now gone,
+  // replaced by PresetQuickPick -- a plain icon showing activeSlotLetter
+  // directly needs no separate "please recenter" signal, just the state
+  // change itself) -- the ref's own guard purpose is unchanged, only the
+  // now-removed presetDialSyncTo state it used to also set alongside it.
   const presetDialSyncedRef = useRef(false);
   // "Recall Last Load" found a completed load at this terminal, but under
   // different equipment than what's currently selected -- per explicit
@@ -734,8 +737,12 @@ export default function CalculatorPage() {
   const [baselineOverrides, setBaselineOverrides] = useState(() => overridesSnapshot(compPlan, cgSlider));
   const [captureBaselineNext, setCaptureBaselineNext] = useState(false);
   // Which preset slot (1-5) the action sheet is open for, if any -- set by
-  // PresetDial's onTapFilled when a filled slot is tapped.
+  // PresetQuickPick's long-press on a filled row (same reuse the sheet's
+  // predecessor, the swipeable PresetDial, already established).
   const [presetSheetSlot, setPresetSheetSlot] = useState<number | null>(null);
+  // Opens PresetQuickPick -- the plan-letter icon's tap target, replacing
+  // the old dial entirely.
+  const [presetQuickPickOpen, setPresetQuickPickOpen] = useState(false);
 
   // Fires once compPlan has actually re-rendered post-load (loadFromSlot
   // applies asynchronously via the hook's own setCompPlan), so the baseline
@@ -1103,14 +1110,16 @@ export default function CalculatorPage() {
     return m;
   }, [terminalProducts]);
 
-  // Preset action sheet summary -- a preset saved at a different terminal
-  // may reference a product not sold here, which productNameById (scoped to
-  // the *current* terminal) won't resolve; surfaced honestly rather than
-  // silently dropped, since that's exactly the mismatch the LOAD-blocking
-  // flow below also has to catch.
-  const presetSheetSummary = useMemo(() => {
-    if (presetSheetSlot == null) return "";
-    const snap = planSlots.peekSlot(presetSheetSlot);
+  // Shared by the PresetActionSheet summary and PresetQuickPick's per-row
+  // summary (one implementation, not two copies -- this project has hit
+  // real bugs before from exactly this kind of duplicated logic drifting
+  // apart, e.g. CustomSelect.tsx/ServiceTypeManager.tsx's own precedent). A
+  // preset saved at a different terminal may reference a product not sold
+  // here, which productNameById (scoped to the *current* terminal) won't
+  // resolve; surfaced honestly rather than silently dropped, since that's
+  // exactly the mismatch the LOAD-blocking flow below also has to catch.
+  const summaryForSlot = useCallback((slot: number) => {
+    const snap = planSlots.peekSlot(slot);
     const plan = snap?.compPlan;
     if (!plan) return "Empty";
     const names = new Set<string>();
@@ -1123,7 +1132,17 @@ export default function CalculatorPage() {
     const parts = Array.from(names);
     if (hasUnavailable) parts.push("unavailable product");
     return parts.length > 0 ? parts.join(", ") : "Empty";
-  }, [presetSheetSlot, planSlots, productNameById]);
+  }, [planSlots, productNameById]);
+
+  const presetSheetSummary = useMemo(() => {
+    if (presetSheetSlot == null) return "";
+    return summaryForSlot(presetSheetSlot);
+  }, [presetSheetSlot, summaryForSlot]);
+
+  // PresetQuickPick's per-row name -- direct peekSlot read, no memoization
+  // needed (cheap localStorage read, same pattern peekSlot's own callers
+  // already use elsewhere on this page).
+  const nameForSlot = useCallback((slot: number) => planSlots.peekSlot(slot)?.name, [planSlots]);
 
   // Compartments whose planned product isn't sold at the currently selected
   // terminal -- almost always the result of loading a preset saved at a
@@ -1363,9 +1382,6 @@ export default function CalculatorPage() {
     if (report?.plan_slot) {
       setLastLoadedSlot(report.plan_slot);
       setActiveSlotLetter(report.plan_slot);
-      // A fresh object every call -- see PresetDial.tsx's own comment on
-      // syncTo for why this can't be a bare number.
-      setPresetDialSyncTo({ slot: report.plan_slot });
     }
   }, [loadWorkflow]);
 
@@ -1407,20 +1423,18 @@ export default function CalculatorPage() {
     if (planSlots.lastLoadReport && !loadWorkflow.loadReport) {
       loadWorkflow.setLoadReport(planSlots.lastLoadReport);
     }
-    // Sync the preset dial's highlighted letter to match whichever preset
-    // the just-restored plan actually came from. Guarded to fire once and
-    // only while no genuine load action has happened yet this session
-    // (lastLoadedSlot == null) -- previously gated on activeSlotLetter === 1,
-    // which assumed an untouched dial always reads exactly 1, but a mere
-    // scroll-preview (no tap) moves activeSlotLetter without loading
-    // anything, silently breaking this guard before the DB round trip even
-    // resolved. lastLoadedSlot is immune to scroll, so this fires reliably
-    // regardless of dial timing.
+    // Sync activeSlotLetter (what the plan-letter icon/PresetQuickPick
+    // shows as "active") to match whichever preset the just-restored plan
+    // actually came from. Guarded to fire once and only while no genuine
+    // load action has happened yet this session (lastLoadedSlot == null) --
+    // previously gated on activeSlotLetter === 1, which assumed an
+    // untouched dial always read exactly 1; the historical dial is gone
+    // now, but lastLoadedSlot remains the right guard since it only ever
+    // changes on a real load action, never a passive restore.
     if (planSlots.lastLoadReport?.plan_slot && !presetDialSyncedRef.current && lastLoadedSlot == null) {
       presetDialSyncedRef.current = true;
       setLastLoadedSlot(planSlots.lastLoadReport.plan_slot);
       setActiveSlotLetter(planSlots.lastLoadReport.plan_slot);
-      setPresetDialSyncTo({ slot: planSlots.lastLoadReport.plan_slot });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [planSlots.lastLoadReport]);
@@ -1611,37 +1625,85 @@ const lastProductInfoById = useMemo(() => {
     : recapValid ? "RELOAD"
     : "LOAD";
 
+  // Same tap-to-load/tap-empty-to-save sequence the old PresetDial's own
+  // onLoad/onSave props used -- preserved verbatim, just triggered from
+  // PresetQuickPick's row taps now instead of the dial's.
+  const handlePresetLoad = (n: number) => {
+    planSlots.loadFromSlot(n);
+    setLastLoadedSlot(n);
+    setActiveSlotLetter(n);
+    setCaptureBaselineNext(true);
+    setCheckAvailabilityNext(true);
+    setPresetQuickPickOpen(false);
+  };
+  const handlePresetSaveEmpty = (n: number) => {
+    planSlots.saveToSlot(n);
+    setBaselineOverrides(overridesSnapshot(compPlan, cgSlider));
+    setActiveSlotLetter(n);
+    setPresetQuickPickOpen(false);
+  };
+
   // Extracted to a const purely for readability -- rendered in exactly one
   // spot, full-width, in every orientation (see the render below for why).
-  const presetDialEl = (
-    <PresetDial
+  const presetQuickPickEl = (
+    <PresetQuickPick
+      open={presetQuickPickOpen}
+      onClose={() => setPresetQuickPickOpen(false)}
       slots={planSlots.PLAN_SLOTS}
       slotHas={planSlots.slotHas}
+      activeSlot={activeSlotLetter}
       // Also gated on presetsReady -- until the initial server sync for
       // this equipment combo has actually completed, a slot that reads
-      // "empty" might just be unsynced, not really empty, and PresetDial
-      // treats a tap on an empty slot as an implicit save. Interacting
-      // during that window silently overwrote real presets with
-      // whatever was on-screen at the time -- see usePlanSlots.ts.
+      // "empty" might just be unsynced, not really empty, and tapping it
+      // would treat it as an implicit save. Interacting during that
+      // window silently overwrote real presets with whatever was
+      // on-screen at the time -- see usePlanSlots.ts.
       disabled={!location.selectedTerminalId || !planSlots.presetsReady}
       disabledReason={!location.selectedTerminalId ? "Select a terminal first" : "Syncing presets…"}
-      onLoad={(n) => {
-        planSlots.loadFromSlot(n);
-        setLastLoadedSlot(n);
-        setCaptureBaselineNext(true);
-        setCheckAvailabilityNext(true);
-      }}
+      getSummary={summaryForSlot}
+      getName={nameForSlot}
+      onLoad={handlePresetLoad}
+      onSaveEmpty={handlePresetSaveEmpty}
       onOpenActions={(n) => setPresetSheetSlot(n)}
-      onSave={(n) => { planSlots.saveToSlot(n); setBaselineOverrides(overridesSnapshot(compPlan, cgSlider)); }}
-      onActiveChange={setActiveSlotLetter}
-      syncTo={presetDialSyncTo}
-      // No longer compact in landscape -- that shrink existed only to
-      // save vertical space when the dial rendered full-width above BOTH
-      // columns; now that it's scoped to just the compartments column
-      // (see its own render site), there's no more space pressure driving
-      // it, and the user asked directly to "bring the plan letter sizes
-      // back up." Portrait was never affected either way.
+      onRename={(n, name) => planSlots.renameSlot(n, name)}
     />
+  );
+
+  // Passive, tappable location readout -- directly above the compartments,
+  // separate from the pin icon in the new compact row (which stays the
+  // "open the picker" action). Recommended and shipped as-is per the
+  // earlier design conversation: "it would be nice to at least display the
+  // location on the planner as that is the thing that changes most
+  // frequently" -- everywhere else tried didn't look right, this was the
+  // best-found position. Same step-based open logic as the old Location
+  // card (Select Location -> Select Terminal) so tapping the line behaves
+  // identically to tapping the pin icon.
+  const locationStep: "location" | "terminal" = location.selectedCity && location.selectedState ? "terminal" : "location";
+  const locationLineEl = (
+    <button
+      type="button"
+      onClick={() => { if (locationStep === "location") setLocOpen(true); else setTermOpen(true); }}
+      style={{
+        width: "100%", boxSizing: "border-box" as const, textAlign: "left" as const,
+        border: "none", background: "none", padding: "0 2px", marginBottom: 8,
+        cursor: "pointer", display: "flex", alignItems: "baseline", gap: 6, minWidth: 0,
+      }}
+    >
+      {location.selectedTerminalId ? (
+        <>
+          <span style={{ fontSize: 13, fontWeight: 700, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
+            {terminalLabel}
+          </span>
+          <span style={{ fontSize: 12, fontWeight: 500, color: "rgba(255,255,255,0.45)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
+            {location.locationLabel}
+          </span>
+        </>
+      ) : (
+        <span style={{ fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,0.35)" }}>
+          {locationStep === "location" ? "Select location" : "Select terminal"}
+        </span>
+      )}
+    </button>
   );
 
   // Extracted alongside presetDialEl for the same reason -- landscape
@@ -1738,26 +1800,16 @@ const lastProductInfoById = useMemo(() => {
         </div>
       )}
 
-      {/* Preset dial -- portrait: full-width, same spot as always, directly
-          under the header. Landscape: NOT rendered here at all -- per
-          explicit follow-up ("the plan slot row extended all the way into
-          the left column. it should only stretch across the right
-          column"), it moves inside the compartments (right) column below
-          instead, so it no longer pushes the left column's buttons down.
-          This is the fourth home for this element within this session's
-          landscape work -- previously reverted back to "full-width, same
-          spot in every orientation" reasoning "just like portrait mode,"
-          but that full-width placement turned out to be exactly what was
-          pushing the left column's content down with nothing to do with
-          plan slots at all; scoping it to the column it actually belongs
-          to (compartments) is the real fix, not a further shrink of the
-          dial itself (already tightened as far as it reasonably goes in
-          the previous round). */}
-      {!isLandscape && (
-        <div>
-          {presetDialEl}
-        </div>
-      )}
+      {/* PresetQuickPick + PresetActionSheet -- both plain overlay sheets,
+          position in the JSX tree doesn't matter functionally, rendered
+          together here. The plan-letter icon that opens PresetQuickPick
+          lives in the new compact icon row inside mainInfoStack below (see
+          that row's own definition) -- replacing the old swipeable
+          PresetDial, which used to render here as its own full-width
+          element (portrait) or inside the compartments column (landscape).
+          Both those render sites are gone; this is purely the sheet
+          itself now, not a visible-by-default element. */}
+      {presetQuickPickEl}
 
       <PresetActionSheet
         open={presetSheetSlot != null}
@@ -1767,6 +1819,7 @@ const lastProductInfoById = useMemo(() => {
           if (presetSheetSlot != null) {
             planSlots.loadFromSlot(presetSheetSlot);
             setLastLoadedSlot(presetSheetSlot);
+            setActiveSlotLetter(presetSheetSlot);
             setCaptureBaselineNext(true);
             setCheckAvailabilityNext(true);
           }
@@ -1898,19 +1951,17 @@ const lastProductInfoById = useMemo(() => {
           content size, which heightScale (above) needs to compute the
           right scale. */}
       <div ref={compartmentsContentRef}>
-      {/* Landscape only -- see presetDialEl/actionRowEl's own definitions
-          above for why these live here now instead of full-width above
-          the whole two-column row: neither one has anything to do with
-          the left (buttons/cards) column, so scoping them to the column
-          they actually belong to is what lets the left column's content
-          start right under the header instead of being pushed down by a
-          dial/action-row that was never really "its" content. */}
-      {isLandscape && (
-        <>
-          {presetDialEl}
-          {actionRowEl}
-        </>
-      )}
+      {/* Landscape only -- see actionRowEl's own definition above for why
+          it lives here now instead of full-width above the whole
+          two-column row: it has nothing to do with the left (buttons/
+          cards) column, so scoping it to the column it actually belongs
+          to is what lets the left column's content start right under the
+          header instead of being pushed down by content that was never
+          really "its" own. (The old swipeable PresetDial used to render
+          here too -- removed along with its full render site, replaced by
+          the plan-letter icon in the new compact row, see mainInfoStack.) */}
+      {locationLineEl}
+      {isLandscape && actionRowEl}
       <PlannerControls
         styles={styles}
         selectedTrailerId={selectedTrailerId}
@@ -2036,41 +2087,34 @@ const lastProductInfoById = useMemo(() => {
           : actualGross >= targetWeight ? "#4ade80"
           : "#fff";
 
-        // isOverride = user manually moved temp away from prediction after it auto-applied
+        // isOverride = user manually moved temp away from prediction after it auto-applied.
+        // Only tempSubColor survives here now -- the new compact Temperature
+        // icon uses color alone to carry confidence (no more text label, no
+        // more separate primary-text-color/background-alpha treatment the
+        // old big card needed -- both removed as dead code along with it,
+        // per explicit direction: "no more confidence label spelled out, we
+        // get the color scheme only").
         const isOverride = userAdjustedTempRef.current && predictedFuelTempF != null && Math.abs(tempF - predictedFuelTempF) > 0.5;
-        const isHighConfidence = !isOverride && fuelTempConfidence === "high";
-        const tempPrimaryColor = isHighConfidence ? "rgba(255,255,255,0.55)" : "#fff";
         const tempSubColor = isOverride ? "#fb923c"
           : fuelTempConfidence === "high"   ? "#4ade80"
           : fuelTempConfidence === "medium" ? "#eab308"
           : fuelTempConfidence === "low"    ? "#ef4444"
           : "rgba(255,255,255,0.35)";
-        const tempSubLabel = isOverride ? "Manual override"
-          : fuelTempConfidence === "high"   ? "High confidence"
-          : fuelTempConfidence === "medium" ? "Medium confidence"
-          : fuelTempConfidence === "low"    ? "Low confidence"
-          : "—";
-        const tempBgAlpha = fuelTempConfidence === "high" ? 0.02 : fuelTempConfidence === "medium" ? 0.045 : 0.07;
 
-        const locationLabel = location.locationLabel ?? null;
         const locationSelected = Boolean(location.selectedCity && location.selectedState);
         const terminalSelected = Boolean(location.selectedTerminalId);
-        const tid = location.selectedTerminalId ? String(location.selectedTerminalId) : null;
-        const cardNum = tid ? (cardDataByTerminalId[tid]?.cardNumber ?? "") : "";
-        const expiryDays = terminalDisplayISO ? daysUntilISO_(terminalDisplayISO) : null;
-        const expirationSub = expiryDays != null ? `Exp. ${expiryDays} days` : null;
 
-        const infoCard: React.CSSProperties = {
-          borderRadius: 16, border: "1px solid rgba(255,255,255,0.10)",
-          background: "rgba(255,255,255,0.03)", padding: "10px 14px",
-          // Explicit "none" -- without it, framer-motion's shared layoutId
-          // transition from SetupGate's cyan-glow CTA (boxShadow:
-          // "0 0 0 4px rgba(103,232,249,0.10)") leaves that glow as a
-          // permanent residual inline style on this button once the gate
-          // closes, since nothing here ever told it what to animate back to.
+        // Shared by all four buttons in the new compact icon row (plan-
+        // letter/Equipment/Location/Temperature) -- replaces the old
+        // per-card infoCard/chevron styling (both now unused: the card
+        // sub-labels/chevrons they styled are gone, equipment/card-number/
+        // expiration detail moved to locationLineEl and LoadingModal's own
+        // new safety block instead of living on this row).
+        const iconRowBtnStyle: React.CSSProperties = {
+          flex: 1, aspectRatio: "1", borderRadius: 12, border: "1px solid rgba(255,255,255,0.10)",
+          background: "rgba(255,255,255,0.03)", display: "flex", alignItems: "center", justifyContent: "center",
           boxShadow: "none",
         };
-        const chevron: React.CSSProperties = { fontSize: 16, color: "rgba(255,255,255,0.25)", flexShrink: 0 };
 
         const hasEquipment = Boolean(equipment.selectedCombo);
 
@@ -2203,127 +2247,80 @@ const lastProductInfoById = useMemo(() => {
             ...(isLandscape ? { width: REF_SIDE_W, flexShrink: 0, order: 1, maxHeight: columnMaxHeight, overflowY: "auto" as const } : {}),
           }}>
 
-            {/* Equipment card — two-up Truck / Trailer */}
-            {(() => {
-              const equipBtnProps = {
-                type: "button" as const,
-                onClick: () => setEquipOpen(true),
-                style: { ...infoCard, width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, cursor: "pointer", textAlign: "left" as const },
-              };
-              const children = !hasEquipment ? (
-                <>
-                  <span style={{ fontSize: 14, fontWeight: 600, color: "rgba(255,255,255,0.35)" }}>Select Equipment</span>
-                  <span style={chevron}>›</span>
-                </>
-              ) : (
-                <>
-                  <div style={{ display: "flex", flex: 1, gap: 20, minWidth: 0 }}>
-                    <div style={{ minWidth: 0, overflow: "hidden" }}>
-                      <div style={{ fontSize: 14, fontWeight: 600, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
-                        Truck{equipmentDetails.truckName ? ` · ${equipmentDetails.truckName}` : ""}
-                      </div>
-                      <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
-                        {equipmentDetails.truckMake || " "}
-                      </div>
-                    </div>
-                    <div style={{ minWidth: 0, overflow: "hidden" }}>
-                      <div style={{ fontSize: 14, fontWeight: 600, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
-                        Trailer{equipmentDetails.trailerName ? ` · ${equipmentDetails.trailerName}` : ""}
-                      </div>
-                      <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
-                        {equipmentDetails.trailerMake || " "}
-                      </div>
-                    </div>
-                  </div>
-                  <span style={chevron}>›</span>
-                </>
-              );
-              return mounted ? (
-                <motion.button {...equipBtnProps} layoutId="setup-equipment-btn">{children}</motion.button>
-              ) : (
-                <button {...equipBtnProps}>{children}</button>
-              );
-            })()}
+            {/* Compact icon row -- plan-letter / Equipment / Location /
+                Temperature, replacing the three stacked cards this used to
+                be. Per the icon-rail design conversation: each icon opens
+                the exact same modal/flow its old card did (verbatim
+                onClick targets, framer-motion layoutIds preserved so
+                SetupGate's shared-element transitions still animate into
+                these), just collapsed to a single tap target with no
+                embedded text -- location detail moved to locationLineEl
+                (rendered separately, directly above the compartments,
+                since it's the value that changes most often and deserves
+                a passive glance-check of its own); equipment detail moved
+                to the Loading Modal's new safety block (see LoadingModal's
+                own props) instead of living on this row at all. */}
+            <div style={{ display: "flex", gap: 8 }}>
+              {(() => {
+                const letter = String.fromCharCode(64 + activeSlotLetter);
+                const presetDisabled = !location.selectedTerminalId || !planSlots.presetsReady;
+                return (
+                  <button
+                    type="button"
+                    disabled={presetDisabled}
+                    onClick={() => setPresetQuickPickOpen(true)}
+                    title="Presets"
+                    style={{ ...iconRowBtnStyle, cursor: presetDisabled ? "not-allowed" : "pointer", opacity: presetDisabled ? 0.4 : 1 }}
+                  >
+                    <span style={{ fontSize: 17, fontWeight: 800, color: "#fff" }}>{letter}</span>
+                  </button>
+                );
+              })()}
 
-            {/* Location / Terminal card — one undivided button, same shape as
-                Equipment/Temp/Load. Steps through Location -> Terminal; once
-                a location is set the button always opens the terminal picker
-                (re-opening Location itself happens from a "Change" link
-                inside that picker, not a second tap zone here). */}
-            {(() => {
-              const step: "location" | "terminal" = locationSelected ? "terminal" : "location";
-              const locTermBtnProps = {
-                type: "button" as const,
-                onClick: () => {
-                  if (step === "location") setLocOpen(true);
-                  else setTermOpen(true);
-                },
-                style: { ...infoCard, width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, cursor: "pointer", textAlign: "left" as const },
-              };
-              const children = step === "location" ? (
-                <>
-                  <span style={{ fontSize: 14, fontWeight: 600, color: "rgba(255,255,255,0.35)" }}>Select Location</span>
-                  <span style={chevron}>›</span>
-                </>
-              ) : (
-                <>
-                  <div style={{ display: "flex", flex: 1, gap: 20, minWidth: 0 }}>
-                    <div style={{ minWidth: 0, overflow: "hidden" }}>
-                      <div style={{ fontSize: 14, fontWeight: 600, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
-                        {locationLabel ?? "—"}
-                      </div>
-                      <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
-                        {cardNum ? `Card # ${cardNum}` : " "}
-                      </div>
-                    </div>
-                    <div style={{ minWidth: 0, overflow: "hidden" }}>
-                      <div style={{ fontSize: 14, fontWeight: 600, color: terminalSelected ? "#fff" : "rgba(255,255,255,0.35)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
-                        {terminalSelected ? (terminalLabel ?? "Terminal") : "Select terminal"}
-                      </div>
-                      <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
-                        {expirationSub ?? " "}
-                      </div>
-                    </div>
-                    {/* Rack, same column pattern as terminal -- hidden for
-                        "Main Rack" (the invisible default every terminal
-                        gets, see CLAUDE.md "rack-aware loading, unified"),
-                        shown only for a real, named, multi-rack facility. */}
-                    {terminalSelected && selectedRackName && selectedRackName !== "Main Rack" && (
-                      <div style={{ minWidth: 0, overflow: "hidden" }}>
-                        <div style={{ fontSize: 14, fontWeight: 600, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
-                          {selectedRackName}
-                        </div>
-                        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginTop: 2 }}> </div>
-                      </div>
-                    )}
-                  </div>
-                  <span style={chevron}>›</span>
-                </>
-              );
-              return mounted ? (
-                <motion.button {...locTermBtnProps} layoutId={step === "location" ? "setup-location-btn" : "setup-terminal-btn"}>{children}</motion.button>
-              ) : (
-                <button {...locTermBtnProps}>{children}</button>
-              );
-            })()}
+              {(() => {
+                const equipBtnProps = {
+                  type: "button" as const,
+                  onClick: () => setEquipOpen(true),
+                  title: "Equipment",
+                  style: iconRowBtnStyle,
+                };
+                const equipChildren = <TruckIcon stroke={hasEquipment ? "#fff" : "rgba(255,255,255,0.35)"} />;
+                return mounted ? (
+                  <motion.button {...equipBtnProps} layoutId="setup-equipment-btn">{equipChildren}</motion.button>
+                ) : (
+                  <button {...equipBtnProps}>{equipChildren}</button>
+                );
+              })()}
 
-            {/* Temp confidence card */}
-            <button type="button" onClick={() => setTempDialOpen(true)}
-              style={{
-                borderRadius: 16, border: "1px solid rgba(255,255,255,0.08)",
-                background: `rgba(255,255,255,${tempBgAlpha})`, padding: "10px 14px", width: "100%",
-                textAlign: "left" as const, cursor: "pointer",
-                display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
-              }}
-            >
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 14, fontWeight: 600, color: tempPrimaryColor }}>
-                  {Math.round(tempF)}°F predicted product temp
-                </div>
-                <div style={{ fontSize: 12, fontWeight: 600, color: tempSubColor, marginTop: 2 }}>{tempSubLabel}</div>
-              </div>
-              <span style={chevron}>›</span>
-            </button>
+              {(() => {
+                const step: "location" | "terminal" = locationSelected ? "terminal" : "location";
+                const locTermBtnProps = {
+                  type: "button" as const,
+                  onClick: () => {
+                    if (step === "location") setLocOpen(true);
+                    else setTermOpen(true);
+                  },
+                  title: "Location",
+                  style: iconRowBtnStyle,
+                };
+                const locTermChildren = <PinIcon stroke={terminalSelected ? "#fff" : "rgba(255,255,255,0.35)"} />;
+                return mounted ? (
+                  <motion.button {...locTermBtnProps} layoutId={step === "location" ? "setup-location-btn" : "setup-terminal-btn"}>{locTermChildren}</motion.button>
+                ) : (
+                  <button {...locTermBtnProps}>{locTermChildren}</button>
+                );
+              })()}
+
+              {/* Temperature icon -- color alone carries confidence now (no
+                  more "High/Medium/Low confidence" text label, per explicit
+                  direction: "no more confidence label spelled out, we get
+                  the color scheme only"), reusing the exact same
+                  tempSubColor the old card's sub-label text used to be
+                  colored with. */}
+              <button type="button" onClick={() => setTempDialOpen(true)} title="Temperature" style={iconRowBtnStyle}>
+                <ThermometerIcon stroke={tempSubColor} />
+              </button>
+            </div>
 
             {/* Load button, its blocked-message, recap/points, and the
                 footnote -- always rendered right here now, in every
@@ -2374,6 +2371,8 @@ const lastProductInfoById = useMemo(() => {
         productInputs={productInputs}
         terminalTimeZone={selectedTerminalTimeZoneResolved}
         lastProductInfoById={lastProductInfoById}
+        equipmentLabel={equipment.equipmentLabel}
+        terminalLabel={terminalLabel}
         setProductApi={(productId, api) => setProductInputs((prev) => ({ ...prev, [productId]: { ...(prev[productId] ?? {}), api } }))}
         setProductTemp={(productId, tempF) => setProductInputs((prev) => ({ ...prev, [productId]: { ...(prev[productId] ?? {}), tempF } }))}
         onSetCompartmentGallons={(comp, gallons) => setLoadingGallonsOverride((prev) => ({ ...prev, [comp]: gallons }))}

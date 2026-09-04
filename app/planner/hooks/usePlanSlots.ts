@@ -582,13 +582,18 @@ export function usePlanSlots({
   // stale-API terminal) expects that cap to still be there next time they
   // tap that preset, not just the product. Slot 0 (the autosave/last-load
   // draft) already had full fidelity.
+  // `name` is only ever passed through here as "whatever this slot's own
+  // name already was" (see saveToSlot below) -- a normal save/edit never
+  // invents or clears a name on its own, only renameSlot (which never
+  // calls buildSnapshot at all) actually changes one.
   const buildSnapshot = useCallback(
-    (terminalId: string): PlanSnapshot => {
+    (terminalId: string, name?: string): PlanSnapshot => {
       return {
         v: 1, savedAt: Date.now(), terminalId,
         tempF: Number(tempF) || 60,
         cgSlider: Number(cgSlider),
         compPlan,
+        ...(name ? { name } : {}),
       };
     },
     [tempF, cgSlider, compPlan]
@@ -849,12 +854,36 @@ export function usePlanSlots({
 
   const saveToSlot = useCallback((slot: number) => {
     if (!canUseSlot(slot)) return;
-    const snap = buildSnapshot(String(selectedTerminalId));
+    // Preserve whatever name this slot already had -- a normal save (tap
+    // an empty slot, or "Edit Preset" re-saving the current plan) has no
+    // reason to know or care about naming, and shouldn't silently clear an
+    // existing one just by re-saving the plan content. Slot 0 has no name
+    // concept at all, so this is skipped there.
+    const existingName = slot !== 0 ? (readSlot(slot) as PlanSnapshot | null)?.name : undefined;
+    const snap = buildSnapshot(String(selectedTerminalId), existingName);
     safeWrite(planStoreKey(slot), snap);
     refreshSlotHas();
     afterLocalSlotWrite(slot);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedTerminalId, selectedComboId, buildSnapshot, safeWrite, planStoreKey, refreshSlotHas]);
+  }, [selectedTerminalId, selectedComboId, buildSnapshot, safeWrite, planStoreKey, refreshSlotHas, readSlot]);
+
+  // Renames a preset WITHOUT touching its saved plan -- deliberately never
+  // calls buildSnapshot (which pulls the CURRENTLY LIVE compPlan/cgSlider/
+  // tempF), only merges a new `name` into whatever that slot's own existing
+  // snapshot already is. Requires the slot to already have real saved
+  // content (readSlot returns something) -- an empty, never-saved slot has
+  // nothing to attach a name to yet; save a plan into it first, per the
+  // quick-pick list's own flow.
+  const renameSlot = useCallback((slot: number, name: string) => {
+    if (!canUseSlot(slot) || slot === 0) return;
+    const existing = readSlot(slot) as PlanSnapshot | null;
+    if (!existing || existing.v !== 1) return;
+    const trimmed = name.trim();
+    const next: PlanSnapshot = { ...existing, name: trimmed || undefined };
+    safeWrite(planStoreKey(slot), next);
+    afterLocalSlotWrite(slot);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedComboId, readSlot, safeWrite, planStoreKey]);
 
   const clearSlot = useCallback((slot: number) => {
     if (!canUseSlot(slot)) return;
@@ -972,6 +1001,7 @@ export function usePlanSlots({
     clearSlot,
     loadFromSlot,
     peekSlot,
+    renameSlot,
     refreshLastLoad,
     recallLastLoad,
     findLastLoadAtTerminalDifferentEquipment,

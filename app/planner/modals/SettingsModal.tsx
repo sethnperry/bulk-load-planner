@@ -22,24 +22,8 @@ import { useCalculatorShell } from "../CalculatorShellContext";
 import { supabase } from "@/lib/supabase/client";
 import JoinFleetView from "../components/JoinFleetView";
 
-function ToggleSwitch({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      onClick={() => onChange(!checked)}
-      style={{
-        width: 44, height: 26, borderRadius: 999, border: "none", padding: 3,
-        background: checked ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.14)",
-        display: "flex", justifyContent: checked ? "flex-end" : "flex-start",
-        cursor: "pointer", transition: "background 150ms", flexShrink: 0,
-      }}
-    >
-      <span style={{ width: 20, height: 20, borderRadius: "50%", background: checked ? "#111" : "#fff", transition: "transform 150ms", boxShadow: "0 1px 3px rgba(0,0,0,0.4)" }} />
-    </button>
-  );
-}
+// ToggleSwitch (used only by the now-removed Dark Mode row) was removed
+// here -- no other caller anywhere in the codebase, confirmed via grep.
 
 function AccentColorPicker({ value, onChange, onReset }: { value: string | null; onChange: (v: string) => void; onReset: () => void }) {
   return (
@@ -111,7 +95,7 @@ function SettingsRow({ label, sub, right, onClick }: {
 
 export default function SettingsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const shell = useCalculatorShell();
-  const { darkMode, accentColor, setDarkMode, setAccentColor } = shell.theme;
+  const { accentColor, setAccentColor } = shell.theme;
   const [view, setView] = useState<"root" | "profile" | "joinFleet">("root");
   const [isSolo, setIsSolo] = useState(false);
 
@@ -166,14 +150,14 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
           <div>
             <SectionLabel>Appearance</SectionLabel>
             <div style={{ display: "grid", gap: 8 }}>
-              <SettingsRow
-                label="Dark Mode"
-                sub="Graphite header, Load button, handles & CG dot"
-                right={<ToggleSwitch checked={darkMode} onChange={setDarkMode} />}
-              />
+              {/* Dark Mode toggle removed -- the app now always renders
+                  dark (continuity with the device's own status bar/system
+                  chrome, per explicit direction). Accent Color stays, still
+                  overriding the fixed dark fill on the Load button,
+                  compartment handles, and CG dot. */}
               <SettingsRow
                 label="Accent Color"
-                sub={accentColor ? "Overrides Dark Mode's fill on those same elements" : "Optional -- pick a custom color for those same elements"}
+                sub={accentColor ? "Overrides the default fill on the Load button, handles & CG dot" : "Optional -- pick a custom color for those same elements"}
                 right={<AccentColorPicker value={accentColor} onChange={setAccentColor} onReset={() => setAccentColor(null)} />}
               />
             </div>

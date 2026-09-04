@@ -7997,6 +7997,182 @@ same stale 401 already documented in the entry above (this session's own
 diagnostic fetch, not app code). `npx tsc --noEmit` and `npx next build`
 both clean.
 
+## Icon-rail Planner redesign for driver/lead roles (2026-09-03)
+
+Per an extended earlier design conversation (mockup + 8 rounds of resolved
+feedback, referenced but not detailed further here) and the literal kickoff
+message this pass ("let's design the icons and set up the planner page for
+drivers and leads"): the driver/lead Planner's three stacked Equipment/
+Location/Temperature cards (name, sub-label, chevron each) are replaced
+with a compact 4-icon row -- plan-letter, Equipment (truck), Location
+(pin), Temperature (thermometer) -- reclaiming real vertical room for
+compartments, the actual point of the redesign. Two smaller pieces shipped
+alongside: a passive location text line above compartments, and a small
+safety-confirmation header in the Loading Modal (equipment + terminal,
+previously shown nowhere in that flow at all). Planned via Plan Mode
+(approved plan preserved at `wild-discovering-plum.md`).
+
+**Explicit scope decision, made rather than guessed at**: the original
+mockup also described the whole icon strip (including the shared header's
+hamburger/bell/gear) eventually becoming a left-edge rail in landscape or a
+bottom bar in portrait -- but the user's own words called that "expect to
+move that around until we get it right," i.e. genuinely unresolved. This
+pass ships the new icons with real interactions in the same general column
+position the old cards occupied (still a real, meaningful improvement --
+one compact row instead of three stacked cards) -- not the more speculative
+rail/bottom-bar restructure, which stays a distinct Phase 2 once these
+icons are visible for real. `Header` (hamburger/bell/gear, shared across
+every route) is completely untouched.
+
+**Dark-mode-only, done first as an isolated change**: `app/planner/hooks/useTheme.ts`
+-- `darkMode` is now a plain constant `true`, not state; the two client-only
+effects that used to resolve a stored `darkMode` value and `setDarkMode`
+itself are gone. `accentColor`'s own real per-user persisted state
+(localStorage, `DEVICE_KEY` + per-user key) is completely unaffected -- only
+the light/dark toggle goes. `app/planner/modals/SettingsModal.tsx`'s
+Appearance section lost its "Dark Mode" row entirely (and the now-fully-
+unused `ToggleSwitch` component, confirmed via grep to have no other
+callers); the Accent Color row's own sub-text was reworded since it used
+to reference "Dark Mode's fill."
+
+**Custom preset names**: `user_plan_slots.payload` is a flexible `jsonb`
+column with no `name` column (confirmed directly against the migration) --
+a name is new metadata *inside* that existing payload, the same way
+`cgSlider` already lives there, not a schema change.
+`app/planner/types.ts`'s `PlanSnapshot` gained an optional `name?: string`.
+`usePlanSlots.ts`: `buildSnapshot` takes an optional `name?`; `saveToSlot`
+now peeks the slot's existing name first and threads it through, so a
+routine save/edit never silently clears a name a driver already set; new
+`renameSlot(slot, name)` deliberately does NOT call `buildSnapshot` --  it
+only merges `name` into the slot's *existing* stored snapshot, so renaming
+can never overwrite plan content with whatever happens to be live on screen
+at that moment.
+
+**New `app/planner/components/PresetQuickPick.tsx`** replaces the
+swipeable A-E `PresetDial` (deleted outright,
+`app/planner/sections/PresetDial.tsx`, confirmed via grep no real
+references remained) as the plan-letter icon's tap target -- "the current
+plan icon can just be a quick pick window," a plain list of all 5 slots
+instead of a horizontal scroll-and-tap strip, since the new compact row
+isn't fighting for space the dial's old full-width position was. Same
+tap-to-load / tap-empty-to-save semantics the dial always had, plus a new
+per-row rename affordance (pencil icon, only shown once a slot has real
+content -- nothing to attach a name to otherwise) with inline-text-field
+editing (Enter/Escape/blur-to-commit). Long-press on a filled row
+(600ms, via `onPointerDown`/`onPointerUp`/`onPointerLeave`) still opens the
+existing `PresetActionSheet.tsx` (Edit/Clear) rather than duplicating that
+logic -- same reuse the dial itself already established.
+
+**New `app/planner/components/PlannerIcons.tsx`** -- `TruckIcon`/
+`PinIcon`/`ThermometerIcon`, matching `CalculatorLayoutClient.tsx`'s
+`BellIcon`/`GearIcon` house style exactly (plain Feather/Lucide-shape
+stroke SVGs, `viewBox="0 0 24 24"`, `fill="none"`, `strokeWidth="2"`, round
+caps/joins, a `stroke` prop for theming) -- hand-copied standard Feather
+paths, not a new icon-library dependency (this project has never taken
+one).
+
+**The icon row itself** (`app/planner/page.tsx`) -- the old
+Equipment/Location/Temperature cards' JSX block (~120 lines) replaced with
+one `<div style={{display:"flex",gap:8}}>` of 4 square buttons
+(`iconRowBtnStyle`, new shared const, replacing the now-dead `infoCard`/
+`chevron` styles): plan-letter (shows `activeSlotLetter`, opens
+`PresetQuickPick`), Equipment (`TruckIcon`, same `setEquipOpen(true)` the
+old card called, framer-motion `layoutId="setup-equipment-btn"` preserved
+so SetupGate's shared-element transition still animates into it), Location
+(`PinIcon`, same location-vs-terminal step logic the old card used,
+`layoutId="setup-location-btn"`/`"setup-terminal-btn"` preserved),
+Temperature (`ThermometerIcon`, same `setTempDialOpen(true)`, stroke
+colored via the existing `tempSubColor` confidence value -- no more
+"High/Medium/Low confidence" text label, color alone carries that meaning
+now). Each button's stroke is white when selected/available, dim
+(`rgba(255,255,255,0.35)`) otherwise. A large batch of now-dead local
+variables that only fed the old cards' text sub-labels (`tid`, `cardNum`,
+`expiryDays`, `expirationSub`, a local `locationLabel` const,
+`isHighConfidence`, `tempPrimaryColor`, `tempSubLabel`, `tempBgAlpha`) were
+removed in the same pass. `presetDialSyncTo`/`setPresetDialSyncTo` (the
+dial's old external "please recenter" signal) were removed entirely -- a
+plain icon reactively showing `activeSlotLetter` needs no such mechanism;
+`presetDialSyncedRef`'s one-time-fire mount guard was kept, since that
+purpose (don't re-apply the passive restore sync more than once) is
+unrelated to the dial's own visual centering.
+
+New `locationLineEl` -- a tappable text line directly above the
+compartments (terminal name in bold white + "City, State" in gray, or a
+"Select location"/"Select terminal" placeholder), same step-based open
+logic as the old Location card's tap target. Rendered in the one shared
+block already common to both portrait and landscape (confirmed via reading
+the surrounding code that this block is reached via the same `isLandscape`
+ternaries as everything else there), so it correctly appears "above
+compartments" in both orientations without duplicating the JSX.
+
+**Loading Modal safety block** (`app/planner/modals/LoadingModal.tsx`) --
+confirmed via direct read that this modal showed zero equipment/location
+identification before this pass, a real, previously-unflagged gap for a
+driver committing to a load. New optional `equipmentLabel`/`terminalLabel`
+props, rendered as a small read-only header (equipment left, terminal
+right, both truncating via `text-overflow:ellipsis` rather than wrapping)
+above "Planned compartments" -- only rendered when at least one is
+truthy. `page.tsx` already held both values for its own former cards;
+passed straight through (`equipment.equipmentLabel`, `terminalLabel`), no
+new fetch.
+
+**A real bug found and fixed during this pass, unrelated to the redesign
+itself**: the Edit tool repeatedly failed exact-string-match replacement on
+the old card block despite the `old_string` being copied directly from a
+fresh read of the same lines -- investigated via hex dump
+(`xxd`/`od -c`), found no hidden characters or CRLF endings, root cause
+never conclusively determined. Worked around with a direct Bash splice
+(`head`/`tail`/`cat` into a temp file, verified boundaries via `sed -n`,
+then `cp` over the real file) rather than fighting the tool further.
+
+**Live-verified** via the demo login route (both available personas
+resolve to admin/dispatch roles, which the earlier nav/role-restructure
+pass's own `defaultLandingPath` redirect sends straight to
+`/planner/dispatch` -- reaching this driver-style Planner page at all
+needed a temporary, explicitly-commented bypass of that redirect for the
+duration of this pass's testing, reverted immediately afterward, confirmed
+via `git status`/`grep` that no trace of it remains): a genuine
+`ReferenceError: darkMode is not defined` hit once while testing (opening
+the Compartment product picker) was investigated and confirmed to be this
+project's own well-documented "Dev-server stale-content trap," not a real
+bug -- a full server stop + `.next` cache clear + restart, followed by a
+**genuinely fresh browser tab** (not just a reload, since this project's
+own memory already documents the console buffer never resetting for a
+tab's lifetime), reproduced the exact same action (tap compartment -> Edit
+Comp N Product) with zero console errors. With that confirmed: TruckIcon
+opens the real Equipment modal (real truck/trailer data); PinIcon opens
+the real terminal picker (correctly went straight to the terminal step
+since a location was already set); ThermometerIcon opens the real temp
+dial (green "HIGH CONFIDENCE," matching the icon's own green stroke);
+plan-letter opens `PresetQuickPick` showing all 5 slots, tap-to-save on an
+empty slot correctly updated the icon's letter and closed the sheet,
+reopening showed the newly-filled slot's real summary text and a rename
+pencil; typed and committed a rename ("Tampa Run"), confirmed it persisted
+across reopening the sheet; long-press (via a scripted `PointerEvent`
+down/wait-700ms/up sequence, since this Browser pane has no native
+long-press primitive) correctly opened `PresetActionSheet` with Load/Edit/
+Clear, and Clear correctly reverted the slot back to empty with its name
+gone. Portrait mode (375x812) re-checked and confirmed rendering
+correctly and unchanged in structure from before this pass -- same order
+(compartments, CG slider, icon row, RELOAD, RECAP), just the icon row
+itself far more compact than the three old cards, exactly the point of
+this redesign. The Loading Modal's own safety block was not reached live
+this pass -- the only demo terminal available (Buckey North) has no real
+product catalog configured (its compartment product picker offers only
+"MT (Empty)"), so the pre-existing, unrelated "products not available at
+this terminal" LOAD gate blocked reaching that modal; the prop wiring
+itself was verified by direct code read rather than a live screenshot, and
+is low-risk (two conditionally-rendered label spans, no new state or
+logic). `npx tsc --noEmit` and `npx next build` both clean.
+
+**Not done this pass, deliberately deferred (Phase 2 per the plan's own
+Context section)**: the left-rail-in-landscape / bottom-bar-in-portrait
+repositioning of this new icon strip, and folding it together with the
+shared header's hamburger/bell/gear -- both explicitly unresolved per the
+user's own "expect to move that around" framing, not safe to guess at
+without a real rendered look first (consistent with how many rounds this
+same session's earlier landscape-layout work needed to land).
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.

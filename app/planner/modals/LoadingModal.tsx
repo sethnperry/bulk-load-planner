@@ -134,6 +134,19 @@ export default function LoadingModal(props: {
 
   // Optional: styled warning block (if you wire it from page.tsx)
   errorMessage?: string | null;
+
+  // Safety-confirmation block -- equipment/location identification shown
+  // before a driver commits to a load. Previously absent from this modal
+  // entirely (confirmed by reading the whole file before this was added --
+  // no truck/trailer/terminal identification appeared anywhere), a real
+  // gap flagged in the icon-rail design conversation: "we should add
+  // details in the loading modal for equipment numbers, location just to
+  // give a visual confirmation before logging a load after forgetting to
+  // change locations or equipment." Both optional/plain strings -- page.tsx
+  // already holds them for its own icon row (equipment.equipmentLabel,
+  // the top-level terminalLabel), passed straight through, no new fetch.
+  equipmentLabel?: string | null;
+  terminalLabel?: string | null;
 }) {
   const {
     open,
@@ -158,6 +171,8 @@ export default function LoadingModal(props: {
     lastProductInfoById,
     terminalTimeZone,
     errorMessage,
+    equipmentLabel,
+    terminalLabel,
   } = props;
 
   const plannedLines = useMemo(() => {
@@ -245,6 +260,16 @@ useEffect(() => {
   return (
     <FullscreenModal open={open} title="Plan Review" onClose={onClose} footer={null} hideCloseButton>
       <div style={{ display: "flex", flexDirection: "column", gap: 12, maxWidth: "100%", boxSizing: "border-box" }}>
+        {/* Safety-confirmation block -- read-only, no interaction. Exactly
+            what's about to be loaded and where, at a glance, before
+            reviewing/adjusting the actual plan below. */}
+        {(equipmentLabel || terminalLabel) && (
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,0.65)", padding: "8px 2px", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+            {equipmentLabel && <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>{equipmentLabel}</span>}
+            {terminalLabel && <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const, textAlign: "right" as const }}>{terminalLabel}</span>}
+          </div>
+        )}
+
         {/* A) Compartments -- tap a card to adjust just that compartment's
             gallons in isolation (siblings never move). */}
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
