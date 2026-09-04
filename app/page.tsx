@@ -5,52 +5,25 @@
 //
 // Redesigned 2026-09 around a repositioning shift: from "avoid overweight
 // tickets" framing to "payload optimization / recover unused legal
-// capacity." Primary message: STOP LEAVING PAYLOAD AT THE RACK. See the
-// PROOF_POINT constant below for why the headline stat is a placeholder,
-// not a real number.
+// capacity." Primary message: STOP LEAVING PAYLOAD AT THE RACK.
+//
+// The hero stat below is real (Seth's own current monthly average), not a
+// placeholder — see CURRENT_MONTHLY_AVG_GAL_PER_LOAD's own comment for what
+// it does and doesn't represent. Update that one constant as the real
+// number moves; the copy around it is written to stay honest either way.
 
 import Link from "next/link";
 import SiteHeader from "./marketing/SiteHeader";
 import SiteFooter from "./marketing/SiteFooter";
 
-// ---------------------------------------------------------------------
-// PROOF POINT — real load-history data, not yet available.
-//
-// This session had no database credentials and no browser/preview access,
-// so the real "average gain in gallons per load" figure could not be
-// queried. Per the handoff spec, this ships as a clearly-marked
-// placeholder rather than an invented number.
-//
-// To fill this in for real: query load_log/load_lines (or whatever the
-// current "My Loads" data source is) for a per-company or fleet-wide
-// average actual_gallons per load, split into a "before ProTankr" baseline
-// window and a "with ProTankr" current window, for accounts that have
-// real usage history to compare. If no reliable historical baseline
-// exists yet (e.g. too few accounts/loads with real pre/post data), ask
-// Seth for the benchmark number directly rather than guessing — see the
-// PR description for this same note.
-//
-// Once real numbers exist, set all three fields below (gainGalPerLoad,
-// historicalAvgGalPerLoad, currentAvgGalPerLoad) — both the hero stat
-// and the proof strip pull from this one place, so there's nothing else
-// to update.
-const PROOF_POINT: {
-  gainGalPerLoad: number | null;
-  historicalAvgGalPerLoad: number | null;
-  currentAvgGalPerLoad: number | null;
-} = {
-  gainGalPerLoad: null,
-  historicalAvgGalPerLoad: null,
-  currentAvgGalPerLoad: null,
-};
-const HAS_REAL_PROOF_DATA =
-  PROOF_POINT.gainGalPerLoad !== null &&
-  PROOF_POINT.historicalAvgGalPerLoad !== null &&
-  PROOF_POINT.currentAvgGalPerLoad !== null;
-
-function fmtGal(n: number) {
-  return n.toLocaleString("en-US");
-}
+// Seth's own current monthly average gallons/load, measured against his
+// own conservative per-product benchmarks. Real, but genuinely nuanced:
+// it's one driver (no network effect from other drivers loading at the
+// same racks yet), it's blended across products rather than a clean
+// product-specific comparison, and it moves month to month. The copy
+// below is written to carry all three caveats honestly rather than
+// present this as a settled, proven result.
+const CURRENT_MONTHLY_AVG_GAL_PER_LOAD = 272.1;
 
 // Bump whenever public/app-screens/planner.png is re-exported -- the bare
 // path alone lets browsers keep serving a stale cached copy of the old
@@ -80,84 +53,17 @@ function PhoneScreen() {
   );
 }
 
-function HeroStat() {
-  if (HAS_REAL_PROOF_DATA) {
-    return (
-      <div className="hero-stat">
-        <span className="hero-stat-num">
-          +{fmtGal(PROOF_POINT.gainGalPerLoad!)} GAL / LOAD
-        </span>
-        <span className="hero-stat-sub">
-          Average gain in initial ProTankr testing versus a{" "}
-          {fmtGal(PROOF_POINT.historicalAvgGalPerLoad!)}-gallon historical
-          benchmark.
-        </span>
-      </div>
-    );
-  }
-  return (
-    <div className="hero-stat hero-stat-placeholder">
-      <span className="hero-stat-num">+___ GAL / LOAD</span>
-      <span className="hero-stat-sub">
-        Real per-load gain, pending live testing data — placeholder pending
-        the real figure.
-      </span>
-    </div>
-  );
-}
-
-function ProofStrip() {
-  if (HAS_REAL_PROOF_DATA) {
-    return (
-      <div className="proof-numbers">
-        <div className="proof-num-block">
-          <span className="proof-num">{fmtGal(PROOF_POINT.historicalAvgGalPerLoad!)}</span>
-          <span className="proof-num-label">Historical avg gal / load</span>
-        </div>
-        <div className="proof-arrow">&rarr;</div>
-        <div className="proof-num-block">
-          <span className="proof-num">{fmtGal(PROOF_POINT.currentAvgGalPerLoad!)}</span>
-          <span className="proof-num-label">Current avg gal / load, with ProTankr</span>
-        </div>
-        <div className="proof-arrow">=</div>
-        <div className="proof-num-block proof-num-block-gain">
-          <span className="proof-num">+{fmtGal(PROOF_POINT.gainGalPerLoad!)}</span>
-          <span className="proof-num-label">More gallons per load</span>
-        </div>
-      </div>
-    );
-  }
-  return (
-    <div className="proof-numbers proof-numbers-placeholder">
-      <div className="proof-num-block">
-        <span className="proof-num">— — —</span>
-        <span className="proof-num-label">Historical avg gal / load</span>
-      </div>
-      <div className="proof-arrow">&rarr;</div>
-      <div className="proof-num-block">
-        <span className="proof-num">— — —</span>
-        <span className="proof-num-label">Current avg gal / load, with ProTankr</span>
-      </div>
-      <div className="proof-arrow">=</div>
-      <div className="proof-num-block proof-num-block-gain">
-        <span className="proof-num">+___</span>
-        <span className="proof-num-label">More gallons per load</span>
-      </div>
-    </div>
-  );
-}
-
 const PRODUCT_FEATURES = [
   {
-    label: "Equipment-aware",
-    body: "Tare weight, compartment count and per-compartment capacity, keyed to the exact truck and trailer you're pulling today.",
+    label: "Equipment aware",
+    body: "Tare weight, compartment count, and how much each compartment can legally hold, keyed to the exact truck and trailer you're pulling today.",
   },
   {
-    label: "Temperature-aware",
+    label: "Temperature aware",
     body: "Live API and temperature drive the density math, so the payload number reflects today's conditions, not a guess from last summer.",
   },
   {
-    label: "Payload-focused",
+    label: "Payload focused",
     body: "One practical answer: how much can you legally and reasonably put on this trailer, right now.",
   },
 ];
@@ -171,7 +77,7 @@ const WORKFLOW_STEPS = [
   {
     n: "02",
     label: "Load",
-    body: "Load the plan at the rack. No re-guessing gallons, no falling back to the same conservative number out of habit.",
+    body: "Load the plan at the rack. No guessing gallons twice, no falling back to the same conservative number out of habit.",
   },
   {
     n: "03",
@@ -203,15 +109,23 @@ export default function Home() {
           </a>
         </div>
 
-        <HeroStat />
+        <div className="hero-stat">
+          <span className="hero-stat-num">
+            +{CURRENT_MONTHLY_AVG_GAL_PER_LOAD} GAL / LOAD
+          </span>
+          <span className="hero-stat-sub">
+            My own current monthly average: one driver, blended across
+            products, changing daily. Expect it to grow once more trucks
+            join the network.
+          </span>
+        </div>
       </section>
 
       {/* 2. PROBLEM / MANIFESTO */}
       <section className="manifesto-section">
         <div className="manifesto-inner">
           <h2 className="manifesto-h2">
-            The truck didn&apos;t get heavier. We just stopped leaving so much
-            behind.
+            Every load could have carried more. Now it will.
           </h2>
           <div className="manifesto-body">
             <p>
@@ -222,18 +136,11 @@ export default function Home() {
               lowered to make sure it never happens again.
             </p>
             <p>
-              The problem is that number was only ever right under one set
-              of conditions. Tare weight changes. Product and API change.
-              Temperature changes by the hour. Compartment constraints
-              change with the trailer. The memorized gallon figure doesn&apos;t
-              track any of it — so trucks routinely leave legal payload
-              sitting at the rack, load after load, without anyone deciding
-              to leave it there.
-            </p>
-            <p>
-              The event that caused the conservative number to stick around
-              — the ticket, the close call — passes. The lower volume never
-              does, unless something actually recalculates it.
+              Most conditions drift slowly enough that a small buffer
+              absorbs them. The real damage comes from something bigger, a
+              single shock, like an unexpected fuel import shifting a
+              terminal&apos;s conditions for a few days. The event passes. The
+              drivers have a new, lower memorized volume to load.
             </p>
           </div>
         </div>
@@ -254,32 +161,19 @@ export default function Home() {
             </p>
           </blockquote>
           <p className="founder-byline">
-            Built by a bulk-fuel hauler who lived this problem, not a
+            Built by a bulk fuel hauler who lived this problem, not a
             software company guessing at it.
           </p>
           <p className="founder-patent">Patent pending.</p>
         </div>
       </section>
 
-      {/* 3. PROOF STRIP */}
-      <section className="proof-section">
-        <div className="proof-inner">
-          <p className="proof-eyebrow">Evidence, not a marketing number</p>
-          <ProofStrip />
-          <p className="proof-footnote">
-            {HAS_REAL_PROOF_DATA
-              ? "From initial ProTankr testing. Individual results vary by equipment, product mix and terminal conditions."
-              : "This block reflects real load-history data once available — nothing here is a projection or a promise for your fleet."}
-          </p>
-        </div>
-      </section>
-
-      {/* 4. PRODUCT */}
+      {/* 3. PRODUCT */}
       <section id="product" className="product-section">
         <div className="product-inner">
           <div className="product-copy">
             <h2 className="product-h2">
-              Know your real capacity before you pull away.
+              Know your real weight before you pull away.
             </h2>
             <p className="product-sub">
               Tare weight. Product density. Temperature. Compartment
@@ -305,7 +199,7 @@ export default function Home() {
         </div>
       </section>
 
-      {/* 5. NOT ANOTHER TMS */}
+      {/* 4. NOT ANOTHER TMS */}
       <section className="tms-section">
         <div className="tms-inner">
           <h2 className="tms-h2">Not another TMS.</h2>
@@ -326,7 +220,7 @@ export default function Home() {
         </div>
       </section>
 
-      {/* 6. WORKFLOW */}
+      {/* 5. WORKFLOW */}
       <section className="workflow-section">
         <div className="workflow-inner">
           <h2 className="workflow-h2">Calculate. Load. Capture.</h2>
@@ -342,7 +236,7 @@ export default function Home() {
         </div>
       </section>
 
-      {/* 7. FINAL CTA */}
+      {/* 6. FINAL CTA */}
       <section className="closing">
         <div className="closing-inner">
           <div className="closing-left">
@@ -435,7 +329,14 @@ export default function Home() {
           gap: 4px;
           padding: 18px 22px;
           border-radius: 16px;
-          background: #f2f2f2;
+          background: repeating-linear-gradient(
+            135deg,
+            #f2f2f2,
+            #f2f2f2 10px,
+            #e9e9e9 10px,
+            #e9e9e9 20px
+          );
+          border: 1px dashed rgba(0,0,0,0.25);
         }
         .hero-stat-num {
           font: 900 30px var(--font);
@@ -448,17 +349,6 @@ export default function Home() {
           color: rgba(0,0,0,0.5);
           line-height: 1.5;
         }
-        .hero-stat-placeholder {
-          background: repeating-linear-gradient(
-            135deg,
-            #f2f2f2,
-            #f2f2f2 10px,
-            #e9e9e9 10px,
-            #e9e9e9 20px
-          );
-          border: 1px dashed rgba(0,0,0,0.25);
-        }
-        .hero-stat-placeholder .hero-stat-num { color: rgba(0,0,0,0.35); }
 
         /* ---------- Problem / Manifesto ---------- */
         .manifesto-section { background: #111111; padding: 88px 48px; }
@@ -507,40 +397,6 @@ export default function Home() {
           font: 500 11px var(--font);
           letter-spacing: 0.04em;
           color: rgba(0,0,0,0.3);
-        }
-
-        /* ---------- Proof strip ---------- */
-        .proof-section { background: #f6f6f5; padding: 64px 48px; }
-        .proof-inner { max-width: 900px; margin: 0 auto; text-align: center; }
-        .proof-eyebrow {
-          margin: 0 0 26px;
-          font: 800 12px var(--font);
-          letter-spacing: 0.12em;
-          text-transform: uppercase;
-          color: rgba(0,0,0,0.4);
-        }
-        .proof-numbers {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 22px;
-          flex-wrap: wrap;
-        }
-        .proof-num-block { display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 150px; }
-        .proof-num { font: 900 40px var(--font); letter-spacing: -0.01em; color: #111; }
-        .proof-num-block-gain .proof-num { color: #0a7d3c; }
-        .proof-num-label {
-          max-width: 170px;
-          font: 600 12px var(--font);
-          color: rgba(0,0,0,0.5);
-          line-height: 1.4;
-        }
-        .proof-arrow { font: 700 22px var(--font); color: rgba(0,0,0,0.3); }
-        .proof-numbers-placeholder .proof-num { color: rgba(0,0,0,0.28); }
-        .proof-footnote {
-          margin: 26px 0 0;
-          font: 500 12.5px var(--font);
-          color: rgba(0,0,0,0.45);
         }
 
         /* ---------- Product ---------- */
@@ -763,10 +619,6 @@ export default function Home() {
 
           .founder-section { padding: 48px 24px; }
           .founder-quote p { font-size: 20px; }
-
-          .proof-section { padding: 44px 24px; }
-          .proof-numbers { gap: 14px; }
-          .proof-num { font-size: 30px; }
 
           .product-section { padding: 56px 24px; }
           .product-inner { grid-template-columns: 1fr; gap: 40px; }
