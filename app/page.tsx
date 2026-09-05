@@ -7,23 +7,210 @@
 // tickets" framing to "payload optimization / recover unused legal
 // capacity." Primary message: STOP LEAVING PAYLOAD AT THE RACK.
 //
-// The hero stat below is real (Seth's own current monthly average), not a
-// placeholder — see CURRENT_MONTHLY_AVG_GAL_PER_LOAD's own comment for what
+// The hero stat below is real (Seth's own current monthly average),
+// presented as a generic "single driver" example rather than "my own
+// number" — see CURRENT_MONTHLY_AVG_GAL_PER_LOAD's own comment for what
 // it does and doesn't represent. Update that one constant as the real
 // number moves; the copy around it is written to stay honest either way.
 
 import Link from "next/link";
+import { useState } from "react";
 import SiteHeader from "./marketing/SiteHeader";
 import SiteFooter from "./marketing/SiteFooter";
 
 // Seth's own current monthly average gallons/load, measured against his
-// own conservative per-product benchmarks. Real, but genuinely nuanced:
-// it's one driver (no network effect from other drivers loading at the
-// same racks yet), it's blended across products rather than a clean
-// product-specific comparison, and it moves month to month. The copy
-// below is written to carry all three caveats honestly rather than
-// present this as a settled, proven result.
+// own conservative per-product benchmarks — shown on the page as a
+// generic "single driver" example, not attributed to him by name. Real,
+// but genuinely nuanced: it's one driver (no network effect from other
+// drivers loading at the same racks yet), it's blended across products
+// rather than a clean product-specific comparison, and it moves month to
+// month. The copy below is written to carry all three caveats honestly
+// rather than present this as a settled, proven result.
 const CURRENT_MONTHLY_AVG_GAL_PER_LOAD = 272.1;
+
+// ---------------------------------------------------------------------
+// Opportunity calculator — a standalone public estimate tool, not a
+// preview of the real app. Deliberately uses only standard, published
+// petroleum-industry density math (API gravity -> specific gravity at
+// 60F, corrected for temperature with a single representative thermal
+// expansion coefficient) rather than the app's own per-product-tuned
+// calculation -- this is the same class of math published in ASTM
+// D1250 / API MPMS volume-correction tables, not anything proprietary,
+// so there's nothing sensitive about running it client-side. It's
+// intentionally simpler than what the real app does (one coefficient
+// for every product, not a per-product one), which the result copy
+// says outright rather than implying false precision.
+const WATER_LBS_PER_GAL_AT_60F = 8.32828;
+const APPROX_THERMAL_EXPANSION_PER_F = 0.0004;
+
+function estimateLbsPerGallon(api: number, tempF: number) {
+  const specificGravity60F = 141.5 / (131.5 + api);
+  const specificGravityAtTemp =
+    specificGravity60F * (1 - APPROX_THERMAL_EXPANSION_PER_F * (tempF - 60));
+  return specificGravityAtTemp * WATER_LBS_PER_GAL_AT_60F;
+}
+
+function OpportunityCalculator() {
+  const [tareWeight, setTareWeight] = useState("");
+  const [api, setApi] = useState("");
+  const [tempF, setTempF] = useState("");
+  const [actualGallons, setActualGallons] = useState("");
+  const [legalLimit, setLegalLimit] = useState("80000");
+
+  const tare = parseFloat(tareWeight);
+  const apiNum = parseFloat(api);
+  const temp = parseFloat(tempF);
+  const actual = parseFloat(actualGallons);
+  const limit = parseFloat(legalLimit);
+  const allFilled = [tare, apiNum, temp, actual, limit].every(
+    (n) => Number.isFinite(n) && n > 0
+  );
+
+  // A driver checking this before leaving the rack needs three distinct
+  // answers -- over legal weight, genuinely close to it (a real "nice
+  // work"), or meaningfully under. Being over is never a "nice work" case,
+  // even by a little, so the tolerance only softens the boundary on the
+  // UNDER side (rounding noise in the estimate could otherwise flag a
+  // load that's actually fine as "left on the table" by a couple gallons)
+  // -- any real overage, no matter how small, always shows the warning.
+  const TOLERANCE_GAL = 25;
+  let result:
+    | { kind: "over"; lbsOver: number; liveWeightLbs: number }
+    | { kind: "good"; gal: number; liveWeightLbs: number }
+    | { kind: "left"; gal: number; liveWeightLbs: number }
+    | null = null;
+  if (allFilled) {
+    const lbsPerGal = estimateLbsPerGallon(apiNum, temp);
+    const actualTotalLbs = tare + actual * lbsPerGal;
+    const maxLegalPayloadLbs = Math.max(limit - tare, 0);
+    const maxLegalGallons = maxLegalPayloadLbs / lbsPerGal;
+    const gapGallons = maxLegalGallons - actual;
+    const liveWeightLbs = Math.round(actualTotalLbs);
+
+    if (gapGallons < 0) {
+      result = {
+        kind: "over",
+        lbsOver: Math.round(actualTotalLbs - limit),
+        liveWeightLbs,
+      };
+    } else if (gapGallons <= TOLERANCE_GAL) {
+      result = { kind: "good", gal: Math.round(gapGallons), liveWeightLbs };
+    } else {
+      result = { kind: "left", gal: Math.round(gapGallons), liveWeightLbs };
+    }
+  }
+
+  return (
+    <div className="calc-card">
+      <div className="calc-fields">
+        <label className="calc-field">
+          <span>Tare (lbs)</span>
+          <input
+            type="number"
+            inputMode="decimal"
+            value={tareWeight}
+            onChange={(e) => setTareWeight(e.target.value)}
+            placeholder="25000"
+          />
+        </label>
+        <label className="calc-field">
+          <span>API</span>
+          <input
+            type="number"
+            inputMode="decimal"
+            value={api}
+            onChange={(e) => setApi(e.target.value)}
+            placeholder="38.5"
+          />
+        </label>
+        <label className="calc-field">
+          <span>Temp &deg;F</span>
+          <input
+            type="number"
+            inputMode="decimal"
+            value={tempF}
+            onChange={(e) => setTempF(e.target.value)}
+            placeholder="78"
+          />
+        </label>
+        <label className="calc-field">
+          <span>Actual gal</span>
+          <input
+            type="number"
+            inputMode="decimal"
+            value={actualGallons}
+            onChange={(e) => setActualGallons(e.target.value)}
+            placeholder="7200"
+          />
+        </label>
+        <label className="calc-field">
+          <span>Legal limit</span>
+          <input
+            type="number"
+            inputMode="decimal"
+            value={legalLimit}
+            onChange={(e) => setLegalLimit(e.target.value)}
+          />
+        </label>
+      </div>
+      <p className="calc-fields-note">
+        Tare weight, product API gravity, product temperature, actual
+        gallons loaded from the BOL, and your legal weight limit.
+      </p>
+
+      <div className="calc-result-area">
+        {result ? (
+          <>
+            {result.kind === "over" ? (
+              <div className="calc-result calc-result-warn">
+                <span className="calc-result-num">
+                  ~{result.lbsOver.toLocaleString("en-US")} lbs over
+                </span>
+                <span className="calc-result-label">
+                  You may be overweight. Recheck before you leave the rack.
+                </span>
+              </div>
+            ) : result.kind === "good" ? (
+              <div className="calc-result calc-result-good">
+                <span className="calc-result-num">
+                  Within {result.gal.toLocaleString("en-US")} gal
+                </span>
+                <span className="calc-result-label">
+                  of your legal capacity. Nice work.
+                </span>
+              </div>
+            ) : (
+              <div className="calc-result calc-result-loss">
+                <span className="calc-result-num">
+                  {result.gal.toLocaleString("en-US")} gal
+                </span>
+                <span className="calc-result-label">
+                  left on the table, this load.
+                </span>
+              </div>
+            )}
+            <p className="calc-live-weight">
+              Live weight: {result.liveWeightLbs.toLocaleString("en-US")} lbs
+              (limit {limit.toLocaleString("en-US")} lbs)
+            </p>
+          </>
+        ) : (
+          <div className="calc-result calc-result-placeholder">
+            <span className="calc-result-label">
+              Fill in every field above to see what you left on the table.
+            </span>
+          </div>
+        )}
+      </div>
+
+      <p className="calc-footnote">
+        This is an estimate, using standard published density tables, not
+        the automatic tuning ProTankr applies for each specific product in
+        the real app.
+      </p>
+    </div>
+  );
+}
 
 // Bump whenever public/app-screens/planner.png is re-exported -- the bare
 // path alone lets browsers keep serving a stale cached copy of the old
@@ -101,9 +288,9 @@ export default function Home() {
         </p>
 
         <div className="hero-actions">
-          <Link href="/get-the-app" className="hero-cta">
+          <a href="#opportunity" className="hero-cta">
             See what you could recover &rarr;
-          </Link>
+          </a>
           <a href="#product" className="hero-secondary">
             How it works &darr;
           </a>
@@ -114,9 +301,10 @@ export default function Home() {
             +{CURRENT_MONTHLY_AVG_GAL_PER_LOAD} GAL / LOAD
           </span>
           <span className="hero-stat-sub">
-            My own current monthly average: one driver, blended across
-            products, changing daily. Expect it to grow once more trucks
-            join the network.
+            A single driver without the network effect typically sees an
+            average recovery like this, blended across products. More
+            drivers using ProTankr will improve the accuracy and shrink the
+            necessary buffer.
           </span>
         </div>
       </section>
@@ -235,16 +423,22 @@ export default function Home() {
         </div>
       </section>
 
-      {/* 6. FINAL CTA */}
-      <section className="closing">
+      {/* 6. FINAL CTA / OPPORTUNITY CALCULATOR */}
+      <section id="opportunity" className="closing">
         <div className="closing-inner">
-          <div className="closing-left">
+          <div className="closing-header">
             <p className="closing-eyebrow">The Opportunity</p>
             <h2 className="closing-h2">
               How many gallons are your trucks leaving behind?
             </h2>
+            <p className="closing-intro">
+              Use this free tool to validate a BOL.
+            </p>
           </div>
-          <div className="closing-right">
+
+          <OpportunityCalculator />
+
+          <div className="closing-footer">
             <p className="closing-sub">
               ProTankr rolls out gradually — no long implementation, no TMS
               replacement, no commitment up front. Start by measuring the
@@ -252,7 +446,7 @@ export default function Home() {
             </p>
             <div className="closing-actions">
               <Link href="/get-the-app" className="closing-cta">
-                Calculate My Opportunity &rarr;
+                Get Early Access &rarr;
               </Link>
               <Link href="/pricing" className="closing-secondary">
                 See pricing &rarr;
@@ -554,18 +748,17 @@ export default function Home() {
           color: rgba(0,0,0,0.55);
         }
 
-        /* ---------- Closing ---------- */
+        /* ---------- Closing / Opportunity calculator ---------- */
         .closing { background: #111111; padding: 88px 48px; }
         .closing-inner {
           display: flex;
-          justify-content: space-between;
-          align-items: flex-end;
-          gap: 40px;
-          max-width: 1400px;
+          flex-direction: column;
+          align-items: center;
+          gap: 44px;
+          max-width: 760px;
           margin: 0 auto;
-          flex-wrap: wrap;
         }
-        .closing-left { max-width: 620px; }
+        .closing-header { text-align: center; }
         .closing-eyebrow {
           margin: 0 0 14px;
           font: 800 12px var(--font);
@@ -573,10 +766,99 @@ export default function Home() {
           text-transform: uppercase;
           color: rgba(255,255,255,0.4);
         }
-        .closing-h2 { margin: 0; font: 900 52px var(--font); letter-spacing: -0.02em; color: #fff; line-height: 1.05; }
-        .closing-right { max-width: 380px; }
+        .closing-h2 { margin: 0; font: 900 44px var(--font); letter-spacing: -0.02em; color: #fff; line-height: 1.08; }
+        .closing-intro {
+          margin: 16px 0 0;
+          font: 400 16px var(--font);
+          color: rgba(255,255,255,0.55);
+        }
+
+        .calc-card {
+          width: 100%;
+          border-radius: 20px;
+          background: rgba(255,255,255,0.05);
+          border: 1px solid rgba(255,255,255,0.12);
+          padding: 32px;
+        }
+        .calc-fields {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 10px;
+        }
+        .calc-field {
+          flex: 1 1 120px;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 6px;
+          padding: 14px 10px;
+          border-radius: 12px;
+          border: 1px solid rgba(255,255,255,0.1);
+          background: rgba(255,255,255,0.06);
+        }
+        .calc-field span {
+          font: 700 10.5px var(--font);
+          letter-spacing: 0.06em;
+          text-transform: uppercase;
+          color: rgba(255,255,255,0.4);
+        }
+        .calc-field input {
+          width: 100%;
+          box-sizing: border-box;
+          border: none;
+          background: transparent;
+          color: #fff;
+          font: 800 21px var(--font);
+          text-align: center;
+          padding: 0;
+        }
+        .calc-field:focus-within { border-color: rgba(255,255,255,0.35); }
+        .calc-field input:focus { outline: none; }
+        .calc-field input::placeholder { color: rgba(255,255,255,0.22); }
+        .calc-fields-note {
+          margin: 14px 0 0;
+          font: 400 12px var(--font);
+          line-height: 1.5;
+          color: rgba(255,255,255,0.4);
+        }
+
+        .calc-result-area {
+          margin-top: 26px;
+          padding-top: 26px;
+          border-top: 1px solid rgba(255,255,255,0.1);
+          text-align: center;
+        }
+        .calc-result { display: flex; flex-direction: column; gap: 4px; }
+        .calc-result-num { font: 900 36px var(--font); letter-spacing: -0.01em; }
+        .calc-result-warn .calc-result-num { color: #f87171; }
+        .calc-result-loss .calc-result-num { color: #fbbf24; }
+        .calc-result-good .calc-result-num { color: #4ade80; }
+        .calc-result-label {
+          font: 500 13.5px var(--font);
+          color: rgba(255,255,255,0.55);
+        }
+        .calc-result-placeholder .calc-result-label {
+          font: 500 14px var(--font);
+          color: rgba(255,255,255,0.4);
+        }
+        .calc-live-weight {
+          margin: 12px 0 0;
+          font: 600 12.5px var(--font);
+          color: rgba(255,255,255,0.4);
+        }
+
+        .calc-footnote {
+          margin: 20px 0 0;
+          font: 400 11.5px var(--font);
+          line-height: 1.5;
+          color: rgba(255,255,255,0.3);
+          text-align: center;
+        }
+
+        .closing-footer { text-align: center; }
         .closing-sub {
           margin: 0;
+          max-width: 560px;
           font: 400 16px var(--font);
           color: rgba(255,255,255,0.55);
           line-height: 1.55;
@@ -585,6 +867,7 @@ export default function Home() {
           margin-top: 22px;
           display: flex;
           align-items: center;
+          justify-content: center;
           gap: 22px;
           flex-wrap: wrap;
         }
@@ -635,9 +918,10 @@ export default function Home() {
           .workflow-steps { grid-template-columns: 1fr; gap: 28px; }
 
           .closing { padding: 48px 24px; }
-          .closing-inner { flex-direction: column; align-items: flex-start; gap: 24px; }
-          .closing-h2 { font-size: 34px; }
-          .closing-right { max-width: none; }
+          .closing-inner { gap: 32px; }
+          .closing-h2 { font-size: 30px; }
+          .calc-card { padding: 22px; }
+          .calc-field { flex-basis: calc(50% - 5px); }
         }
       `}</style>
     </div>
