@@ -79,47 +79,47 @@ function OpportunityCalculator() {
     <div className="calc-card">
       <div className="calc-fields">
         <label className="calc-field">
-          <span>Combined tare weight (lbs)</span>
+          <span>Tare (lbs)</span>
           <input
             type="number"
             inputMode="decimal"
             value={tareWeight}
             onChange={(e) => setTareWeight(e.target.value)}
-            placeholder="e.g. 25000"
+            placeholder="25000"
           />
         </label>
         <label className="calc-field">
-          <span>Product API gravity</span>
+          <span>API</span>
           <input
             type="number"
             inputMode="decimal"
             value={api}
             onChange={(e) => setApi(e.target.value)}
-            placeholder="e.g. 38.5"
+            placeholder="38.5"
           />
         </label>
         <label className="calc-field">
-          <span>Product temperature (&deg;F)</span>
+          <span>Temp &deg;F</span>
           <input
             type="number"
             inputMode="decimal"
             value={tempF}
             onChange={(e) => setTempF(e.target.value)}
-            placeholder="e.g. 78"
+            placeholder="78"
           />
         </label>
         <label className="calc-field">
-          <span>Actual gallons loaded (from the BOL)</span>
+          <span>Actual gal</span>
           <input
             type="number"
             inputMode="decimal"
             value={actualGallons}
             onChange={(e) => setActualGallons(e.target.value)}
-            placeholder="e.g. 7200"
+            placeholder="7200"
           />
         </label>
-        <label className="calc-field calc-field-limit">
-          <span>Legal weight limit (lbs)</span>
+        <label className="calc-field">
+          <span>Legal limit</span>
           <input
             type="number"
             inputMode="decimal"
@@ -128,6 +128,10 @@ function OpportunityCalculator() {
           />
         </label>
       </div>
+      <p className="calc-fields-note">
+        Tare weight, product API gravity, product temperature, actual
+        gallons loaded from the BOL, and your legal weight limit.
+      </p>
 
       <div className="calc-result-area">
         {result ? (
@@ -737,30 +741,46 @@ export default function Home() {
           padding: 32px;
         }
         .calc-fields {
-          display: grid;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-          gap: 18px;
+          display: flex;
+          flex-wrap: wrap;
+          gap: 10px;
         }
-        .calc-field { display: flex; flex-direction: column; gap: 6px; }
+        .calc-field {
+          flex: 1 1 120px;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 6px;
+          padding: 14px 10px;
+          border-radius: 12px;
+          border: 1px solid rgba(255,255,255,0.1);
+          background: rgba(255,255,255,0.06);
+        }
         .calc-field span {
-          font: 700 11px var(--font);
-          letter-spacing: 0.04em;
+          font: 700 10.5px var(--font);
+          letter-spacing: 0.06em;
           text-transform: uppercase;
-          color: rgba(255,255,255,0.45);
+          color: rgba(255,255,255,0.4);
         }
         .calc-field input {
           width: 100%;
           box-sizing: border-box;
-          padding: 12px 14px;
-          border-radius: 10px;
-          border: 1px solid rgba(255,255,255,0.16);
-          background: rgba(255,255,255,0.06);
+          border: none;
+          background: transparent;
           color: #fff;
-          font: 600 15px var(--font);
+          font: 800 21px var(--font);
+          text-align: center;
+          padding: 0;
         }
-        .calc-field input:focus { outline: 2px solid rgba(255,255,255,0.35); outline-offset: 1px; }
-        .calc-field input::placeholder { color: rgba(255,255,255,0.28); }
-        .calc-field-limit { grid-column: 1 / -1; max-width: 260px; }
+        .calc-field:focus-within { border-color: rgba(255,255,255,0.35); }
+        .calc-field input:focus { outline: none; }
+        .calc-field input::placeholder { color: rgba(255,255,255,0.22); }
+        .calc-fields-note {
+          margin: 14px 0 0;
+          font: 400 12px var(--font);
+          line-height: 1.5;
+          color: rgba(255,255,255,0.4);
+        }
 
         .calc-result-area {
           margin-top: 26px;
@@ -855,8 +875,7 @@ export default function Home() {
           .closing-inner { gap: 32px; }
           .closing-h2 { font-size: 30px; }
           .calc-card { padding: 22px; }
-          .calc-fields { grid-template-columns: 1fr; }
-          .calc-field-limit { max-width: none; }
+          .calc-field { flex-basis: calc(50% - 5px); }
         }
       `}</style>
     </div>
