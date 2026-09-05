@@ -9100,8 +9100,8 @@ modal exists for) -- now also, best-effort/non-fatal:
   able to clear a peer driver's report too, not just one this same user
   happens to have filed.
 
-**New migration** (`supabase/migrations/20260906000000_terminal_outage_reports_stud_link.sql`,
-**not yet applied**): the existing `terminal_outage_reports_delete` RLS
+**Migration applied 2026-09-06** (`supabase/migrations/20260906000000_terminal_outage_reports_stud_link.sql`,
+user ran it in the Supabase SQL editor): the existing `terminal_outage_reports_delete` RLS
 policy (from `20260829000000`) is deliberately reporter-only ("I fixed my
 own mistake," not a moderation tool) -- which would have silently limited
 STUD's own clear to 0 rows for any report someone else filed, with no
