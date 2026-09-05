@@ -9183,10 +9183,10 @@ limit; the legal limit is a **fleet-only** headroom metric tied to user density
   period aggregation (never a mean of percentages).
 - `lib/capacity/useUtilization.ts` — read helpers. **No leaderboard**, by design.
 - `supabase/migrations/20260905000000_payload_utilization_phase1.sql` and
-  `20260905010000_record_load_utilization.sql` — **written, NOT applied.**
-  Purely additive; the legacy incentive system is untouched and
-  `calculate_load_points` still fires alongside, so a Phase 1 rollback never
-  leaves the app with no incentive system.
+  `20260905010000_record_load_utilization.sql` — **APPLIED 2026-09-05** (see
+  the apply record below). Purely additive; the legacy incentive system is
+  untouched and `calculate_load_points` still fires alongside, so a Phase 1
+  rollback never leaves the app with no incentive system.
 - `npm test` — 24 tests on node's built-in runner with native type-stripping.
   **No new dependency, no DB, no auth session, no browser.** Deliberate: live
   verification on this project is repeatedly blocked by not having a session,
@@ -9213,11 +9213,34 @@ possible** — it caught two real bugs before any SQL-editor paste:
 - A plpgsql `SELECT INTO` matching no row **nulls its targets**; a missing combo
   would have silently nulled the resolved company target.
 
-**Still unproven:** nothing has touched the live DB (no `.env.local` in this
-container, so no session at all), no real load has been measured, nothing
-displays the number yet (Phase 2), and the staff-gated target wasn't exercised
-with a real driver-role login. Per this repo's own rule, spot-check the
-referenced columns against `information_schema.columns` before applying.
+**Applied to the live database 2026-09-05.** Ran in the Supabase SQL editor,
+migration 1 then migration 2 (the second writes tables the first creates).
+`docs/phase1-apply-checklist.sql` PART 1 ran first and returned **ALL 40 CHECKS
+PASSED** — the `information_schema.columns` spot-check this repo's own
+"Architecture reality" rule demands, confirming the live schema matched the stub
+the migrations had been verified against, and that none of the three new table
+names collided. PART 2 after applying returned **ALL 9 CHECKS PASSED**: three
+tables present with RLS on, policy counts 2/2/3, both `incentive_settings`
+columns with their defaults (79500 / 80000), and the RPC present with no
+duplicate overloads.
+
+A real flaw in that checklist was caught and fixed the same pass: each PART had
+been three separate `SELECT`s, and the Supabase SQL editor **only displays the
+last result set** when several statements run together — so the column check and
+the function check would both have been silently invisible, and the one visible
+check would have read as "all clear." Each PART is now a single query with a
+summary row that sorts to the top. Both paths were proven against a real
+PostgreSQL 16 before being handed over (empty DB → 37 problems correctly
+enumerated; complete stub → 40 passed).
+
+**Still unproven:** no real load has been measured, and nothing has been clicked
+through in a browser. This environment's network policy blocks every Supabase
+and protankr.com host outright (`connect_rejected`, gateway 403 on CONNECT —
+a policy denial, not a credential problem; confirmed again 2026-09-05 via
+`$HTTPS_PROXY/__agentproxy/status`), so live testing needs either that policy
+widened for this environment or a manual walkthrough. The staff-gated target
+field also still hasn't been exercised with a real driver-role login — the same
+gap this project has documented repeatedly for role-matrix checks.
 
 **Phase 2 shipped 2026-09-05 (driver display).** A utilization card on the
 Planner (this-load %, period average, "7,760 of 7,820 gal available planned")

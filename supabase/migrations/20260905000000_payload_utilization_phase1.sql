@@ -7,12 +7,12 @@
 -- only once this engine has been validated, so a rollback during Phase 1 never
 -- leaves the app with no incentive system at all.
 --
--- NOT APPLIED -- run manually in the Supabase SQL editor. Per this repo's own
--- "Architecture reality" rule, spot-check the referenced columns against
--- information_schema.columns first; the types below follow this repo's
--- established uuid PK naming (load_log.load_id, companies.company_id,
--- products.product_id) as confirmed in its own migrations, but the migrations
--- folder is known to lag the live database.
+-- APPLIED 2026-09-05 via the Supabase SQL editor. The pre-flight in
+-- docs/phase1-apply-checklist.sql ran first and returned ALL 40 CHECKS PASSED,
+-- confirming every referenced column and helper function existed live and none
+-- of the three new table names collided -- this repo's own "Architecture
+-- reality" rule, since the migrations folder is known to lag the live database.
+-- PART 2 after applying returned ALL 9 CHECKS PASSED.
 
 -- ─────────────────────────────────────────────────────────────────────────
 -- 1. Company target gross weight (the driver's 100% mark)

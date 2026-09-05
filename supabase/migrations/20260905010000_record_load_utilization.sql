@@ -1,5 +1,7 @@
 -- record_load_utilization -- writes the Phase 1 measurement rows for one load.
--- Requires 20260905000000_payload_utilization_phase1.sql. Not applied.
+-- Requires 20260905000000_payload_utilization_phase1.sql.
+-- APPLIED 2026-09-05 via the Supabase SQL editor, second (it writes the tables
+-- the first migration creates). Post-apply checks: ALL 9 CHECKS PASSED.
 --
 -- WHY THE CLIENT SENDS THE CAPACITY NUMBER
 --

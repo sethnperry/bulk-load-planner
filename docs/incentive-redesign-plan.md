@@ -528,11 +528,23 @@ too narrow in practice.
 
 ## 9. Phase 1 contents
 
-> **Status: built and verified (2026-09-05).** Both migrations are written but
-> NOT yet applied to the live database. They were, however, actually executed
-> against a throwaway PostgreSQL 16 instance with a stub of the live schema --
-> so "they apply cleanly" is a fact here, not a hope. See "Phase 1 verification"
-> at the end of this document for exactly what was and was not proven.
+> **Status: APPLIED to the live database 2026-09-05.** Both migrations ran in
+> the Supabase SQL editor after the pre-flight in
+> `docs/phase1-apply-checklist.sql` returned ALL 40 CHECKS PASSED -- confirming
+> the live schema matched the stub the migrations were verified against. The
+> post-apply check returned ALL 9 CHECKS PASSED (three tables present with RLS
+> on, policy counts 2/2/3, both `incentive_settings` columns with their
+> defaults, the RPC present with no duplicate overloads).
+>
+> Before that they were executed against a throwaway PostgreSQL 16 instance
+> with a stub of the live schema, so "they apply cleanly" was a fact rather
+> than a hope going in. See "Phase 1 verification" at the end of this document
+> for what was and was not proven.
+>
+> Still unproven: no real load has been measured, and nothing has been clicked
+> through in a browser -- this session's network policy blocks every Supabase
+> and protankr.com host (`connect_rejected`, 403 on CONNECT), so live testing
+> needs either that policy widened or a manual walkthrough.
 
 
 Measurement only. No incentive UI, no money, no thresholds (§31).
@@ -648,12 +660,11 @@ check than this project usually gets before an SQL-editor paste.
 
 ### Not proven, and why
 
-- **Nothing has run against the live database.** This container has no
-  `.env.local`, so there was no authenticated session and no Supabase access at
-  all this session. The stub schema was built from this repo's migrations, and
-  the migrations folder is known to lag the live database -- so the columns the
-  migrations reference still need the usual `information_schema.columns`
-  spot-check before the SQL-editor paste.
+- ~~**Nothing has run against the live database.**~~ **Resolved 2026-09-05:**
+  both migrations are applied. The `information_schema.columns` spot-check this
+  bullet called for ran first and returned ALL 40 CHECKS PASSED, so the live
+  schema is confirmed to match the stub -- the concern behind this bullet was
+  real and is now closed by evidence rather than assumption.
 - **No real load has been measured.** The end-to-end run used seeded rows, not
   a load completed through the app.
 - **Nothing displays the number yet.** That is Phase 2, deliberately (spec
@@ -727,8 +738,10 @@ one file and not its twin), caught before it could diverge rather than after.
 
 ### Not verified
 
-No live session again (no `.env.local` in this container), so nothing was
-clicked through and the migrations still have not been applied to the live
-database. The card's own layout in a real browser, and the behavior for a real
-driver-role login, remain unverified — the same gap this project has documented
-repeatedly.
+The migrations are now applied (2026-09-05), but no live session was available
+in any session so far: this environment's network policy blocks every Supabase
+and protankr.com host outright (`connect_rejected`, gateway 403 on CONNECT --
+a policy denial, not a credential problem), so nothing has been clicked through.
+The card's own layout in a real browser, the numbers on a real completed load,
+and the behavior for a real driver-role login all remain unverified — the same
+gap this project has documented repeatedly.
