@@ -195,17 +195,6 @@ function OpportunityCalculator() {
               Live weight: {result.liveWeightLbs.toLocaleString("en-US")} lbs
               (limit {limit.toLocaleString("en-US")} lbs)
             </p>
-            {/* Shown only once the visitor has their own number, so the
-                benchmark reads as context for what they just calculated
-                rather than a claim they hit before engaging with anything. */}
-            <p className="calc-benchmark">
-              For comparison: in testing, a single driver recovered an
-              average of{" "}
-              <strong>
-                +{Math.round(CURRENT_MONTHLY_AVG_GAL_PER_LOAD)} gal per load
-              </strong>{" "}
-              against their own prior baseline, blended across products.
-            </p>
           </>
         ) : (
           <div className="calc-result calc-result-placeholder">
@@ -311,7 +300,6 @@ export default function Home() {
       <section id="calculator" className="calc-section">
         <div className="calc-inner">
           <div className="calc-header">
-            <p className="calc-eyebrow">Free tool</p>
             <h2 className="calc-h2">Validate a BOL.</h2>
             <p className="calc-intro">
               Check a real load against your legal limit. Enter what was on
@@ -319,6 +307,20 @@ export default function Home() {
             </p>
           </div>
           <OpportunityCalculator />
+
+          <div className="calc-stat-wrap">
+            <div className="hero-stat">
+              <span className="hero-stat-num">
+                +{CURRENT_MONTHLY_AVG_GAL_PER_LOAD} GAL / LOAD
+              </span>
+              <span className="hero-stat-sub">
+                A single driver without the network effect typically sees an
+                average recovery like this, blended across products. More
+                drivers using ProTankr will improve the accuracy and shrink
+                the necessary buffer.
+              </span>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -368,8 +370,7 @@ export default function Home() {
             </p>
           </blockquote>
           <p className="founder-byline">
-            Built by a CDL-A driver with a hazmat endorsement, hauling bulk
-            fuel. Boots-on experience.
+            Built by a bulk fuel hauler with hands-on experience.
           </p>
           <p className="founder-patent">
             <span className="patent-badge">Patent Pending</span>
@@ -536,13 +537,6 @@ export default function Home() {
         }
         .calc-inner { max-width: 760px; margin: 0 auto; }
         .calc-header { text-align: center; margin-bottom: 32px; }
-        .calc-eyebrow {
-          margin: 0 0 12px;
-          font: 800 12px var(--font);
-          letter-spacing: 0.14em;
-          text-transform: uppercase;
-          color: rgba(0,0,0,0.4);
-        }
         .calc-h2 {
           margin: 0;
           font: 900 40px var(--font);
@@ -631,16 +625,33 @@ export default function Home() {
           font: 600 12.5px var(--font);
           color: rgba(0,0,0,0.45);
         }
-        .calc-benchmark {
-          margin: 20px auto 0;
-          max-width: 460px;
-          padding-top: 18px;
-          border-top: 1px solid rgba(0,0,0,0.08);
-          font: 400 13px var(--font);
-          line-height: 1.55;
-          color: rgba(0,0,0,0.55);
+        .calc-stat-wrap { display: flex; justify-content: center; margin-top: 32px; }
+        .hero-stat {
+          display: inline-flex;
+          flex-direction: column;
+          gap: 4px;
+          padding: 18px 22px;
+          border-radius: 16px;
+          background: repeating-linear-gradient(
+            135deg,
+            #f2f2f2,
+            #f2f2f2 10px,
+            #e9e9e9 10px,
+            #e9e9e9 20px
+          );
+          border: 1px dashed rgba(0,0,0,0.25);
         }
-        .calc-benchmark strong { color: #111; font-weight: 800; }
+        .hero-stat-num {
+          font: 900 30px var(--font);
+          letter-spacing: -0.01em;
+          color: #111;
+        }
+        .hero-stat-sub {
+          max-width: 440px;
+          font: 500 12.5px var(--font);
+          color: rgba(0,0,0,0.5);
+          line-height: 1.5;
+        }
 
         .calc-footnote {
           margin: 20px 0 0;

@@ -44,6 +44,16 @@ export default function SiteHeader({ active }: { active?: ActiveNav }) {
   return (
     <header className="site-header">
       <div className="nav-row">
+        <button
+          type="button"
+          className="nav-menu-btn"
+          aria-label={menuOpen ? "Close menu" : "Open menu"}
+          aria-expanded={menuOpen}
+          onClick={() => setMenuOpen((v) => !v)}
+        >
+          <MenuIcon />
+        </button>
+
         <Link href="/" className="brand">
           <svg className="mark" width="58" height="54" viewBox="-53.56 -35.05 24.29 22.70" aria-hidden="true">
             <path d={LOGO_PATH} fill="#111111" />
@@ -60,20 +70,9 @@ export default function SiteHeader({ active }: { active?: ActiveNav }) {
           </Link>
         </nav>
 
-        <div className="nav-compact">
-          <Link href="/get-the-app" className="nav-cta">
-            Get the App <PhoneIcon />
-          </Link>
-          <button
-            type="button"
-            className="nav-menu-btn"
-            aria-label={menuOpen ? "Close menu" : "Open menu"}
-            aria-expanded={menuOpen}
-            onClick={() => setMenuOpen((v) => !v)}
-          >
-            <MenuIcon />
-          </button>
-        </div>
+        <Link href="/get-the-app" className="nav-cta nav-cta-compact">
+          Get the App <PhoneIcon />
+        </Link>
       </div>
 
       {menuOpen && (
@@ -104,10 +103,11 @@ export default function SiteHeader({ active }: { active?: ActiveNav }) {
       <style jsx global>{`
         .site-header { padding: 28px 48px 0; position: relative; }
         .site-header .nav-row { display: flex; align-items: center; gap: 16px; }
-        /* Compact (phone) nav is hidden until the breakpoint below swaps
-           the two; the full link row is the default so nothing regresses
-           on desktop if this block ever fails to apply. */
-        .site-header .nav-compact { display: none; }
+        /* Both the hamburger and the compact CTA are mobile-only; hidden
+           by default so nothing regresses on desktop if the breakpoint
+           below ever fails to apply. */
+        .site-header .nav-menu-btn { display: none; }
+        .site-header .nav-cta-compact { display: none; }
         .site-header .brand { display: flex; align-items: flex-start; gap: 14px; flex-shrink: 0; text-decoration: none; }
         .site-header .wordmark { margin-top: 14px; font: 800 24px var(--font-outfit), sans-serif; letter-spacing: 0.02em; color: #111; }
         .site-header .nav-links { display: flex; align-items: center; gap: 30px; flex-shrink: 0; margin-left: auto; }
@@ -140,38 +140,37 @@ export default function SiteHeader({ active }: { active?: ActiveNav }) {
           .site-header .nav-links a { font-size: 15px; }
         }
 
-        /* Phone: swap the full link row for the CTA + menu button. 700px
+        /* Phone: hamburger on the far left (bare icon, no button chrome),
+           logo next to it, "Get the App" pinned to the far right. 700px
            clears every common phone width in landscape and portrait while
            leaving tablets (768+) on the full nav, which still fits there. */
         @media (max-width: 700px) {
           .site-header .nav-row { flex-wrap: nowrap; }
           .site-header .nav-links { display: none; }
-          .site-header .nav-compact {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            margin-left: auto;
-            flex-shrink: 0;
-          }
-          .site-header .nav-compact .nav-cta {
-            font: 600 14px var(--font-outfit), sans-serif;
-            padding: 10px 16px;
-            text-decoration: none;
-          }
           .site-header .nav-menu-btn {
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            width: 40px;
-            height: 40px;
+            width: 36px;
+            height: 36px;
             padding: 0;
-            border-radius: 10px;
-            border: 1px solid rgba(0,0,0,0.14);
-            background: #fff;
+            border: none;
+            background: none;
             color: #111;
             cursor: pointer;
+            flex-shrink: 0;
           }
-          .site-header .nav-menu-btn:hover { background: rgba(0,0,0,0.04); }
+          .site-header .nav-menu-btn:hover { opacity: 0.6; }
+          .site-header .nav-cta-compact {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            margin-left: auto;
+            flex-shrink: 0;
+            font: 600 14px var(--font-outfit), sans-serif;
+            padding: 10px 16px;
+            text-decoration: none;
+          }
           .site-header .nav-backdrop {
             position: fixed;
             inset: 0;
@@ -180,7 +179,7 @@ export default function SiteHeader({ active }: { active?: ActiveNav }) {
           .site-header .nav-panel {
             position: absolute;
             top: 100%;
-            right: 24px;
+            left: 24px;
             z-index: 41;
             margin-top: 8px;
             min-width: 168px;
