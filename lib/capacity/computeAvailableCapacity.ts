@@ -45,6 +45,13 @@ export const CALC_VERSION = 1;
  *  legal_gross_lbs rather than this being baked into the math. */
 export const DEFAULT_LEGAL_GROSS_LBS = 80000;
 
+/** Fallback company target, used only when a combo carries no target of its own
+ *  and the company has configured none. Mirrors incentive_settings'
+ *  target_gross_lbs default so the client and record_load_utilization agree on
+ *  the denominator without the client having to read a column that may not
+ *  exist yet. */
+export const DEFAULT_COMPANY_TARGET_GROSS_LBS = 79500;
+
 export type LimitingFactor =
   | "volume"          // every compartment filled before weight ran out
   | "company_target"  // weight-limited, and the company target is below legal

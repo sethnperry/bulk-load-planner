@@ -1563,6 +1563,7 @@ export default function EquipmentModal({
         onSelectComboId={onSelectComboId}
         onRefreshCombos={onRefreshCombos}
         setupSession={setupSession}
+        myRole={myRole}
       />
     );
   }

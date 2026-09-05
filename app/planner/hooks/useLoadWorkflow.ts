@@ -8,10 +8,30 @@ import { beginLoad, completeLoad, deleteLoad } from "@/lib/supabase/load";
 import { computeActualLbsForLine } from "../utils/planMath";
 import { resolveEffectiveRackId } from "../utils/rack";
 import type { LoadReport, PlanRow, ProductRow } from "../types";
+import type { CapacityResult } from "@/lib/capacity/computeAvailableCapacity";
+
+/** What record_load_utilization returns. Nullable percentage on purpose: an
+ *  excluded load genuinely has no score, and null says that where a 0 would
+ *  read as "this driver loaded nothing." */
+export type LoadUtilizationResult = {
+  ok: boolean;
+  available_gallons: number;
+  effective_available_gallons: number;
+  actual_gallons: number;
+  unused_gallons: number;
+  utilization_pct: number | null;
+  eligibility: "eligible" | "excluded_constraint" | "excluded_safety" | "excluded_incomplete_data";
+  exception_reason: string | null;
+  limiting_factor: string | null;
+};
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
 
 type Props = {
+  /** Available capacity for the live plan, measured against the CONFIGURED
+   *  compartment caps rather than the driver's own capOverride -- see
+   *  page.tsx's capacityResult. Null whenever there's no solvable plan. */
+  capacityResult?: CapacityResult | null;
   authUserId: string | null;
   selectedComboId: string;
   selectedTerminalId: string;
@@ -56,6 +76,7 @@ export function useLoadWorkflow({
   onPostLoadComplete,
   predictedTempF,
   activeSlotLetter,
+  capacityResult,
 }: Props) {
   const [activeLoadId, setActiveLoadId] = useState<string | null>(null);
   const [beginLoadBusy, setBeginLoadBusy] = useState(false);
@@ -71,6 +92,10 @@ export function useLoadWorkflow({
   >({});
 
   const [loadReport, setLoadReport] = useState<LoadReport | null>(null);
+  // Payload utilization for the load just completed. Null until a load
+  // completes, and stays null whenever the measurement couldn't run (no
+  // solvable plan, or the RPC failed -- it is deliberately non-fatal).
+  const [loadUtilization, setLoadUtilization] = useState<LoadUtilizationResult | null>(null);
 
   const PLAN_SNAPSHOT_VERSION = 1;
 
@@ -230,6 +255,7 @@ export function useLoadWorkflow({
         }
       }
       setProductInputs(nextInputs);
+      setLoadUtilization(null);
       setLoadingGallonsOverride?.({});
       setLoadingOpen(true);
       setLoadingModalError(null);
@@ -392,6 +418,38 @@ try {
   console.warn("calculate_load_points failed (non-fatal):", e);
 }
 
+// Payload utilization (Phase 1) -- silent, non-fatal, same fire-and-forget
+// shape as the two calls above. Runs ALONGSIDE calculate_load_points rather
+// than replacing it: the legacy incentive system stays live until this
+// engine has been validated against real loads, so a rollback never leaves
+// the app with no incentive system at all.
+//
+// The client sends only the computed capacity. record_load_utilization
+// re-derives every INPUT server-side (tare, target, caps, densities,
+// actuals) and enforces the safety gate itself, so a crafted request can't
+// shrink its own denominator or score a violation -- see that migration's
+// own header for why capacity itself can't be computed there.
+let utilizationResult: LoadUtilizationResult | null = null;
+if (capacityResult && capacityResult.available_gallons > 0) {
+  try {
+    const { data: utilRes, error: utilErr } = await supabase.rpc("record_load_utilization", {
+      p_load_id: activeLoadId,
+      p_capacity: {
+        calc_version: capacityResult.calc_version,
+        available_gallons: capacityResult.available_gallons,
+        available_payload_lbs: capacityResult.available_payload_lbs,
+        capacity_at_legal_gallons: capacityResult.capacity_at_legal_gallons,
+        total_volume_gallons: capacityResult.total_volume_gallons,
+        limiting_factor: capacityResult.limiting_factor,
+      },
+    });
+    if (utilErr) throw utilErr;
+    if (utilRes?.ok) utilizationResult = utilRes as LoadUtilizationResult;
+  } catch (e) {
+    console.warn("record_load_utilization failed (non-fatal):", e);
+  }
+}
+
 // Persist "last observed" API/temp so LoadingModal can show previous API on
 // reload -- rack_product_status only (see CLAUDE.md "rack-aware loading,
 // unified"). terminal_products is deliberately no longer written here: with
@@ -499,6 +557,7 @@ try {
         completed_at: res?.completed_at ?? new Date().toISOString(),
         plan_slot: activeSlotLetter ?? null,
       });
+      setLoadUtilization(utilizationResult);
       setLoadingOpen(false);
       // activeLoadId was previously only ever cleared in cancelActiveLoad
       // (Update Card/Back to Planner) -- never on a genuine successful
@@ -524,7 +583,7 @@ try {
     }
   }, [activeLoadId, planRows, productInputs, productNameById, tare, plannedGallonsTotal, terminalProducts,
       selectedTerminalId, selectedRackId, tempF, onRefreshTerminalProducts, onRefreshTerminalAccess,
-      onPostLoadComplete, activeSlotLetter]);
+      onPostLoadComplete, activeSlotLetter, capacityResult]);
 
   return {
     activeLoadId,
@@ -536,6 +595,7 @@ try {
     completeError,
     actualByComp,
     loadReport, setLoadReport,
+    loadUtilization, setLoadUtilization,
     beginLoadToSupabase,
     onLoadedFromLoadingModal,
     cancelActiveLoad,

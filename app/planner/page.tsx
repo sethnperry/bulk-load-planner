@@ -40,6 +40,12 @@ let hasCheckedDefaultLanding = false;
 import { usePlanSlots } from "./hooks/usePlanSlots";
 import { useLoadWorkflow } from "./hooks/useLoadWorkflow";
 import { usePlanRows } from "./hooks/usePlanRows";
+import {
+  computeAvailableCapacity,
+  DEFAULT_COMPANY_TARGET_GROSS_LBS,
+  DEFAULT_LEGAL_GROSS_LBS,
+  type CapacityCompartmentInput,
+} from "@/lib/capacity/computeAvailableCapacity";
 import { useFuelTempPrediction } from "./hooks/useFuelTempPrediction";
 
 // ── Sections ───────────────────────────────────────────────────────────────────
@@ -966,6 +972,66 @@ export default function CalculatorPage() {
 
   // ── Plan rows (binary search) ──────────────────────────────────────────────
   const plannedResult = usePlanRows({ selectedTrailerId, activeComps, allowedLbs, cgBias, capacityGallonsActive, planForGallons });
+
+  // ── Available capacity (payload utilization, Phase 1) ─────────────────────
+  // A SECOND solve of the same plan, and the one real difference is the
+  // ceiling it uses: activeComps above is built from
+  // effectiveMaxGallonsForComp (the driver's own capOverride handle drag),
+  // while this is built from persistedCapForComp (the admin-gated configured
+  // cap). That substitution is the whole anti-gaming rule -- a driver
+  // reducing their own ceiling is exactly what the metric exists to catch, so
+  // it must not be able to shrink the denominator too. Everything else -- CG
+  // bias, per-product density at the confirmed temp, positions, the weight
+  // ceiling -- is identical, and both go through the same solveMaxGallons.
+  //
+  // Deliberately NOT read from incentive_settings: its target_gross_lbs
+  // column doesn't exist until this pass's migration is applied, and adding
+  // it to that fetch's select early would 400 the whole query and break the
+  // existing incentive card (the same class of failure as the buffer_lbs
+  // incident). The combo's own target_weight is the ceiling the Planner
+  // already plans against anyway, so it is the honest number to measure
+  // against; record_load_utilization resolves the same value server-side.
+  const capacityCompartments = useMemo<CapacityCompartmentInput[]>(() => {
+    if (!selectedTrailerId) return [];
+    const out: CapacityCompartmentInput[] = [];
+    for (const c of compartments) {
+      const n = Number(c.comp_number);
+      if (!Number.isFinite(n)) continue;
+      const sel = compPlan[n];
+      if (!sel || sel.empty || !sel.productId) continue;
+
+      const persistedCap = persistedCapForComp(n);
+      if (!(persistedCap > 0)) continue;
+
+      const p = terminalProducts.find((x) => x.product_id === sel.productId);
+      if (!p || p.api_60 == null || p.alpha_per_f == null) continue;
+
+      out.push({
+        comp_number: n,
+        position: -(Number(c.position ?? 0)), // DB +position = REAR -> flip to FRONT
+        cap_gallons: persistedCap,
+        cap_override_gallons: sel.capOverride ?? null, // recorded, never used in the math
+        product_id: sel.productId,
+        api_60: Number(p.api_60),
+        alpha_per_f: Number(p.alpha_per_f),
+        observed_api: p.last_api != null ? Number(p.last_api) : null,
+        observed_api_temp_f: p.last_temp_f != null ? Number(p.last_temp_f) : null,
+        temp_f: productTempF[sel.productId] ?? tempF,
+      });
+    }
+    return out;
+  }, [selectedTrailerId, compartments, compPlan, terminalProducts, persistedCapForComp, productTempF, tempF]);
+
+  const capacityResult = useMemo(
+    () => computeAvailableCapacity({
+      tare_lbs: tare,
+      target_gross_lbs: targetWeight > 0 ? targetWeight : DEFAULT_COMPANY_TARGET_GROSS_LBS,
+      legal_gross_lbs: DEFAULT_LEGAL_GROSS_LBS,
+      cg_bias: cgBias,
+      compartments: capacityCompartments,
+    }),
+    [tare, targetWeight, cgBias, capacityCompartments],
+  );
   const planRows = plannedResult.planRows;
 
   const plannedGallonsByComp = useMemo<Record<number, number>>(() => {
@@ -1237,6 +1303,7 @@ export default function CalculatorPage() {
     // meaning; left as-is inside useLoadWorkflow.ts to keep this a
     // page.tsx-only fix.
     activeSlotLetter: lastLoadedSlot,
+    capacityResult,
   });
 
   // ── Incentive running-average card ────────────────────────────────────────

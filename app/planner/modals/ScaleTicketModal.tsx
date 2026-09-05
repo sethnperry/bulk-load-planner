@@ -42,7 +42,7 @@ const S = {
 };
 
 export default function ScaleTicketModal({
-  open, onClose, combo, companyId, authUserId, truckName, trailerName, onSaved,
+  open, onClose, combo, companyId, authUserId, truckName, trailerName, onSaved, myRole,
 }: {
   open: boolean;
   onClose: () => void;
@@ -52,6 +52,8 @@ export default function ScaleTicketModal({
   truckName?: string | null;
   trailerName?: string | null;
   onSaved: () => void;
+  /** Gates the target field only -- tare stays open to every role. */
+  myRole?: string | null;
 }) {
   const [tareLbs, setTareLbs] = useState("");
   const [targetLbs, setTargetLbs] = useState("");
@@ -92,6 +94,20 @@ export default function ScaleTicketModal({
   const label = [truckName, trailerName].filter(Boolean).join(" / ") || "Unknown";
   const tooClose = Number(targetLbs) >= 79500;
 
+  // Tare stays editable by every role, deliberately: the driver weighs the
+  // truck, and a company that doubts a number has the weight ticket to check
+  // it against.
+  //
+  // The target does not. It is the denominator of every payload-utilization
+  // number now (see docs/incentive-redesign-plan.md section 4b), so leaving it
+  // editable by the person being measured would let anyone lower their own
+  // score's denominator in two taps. Same admin/dispatch/lead set already used
+  // for compartment caps and Unit #, and no solo carve-out is needed -- a solo
+  // company's sole member is always role='admin' by the existing
+  // solo-provisioning design, so a solo driver still sets their own target.
+  const canEditTarget =
+    myRole === "admin" || myRole === "dispatch" || myRole === "lead";
+
   async function save() {
     if (!combo) return;
     if (savingNowRef.current) { rerunNeededRef.current = true; return; }
@@ -103,7 +119,11 @@ export default function ScaleTicketModal({
       const target = Number(targetLbsRef.current);
       const patch: Record<string, any> = {};
       if (tareLbsRef.current && Number.isFinite(tare) && tare > 0) patch.tare_lbs = tare;
-      if (targetLbsRef.current && Number.isFinite(target) && target > 0) patch.target_weight = target;
+      // Gated here too, not just in the UI: disabling an input is a display
+      // choice, and this autosaves on a debounce from a ref.
+      if (canEditTarget && targetLbsRef.current && Number.isFinite(target) && target > 0) {
+        patch.target_weight = target;
+      }
 
       if (Object.keys(patch).length > 0) {
         const { error } = await supabase.from("equipment_combos").update(patch).eq("combo_id", combo.combo_id);
@@ -169,8 +189,17 @@ export default function ScaleTicketModal({
               type="number" inputMode="numeric" placeholder="80000"
               value={targetLbs}
               onChange={(e) => onFieldChange(setTargetLbs)(e.target.value)}
-              style={S.input}
+              disabled={!canEditTarget}
+              style={{
+                ...S.input,
+                ...(canEditTarget ? null : { opacity: 0.5, cursor: "not-allowed" }),
+              }}
             />
+            {!canEditTarget && (
+              <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginTop: 6, lineHeight: 1.5 }}>
+                Set by your company. Tare is yours to update after every weigh.
+              </div>
+            )}
           </div>
           {tooClose && (
             <div style={{ padding: "8px 12px", borderRadius: 6, marginBottom: 24,

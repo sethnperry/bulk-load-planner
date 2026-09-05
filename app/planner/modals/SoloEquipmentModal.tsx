@@ -70,6 +70,9 @@ type Props = {
   // via the service-role /api/admin/setup proxy, not the real admin's own
   // browser session (which has no way to act as anyone but auth.uid()).
   setupSession?: SetupSession | null;
+  /** Passed through to ScaleTicketModal, which gates the target gross weight
+   *  field on it. Tare stays open to every role. */
+  myRole?: string | null;
 };
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
@@ -383,7 +386,7 @@ function computeWashLines(truckWashedAt: string | null, trailerWashedAt: string 
 
 export default function SoloEquipmentModal({
   open, onClose, authUserId, companyId, selectedComboId, onSelectComboId, onRefreshCombos,
-  setupSession,
+  setupSession, myRole,
 }: Props) {
   const [trucks, setTrucks] = useState<TruckRow[]>([]);
   const [trailers, setTrailers] = useState<TrailerRow[]>([]);
@@ -977,6 +980,15 @@ export default function SoloEquipmentModal({
           truckName={trucks.find((t) => t.truck_id === selectedCombo.truck_id)?.truck_name}
           trailerName={trailers.find((t) => t.trailer_id === selectedCombo.trailer_id)?.trailer_name}
           onSaved={() => { loadEquipment(); onRefreshCombos(); }}
+          // Threaded rather than assumed. The nearby RegionLocalAreaFilterModal
+          // hardcodes `canManage` on the reasoning that a solo company's sole
+          // member is always role='admin' -- but companies.is_solo records how a
+          // company was CREATED, not its current member count (CLAUDE.md's own
+          // note on this, and the demo company is is_solo=true with two real
+          // members), so a plain driver genuinely can reach this modal. The
+          // target field is a measurement denominator now, so it takes the real
+          // role instead of an assumption that is already known to be shaky.
+          myRole={myRole}
         />
       )}
 

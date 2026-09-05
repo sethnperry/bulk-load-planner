@@ -1,0 +1,321 @@
+-- record_load_utilization -- writes the Phase 1 measurement rows for one load.
+-- Requires 20260905000000_payload_utilization_phase1.sql. Not applied.
+--
+-- WHY THE CLIENT SENDS THE CAPACITY NUMBER
+--
+-- The capacity solver is a CG-biased binary search over per-compartment caps
+-- and per-product densities (planMath.solveMaxGallons). Reimplementing it in
+-- plpgsql would create exactly the second, independently-drifting payload
+-- calculation the spec forbids, so the client computes capacity with the same
+-- engine the Planner uses and sends the result here.
+--
+-- WHAT THIS FUNCTION THEREFORE DOES NOT TRUST
+--
+-- Only the computed OUTPUTS come from the client. Every INPUT is re-derived
+-- here from the database -- tare, target, legal ceiling, CG bias, configured
+-- compartment caps, product api_60/alpha_per_f, and the actual gallons/lbs --
+-- so a client cannot claim a smaller tare, a lower target or a reduced
+-- compartment cap to shrink its own denominator. The snapshot stores those
+-- server-derived inputs, which is what makes a stored row independently
+-- checkable later.
+--
+-- And the safety gate is enforced here, never accepted from the client: a load
+-- over the legal ceiling or past a compartment's configured cap is forced to
+-- excluded_safety no matter what eligibility was submitted. Safety is a gate,
+-- not a score (spec section 10), so it must not be bypassable by a crafted
+-- request.
+
+create or replace function public.record_load_utilization(
+  p_load_id  uuid,
+  p_capacity jsonb
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path to 'public'
+as $function$
+declare
+  v_load               record;
+  v_company_id         uuid;
+  v_trailer_id         uuid;
+  v_target             numeric;
+  v_legal              numeric;
+  v_compartments       jsonb;
+  v_actual_gallons     numeric;
+  v_actual_lbs         numeric;
+  v_actual_gross       numeric;
+  v_overfilled         boolean;
+  v_cap_gallons        numeric;
+  v_available          numeric;
+  v_effective          numeric;
+  v_eligibility        text;
+  v_exception          text;
+  v_utilization        numeric;
+  v_unused             numeric;
+  v_calc_version       int;
+begin
+  if auth.uid() is null then
+    raise exception 'not_authenticated';
+  end if;
+
+  select ll.load_id, ll.user_id, ll.combo_id, ll.tare_lbs, ll.cg_bias, ll.loaded_at, ll.completed_at
+    into v_load
+    from load_log ll
+   where ll.load_id = p_load_id;
+
+  if not found then
+    raise exception 'load_not_found: %', p_load_id;
+  end if;
+
+  -- Own-load only, matching calculate_load_points' own ownership check. An
+  -- admin correcting someone else's load is a deliberate, audited action and
+  -- belongs in its own function, not this one.
+  if v_load.user_id != auth.uid() then
+    raise exception 'unauthorized: load does not belong to current user';
+  end if;
+
+  v_company_id := get_active_company_id();
+  if v_company_id is null then
+    return jsonb_build_object('ok', false, 'reason', 'no_active_company');
+  end if;
+
+  -- ── Authoritative weight ceilings (never from the client) ──────────────
+  -- The company target is the driver's 100% mark; the legal ceiling feeds
+  -- fleet headroom only. Falls back to the documented defaults when a company
+  -- has never opened the settings -- measurement must not require any
+  -- configuration at all (spec TEST J/K).
+  select coalesce(target_gross_lbs, 79500), coalesce(legal_gross_lbs, 80000)
+    into v_target, v_legal
+    from incentive_settings
+   where company_id = v_company_id;
+
+  if not found then
+    v_target := 79500;
+    v_legal  := 80000;
+  end if;
+
+  -- The per-combo target is the OPERATIVE ceiling when set: it is the number
+  -- the Planner itself already plans against, so measuring against anything
+  -- else would compare a load to a ceiling it was never planned for. The
+  -- company value is the policy default behind it. This is safe to trust
+  -- precisely because the same pass gates that field to staff -- if it were
+  -- still driver-editable it would need clamping instead.
+  select coalesce(ec.target_weight, v_target), ec.trailer_id
+    into v_target, v_trailer_id
+    from equipment_combos ec
+   where ec.combo_id = v_load.combo_id;
+
+  -- ── Actuals, from what complete_load already wrote ─────────────────────
+  select coalesce(sum(actual_gallons), 0), coalesce(sum(actual_lbs), 0)
+    into v_actual_gallons, v_actual_lbs
+    from load_lines
+   where load_id = p_load_id
+     and actual_gallons is not null;
+
+  v_actual_gross := coalesce(v_load.tare_lbs, 0) + v_actual_lbs;
+
+  -- ── Safety gate, computed here and non-negotiable ──────────────────────
+  -- Any compartment loaded past its CONFIGURED cap. cap_gallons is the real
+  -- ceiling; max_gallons is informational only, per trailer_compartments' own
+  -- established meaning in this app.
+  v_overfilled := exists (
+    select 1
+      from load_lines ll
+      join trailer_compartments tc
+        on tc.trailer_id = v_trailer_id
+       and tc.comp_number = ll.comp_number
+     where ll.load_id = p_load_id
+       and ll.actual_gallons is not null
+       and ll.actual_gallons > coalesce(tc.cap_gallons, tc.max_gallons, 0) + 0.5
+  );
+
+  -- ── Server-derived snapshot inputs ─────────────────────────────────────
+  -- Rebuilt from the database rather than accepted from the request, so the
+  -- stored snapshot is a trustworthy record of what the load actually faced.
+  -- Density inputs (api_60, alpha_per_f) come from products; the observed
+  -- API and temperature come from load_lines, which is where the driver's own
+  -- entry at completion already lives.
+  select coalesce(jsonb_agg(jsonb_build_object(
+           'comp_number',          ll.comp_number,
+           'position',             -coalesce(tc.position, 0),
+           'cap_gallons',          coalesce(tc.cap_gallons, tc.max_gallons, 0),
+           'cap_override_gallons', null,
+           'product_id',           ll.product_id,
+           'api_60',               p.api_60,
+           'alpha_per_f',          p.alpha_per_f,
+           'observed_api',         ll.actual_api,
+           'observed_api_temp_f',  coalesce(ll.actual_temp_f, ll.temp_f),
+           'temp_f',               coalesce(ll.actual_temp_f, ll.temp_f),
+           'actual_gallons',       ll.actual_gallons
+         ) order by ll.comp_number), '[]'::jsonb)
+    into v_compartments
+    from load_lines ll
+    left join trailer_compartments tc
+      on tc.trailer_id = v_trailer_id and tc.comp_number = ll.comp_number
+    left join products p on p.product_id = ll.product_id
+   where ll.load_id = p_load_id;
+
+  v_calc_version := coalesce((p_capacity->>'calc_version')::int, 0);
+  v_available    := coalesce((p_capacity->>'available_gallons')::numeric, 0);
+
+  insert into load_capacity_snapshot (
+    load_id, calc_version, tare_lbs, target_gross_lbs, legal_gross_lbs, cg_bias,
+    compartments, available_gallons, available_payload_lbs,
+    capacity_at_legal_gallons, total_volume_gallons, limiting_factor
+  ) values (
+    p_load_id, v_calc_version, coalesce(v_load.tare_lbs, 0), v_target, v_legal,
+    coalesce(v_load.cg_bias, 0), v_compartments, v_available,
+    coalesce((p_capacity->>'available_payload_lbs')::numeric, 0),
+    coalesce((p_capacity->>'capacity_at_legal_gallons')::numeric, 0),
+    coalesce((p_capacity->>'total_volume_gallons')::numeric, 0),
+    coalesce(p_capacity->>'limiting_factor', 'none')
+  )
+  -- Idempotent, same as calculate_load_points was: safe to call twice for the
+  -- same load without duplicating or corrupting the record.
+  on conflict (load_id) do update set
+    calc_version              = excluded.calc_version,
+    tare_lbs                  = excluded.tare_lbs,
+    target_gross_lbs          = excluded.target_gross_lbs,
+    legal_gross_lbs           = excluded.legal_gross_lbs,
+    cg_bias                   = excluded.cg_bias,
+    compartments              = excluded.compartments,
+    available_gallons         = excluded.available_gallons,
+    available_payload_lbs     = excluded.available_payload_lbs,
+    capacity_at_legal_gallons = excluded.capacity_at_legal_gallons,
+    total_volume_gallons      = excluded.total_volume_gallons,
+    limiting_factor           = excluded.limiting_factor;
+
+  -- ── Automatic constraint from an Out of Allocation report ─────────────
+  -- terminal_outage_reports already records "this terminal capped me on this
+  -- product" -- it is the one external-constraint signal this app has today.
+  -- It carries no gallon figure, which is exactly why it raises an
+  -- UNQUANTIFIED constraint: enough to know the driver was capped, not enough
+  -- to re-baseline them, so the load is excluded rather than measured against
+  -- capacity it was never allowed to use.
+  --
+  -- It has to be a lookback rather than a link, because reporting Out of
+  -- Allocation CANCELS the load it was reported from (CancelLoadSheet routes
+  -- both report types to the card-renewal question, and both of its answers
+  -- cancel). The capped driver then re-plans and loads what they were
+  -- allowed, so the report and the load it constrains are always different
+  -- loads.
+  --
+  -- 12 hours, deliberately NOT the banner's 6am/12pm/6pm/12am terminal-local
+  -- clearing schedule: that schedule exists to decide how long a banner stays
+  -- on screen, and reimplementing its timezone math here would be a second
+  -- copy of app/planner/utils/dates.ts. A plain window is the honest fit for
+  -- "was this driver capped here recently," and it is one shift wide.
+  insert into load_constraints (load_id, constraint_type, constrained_gallons, source, notes, created_by)
+  select p_load_id, 'terminal_cap', null, 'DRIVER',
+         'Auto-linked from an Out of Allocation report at this terminal.', v_load.user_id
+   where exists (
+     select 1
+       from terminal_outage_reports r
+       join load_lines ll2 on ll2.load_id = p_load_id and ll2.product_id = r.product_id
+       join load_log ll3 on ll3.load_id = p_load_id
+      where r.report_type = 'out_of_allocation'
+        and r.reporter_user_id = v_load.user_id
+        and r.terminal_id = ll3.terminal_id
+        and r.created_at >= coalesce(v_load.loaded_at, v_load.completed_at, now()) - interval '12 hours'
+        and r.created_at <= coalesce(v_load.loaded_at, v_load.completed_at, now())
+   )
+     -- Idempotent: this function may run more than once for a load, and the
+     -- auto-link must not stack up duplicate constraint rows.
+     and not exists (
+       select 1 from load_constraints lc
+        where lc.load_id = p_load_id and lc.constraint_type = 'terminal_cap'
+     );
+
+  -- ── External constraints (spec section 11) ─────────────────────────────
+  -- Lowest quantified cap wins. A constraint with no gallon figure is still
+  -- meaningful: it proves the driver was capped without saying by how much.
+  select min(constrained_gallons)
+    into v_effective
+    from load_constraints
+   where load_id = p_load_id and constrained_gallons is not null;
+
+  if v_effective is not null then
+    -- A cap can only ever narrow. One above real capacity constrained nothing.
+    v_effective := least(v_available, v_effective);
+  else
+    v_effective := v_available;
+  end if;
+
+  -- ── Eligibility ────────────────────────────────────────────────────────
+  if v_available <= 0 or v_actual_gallons < 0 then
+    v_eligibility := 'excluded_incomplete_data';
+    v_exception   := 'Available capacity or actual gallons could not be established for this load.';
+  elsif v_actual_gross > v_legal then
+    v_eligibility := 'excluded_safety';
+    v_exception   := format('Actual gross weight exceeded the legal limit of %s lbs.', round(v_legal));
+  elsif v_overfilled then
+    v_eligibility := 'excluded_safety';
+    v_exception   := 'A compartment was loaded beyond its configured cap.';
+  elsif exists (
+    select 1 from load_constraints
+     where load_id = p_load_id and constrained_gallons is null
+  ) then
+    v_eligibility := 'excluded_constraint';
+    v_exception   := 'This load was capped by an external constraint of unknown size, so it is excluded rather than measured against full capacity.';
+  else
+    v_eligibility := 'eligible';
+    v_exception   := case when v_effective < v_available
+      then format('Measured against an external cap of %s gal rather than full capacity.', round(v_effective))
+      else null end;
+  end if;
+
+  if v_eligibility = 'eligible' then
+    -- Deliberately NOT clamped at 100. With the company target as the
+    -- denominator, above target but under the legal ceiling is a real, legal,
+    -- well-loaded trip, and clamping would erase the difference between
+    -- hitting the target and safely beating it.
+    v_utilization := (v_actual_gallons / nullif(v_effective, 0)) * 100;
+  else
+    v_utilization := null;
+  end if;
+
+  v_unused := greatest(0, v_effective - v_actual_gallons);
+
+  insert into load_utilization (
+    load_id, driver_id, company_id, loaded_at,
+    available_gallons, effective_available_gallons, actual_gallons,
+    unused_gallons, utilization_pct, eligibility, exception_reason,
+    actual_gallons_source, calc_version, updated_at
+  ) values (
+    p_load_id, v_load.user_id, v_company_id,
+    coalesce(v_load.loaded_at, v_load.completed_at, now()),
+    v_available, v_effective, v_actual_gallons,
+    v_unused, v_utilization, v_eligibility, v_exception,
+    -- Phase 1 is plan-vs-capacity: actual_gallons is what was planned, because
+    -- nothing in the app measures real loaded gallons yet. Stamped honestly so
+    -- history stays interpretable when a real source arrives.
+    'PLANNER', v_calc_version, now()
+  )
+  on conflict (load_id) do update set
+    driver_id                   = excluded.driver_id,
+    company_id                  = excluded.company_id,
+    loaded_at                   = excluded.loaded_at,
+    available_gallons           = excluded.available_gallons,
+    effective_available_gallons = excluded.effective_available_gallons,
+    actual_gallons              = excluded.actual_gallons,
+    unused_gallons              = excluded.unused_gallons,
+    utilization_pct             = excluded.utilization_pct,
+    eligibility                 = excluded.eligibility,
+    exception_reason            = excluded.exception_reason,
+    actual_gallons_source       = excluded.actual_gallons_source,
+    calc_version                = excluded.calc_version,
+    updated_at                  = now();
+
+  return jsonb_build_object(
+    'ok', true,
+    'available_gallons', v_available,
+    'effective_available_gallons', v_effective,
+    'actual_gallons', v_actual_gallons,
+    'unused_gallons', v_unused,
+    'utilization_pct', v_utilization,
+    'eligibility', v_eligibility,
+    'exception_reason', v_exception,
+    'limiting_factor', p_capacity->>'limiting_factor'
+  );
+end;
+$function$;
