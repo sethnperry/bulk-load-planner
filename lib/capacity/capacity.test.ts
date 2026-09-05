@@ -20,7 +20,9 @@ import {
   computeAvailableCapacity, CALC_VERSION, DEFAULT_LEGAL_GROSS_LBS,
   type CapacityCompartmentInput,
 } from "./computeAvailableCapacity.ts";
-import { computeUtilization, aggregateUtilization } from "./computeUtilization.ts";
+import { computeUtilization, aggregateUtilization,
+  normalizeUtilizationRow,
+} from "./computeUtilization.ts";
 
 // ── fixtures ────────────────────────────────────────────────────────────────
 // Real-shaped: a 3-compartment trailer, diesel-ish and gasoline-ish API values
@@ -332,4 +334,44 @@ test("period aggregate handles DB-shaped rows with string numerics", () => {
   assert.ok(Math.abs(agg.utilization_pct! - 90.12) < 0.01, `got ${agg.utilization_pct}`);
   assert.ok(agg.utilization_pct! < 95,
     "the naive mean of 90% and 100% is 95% -- gallon weighting must not flatter a tiny perfect load");
+});
+
+// A load_utilization row as PostgREST can hand it back: numeric columns are
+// not guaranteed to arrive as JSON numbers. The aggregate already coerced
+// defensively, but the Reports modal renders these rows DIRECTLY and calls
+// .toFixed() on the percentage -- proven against a real Postgres to throw and
+// take the whole modal down, not degrade. Normalising at the read boundary is
+// what makes UtilizationRow's declared `number` type true for every consumer.
+test("normalizeUtilizationRow makes DB-shaped numerics safe to format", () => {
+  const row = normalizeUtilizationRow({
+    load_id: "l1",
+    driver_id: "d1",
+    loaded_at: "2026-09-03T21:02:11.617345+00:00",
+    available_gallons: "6340",
+    effective_available_gallons: "6340",
+    actual_gallons: "6300",
+    unused_gallons: "40",
+    utilization_pct: "99.36908517350157728700",
+    eligibility: "eligible",
+    exception_reason: null,
+  } as any) as any;
+
+  assert.equal(typeof row.utilization_pct, "number");
+  assert.equal(row.utilization_pct.toFixed(1), "99.4", "this is the call that crashed the modal");
+  assert.equal(row.actual_gallons, 6300);
+  assert.equal(row.available_gallons + row.unused_gallons, 6380, "must add, not concatenate");
+  assert.equal(row.eligibility, "eligible", "non-numeric fields pass through untouched");
+  assert.equal(row.loaded_at, "2026-09-03T21:02:11.617345+00:00");
+});
+
+test("normalizeUtilizationRow keeps a null percentage null, never 0", () => {
+  const row = normalizeUtilizationRow({
+    available_gallons: "6340", effective_available_gallons: "6340",
+    actual_gallons: "3200", unused_gallons: "3140",
+    utilization_pct: null, eligibility: "excluded_constraint", exception_reason: "capped",
+  } as any) as any;
+
+  // 0% would read as "this driver loaded nothing"; an excluded load has no score.
+  assert.equal(row.utilization_pct, null);
+  assert.equal(row.actual_gallons, 3200);
 });

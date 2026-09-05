@@ -14,7 +14,7 @@ import { useMemo } from "react";
 
 import { useQuery } from "@tanstack/react-query";
 
-import { aggregateUtilization } from "./computeUtilization";
+import { aggregateUtilization, normalizeUtilizationRow } from "./computeUtilization";
 import { supabase } from "@/lib/supabase/client";
 
 export type UtilizationRow = {
@@ -54,7 +54,12 @@ async function fetchRows(filter: { driverId?: string; companyId?: string; since:
   if (error) throw error;
   // Cast through unknown: these tables are new in this pass, so the generated
   // Supabase types don't know them yet and infer an error shape for the select.
-  return (data ?? []) as unknown as UtilizationRow[];
+  //
+  // Normalised on the way out so UtilizationRow's `number` fields really are
+  // numbers. Without this the type is a promise the read path doesn't keep,
+  // and a consumer that formats a value (`pct.toFixed(1)`) throws rather than
+  // degrading -- which takes down the whole Reports modal, not just one cell.
+  return ((data ?? []) as unknown as UtilizationRow[]).map(normalizeUtilizationRow);
 }
 
 /** One driver's own loads over a period. */

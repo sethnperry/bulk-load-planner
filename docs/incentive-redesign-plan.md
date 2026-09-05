@@ -736,12 +736,85 @@ one file and not its twin), caught before it could diverge rather than after.
   still counted for the "1 load is not counted" line.
 - `tsc --noEmit` and `next build` clean.
 
+### Retested end to end 2026-09-05 (real Postgres, real component render)
+
+Re-verified from the database up rather than from the unit tests down, and it
+found a real crash bug (below). A throwaway PostgreSQL 16 was stood up, both
+Phase 1 migrations applied verbatim, and six loads seeded to cover **every**
+eligibility branch — eligible, eligible-but-externally-capped, unquantified
+cap, over-legal, and no-capacity-established. The real
+`record_load_utilization` produced all six rows, then:
+
+1. The **literal SELECT string** was read out of `useUtilization.ts` by parsing
+   the source (not retyped) and run against the database — all ten columns
+   resolve.
+2. Those exact rows went through the **real `aggregateUtilization`**: 94.2957%
+   gallon-weighted, where a naive mean of the same three percentages gives
+   94.6326%. The seed is deliberately non-uniform so the two cannot coincide —
+   a uniform seed would pass whether the weighting worked or not.
+3. `UtilizationReportModal.tsx` was **compiled and actually rendered** with
+   `renderToStaticMarkup` on those rows — the first time any Phase 2 component
+   has been executed rather than only typechecked. No browser needed and no new
+   dependency: `tsc` emits the component, React and react-dom are already
+   direct dependencies.
+
+Every driver-visible string was checked against the seed: the period figure,
+`6,300 gal of 6,340 gal` per load, all three exclusion notes in the right tone,
+the `3 loads are not counted … 1 externally capped … 1 over a safety limit …
+1 not measured` breakdown, plus the empty state (`—`, never `0%`), the loading
+state, singular grammar at exactly one load, and the staff "Viewing {driver}"
+line with no ranking anywhere.
+
+**Incidentally confirmed:** the first seed was accidentally overweight (7,760
+gal of diesel on a 34,800 lb tare is ~89,500 lbs gross) and the RPC's safety
+gate correctly forced `excluded_safety` on it. The gate fires on realistic-
+looking wrong data, not only on data written to trip it.
+
+### The bug this found: the Reports modal crashed on DB-shaped rows
+
+`UtilizationReportModal` calls `r.utilization_pct.toFixed(1)` directly on rows
+straight out of PostgREST. Rendering proved that a numeric arriving as a string
+throws `toFixed is not a function` **and takes the entire modal down** — not
+one bad cell, the whole screen. `gal()` survived the same input only because
+`Math.round` coerces, which is why nothing had caught it.
+
+What makes this a real defect rather than a hypothetical is that this codebase
+had already decided the question everywhere else: `usePlanSlots`' recall lookup
+coerces all seven fields with `Number()`, `aggregateUtilization` coerces
+defensively and already had a test pinning the string case, and `MyLoadsModal`
+uses `Number(x).toFixed(1)` — the exact defensive form — on the same class of
+value. Two of the three consumers of `load_utilization` coerced; the third
+rendered raw and threw.
+
+Fixed at the **read boundary**, not per call site: `normalizeUtilizationRow`
+(pure, in `computeUtilization.ts`) is applied in `fetchRows`, so
+`UtilizationRow`'s declared `number` type is finally true and every present and
+future consumer is safe without having to remember. Null percentages stay null
+— an excluded load has no score, and 0 would read as "loaded nothing." Two
+regression tests pin it (27 tests total), and re-rendering with string rows now
+produces markup byte-identical to the numeric run.
+
 ### Not verified
 
-The migrations are now applied (2026-09-05), but no live session was available
-in any session so far: this environment's network policy blocks every Supabase
-and protankr.com host outright (`connect_rejected`, gateway 403 on CONNECT --
-a policy denial, not a credential problem), so nothing has been clicked through.
-The card's own layout in a real browser, the numbers on a real completed load,
-and the behavior for a real driver-role login all remain unverified — the same
-gap this project has documented repeatedly.
+No live session in any session so far: this environment has no `.env.local`
+and its network policy blocks the Supabase and protankr.com hosts outright, so
+nothing has been clicked through against production data. What remains unproven
+is specifically what a real browser and a real account are needed for — the
+Planner card's layout on a device, the numbers on a genuinely completed live
+load, and the behavior for a real driver-role login. The rendering above covers
+the Reports modal's markup and copy but not its appearance, and the Planner
+card is inline in `page.tsx` rather than a component, so it could not be
+rendered in isolation the same way; its two data sources are both already
+coerced (`usePlanSlots` explicitly, and the RPC's own jsonb return), so it is
+not exposed to the bug found above.
+
+**Known boundary caveat, flagged not fixed.** `useUtilizationPeriod` builds
+`since` as `${start}T00:00:00Z` — UTC midnight, which for a US fleet is 4–7
+hours *before* the period's real local start, so a load from the previous
+period's last evening can fall into the new window. This was measured, not
+assumed. It is deliberately left alone: the existing Period Report filters with
+`${start}T00:00:00` (no zone), which Postgres resolves in the server's
+timezone — also UTC in practice — so the two surfaces agree today, and fixing
+only this one would make the driver's average disagree with the report their
+own company runs. There is also no per-company timezone field to do it
+correctly. It belongs with the Period Report, as one change to both.

@@ -206,3 +206,34 @@ export function aggregateUtilization(rows: AggregatableUtilization[]): Utilizati
     utilization_pct: availableSum > 0 ? (actualSum / availableSum) * 100 : null,
   };
 }
+
+/**
+ * Coerce one `load_utilization` row's numerics into real JS numbers.
+ *
+ * PostgREST hands `numeric` columns back without any guarantee that they
+ * arrive as JSON numbers, and this app already treats them as needing
+ * coercion everywhere else it reads them -- usePlanSlots' own recall lookup
+ * does exactly this field for field, MyLoadsModal wraps every numeric in
+ * Number() before formatting, and PayrollReportModal sums through Number().
+ *
+ * Doing it HERE, at the boundary, rather than at each call site is the point.
+ * `UtilizationRow` declares these as `number`, so anything downstream is
+ * entitled to call `.toFixed()` on them -- and a string that reaches a display
+ * does not degrade gracefully, it throws and takes the whole screen with it.
+ * One normaliser keeps the declared type honest for every present and future
+ * consumer instead of relying on each one to remember.
+ *
+ * Null stays null: an excluded load genuinely has no percentage, and 0 there
+ * would read as "this driver loaded nothing."
+ */
+export function normalizeUtilizationRow<T extends Record<string, unknown>>(row: T): T {
+  const num = (v: unknown) => (v == null ? 0 : Number(v));
+  return {
+    ...row,
+    available_gallons: num(row.available_gallons),
+    effective_available_gallons: num(row.effective_available_gallons),
+    actual_gallons: num(row.actual_gallons),
+    unused_gallons: num(row.unused_gallons),
+    utilization_pct: row.utilization_pct == null ? null : Number(row.utilization_pct),
+  };
+}

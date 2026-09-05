@@ -9262,6 +9262,45 @@ and those rows through the real aggregate — 90.12% gallon-weighted where a nai
 mean of percentages would have read 95%. 25 tests, `tsc` and `next build` clean.
 Still nothing clicked through in a browser, and the migrations are still unapplied.
 
+**Phase 2 retested 2026-09-05 (real Postgres + real component render) — found
+and fixed a crash.** Re-verified from the database up: a throwaway PostgreSQL 16
+with both migrations applied verbatim, six loads seeded to cover every
+eligibility branch, written by the real `record_load_utilization`. Then the
+literal SELECT string parsed out of `useUtilization.ts` (not retyped) run
+against it, those rows through the real `aggregateUtilization` (94.2957%
+gallon-weighted vs 94.6326% for a naive mean — the seed is non-uniform on
+purpose so the two can't coincide), and finally `UtilizationReportModal.tsx`
+**compiled and actually rendered** via `renderToStaticMarkup` — the first time a
+Phase 2 component has been executed rather than only typechecked. No browser,
+no new dependency: `tsc` emits it and React/react-dom are already direct deps.
+**Worth remembering this is possible** — same lesson as Phase 1's throwaway
+Postgres, one level up the stack.
+
+The render caught a real bug typechecking never could: `UtilizationReportModal`
+called `r.utilization_pct.toFixed(1)` on rows straight from PostgREST, so a
+numeric arriving as a string threw and took the **whole modal** down (`gal()`
+survived only because `Math.round` coerces, which is why it hid). This repo had
+already decided that question everywhere else — `usePlanSlots`' recall lookup
+coerces all seven fields, `aggregateUtilization` coerces and had a test pinning
+the string case, `MyLoadsModal` uses `Number(x).toFixed(1)` on the same class of
+value — so two of three consumers of `load_utilization` coerced and the third
+threw. Fixed at the **read boundary** (`normalizeUtilizationRow`, pure, applied
+in `fetchRows`) rather than per call site, so `UtilizationRow`'s declared
+`number` type is finally true for every present and future consumer; nulls stay
+null. 27 tests; string rows now render byte-identical to numeric ones.
+
+Also measured, flagged **not** fixed: `useUtilizationPeriod`'s
+`${start}T00:00:00Z` is UTC midnight, 4–7 hours before a US fleet's real local
+period start, so a load from the previous period's last evening can land in the
+new window. Left alone deliberately — the existing Period Report filters with
+`${start}T00:00:00` (no zone, resolved server-side as UTC too), so the two
+surfaces agree today, and there's no per-company timezone field to do it right.
+It belongs with the Period Report, as one change to both.
+
+Still unverified for Phase 2: anything needing a real browser or account — the
+Planner card's layout on a device, a genuinely completed live load, driver-role
+behavior. This environment has no `.env.local` and blocks the Supabase hosts.
+
 **Not started:** Phase 3 (fleet dashboard replacing the benchmark-based
 Underloading Dashboard), Phase 4 (incentive/payroll layer), and the legacy
 teardown — which lands **after** this engine is validated against real loads,
