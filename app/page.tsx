@@ -432,8 +432,7 @@ export default function Home() {
               How many gallons are your trucks leaving behind?
             </h2>
             <p className="closing-intro">
-              Use this free tool to validate a BOL. No signup, no email
-              required.
+              Use this free tool to validate a BOL.
             </p>
           </div>
 
