@@ -55,24 +55,32 @@ inputs, not measurements:
 - `loadingGallonsOverride` — the Plan Review per-compartment gallons edit.
   Reduces actual only; the plan's own max is unaffected.
 
-### 0.3 The capacity inputs are driver-editable — a real anti-gaming problem (§30)
+### 0.3 The capacity inputs are driver-editable
 
 | Input | Source | Who can change it |
 |---|---|---|
 | `tare_lbs` | `equipment_combos` | **any driver**, via `ScaleTicketModal` (autosaves on keystroke) |
-| `target_weight` | `equipment_combos` | **any driver**, same modal |
+| `target_weight` | `equipment_combos` | **any driver**, same modal, no role gate |
 | `cap_gallons` | `trailer_compartments` | admin/dispatch/lead (gated 2026-08-06) |
 | `capOverride` | client-side plan state | **any driver**, every load |
 | API / temp | driver-entered at completion | **any driver** |
 
-`target_weight` is not a legal limit. It defaults to 80,000 but is explicitly
-"the gross weight the driver is trying to hit." Lowering it lowers `allowedLbs`,
-which lowers available capacity, which *raises* utilization. Same for raising
-tare. Same for dragging a cap handle down.
+Two of these are settled by explicit direction (see §4) and are **not** treated
+as gaming vectors: tare is driver-entered by design (the driver weighs the truck;
+the scale ticket is the audit trail), and the company target is deliberately the
+100% mark.
 
-So a naive "utilization = actual ÷ effectiveMaxGallons" is trivially gameable to
-100% by three separate one-tap paths. **Available capacity must be computed from
-the trusted ceiling, not from the driver's own per-load choices.**
+The unresolved one is that `target_weight` — now the denominator of every
+utilization number — lives per-combo on `equipment_combos` and is editable by
+any driver through an ungated modal. Confirmed by reading `ScaleTicketModal.tsx`:
+no `myRole` prop, no role check, debounced autosave straight to
+`equipment_combos`. A driver can lower their own denominator in two taps.
+
+That is a mismatch between intent and schema, not a design flaw in the intent:
+the target is described as a *company* number and a *company-wide* goal, but the
+schema has it as per-equipment driver-editable state. §4 proposes the fix.
+
+`capOverride` remains a genuine gaming vector and is handled in §4.
 
 ### 0.4 Nothing captures the capacity inputs at load time
 
@@ -160,7 +168,8 @@ Everything needed to recompute capacity without reading a mutable table:
 `position`, `cap_gallons` **as configured**, `cap_override_gallons` nullable,
 `product_id`, `api_60`, `alpha_per_f`, `observed_api`, `observed_api_temp_f`,
 `temp_f`), plus the computed outputs `available_gallons`,
-`available_payload_lbs`, and `limiting_factor` text.
+`available_payload_lbs`, `capacity_at_legal_gallons` (§4a headroom) and
+`limiting_factor` text.
 
 `calc_version` is the §23 guarantee: a stored row is never recomputed by a newer
 engine; a version bump writes new rows, it does not mutate old ones.
@@ -209,15 +218,34 @@ tension with §30. Mitigation: the snapshot records every input, so a server-sid
 recompute can verify any row; and a Phase 1 validation task re-derives capacity
 in SQL for a sample of loads and diffs it against the stored value.
 
-**`target_weight` vs. legal limit.** Both get stored. `available_gallons` is
-computed against `min(target_weight, 80000)` — a driver who lowers their target
-does *not* shrink the denominator below what the equipment could legally carry,
-which closes the §0.3 gaming path. Where `target_weight < legal`, the gap is
-recorded as `limiting_factor = 'company_target'` so the fleet view can see it.
+**The company target is the 100% mark — not the legal limit.** Per explicit
+direction, `available_gallons` is computed against `target_weight`, full stop.
+A company that targets 79,500 lbs is measured against 79,500 lbs; the federal
+80,000 is *not* the driver's denominator and never appears in a driver's score.
+This reverses the `min(target, 80000)` rule the first draft of this plan
+proposed.
 
-Tare is the remaining soft spot: it is genuinely driver-editable and genuinely
-required. Phase 1 records tare + who last changed it; making tare edits
-role-gated or audited is proposed as a follow-up, flagged rather than assumed.
+**The legal limit becomes a second, company-wide goal (see §4a).**
+
+**Tare stays driver-entered**, per explicit direction: the driver weighs the
+truck and enters the weight, and a company that doubts a number has the weight
+ticket to check it against. No role gate is added. The snapshot records the tare
+used, so a disputed load can be re-derived against a corrected tare rather than
+argued about.
+
+**The one change this does require: move the target to company level.** Because
+`target_weight` is now the denominator, leaving it per-combo and ungated means
+"the company target" is neither. Proposed:
+`incentive_settings.target_gross_lbs` as the company number (default 79,500),
+with the existing per-combo `target_weight` kept as a staff-gated override for
+equipment that genuinely can't hit the company number. The planner keeps using
+whatever applies to the current combo, so `allowedLbs` and the live plan are
+unaffected; only *who can change it* moves. `ScaleTicketModal` keeps its tare
+field open to drivers and gates only the target field — a small, contained edit.
+
+**`capOverride` is still excluded from the denominator.** A driver dragging a
+compartment handle down is exactly what this metric should catch, so it reduces
+actual, never available.
 
 **Multi-product (§5, TEST D)** needs no special handling: `allocateWithCaps`
 already water-fills across heterogeneous per-compartment densities and caps.
@@ -225,6 +253,66 @@ already water-fills across heterogeneous per-compartment densities and caps.
 ceiling lifted — if capacity doesn't move, the binding constraint was volume
 (and the snapshot names which compartments were full); if it does, the binding
 constraint was weight.
+
+## 4a. The legal limit as a second, company-wide goal
+
+Per explicit direction, the gap between the company target and the legal limit
+is not waste and is not a driver's problem — it is **the company's own
+improvement goal, and it is a network-effect metric.**
+
+The reasoning, in the user's own framing: a company running one user can only
+safely target 79,500, because the API/temp reading it plans against may be
+hours old. A company with 25 users in an area can safely target 79,750, because
+somebody is updating that terminal's reading constantly — you are always loading
+right behind someone who just fed the app a current number. Denser usage →
+fresher readings → tighter density prediction → less margin needed → a higher
+target that is *still safe*.
+
+**Headroom** is therefore a first-class fleet metric:
+
+```
+headroom_gallons = capacity_at_legal_limit − capacity_at_company_target
+```
+
+Computed per load from the same snapshot (re-run the solver with the legal
+ceiling substituted for the target ceiling — one extra solve, no new inputs) and
+summed per period. It answers "what would this fleet haul if it could safely
+target the legal limit," which is a much better argument for adding users than
+any driver score.
+
+**This has a real statistical basis already in the database.**
+`terminal_temp_bias` accumulates a genuine Welford running mean and variance of
+prediction error per (terminal, hour bucket, month): `sample_count`,
+`mean_error`, `m2`. That is precisely "how well do we predict this terminal, and
+how confident are we in that." A target-raise recommendation does not need a new
+measurement system — it needs to read a table that has been accumulating the
+right data all along. (Columns are per CLAUDE.md's own architecture notes;
+`terminal_temp_bias` is one of the live-only tables with no migration file, so
+verify against `information_schema.columns` before building on it.)
+
+**Phase 1 scope: measure and show headroom. Nothing else.** Specifically:
+
+- `load_capacity_snapshot` stores `capacity_at_legal_gallons` alongside
+  `available_gallons`, so headroom is queryable historically.
+- The fleet view shows headroom in gallons next to unused capacity, framed as
+  opportunity, never as a shortfall.
+- No driver ever sees it. It is not in any driver-facing number, and a driver's
+  utilization is never affected by it.
+
+**Explicitly not built in Phase 1, and flagged rather than guessed:** an engine
+that recommends (or applies) a target raise based on local user density and bias
+maturity. That is a real feature with a real safety consequence — raising a
+company's target gross weight moves every driver closer to an overweight ticket —
+and it needs actual accuracy data behind the threshold, not a plausible-looking
+formula. §10 applies with full force: the app can present evidence that a raise
+is justified; it must never raise a target automatically, and the raise stays an
+explicit admin action.
+
+`LEGAL_GROSS_LBS = 80000` already exists as a constant in `page.tsx` and
+`LoadReportModal`; Phase 1 reuses it rather than introducing a second one.
+Per-state and permitted limits above 80,000 are a real refinement and a real
+future need, but out of scope here — noted so the column is `legal_gross_lbs`
+per load, not a hardcoded assumption baked into the math.
 
 ## 5. How external constraints are represented
 
@@ -250,9 +338,15 @@ guessing at one.
 
 ## 6. How driver utilization is calculated
 
-Per load: `utilization_pct = actual_gallons ÷ effective_available_gallons × 100`,
-capped at 100 for display (a load that comes in *over* the computed available is
-a data-quality or safety signal, not a >100% score).
+Per load: `utilization_pct = actual_gallons ÷ effective_available_gallons × 100`.
+
+**Over 100% is legitimate and is not clamped.** With the company target as the
+denominator (§4), a load that comes in above target but below the legal limit is
+a real, legal, well-executed load — the recap card already colors exactly that
+band green today. Clamping it to 100 would erase the difference between hitting
+the target and safely beating it, which is the behavior this system is supposed
+to reward. Utilization is only suspect above the *legal* ceiling, and that is a
+gate, not a score (below).
 
 Per period: **gallon-weighted, not a mean of percentages** —
 `Σ actual ÷ Σ effective_available` across eligible loads only. Averaging
@@ -263,8 +357,9 @@ fleet view (§16: "the most important number may be 253,000 gallons left
 available").
 
 **Safety is a gate, never a term (§10).** `eligibility` is set to
-`excluded_safety` when actual gross exceeds the legal limit or any compartment
-exceeds its configured cap. Excluded loads never contribute to a period
+`excluded_safety` when actual gross exceeds the **legal** limit (not the company
+target — exceeding a target is legal and fine) or any compartment exceeds its
+configured cap. Excluded loads never contribute to a period
 aggregate in either direction — a violation cannot raise a score, and per §10 it
 also is not folded in as a penalty. It surfaces as its own count.
 
@@ -339,7 +434,8 @@ Measurement only. No incentive UI, no money, no thresholds (§31).
    `load_utilization`, stamped `actual_gallons_source = 'PLANNER'`.
 5. Automatic `out_of_allocation` → `load_constraints` linkage.
 6. Safety/eligibility gating.
-7. Read helpers: per-driver period aggregate, per-company period aggregate.
+7. Read helpers: per-driver period aggregate, per-company period aggregate,
+   per-company headroom-to-legal (§4a).
 8. Backfill decision: per §26, **do not** synthesize `available_gallons` for
    historical loads from the old benchmarks. Existing `load_points` data is
    exported to a `legacy_load_points` archive table and left out of the new
@@ -354,17 +450,21 @@ all.
 
 ---
 
-## Open questions for the user
+## Decisions made, and the one thing left to confirm
 
-Resolved: actual gallons — Phase 1 ships plan-vs-capacity, labeled as such
-(§8). Still open:
+**Resolved by explicit direction:**
 
-1. **Tare.** `tare_lbs` is editable by any driver via `ScaleTicketModal` and
-   feeds the capacity denominator directly. Leave it editable (recorded, but
-   gameable), or gate it to admin/dispatch/lead the way `cap_gallons` already
-   is? Gating it is a small change; it just needs a call, because drivers do
-   legitimately re-weigh.
-2. **`target_weight` below legal.** The plan measures capacity against
-   `min(target_weight, 80000)` so lowering a target can't inflate utilization.
-   Confirm — a company deliberately targeting 78,000 will show a permanent
-   ~2.5% unused gap, attributed to `company_target` rather than to the driver.
+1. *Actual gallons* — Phase 1 ships plan-vs-capacity, labeled as such (§8).
+2. *Tare* — stays driver-entered and ungated. The driver weighs the truck; the
+   weight ticket is the check if a company doubts a number (§4).
+3. *The 100% mark* — the company target, not the legal limit. The legal limit is
+   a separate company-wide goal tied to user density (§4a).
+
+**Left to confirm — one consequence of #3, not a new question:** the company
+target is currently a per-combo field that any driver can edit through an
+ungated modal, so as written it is neither company-level nor protected. §4
+proposes `incentive_settings.target_gross_lbs` as the company number with a
+staff-gated per-combo override, and gating only the target field in
+`ScaleTicketModal` while leaving tare open. That is a small change, but it is a
+change to something drivers can do today, so it should be a deliberate yes
+rather than something that arrives with the incentive system.
