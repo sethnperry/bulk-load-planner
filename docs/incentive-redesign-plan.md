@@ -233,15 +233,23 @@ ticket to check it against. No role gate is added. The snapshot records the tare
 used, so a disputed load can be re-derived against a corrected tare rather than
 argued about.
 
-**The one change this does require: move the target to company level.** Because
-`target_weight` is now the denominator, leaving it per-combo and ungated means
-"the company target" is neither. Proposed:
+**The target moves to company level and gets staff-gated (approved).** Because
+`target_weight` is now the denominator, leaving it per-combo and ungated meant
+"the company target" was neither. Shipping:
 `incentive_settings.target_gross_lbs` as the company number (default 79,500),
 with the existing per-combo `target_weight` kept as a staff-gated override for
 equipment that genuinely can't hit the company number. The planner keeps using
 whatever applies to the current combo, so `allowedLbs` and the live plan are
-unaffected; only *who can change it* moves. `ScaleTicketModal` keeps its tare
-field open to drivers and gates only the target field — a small, contained edit.
+unaffected; only *who can change it* moves.
+
+`ScaleTicketModal` keeps its tare field open to every driver and gates only the
+target field. **Fleet tier only** — a solo company's sole member is always
+`role = 'admin'` by the existing solo-provisioning design, so a solo driver
+still sets their own target with no code branch needed; the same admin check
+does both. This follows the equipment cap/Unit# gating precedent from
+2026-08-06 (`myRole` threaded through, admin/dispatch/lead), and
+`ScaleTicketModal` currently receives no `myRole` prop at all, so that is the
+one piece of new plumbing.
 
 **`capOverride` is still excluded from the denominator.** A driver dragging a
 compartment handle down is exactly what this metric should catch, so it reduces
@@ -313,6 +321,106 @@ explicit admin action.
 Per-state and permitted limits above 80,000 are a real refinement and a real
 future need, but out of scope here — noted so the column is `legal_gross_lbs`
 per load, not a hardcoded assumption baked into the math.
+
+## 4b. Target vs. legal limit as the driver's denominator — decision record
+
+Raised as a genuine open question after §4a was written. Worked through here
+rather than settled by preference, because it determines what every driver sees.
+
+**First: it is not a fork.** The snapshot already stores both
+`available_gallons` (at target) and `capacity_at_legal_gallons` (§4a), so both
+utilization numbers cost one extra division each. Storing both is free and
+non-committal. The only real decision is **which one a driver is shown**, and
+that is a display choice that can be flipped later without a migration or a
+recompute.
+
+### The case for the company target
+
+**1. 100% has to mean something a driver can actually do.** With the target as
+the denominator, 100% means "I loaded what I was told to load" — reachable,
+repeatable, and true for every driver in the company. With the legal limit as
+the denominator, 100% means "I loaded to 80,000," which the company has
+explicitly instructed them *not* to do by setting a target below it. Rewarding a
+number that company policy forbids is incoherent, and §19 already rules out
+incentives that push against operational restrictions.
+
+**2. Nobody can ever score 100%, and the shortfall is arbitrary.** Under a legal
+denominator, every driver is permanently capped at `target_payload ÷
+legal_payload`. Modeled on two real-shaped combos in the same company:
+
+| | tare | vs. target | vs. legal | best possible vs. legal |
+|---|---|---|---|---|
+| Driver A | 34,000 | 99.56% | 98.48% | **98.91%** |
+| Driver B | 32,000 | 99.58% | 98.54% | **98.96%** |
+
+Both drivers performed essentially identically (99.56 vs 99.58 against target).
+The legal denominator preserves that, but caps each at a *different* ceiling,
+and the heavier tractor gets the lower one. The effect is small — 0.05
+percentage points — so this is a minor argument, not a decisive one. But it
+points the wrong way: §7 is explicit that equipment differences must not decide
+who wins, and this bakes a small equipment handicap into the denominator.
+
+**3. §21's "100% or nothing" problem gets worse, not better.** A legal
+denominator has no natural top, so any qualification threshold becomes an
+indirection — "95% of legal" is really "99.4% of target," which no driver will
+reason about correctly at a rack at 4am. A target denominator gives 100% an
+obvious, communicable meaning.
+
+**4. Solo tier only works this way.** A solo driver sets their own target, so
+under a target denominator the number is self-referential — "am I hitting my own
+mark?" That is the right question for a self-improvement tool with no bonus
+attached. Under a legal denominator a solo driver's score is a permanent
+sub-100 they cannot move without exceeding their own chosen target.
+
+### The real argument against the target — and why it is actually a feature
+
+Raising the company target (the entire point of §4a) **mechanically lowers every
+driver's utilization overnight**, through no fault of theirs. 79,500 → 79,750
+drops everyone ~0.3% for doing exactly the same work. Left unexamined, that
+makes drivers structurally opposed to the raise ProTankr exists to enable —
+a serious perverse incentive.
+
+But it resolves cleanly, because of what §4a's premise actually claims: the
+target only rises *when denser usage has made it safely reachable*. If that
+premise holds, a driver hitting 99% at 79,500 also hits ~99% at 79,750, because
+the tighter prediction is precisely what allowed the raise. Scores should not
+drop.
+
+So if fleet utilization drops after a raise **and stays down**, that is not a
+driver problem — it is evidence the raise outran the data. **Utilization against
+the target doubles as the feedback signal on whether a target raise was
+justified.** That property only exists under the target denominator; against the
+legal limit, a raise looks like unambiguous improvement whether or not it was
+safe.
+
+This does need handling in the UI: the snapshot records the target each load was
+measured against, so a period spanning a target change can say so rather than
+showing an unexplained step down.
+
+### The one thing the legal limit uniquely gives you
+
+A universal denominator. Every company's target differs, so "97% of target" is
+not comparable across companies — but "94% of legal" is. That is the only way to
+ever produce an industry-benchmark number for §28's ROI story ("the average
+ProTankr fleet runs at X% of legal"). Worth having.
+
+That is a **fleet and marketing** metric, though, not a driver metric — which is
+exactly where §4a already put the legal limit. Storing both covers it.
+
+### Decision
+
+- **Driver-facing utilization: against the company target.** 100% is reachable
+  and means "on target."
+- **Both stored per load**, so legal-based utilization and headroom are always
+  queryable historically.
+- **Fleet view shows both**: utilization vs. target (are our drivers
+  executing?) and vs. legal (what is the total opportunity?). The gap between
+  them is the §4a headroom story, and it is the number that argues for adding
+  users.
+- **A driver never sees the legal-based number.** Their score must not move
+  because of a company-level decision they had no part in.
+- Reversible: flipping the driver-facing denominator later is a display change
+  over data that already exists.
 
 ## 5. How external constraints are represented
 
@@ -450,21 +558,24 @@ all.
 
 ---
 
-## Decisions made, and the one thing left to confirm
+## Decisions made
 
-**Resolved by explicit direction:**
+All resolved by explicit direction. Nothing is blocking Phase 1.
 
-1. *Actual gallons* — Phase 1 ships plan-vs-capacity, labeled as such (§8).
-2. *Tare* — stays driver-entered and ungated. The driver weighs the truck; the
+1. **Actual gallons** — Phase 1 ships plan-vs-capacity, labeled as such, with
+   `actual_gallons_source = PLANNER` and the metric named "Plan Utilization"
+   until a real actual exists (§8).
+2. **Tare** — stays driver-entered and ungated. The driver weighs the truck; the
    weight ticket is the check if a company doubts a number (§4).
-3. *The 100% mark* — the company target, not the legal limit. The legal limit is
-   a separate company-wide goal tied to user density (§4a).
+3. **The driver's 100% mark** — the company target, not the legal limit. Both
+   are stored per load; the legal-based number is a fleet metric only, and the
+   choice is reversible as a display change (§4b).
+4. **The target itself** — moves to company level, staff-gated, fleet tier only;
+   solo keeps setting its own via the same admin check (§4).
+5. **The legal limit** — a company-wide second goal driven by user density.
+   Phase 1 measures headroom; it never auto-raises a target (§4a).
 
-**Left to confirm — one consequence of #3, not a new question:** the company
-target is currently a per-combo field that any driver can edit through an
-ungated modal, so as written it is neither company-level nor protected. §4
-proposes `incentive_settings.target_gross_lbs` as the company number with a
-staff-gated per-combo override, and gating only the target field in
-`ScaleTicketModal` while leaving tare open. That is a small change, but it is a
-change to something drivers can do today, so it should be a deliberate yes
-rather than something that arrives with the incentive system.
+Deliberately deferred, recorded so they are not rediscovered from scratch: a
+target-raise recommendation engine built on `terminal_temp_bias` maturity (§4a),
+per-compartment BOL gallons entry (§8), per-state and permitted legal limits
+above 80,000 (§4a), and dispatch-set caps (§5).
