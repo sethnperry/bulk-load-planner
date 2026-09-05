@@ -217,7 +217,7 @@ function OpportunityCalculator() {
 // Bump whenever public/app-screens/planner.jpg is re-exported -- the bare
 // path alone lets browsers keep serving a stale cached copy of the old
 // screenshot indefinitely (same URL every time, no cache-buster).
-const PLANNER_SCREEN_VERSION = "20260905-planreview";
+const PLANNER_SCREEN_VERSION = "20260905b-cropped";
 
 function PhoneScreen() {
   return (
@@ -230,13 +230,17 @@ function PhoneScreen() {
         {/* eslint-disable-next-line @next/next/no-img-element -- a real
             captured screenshot of the live Planner screen; not a Next/Image
             candidate since this is a static marketing asset, not content
-            that benefits from remote optimization. */}
+            that benefits from remote optimization. Cropped to remove the
+            source device's own status bar and gesture nav bar -- that's OS
+            chrome specific to whichever phone the screenshot was taken on,
+            not app content, and a mockup frame's own fake notch/camera
+            cutout would otherwise have to line up with real status-bar
+            icons/a real camera hole it knows nothing about. */}
         <img
           src={`/app-screens/planner.jpg?v=${PLANNER_SCREEN_VERSION}`}
           alt="ProTankr planner screen, showing a real compartment load plan"
           className="screen-img"
         />
-        <div className="dynamic-island" />
       </div>
     </div>
   );
@@ -777,18 +781,6 @@ export default function Home() {
         .phone-btn-power { right: -3px; top: 17%; width: 3px; height: 8.5%; }
         .screen { position: relative; background: #111111; border-radius: 40px; overflow: hidden; line-height: 0; }
         .screen-img { display: block; width: 100%; height: auto; }
-        .dynamic-island {
-          position: absolute;
-          top: 14px;
-          left: 50%;
-          transform: translateX(-50%);
-          width: 84px;
-          height: 24px;
-          background: #000;
-          border-radius: 14px;
-          z-index: 2;
-          box-shadow: inset 0 0 0 1px rgba(255,255,255,0.06);
-        }
 
         /* ---------- Not another TMS ---------- */
         .tms-section { background: #f6f6f5; padding: 96px 48px; }
