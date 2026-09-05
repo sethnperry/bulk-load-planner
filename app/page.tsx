@@ -67,17 +67,17 @@ function OpportunityCalculator() {
   );
 
   // A driver checking this before leaving the rack needs three distinct
-  // answers, not two -- "over" and "already tight, well done" are very
-  // different situations that both used to collapse into one "short gap"
-  // case. TOLERANCE_GAL absorbs the estimate's own imprecision (this is
-  // published density math, not the real app's per-product tuning) so a
-  // load that's genuinely right at the line doesn't get flagged either
-  // way on rounding noise alone.
+  // answers -- over legal weight, genuinely close to it (a real "nice
+  // work"), or meaningfully under. Being over is never a "nice work" case,
+  // even by a little, so the tolerance only softens the boundary on the
+  // UNDER side (rounding noise in the estimate could otherwise flag a
+  // load that's actually fine as "left on the table" by a couple gallons)
+  // -- any real overage, no matter how small, always shows the warning.
   const TOLERANCE_GAL = 25;
   let result:
-    | { kind: "over"; lbsOver: number }
-    | { kind: "good"; gal: number }
-    | { kind: "left"; gal: number }
+    | { kind: "over"; lbsOver: number; liveWeightLbs: number }
+    | { kind: "good"; gal: number; liveWeightLbs: number }
+    | { kind: "left"; gal: number; liveWeightLbs: number }
     | null = null;
   if (allFilled) {
     const lbsPerGal = estimateLbsPerGallon(apiNum, temp);
@@ -85,13 +85,18 @@ function OpportunityCalculator() {
     const maxLegalPayloadLbs = Math.max(limit - tare, 0);
     const maxLegalGallons = maxLegalPayloadLbs / lbsPerGal;
     const gapGallons = maxLegalGallons - actual;
+    const liveWeightLbs = Math.round(actualTotalLbs);
 
-    if (gapGallons < -TOLERANCE_GAL) {
-      result = { kind: "over", lbsOver: Math.round(actualTotalLbs - limit) };
-    } else if (Math.abs(gapGallons) <= TOLERANCE_GAL) {
-      result = { kind: "good", gal: Math.round(Math.abs(gapGallons)) };
+    if (gapGallons < 0) {
+      result = {
+        kind: "over",
+        lbsOver: Math.round(actualTotalLbs - limit),
+        liveWeightLbs,
+      };
+    } else if (gapGallons <= TOLERANCE_GAL) {
+      result = { kind: "good", gal: Math.round(gapGallons), liveWeightLbs };
     } else {
-      result = { kind: "left", gal: Math.round(gapGallons) };
+      result = { kind: "left", gal: Math.round(gapGallons), liveWeightLbs };
     }
   }
 
@@ -155,34 +160,40 @@ function OpportunityCalculator() {
 
       <div className="calc-result-area">
         {result ? (
-          result.kind === "over" ? (
-            <div className="calc-result calc-result-warn">
-              <span className="calc-result-num">
-                ~{result.lbsOver.toLocaleString("en-US")} lbs over
-              </span>
-              <span className="calc-result-label">
-                You may be overweight. Recheck before you leave the rack.
-              </span>
-            </div>
-          ) : result.kind === "good" ? (
-            <div className="calc-result calc-result-good">
-              <span className="calc-result-num">
-                Within {result.gal.toLocaleString("en-US")} gal
-              </span>
-              <span className="calc-result-label">
-                of your legal capacity. Nice work.
-              </span>
-            </div>
-          ) : (
-            <div className="calc-result calc-result-loss">
-              <span className="calc-result-num">
-                {result.gal.toLocaleString("en-US")} gal
-              </span>
-              <span className="calc-result-label">
-                left on the table, this load.
-              </span>
-            </div>
-          )
+          <>
+            {result.kind === "over" ? (
+              <div className="calc-result calc-result-warn">
+                <span className="calc-result-num">
+                  ~{result.lbsOver.toLocaleString("en-US")} lbs over
+                </span>
+                <span className="calc-result-label">
+                  You may be overweight. Recheck before you leave the rack.
+                </span>
+              </div>
+            ) : result.kind === "good" ? (
+              <div className="calc-result calc-result-good">
+                <span className="calc-result-num">
+                  Within {result.gal.toLocaleString("en-US")} gal
+                </span>
+                <span className="calc-result-label">
+                  of your legal capacity. Nice work.
+                </span>
+              </div>
+            ) : (
+              <div className="calc-result calc-result-loss">
+                <span className="calc-result-num">
+                  {result.gal.toLocaleString("en-US")} gal
+                </span>
+                <span className="calc-result-label">
+                  left on the table, this load.
+                </span>
+              </div>
+            )}
+            <p className="calc-live-weight">
+              Live weight: {result.liveWeightLbs.toLocaleString("en-US")} lbs
+              (limit {limit.toLocaleString("en-US")} lbs)
+            </p>
+          </>
         ) : (
           <div className="calc-result calc-result-placeholder">
             <span className="calc-result-label">
@@ -421,9 +432,8 @@ export default function Home() {
               How many gallons are your trucks leaving behind?
             </h2>
             <p className="closing-intro">
-              Use this free tool to validate your BOL: check if you&apos;re
-              overweight before you leave the rack, or how much you left on
-              the table if you&apos;re not. No signup, no email required.
+              Use this free tool to validate a BOL. No signup, no email
+              required.
             </p>
           </div>
 
@@ -830,6 +840,11 @@ export default function Home() {
         }
         .calc-result-placeholder .calc-result-label {
           font: 500 14px var(--font);
+          color: rgba(255,255,255,0.4);
+        }
+        .calc-live-weight {
+          margin: 12px 0 0;
+          font: 600 12.5px var(--font);
           color: rgba(255,255,255,0.4);
         }
 
