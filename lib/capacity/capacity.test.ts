@@ -1,0 +1,313 @@
+// lib/capacity/capacity.test.ts
+//
+// The spec's acceptance tests (section 36), as runnable assertions.
+//
+// Runs on node's built-in test runner with native TypeScript type-stripping --
+// no new dependency, and no DB, no auth session and no browser. That matters
+// for this project specifically: live verification has repeatedly been blocked
+// by not having an authenticated session available, so the parts of this system
+// that CAN be proven without one should be.
+//
+//   npm test
+//
+// Relative imports (not "@/...") so node resolves them without the tsconfig
+// path aliases, which the built-in runner does not read.
+
+import { test } from "node:test";
+import assert from "node:assert/strict";
+
+import {
+  computeAvailableCapacity, CALC_VERSION, DEFAULT_LEGAL_GROSS_LBS,
+  type CapacityCompartmentInput,
+} from "./computeAvailableCapacity.ts";
+import { computeUtilization, aggregateUtilization } from "./computeUtilization.ts";
+
+// ── fixtures ────────────────────────────────────────────────────────────────
+// Real-shaped: a 3-compartment trailer, diesel-ish and gasoline-ish API values
+// taken from the ranges products.api_60 actually holds in this app.
+
+const DIESEL = { api_60: 36.5, alpha_per_f: 0.00045 };
+const GAS    = { api_60: 60.4, alpha_per_f: 0.00070 };
+
+function comp(
+  n: number, cap: number, position: number,
+  product: { api_60: number; alpha_per_f: number },
+  tempF = 75,
+  overrides: Partial<CapacityCompartmentInput> = {},
+): CapacityCompartmentInput {
+  return {
+    comp_number: n, position, cap_gallons: cap, cap_override_gallons: null,
+    product_id: `p-${product.api_60}`,
+    api_60: product.api_60, alpha_per_f: product.alpha_per_f,
+    observed_api: null, observed_api_temp_f: null, temp_f: tempF,
+    ...overrides,
+  };
+}
+
+const THREE_COMP = [comp(1, 3000, -1, DIESEL), comp(2, 2800, 0, DIESEL), comp(3, 2600, 1, DIESEL)];
+
+function capacityFor(over: Partial<Parameters<typeof computeAvailableCapacity>[0]> = {}) {
+  return computeAvailableCapacity({
+    tare_lbs: 34000, target_gross_lbs: 79500, legal_gross_lbs: DEFAULT_LEGAL_GROSS_LBS,
+    cg_bias: 0, compartments: THREE_COMP, ...over,
+  });
+}
+
+// ── TEST A — different tare ─────────────────────────────────────────────────
+test("A: identical trailers on different tractors get their own capacity", () => {
+  const heavy = capacityFor({ tare_lbs: 34000 });
+  const light = capacityFor({ tare_lbs: 32000 });
+
+  assert.ok(light.available_gallons > heavy.available_gallons,
+    "the lighter tractor must get more available gallons -- no static benchmark");
+
+  // 2,000 lb of extra payload, converted at this product's own density.
+  const lbsPerGal = heavy.available_payload_lbs / heavy.available_gallons;
+  const expectedExtra = 2000 / lbsPerGal;
+  assert.ok(Math.abs((light.available_gallons - heavy.available_gallons) - expectedExtra) < 1,
+    "the gap must equal the tare difference converted at load density");
+});
+
+// ── TEST B — different product density ──────────────────────────────────────
+test("B: a lighter product yields more available gallons on the same equipment", () => {
+  const diesel = capacityFor();
+  const gasoline = capacityFor({
+    compartments: [comp(1, 3000, -1, GAS), comp(2, 2800, 0, GAS), comp(3, 2600, 1, GAS)],
+  });
+  assert.ok(gasoline.available_gallons > diesel.available_gallons,
+    "gasoline is less dense, so the same weight ceiling allows more gallons");
+});
+
+// ── TEST C — temperature ────────────────────────────────────────────────────
+test("C: a warmer load is less dense, so more gallons fit under the same ceiling", () => {
+  const cold = capacityFor({ compartments: THREE_COMP.map((c) => ({ ...c, temp_f: 40 })) });
+  const warm = capacityFor({ compartments: THREE_COMP.map((c) => ({ ...c, temp_f: 95 })) });
+  assert.ok(warm.available_gallons > cold.available_gallons,
+    "thermal expansion means warm product weighs less per gallon");
+});
+
+// ── TEST D — multi-product ──────────────────────────────────────────────────
+test("D: a split load respects each compartment's own product and cap", () => {
+  const split = capacityFor({
+    compartments: [comp(1, 3000, -1, GAS), comp(2, 2800, 0, DIESEL), comp(3, 2600, 1, DIESEL)],
+  });
+  const allDiesel = capacityFor();
+  const allGas = capacityFor({
+    compartments: [comp(1, 3000, -1, GAS), comp(2, 2800, 0, GAS), comp(3, 2600, 1, GAS)],
+  });
+
+  assert.ok(split.available_gallons > allDiesel.available_gallons, "must beat the all-heavy case");
+  assert.ok(split.available_gallons < allGas.available_gallons, "must not reach the all-light case");
+  assert.ok(split.available_gallons <= split.total_volume_gallons, "never exceeds physical volume");
+});
+
+// ── TEST E — underload ──────────────────────────────────────────────────────
+test("E: an underload reports the real gallons left and a utilization below 100", () => {
+  const r = computeUtilization({
+    available_gallons: 7820, actual_gallons: 7200, actual_gross_lbs: 74000,
+    legal_gross_lbs: 80000, compartment_overfilled: false,
+    external_cap_gallons: null, has_unquantified_constraint: false,
+  });
+  assert.equal(r.eligibility, "eligible");
+  assert.equal(r.unused_gallons, 620);
+  assert.ok(Math.abs(r.utilization_pct! - 92.07) < 0.01, `got ${r.utilization_pct}`);
+});
+
+// ── TEST F — near maximum ───────────────────────────────────────────────────
+test("F: a near-max load reports a small remainder", () => {
+  const r = computeUtilization({
+    available_gallons: 7820, actual_gallons: 7760, actual_gross_lbs: 79400,
+    legal_gross_lbs: 80000, compartment_overfilled: false,
+    external_cap_gallons: null, has_unquantified_constraint: false,
+  });
+  assert.equal(r.unused_gallons, 60);
+  assert.ok(Math.abs(r.utilization_pct! - 99.23) < 0.01, `got ${r.utilization_pct}`);
+});
+
+// ── TEST G — external cap ───────────────────────────────────────────────────
+test("G: a quantified external cap re-baselines the denominator", () => {
+  const r = computeUtilization({
+    available_gallons: 7850, actual_gallons: 7480, actual_gross_lbs: 79000,
+    legal_gross_lbs: 80000, compartment_overfilled: false,
+    external_cap_gallons: 7500, has_unquantified_constraint: false,
+  });
+  assert.equal(r.eligibility, "eligible", "an external cap must not disqualify the driver");
+  assert.equal(r.effective_available_gallons, 7500);
+  assert.ok(Math.abs(r.utilization_pct! - 99.73) < 0.01, `got ${r.utilization_pct}`);
+  assert.equal(r.unused_gallons, 20, "measured against the cap, not full capacity");
+});
+
+test("G2: an unquantified cap excludes the load instead of guessing a number", () => {
+  const r = computeUtilization({
+    available_gallons: 7850, actual_gallons: 7480, actual_gross_lbs: 79000,
+    legal_gross_lbs: 80000, compartment_overfilled: false,
+    external_cap_gallons: null, has_unquantified_constraint: true,
+  });
+  assert.equal(r.eligibility, "excluded_constraint");
+  assert.equal(r.utilization_pct, null, "no score is better than a wrong score");
+});
+
+test("G3: a cap above real capacity constrained nothing", () => {
+  const r = computeUtilization({
+    available_gallons: 7500, actual_gallons: 7400, actual_gross_lbs: 79000,
+    legal_gross_lbs: 80000, compartment_overfilled: false,
+    external_cap_gallons: 9000, has_unquantified_constraint: false,
+  });
+  assert.equal(r.effective_available_gallons, 7500, "a cap can only ever narrow");
+});
+
+// ── TEST H — safety violation ───────────────────────────────────────────────
+test("H: exceeding the legal limit is never rewarded", () => {
+  const r = computeUtilization({
+    available_gallons: 7820, actual_gallons: 7900, actual_gross_lbs: 80400,
+    legal_gross_lbs: 80000, compartment_overfilled: false,
+    external_cap_gallons: null, has_unquantified_constraint: false,
+  });
+  assert.equal(r.eligibility, "excluded_safety");
+  assert.equal(r.utilization_pct, null, "a violation must not produce a >100% score");
+});
+
+test("H2: an overfilled compartment is a safety exclusion too", () => {
+  const r = computeUtilization({
+    available_gallons: 7820, actual_gallons: 7800, actual_gross_lbs: 79000,
+    legal_gross_lbs: 80000, compartment_overfilled: true,
+    external_cap_gallons: null, has_unquantified_constraint: false,
+  });
+  assert.equal(r.eligibility, "excluded_safety");
+});
+
+test("H3: a violation is excluded from aggregates, not folded in as a penalty", () => {
+  const good = computeUtilization({
+    available_gallons: 1000, actual_gallons: 990, actual_gross_lbs: 79000,
+    legal_gross_lbs: 80000, compartment_overfilled: false,
+    external_cap_gallons: null, has_unquantified_constraint: false,
+  });
+  const violation = computeUtilization({
+    available_gallons: 1000, actual_gallons: 1100, actual_gross_lbs: 80500,
+    legal_gross_lbs: 80000, compartment_overfilled: false,
+    external_cap_gallons: null, has_unquantified_constraint: false,
+  });
+
+  const agg = aggregateUtilization([good, violation]);
+  assert.equal(agg.eligible_loads, 1);
+  assert.equal(agg.excluded_safety, 1);
+  assert.equal(agg.actual_gallons, 990, "the violation's gallons must not inflate the total");
+  assert.ok(Math.abs(agg.utilization_pct! - 99) < 0.001, "and must not raise the score");
+});
+
+// ── Above target but under legal is legitimate, not clamped ─────────────────
+test("above the company target but under legal scores over 100 and stays eligible", () => {
+  const r = computeUtilization({
+    available_gallons: 7500, actual_gallons: 7560, actual_gross_lbs: 79800,
+    legal_gross_lbs: 80000, compartment_overfilled: false,
+    external_cap_gallons: null, has_unquantified_constraint: false,
+  });
+  assert.equal(r.eligibility, "eligible", "beating a target is not a violation");
+  assert.ok(r.utilization_pct! > 100, "clamping would erase safely beating the target");
+  assert.equal(r.unused_gallons, 0, "unused never goes negative");
+});
+
+// ── TEST I — historical stability ───────────────────────────────────────────
+test("I: a result carries the engine version that produced it", () => {
+  assert.equal(capacityFor().calc_version, CALC_VERSION);
+  // The stability guarantee itself is structural: stored rows keep their own
+  // calc_version and are never recomputed in place. What is asserted here is
+  // that the version travels with the result, which is what makes that
+  // possible -- see the plan's section 7.
+});
+
+test("I2: identical inputs always produce an identical result", () => {
+  assert.deepEqual(capacityFor(), capacityFor(), "the engine must be deterministic");
+});
+
+// ── TEST J — no manager benchmark ───────────────────────────────────────────
+test("J: capacity needs no benchmark configuration of any kind", () => {
+  const r = capacityFor();
+  assert.ok(r.available_gallons > 0,
+    "a company that has configured nothing still gets a real capacity number");
+});
+
+// ── TEST K — no incentive configuration ─────────────────────────────────────
+test("K: utilization works with no incentive configuration", () => {
+  const r = computeUtilization({
+    available_gallons: capacityFor().available_gallons, actual_gallons: 7000,
+    actual_gross_lbs: 74000, legal_gross_lbs: 80000, compartment_overfilled: false,
+    external_cap_gallons: null, has_unquantified_constraint: false,
+  });
+  assert.equal(r.eligibility, "eligible");
+  assert.ok(r.utilization_pct! > 0, "measurement must not depend on the incentive layer");
+});
+
+// ── Anti-gaming: the rules that make the number defensible ──────────────────
+test("a driver's capOverride cannot shrink their own denominator", () => {
+  const honest = capacityFor();
+  const dragged = capacityFor({
+    compartments: THREE_COMP.map((c) => ({ ...c, cap_override_gallons: 100 })),
+  });
+  assert.equal(dragged.available_gallons, honest.available_gallons,
+    "capacity is measured against the configured cap, never the handle drag");
+});
+
+test("the company target is the denominator; legal only feeds fleet headroom", () => {
+  const r = capacityFor({ target_gross_lbs: 79500, legal_gross_lbs: 80000 });
+  assert.ok(r.capacity_at_legal_gallons > r.available_gallons,
+    "the legal ceiling allows more than the company target");
+  assert.ok(Math.abs(r.headroom_gallons - (r.capacity_at_legal_gallons - r.available_gallons)) < 1e-6);
+  assert.equal(r.limiting_factor, "company_target",
+    "a weight-limited load under a sub-legal target is limited BY that target");
+});
+
+test("headroom is floored at zero when a target meets or exceeds legal", () => {
+  const r = capacityFor({ target_gross_lbs: 80000, legal_gross_lbs: 80000 });
+  assert.equal(r.headroom_gallons, 0);
+  assert.equal(r.limiting_factor, "legal_weight");
+});
+
+// ── Limiting factor + degenerate inputs ─────────────────────────────────────
+test("a load that fills every compartment is volume-limited, with no headroom", () => {
+  // Tiny tanks against a full weight allowance: volume runs out first.
+  const r = capacityFor({ compartments: [comp(1, 100, 0, GAS)] });
+  assert.equal(r.limiting_factor, "volume");
+  assert.equal(r.available_gallons, r.total_volume_gallons);
+  assert.equal(r.headroom_gallons, 0, "already full -- a higher target unlocks nothing");
+});
+
+test("no compartments, or a tare over the target, yields zero rather than a wrong number", () => {
+  assert.equal(computeAvailableCapacity({
+    tare_lbs: 34000, target_gross_lbs: 79500, legal_gross_lbs: 80000,
+    cg_bias: 0, compartments: [],
+  }).limiting_factor, "none");
+
+  assert.equal(capacityFor({ tare_lbs: 85000 }).available_gallons, 0,
+    "an over-target tare leaves no payload room at all");
+});
+
+test("incomplete data is reported as such, never as a zero score", () => {
+  const r = computeUtilization({
+    available_gallons: 0, actual_gallons: 7000, actual_gross_lbs: null,
+    legal_gross_lbs: 80000, compartment_overfilled: false,
+    external_cap_gallons: null, has_unquantified_constraint: false,
+  });
+  assert.equal(r.eligibility, "excluded_incomplete_data");
+  assert.equal(r.utilization_pct, null);
+});
+
+// ── Aggregate weighting ─────────────────────────────────────────────────────
+test("period utilization is gallon-weighted, not a mean of percentages", () => {
+  const big = computeUtilization({
+    available_gallons: 8000, actual_gallons: 7200, actual_gross_lbs: 74000,
+    legal_gross_lbs: 80000, compartment_overfilled: false,
+    external_cap_gallons: null, has_unquantified_constraint: false,
+  }); // 90%
+  const tiny = computeUtilization({
+    available_gallons: 100, actual_gallons: 100, actual_gross_lbs: 40000,
+    legal_gross_lbs: 80000, compartment_overfilled: false,
+    external_cap_gallons: null, has_unquantified_constraint: false,
+  }); // 100%
+
+  const agg = aggregateUtilization([big, tiny]);
+  const meanOfPercentages = (90 + 100) / 2;
+  assert.ok(Math.abs(agg.utilization_pct! - (7300 / 8100) * 100) < 0.001);
+  assert.ok(agg.utilization_pct! < meanOfPercentages,
+    "one tiny perfect load must not drag the fleet number up to 95%");
+});

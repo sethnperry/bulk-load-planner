@@ -6,6 +6,13 @@
     "skipLibCheck": true,
     "strict": true,
     "noEmit": true,
+    // Lets a module import a sibling with an explicit .ts extension. Needed so
+    // lib/capacity/* can be executed directly by node's built-in test runner
+    // (which resolves imports itself and requires the extension) while still
+    // being imported normally by the app. Permitted because noEmit is true;
+    // it only ALLOWS the extension, so every existing extensionless import is
+    // unaffected.
+    "allowImportingTsExtensions": true,
     "esModuleInterop": true,
     "module": "esnext",
     "moduleResolution": "bundler",

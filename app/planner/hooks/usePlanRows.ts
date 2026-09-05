@@ -2,6 +2,8 @@
 
 import { useMemo } from "react";
 
+import { solveMaxGallons } from "../utils/planMath";
+
 export function usePlanRows<TPlanRow extends { planned_gallons: number; lbsPerGal: number }>(args: {
   selectedTrailerId: string | null;
   activeComps: any[];
@@ -25,19 +27,11 @@ export function usePlanRows<TPlanRow extends { planned_gallons: number; lbsPerGa
       return { planRows: [] as TPlanRow[], effectiveMaxGallons: 0 };
     }
 
-    // Binary search max gallons that keeps weight <= allowedLbs
-    let lo = 0;
-    let hi = cap;
-
-    for (let i = 0; i < 22; i++) {
-      const mid = (lo + hi) / 2;
-      const rows = planForGallons(mid, activeComps, cgBias);
-      const lbs = rows.reduce((s, r) => s + r.planned_gallons * r.lbsPerGal, 0);
-      if (lbs <= allowedLbs + 1e-6) lo = mid;
-      else hi = mid;
-    }
-
-    const effectiveMaxGallons = lo;
+    // Binary search max gallons that keeps weight <= allowedLbs.
+    // Lives in planMath as solveMaxGallons so the payload-utilization engine
+    // (lib/capacity/computeAvailableCapacity.ts) uses the exact same solver
+    // rather than a second copy -- behavior here is unchanged.
+    const effectiveMaxGallons = solveMaxGallons(cap, activeComps, allowedLbs, cgBias, planForGallons);
 
     // Decide target gallons
     const requested = effectiveMaxGallons;

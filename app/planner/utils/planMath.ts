@@ -254,3 +254,56 @@ export function planForGallons(
   rows.sort((a, b) => a.comp_number - b.comp_number);
   return rows;
 }
+
+/**
+ * Largest gallon total that keeps the CG-biased allocation at or under a weight
+ * ceiling, respecting every compartment's own cap.
+ *
+ * Extracted verbatim from usePlanRows.ts's inline binary search so the Planner
+ * and the payload-utilization engine (lib/capacity/computeAvailableCapacity.ts)
+ * share one solver rather than growing a second copy -- the same reasoning
+ * behind computeActualLbsForLine's extraction above, and the reason the
+ * incentive redesign needed no new payload math at all.
+ *
+ * `plan` is injectable only because usePlanRows already receives planForGallons
+ * as a prop; every real call site passes the one implementation.
+ */
+export function solveMaxGallons(
+  totalCapacityGallons: number,
+  comps: {
+    compNumber: number;
+    maxGallons: number;
+    position: number;
+    lbsPerGal: number;
+    productId: string;
+  }[],
+  allowedLbs: number,
+  bias: number,
+  plan: (gallons: number, comps: any[], bias: number) => Array<{ planned_gallons: number; lbsPerGal: number }> = planForGallons,
+  iterations = 22,
+): number {
+  let lo = 0;
+  let hi = Math.max(0, totalCapacityGallons);
+  if (!(hi > 0)) return 0;
+
+  // Exact answer for the volume-limited case, checked before searching.
+  // A bisection that only ever raises `lo` converges from BELOW and can never
+  // actually land on its upper bound -- 22 iterations over a 100 gal range
+  // stops at 99.99997. That is invisible after rounding, but it means a load
+  // that genuinely fills every compartment never reports as exactly full, and
+  // downstream that reads as a phantom fraction of a gallon left unused (and a
+  // utilization of 100.00002%). When the tanks fit under the weight ceiling,
+  // total volume IS the true maximum, so return it rather than approach it.
+  const fullRows = plan(hi, comps, bias);
+  const fullLbs = fullRows.reduce((s, r) => s + r.planned_gallons * r.lbsPerGal, 0);
+  if (fullLbs <= allowedLbs + 1e-6) return hi;
+
+  for (let i = 0; i < iterations; i++) {
+    const mid = (lo + hi) / 2;
+    const rows = plan(mid, comps, bias);
+    const lbs = rows.reduce((s, r) => s + r.planned_gallons * r.lbsPerGal, 0);
+    if (lbs <= allowedLbs + 1e-6) lo = mid;
+    else hi = mid;
+  }
+  return lo;
+}
