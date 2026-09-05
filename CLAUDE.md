@@ -8812,6 +8812,37 @@ confirmed the 3-tile grid still works with the simplified card content,
 all three tiles measuring identically; portrait (375×812) re-confirmed
 pixel-unaffected. `npx tsc --noEmit` and `npx next build` both clean.
 
+### Gear icon moved into the nav menu, off the header strip (2026-09-05)
+
+Per explicit direction to reduce the header icon strip's count: the
+standalone `GearIcon` button (opened `SettingsModal`) is removed from
+both `Header` render sites in `CalculatorLayoutClient.tsx` (portrait row
+and the landscape vertical rail) — deleted outright, not hidden.
+`lib/ui/NavMenu.tsx` gained an optional `onOpenSettings?: () => void`
+prop; when provided, a new "Settings" row renders in the dropdown
+(between Learn and Sign Out) calling it directly instead of navigating.
+`CalculatorLayoutClient.tsx` passes `onOpenSettings={onOpenSettings}`
+(the same callback `Header` already received as a prop, previously wired
+only to the now-removed gear button) into both `NavMenu` instances.
+Every other `NavMenu` consumer (`/admin`, `/superadmin`, `/profile`)
+simply omits the prop and gets no Settings row — matches how none of
+them had a nearby gear icon before this change either, and none of them
+has a `SettingsModal` instance to open.
+
+Portrait's icon row is now hamburger/bell/[portal slot] (6 icons when
+the Planner page's own plan-letter/EQ/pin/temp cluster is portaled in,
+down from 7); the landscape rail is the same set stacked vertically.
+Comments referencing "seven icons"/gear in both render sites were
+updated to match.
+
+**Live-verified** via the demo login route: hamburger menu now shows a
+real "Settings" row (gear icon, between Learn and Sign Out) that opens
+the actual `SettingsModal` (Accent Color/Profile/Subscription/Join a
+Fleet, same content as before); confirmed via direct DOM query that the
+header itself now only renders two `aria-label`led buttons ("Open
+navigation menu", "Alerts") — no gear button left in the strip.
+`npx tsc --noEmit` and `npx next build` both clean.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.

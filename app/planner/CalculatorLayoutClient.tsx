@@ -51,17 +51,6 @@ function BellIcon({ count, onClick, stroke }: { count: number; onClick: () => vo
   );
 }
 
-function GearIcon({ onClick, stroke }: { onClick: () => void; stroke: string }) {
-  return (
-    <button type="button" onClick={onClick} aria-label="Settings" style={{ border: "none", background: "none", cursor: "pointer", padding: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="12" cy="12" r="3"></circle>
-        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-      </svg>
-    </button>
-  );
-}
-
 // outageBanner is now a prop, not fetched inside Header itself -- landscape
 // mode needs the SAME data rendered in a different spot (ShellChrome, above
 // the content column, since the vertical rail has no room for a horizontal
@@ -112,24 +101,26 @@ function Header({ onOpenSettings, isLandscape, outageBanner }: {
   }, [pathname]);
 
   // Landscape: the whole header collapses into a vertical rail pinned to
-  // the far left of the screen -- hamburger/bell/plan-letter/EQ/pin/temp/
-  // gear all stack top-to-bottom instead of left-to-right, per explicit
-  // direction ("move the icon strip into a vertical column and put it
-  // all the way left"). This is the deferred "Phase 2" from the original
-  // icon-rail pass ("the whole strip... eventually becoming a left-edge
-  // rail in landscape... expect to move that around until we get it
-  // right") -- finally built once a real mockup existed to match. Every
-  // child here (NavMenu, BellIcon, the portal slot, GearIcon) is the
-  // exact same element as the portrait row; only this wrapping div's own
-  // flexDirection/padding changed, plus justify-content:space-between
-  // now spaces them evenly down the column the same way it did across
-  // the row -- the portaled plan-letter/EQ/pin/temp cluster (page.tsx's
-  // headerIconsEl) needed no changes at all, since none of its own
-  // buttons hardcode a row-only layout; they just follow whichever
-  // direction this parent flex container is in. No outage banner in
-  // this rail -- narrow and tall, no room for a horizontal ticker;
-  // ShellChrome renders it separately, above the content column, when
-  // isLandscape (see that component).
+  // the far left of the screen -- hamburger/bell/plan-letter/EQ/pin/temp
+  // stack top-to-bottom instead of left-to-right, per explicit direction
+  // ("move the icon strip into a vertical column and put it all the way
+  // left"). This is the deferred "Phase 2" from the original icon-rail
+  // pass ("the whole strip... eventually becoming a left-edge rail in
+  // landscape... expect to move that around until we get it right") --
+  // finally built once a real mockup existed to match. Every child here
+  // (NavMenu, BellIcon, the portal slot) is the exact same element as the
+  // portrait row; only this wrapping div's own flexDirection/padding
+  // changed, plus justify-content:space-between now spaces them evenly
+  // down the column the same way it did across the row -- the portaled
+  // plan-letter/EQ/pin/temp cluster (page.tsx's headerIconsEl) needed no
+  // changes at all, since none of its own buttons hardcode a row-only
+  // layout; they just follow whichever direction this parent flex
+  // container is in. No outage banner in this rail -- narrow and tall, no
+  // room for a horizontal ticker; ShellChrome renders it separately,
+  // above the content column, when isLandscape (see that component).
+  // Settings (formerly its own gear icon here) now lives inside NavMenu's
+  // own dropdown -- see NavMenu.tsx's onOpenSettings prop -- one fewer
+  // icon in the rail, per explicit direction to reduce the icon count.
   if (isLandscape) {
     return (
       <div style={{
@@ -140,10 +131,9 @@ function Header({ onOpenSettings, isLandscape, outageBanner }: {
         display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "space-between",
         height: "100%",
       }}>
-        <NavMenu darkMode={darkMode} />
+        <NavMenu darkMode={darkMode} onOpenSettings={onOpenSettings} />
         <BellIcon count={shell.expirations.expiredCount + shell.expirations.warningCount} onClick={() => shell.setExpModalOpen(true)} stroke={iconStroke} />
         <div id="planner-header-icons-slot" style={{ display: "contents" }} />
-        <GearIcon onClick={onOpenSettings} stroke={iconStroke} />
       </div>
     );
   }
@@ -171,19 +161,22 @@ function Header({ onOpenSettings, isLandscape, outageBanner }: {
           (padding never shrinks an element's own background), only the
           icon row's actual CONTENT gets pushed in from the unsafe edges.
 
-          All seven icons (hamburger, bell, and whatever the Planner page's
-          own portal slot below contributes) are now direct children of
-          this ONE flex row with justify-content:space-between, per
-          explicit direction ("evenly space all seven icons in the
-          header") -- previously NavMenu sat alone on the left against a
-          separately-grouped bell/slot/gear cluster on the right, which
-          only evenly spaced within that right cluster, not across the
-          whole row. */}
+          All six icons (hamburger, bell, and whatever the Planner page's
+          own portal slot below contributes) are direct children of this
+          ONE flex row with justify-content:space-between, per explicit
+          direction ("evenly space all the icons in the header") --
+          previously NavMenu sat alone on the left against a separately-
+          grouped bell/slot/gear cluster on the right, which only evenly
+          spaced within that right cluster, not across the whole row.
+          Settings (formerly its own gear icon at the far right here) now
+          lives inside NavMenu's own dropdown instead -- see NavMenu.tsx's
+          onOpenSettings prop -- one fewer icon in this row, per explicit
+          direction to reduce the strip's icon count. */}
       <div style={{
         display: "flex", alignItems: "center", justifyContent: "space-between",
         padding: "0 calc(env(safe-area-inset-right, 0px) + 16px) 0 calc(env(safe-area-inset-left, 0px) + 16px)",
       }}>
-        <NavMenu darkMode={darkMode} />
+        <NavMenu darkMode={darkMode} onOpenSettings={onOpenSettings} />
         <BellIcon count={shell.expirations.expiredCount + shell.expirations.warningCount} onClick={() => shell.setExpModalOpen(true)} stroke={iconStroke} />
         {/* Portal target for the Planner page's own plan-letter/Equipment/
             Location/Temperature cluster -- per explicit direction to try
@@ -199,11 +192,10 @@ function Header({ onOpenSettings, isLandscape, outageBanner }: {
             the header placement doesn't stick. display:"contents" makes
             this div invisible to layout -- its portaled children become
             direct flex items of the row above, so justify-content:
-            space-between spaces all seven icons evenly instead of
-            grouping the four portaled ones into their own sub-cluster
-            with a smaller, separately-set gap between them. */}
+            space-between spaces all six icons evenly instead of grouping
+            the four portaled ones into their own sub-cluster with a
+            smaller, separately-set gap between them. */}
         <div id="planner-header-icons-slot" style={{ display: "contents" }} />
-        <GearIcon onClick={onOpenSettings} stroke={iconStroke} />
       </div>
       {/* Outage banner still renders right after the icon row either way
           -- when there's nothing to show it contributes zero height

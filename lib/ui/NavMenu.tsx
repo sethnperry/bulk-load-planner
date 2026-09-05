@@ -13,7 +13,7 @@ type Membership = {
   company: { company_id: string; company_name: string } | null;
 };
 
-export default function NavMenu({ darkMode, anchor }: { darkMode?: boolean; anchor?: "left" | "right" } = {}) {
+export default function NavMenu({ darkMode, anchor, onOpenSettings }: { darkMode?: boolean; anchor?: "left" | "right"; onOpenSettings?: () => void } = {}) {
   const router   = useRouter();
   const pathname = usePathname();
   const panelRef = useRef<HTMLDivElement>(null);
@@ -251,6 +251,18 @@ export default function NavMenu({ darkMode, anchor }: { darkMode?: boolean; anch
               <NavLink href="/superadmin" icon="◈" label="Super Admin" onClick={() => setOpen(false)} />
             )}
             <NavLink href="/learn" icon="?" label="Learn" onClick={() => setOpen(false)} />
+            {/* Settings used to be its own gear icon in the Planner header's
+                icon strip -- moved here per explicit direction to reduce
+                that strip's icon count. Only rendered when a caller actually
+                wires up onOpenSettings (today: CalculatorLayoutClient, the
+                only place with a SettingsModal instance mounted) -- every
+                other NavMenu consumer (Admin, Super Admin, Profile) simply
+                omits the prop and gets no Settings row, same as they had no
+                gear icon near their own header before this change either. */}
+            {onOpenSettings && (
+              <NavLink href="#" icon="⚙" label="Settings"
+                onClick={e => { e.preventDefault(); setOpen(false); onOpenSettings(); }} />
+            )}
             <NavLink href="#" icon="↩" label="Sign Out"
               onClick={e => { e.preventDefault(); signOut(); }} danger />
           </div>
