@@ -130,10 +130,10 @@ export default function Home() {
           <div className="manifesto-body">
             <p>
               Across the country, drivers load bulk fuel conservatively on
-              purpose — a safe, memorized number, well under the legal
-              limit, loaded the same way every time. It&apos;s not carelessness.
-              It&apos;s one bad ticket, once, and a number that got permanently
-              lowered to make sure it never happens again.
+              purpose. A safe, memorized number, well under the legal limit,
+              loaded the same way every time. It&apos;s not carelessness. It&apos;s
+              one too many tickets, permanently forcing the safe volume
+              lower. Far less than legal.
             </p>
             <p>
               Most conditions drift slowly enough that a small buffer
