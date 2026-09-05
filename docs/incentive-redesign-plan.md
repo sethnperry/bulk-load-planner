@@ -288,28 +288,40 @@ TEST I is a real test in Phase 1: complete a load, record its result, bump
 completion input, already required by the existing weight math, so utilization
 adds **zero new mandatory input**.
 
-**The honest gap (§0.2):** without a separate actual-gallons capture, actual
-always equals plan, and utilization is a tautology. Options, in order of
-preference:
+**The honest gap (§0.2), and the decision made:** without a separate
+actual-gallons capture, `actual` always equals `plan`. **Decided: ship Phase 1
+as plan-vs-capacity, labeled honestly** — `actual_gallons_source = PLANNER`. No
+new driver input at all.
 
-- **(a) BOL/rack-ticket gallons per compartment on the Complete screen.** One
-  number per filled compartment, `actual_gallons_source = DRIVER`. This is real
-  new driver input — which cuts against §12 — but it is the only thing that makes
-  the metric mean anything before an integration exists. Note this is the
-  "Verify Against BOL" step that was built on 2026-08-26 and deliberately
-  removed on 2026-08-27 as unnecessary; it would be coming back for a different
-  and better reason, and should be re-proposed explicitly rather than
-  reintroduced quietly.
-- **(b) Ship measurement with `actual_gallons_source = PLANNER`** and label it
-  honestly as plan-vs-capacity, not actual-vs-capacity. Correctly measures
-  capOverride and Plan Review reductions; blind to what actually came out of the
-  rack.
-- **(c) Rack/TMS integration** (§35). The right end state; not available now.
+What this measures, correctly and defensibly:
 
-**This is the one decision the plan cannot make on its own** — it is a product
-call about driver burden, and it determines whether Phase 1 ships a real metric
-or a placeholder. The schema supports all three unchanged (`actual_gallons_source`
-exists from day one), so Phase 1 can start while it is being decided.
+- a compartment cap dragged down before loading (`capOverride`),
+- a Plan Review per-compartment gallons reduction (`loadingGallonsOverride`),
+- a company target set below the equipment's legal capability,
+- capacity lost to product density and temperature on the day.
+
+What it is blind to: any difference between what was planned and what actually
+came out of the rack. There is no such signal in the system today.
+
+**Naming is load-bearing here, and §14's mockup has to change.** The driver
+screen cannot read `7,760 GAL LOADED` — that would be a claim the data does not
+support. Phase 1 copy is `PLANNED` against `AVAILABLE`, and the metric is
+**Plan Utilization**, not Payload Utilization. The same applies to the fleet
+view: "gallons left available" is gallons the *plan* left available. Renaming to
+"Payload Utilization" happens when, and only when, a real actual arrives.
+
+The schema does not change when that day comes: `actual_gallons_source` exists
+from day one, so switching a company (or the whole app) from `PLANNER` to
+`DRIVER` or `RACK_TICKET` is a source swap plus a copy change, not a migration.
+Loads keep their own source, so history stays interpretable across the cutover
+rather than silently mixing two different meanings under one label.
+
+**Rejected for Phase 1, recorded so it isn't relitigated blind:** re-adding a
+per-compartment BOL gallons entry on the Complete screen. That is the
+"Verify Against BOL" step built 2026-08-26 and deliberately removed 2026-08-27
+as unnecessary; bringing it back is a real product decision about driver burden,
+and it is the natural Phase 2+ upgrade path if plan-vs-capacity turns out to be
+too narrow in practice.
 
 ## 9. Phase 1 contents
 
@@ -324,7 +336,7 @@ Measurement only. No incentive UI, no money, no thresholds (§31).
 4. `begin_load` payload extended with the capacity snapshot; `complete_load` (or
    a new `record_load_utilization(p_load_id)` RPC, called the same
    fire-and-forget way `calculate_load_points` is today) writes
-   `load_utilization`.
+   `load_utilization`, stamped `actual_gallons_source = 'PLANNER'`.
 5. Automatic `out_of_allocation` → `load_constraints` linkage.
 6. Safety/eligibility gating.
 7. Read helpers: per-driver period aggregate, per-company period aggregate.
@@ -344,12 +356,15 @@ all.
 
 ## Open questions for the user
 
-1. **Actual gallons (§8).** (a) driver enters BOL gallons, (b) ship as
-   plan-vs-capacity and label it honestly, or (c) wait for integration? This
-   gates whether Phase 1's number is meaningful.
-2. **Tare.** Leave driver-editable (recorded but gameable), or gate/audit it?
-3. **`target_weight` below legal.** Plan assumes capacity measures against
-   `min(target, 80000)` so lowering a target can't inflate utilization. Confirm —
-   a company that deliberately targets 78,000 for its own reasons will show a
-   permanent ~2.5% "unused" gap under this rule, correctly attributed to
-   `company_target` rather than to the driver.
+Resolved: actual gallons — Phase 1 ships plan-vs-capacity, labeled as such
+(§8). Still open:
+
+1. **Tare.** `tare_lbs` is editable by any driver via `ScaleTicketModal` and
+   feeds the capacity denominator directly. Leave it editable (recorded, but
+   gameable), or gate it to admin/dispatch/lead the way `cap_gallons` already
+   is? Gating it is a small change; it just needs a call, because drivers do
+   legitimately re-weigh.
+2. **`target_weight` below legal.** The plan measures capacity against
+   `min(target_weight, 80000)` so lowering a target can't inflate utilization.
+   Confirm — a company deliberately targeting 78,000 will show a permanent
+   ~2.5% unused gap, attributed to `company_target` rather than to the driver.
