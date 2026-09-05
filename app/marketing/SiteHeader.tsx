@@ -140,13 +140,24 @@ export default function SiteHeader({ active }: { active?: ActiveNav }) {
           .site-header .nav-links a { font-size: 15px; }
         }
 
-        /* Phone: hamburger on the far left (bare icon, no button chrome),
-           logo next to it, "Get the App" pinned to the far right. 700px
+        /* Phone: hamburger (bare icon, no button chrome) and "Get the App"
+           on one row, logo raised onto its own full-width row above them.
+           Hamburger + logo + CTA all inline on one row genuinely doesn't
+           fit a 375px phone (measured: roughly 360px of content against
+           ~327px of available width after padding), which is what pushed
+           the CTA pill off-screen -- splitting the logo onto its own row
+           frees the room instead of shrinking anything further. 700px
            clears every common phone width in landscape and portrait while
            leaving tablets (768+) on the full nav, which still fits there. */
         @media (max-width: 700px) {
-          .site-header .nav-row { flex-wrap: nowrap; }
+          .site-header .nav-row { flex-wrap: wrap; }
           .site-header .nav-links { display: none; }
+          .site-header .brand {
+            order: -1;
+            flex: 1 1 100%;
+            justify-content: center;
+            margin-bottom: 10px;
+          }
           .site-header .nav-menu-btn {
             display: inline-flex;
             align-items: center;

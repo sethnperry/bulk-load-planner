@@ -285,22 +285,19 @@ export default function Home() {
         <p className="hero-eyebrow">Payload optimization for bulk fuel</p>
         <h1 className="hero-h1">Stop leaving payload at the rack.</h1>
         <p className="hero-sub">
-          ProTankr calculates how much you can actually load — based on your
+          ProTankr calculates how much you can actually load, based on your
           equipment, product, temperature, compartments and legal weight.
         </p>
-
-        <div className="hero-actions">
-          <a href="#calculator" className="hero-cta">
-            See what you could recover &rarr;
-          </a>
-        </div>
       </section>
 
-      {/* 2. CALCULATOR — deliberately second, before any pitch. */}
+      {/* 2. CALCULATOR, deliberately second, before any pitch. The old
+          hero CTA button ("See what you could recover") is now this
+          section's plain header instead of a clickable pill, since the
+          calculator sits in view right below the hero either way. */}
       <section id="calculator" className="calc-section">
         <div className="calc-inner">
           <div className="calc-header">
-            <h2 className="calc-h2">Validate a BOL.</h2>
+            <h2 className="calc-h2">See what you could recover.</h2>
             <p className="calc-intro">
               Check a real load against your legal limit. Enter what was on
               the ticket and see where it actually landed.
@@ -347,9 +344,9 @@ export default function Home() {
             </p>
             <p>
               Every load teaches ProTankr something. When conditions shift
-              and catch a driver off guard, the network adjusts — so the
-              truck behind them doesn&apos;t repeat it, and nobody has to guess
-              low forever because of one bad day.
+              and catch a driver off guard, the network adjusts. The truck
+              behind them doesn&apos;t repeat it, and nobody has to guess low
+              forever because of one bad day.
             </p>
           </div>
         </div>
@@ -424,7 +421,7 @@ export default function Home() {
             </p>
             <p className="tms-line tms-line-sub">
               It works as an optimization layer alongside the systems you
-              already have — not a replacement for any of them.
+              already have, not a replacement for any of them.
             </p>
           </div>
         </div>
@@ -458,9 +455,10 @@ export default function Home() {
 
           <div className="closing-footer">
             <p className="closing-sub">
-              ProTankr rolls out gradually — no long implementation, no TMS
-              replacement, no commitment up front. Start by measuring the
-              opportunity at one terminal, one truck, one load.
+              ProTankr rolls out gradually, with no long implementation, no
+              TMS replacement, and no commitment up front. Start by
+              measuring the opportunity at one terminal, one truck, one
+              load.
             </p>
             <div className="closing-actions">
               <Link href="/get-the-app" className="closing-cta">
@@ -510,23 +508,6 @@ export default function Home() {
           line-height: 1.55;
           color: rgba(0,0,0,0.62);
         }
-        .hero-actions {
-          margin-top: 32px;
-          display: flex;
-          align-items: center;
-          gap: 26px;
-          flex-wrap: wrap;
-        }
-        .hero-cta {
-          padding: 15px 26px;
-          border-radius: 999px;
-          background: #111;
-          color: #fff;
-          font: 700 15px var(--font);
-          text-decoration: none;
-        }
-        .hero-cta:hover { opacity: 0.85; }
-
         /* ---------- Calculator (light, distinct widget block) ---------- */
         .calc-section {
           background: #f6f6f5;
