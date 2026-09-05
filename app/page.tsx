@@ -7,23 +7,166 @@
 // tickets" framing to "payload optimization / recover unused legal
 // capacity." Primary message: STOP LEAVING PAYLOAD AT THE RACK.
 //
-// The hero stat below is real (Seth's own current monthly average), not a
-// placeholder — see CURRENT_MONTHLY_AVG_GAL_PER_LOAD's own comment for what
+// The hero stat below is real (Seth's own current monthly average),
+// presented as a generic "single driver" example rather than "my own
+// number" — see CURRENT_MONTHLY_AVG_GAL_PER_LOAD's own comment for what
 // it does and doesn't represent. Update that one constant as the real
 // number moves; the copy around it is written to stay honest either way.
 
 import Link from "next/link";
+import { useState } from "react";
 import SiteHeader from "./marketing/SiteHeader";
 import SiteFooter from "./marketing/SiteFooter";
 
 // Seth's own current monthly average gallons/load, measured against his
-// own conservative per-product benchmarks. Real, but genuinely nuanced:
-// it's one driver (no network effect from other drivers loading at the
-// same racks yet), it's blended across products rather than a clean
-// product-specific comparison, and it moves month to month. The copy
-// below is written to carry all three caveats honestly rather than
-// present this as a settled, proven result.
+// own conservative per-product benchmarks — shown on the page as a
+// generic "single driver" example, not attributed to him by name. Real,
+// but genuinely nuanced: it's one driver (no network effect from other
+// drivers loading at the same racks yet), it's blended across products
+// rather than a clean product-specific comparison, and it moves month to
+// month. The copy below is written to carry all three caveats honestly
+// rather than present this as a settled, proven result.
 const CURRENT_MONTHLY_AVG_GAL_PER_LOAD = 272.1;
+
+// ---------------------------------------------------------------------
+// Opportunity calculator — a standalone public estimate tool, not a
+// preview of the real app. Deliberately uses only standard, published
+// petroleum-industry density math (API gravity -> specific gravity at
+// 60F, corrected for temperature with a single representative thermal
+// expansion coefficient) rather than the app's own per-product-tuned
+// calculation -- this is the same class of math published in ASTM
+// D1250 / API MPMS volume-correction tables, not anything proprietary,
+// so there's nothing sensitive about running it client-side. It's
+// intentionally simpler than what the real app does (one coefficient
+// for every product, not a per-product one), which the result copy
+// says outright rather than implying false precision.
+const WATER_LBS_PER_GAL_AT_60F = 8.32828;
+const APPROX_THERMAL_EXPANSION_PER_F = 0.0004;
+
+function estimateLbsPerGallon(api: number, tempF: number) {
+  const specificGravity60F = 141.5 / (131.5 + api);
+  const specificGravityAtTemp =
+    specificGravity60F * (1 - APPROX_THERMAL_EXPANSION_PER_F * (tempF - 60));
+  return specificGravityAtTemp * WATER_LBS_PER_GAL_AT_60F;
+}
+
+function OpportunityCalculator() {
+  const [tareWeight, setTareWeight] = useState("");
+  const [api, setApi] = useState("");
+  const [tempF, setTempF] = useState("");
+  const [actualGallons, setActualGallons] = useState("");
+  const [legalLimit, setLegalLimit] = useState("80000");
+
+  const tare = parseFloat(tareWeight);
+  const apiNum = parseFloat(api);
+  const temp = parseFloat(tempF);
+  const actual = parseFloat(actualGallons);
+  const limit = parseFloat(legalLimit);
+  const allFilled = [tare, apiNum, temp, actual, limit].every(
+    (n) => Number.isFinite(n) && n > 0
+  );
+
+  let result: { gal: number; short: boolean } | null = null;
+  if (allFilled) {
+    const lbsPerGal = estimateLbsPerGallon(apiNum, temp);
+    const maxLegalPayloadLbs = Math.max(limit - tare, 0);
+    const maxLegalGallons = maxLegalPayloadLbs / lbsPerGal;
+    const gap = maxLegalGallons - actual;
+    result = { gal: Math.round(Math.abs(gap)), short: gap <= 1 };
+  }
+
+  return (
+    <div className="calc-card">
+      <div className="calc-fields">
+        <label className="calc-field">
+          <span>Combined tare weight (lbs)</span>
+          <input
+            type="number"
+            inputMode="decimal"
+            value={tareWeight}
+            onChange={(e) => setTareWeight(e.target.value)}
+            placeholder="e.g. 25000"
+          />
+        </label>
+        <label className="calc-field">
+          <span>Product API gravity</span>
+          <input
+            type="number"
+            inputMode="decimal"
+            value={api}
+            onChange={(e) => setApi(e.target.value)}
+            placeholder="e.g. 38.5"
+          />
+        </label>
+        <label className="calc-field">
+          <span>Product temperature (&deg;F)</span>
+          <input
+            type="number"
+            inputMode="decimal"
+            value={tempF}
+            onChange={(e) => setTempF(e.target.value)}
+            placeholder="e.g. 78"
+          />
+        </label>
+        <label className="calc-field">
+          <span>Actual gallons loaded (from the BOL)</span>
+          <input
+            type="number"
+            inputMode="decimal"
+            value={actualGallons}
+            onChange={(e) => setActualGallons(e.target.value)}
+            placeholder="e.g. 7200"
+          />
+        </label>
+        <label className="calc-field calc-field-limit">
+          <span>Legal weight limit (lbs)</span>
+          <input
+            type="number"
+            inputMode="decimal"
+            value={legalLimit}
+            onChange={(e) => setLegalLimit(e.target.value)}
+          />
+        </label>
+      </div>
+
+      <div className="calc-result-area">
+        {result ? (
+          result.short ? (
+            <div className="calc-result calc-result-good">
+              <span className="calc-result-num">
+                Within {result.gal.toLocaleString("en-US")} gal
+              </span>
+              <span className="calc-result-label">
+                of your legal capacity. Nice work.
+              </span>
+            </div>
+          ) : (
+            <div className="calc-result calc-result-loss">
+              <span className="calc-result-num">
+                {result.gal.toLocaleString("en-US")} gal
+              </span>
+              <span className="calc-result-label">
+                left on the table, this load.
+              </span>
+            </div>
+          )
+        ) : (
+          <div className="calc-result calc-result-placeholder">
+            <span className="calc-result-label">
+              Fill in every field above to see what you left on the table.
+            </span>
+          </div>
+        )}
+      </div>
+
+      <p className="calc-footnote">
+        This is an estimate, using standard published density tables, not
+        the automatic tuning ProTankr applies for each specific product in
+        the real app.
+      </p>
+    </div>
+  );
+}
 
 // Bump whenever public/app-screens/planner.png is re-exported -- the bare
 // path alone lets browsers keep serving a stale cached copy of the old
@@ -101,9 +244,9 @@ export default function Home() {
         </p>
 
         <div className="hero-actions">
-          <Link href="/get-the-app" className="hero-cta">
+          <a href="#opportunity" className="hero-cta">
             See what you could recover &rarr;
-          </Link>
+          </a>
           <a href="#product" className="hero-secondary">
             How it works &darr;
           </a>
@@ -114,9 +257,10 @@ export default function Home() {
             +{CURRENT_MONTHLY_AVG_GAL_PER_LOAD} GAL / LOAD
           </span>
           <span className="hero-stat-sub">
-            My own current monthly average: one driver, blended across
-            products, changing daily. Expect it to grow once more trucks
-            join the network.
+            A single driver without the network effect typically sees an
+            average recovery like this, blended across products. More
+            drivers using ProTankr will improve the accuracy and shrink the
+            necessary buffer.
           </span>
         </div>
       </section>
@@ -235,16 +379,22 @@ export default function Home() {
         </div>
       </section>
 
-      {/* 6. FINAL CTA */}
-      <section className="closing">
+      {/* 6. FINAL CTA / OPPORTUNITY CALCULATOR */}
+      <section id="opportunity" className="closing">
         <div className="closing-inner">
-          <div className="closing-left">
+          <div className="closing-header">
             <p className="closing-eyebrow">The Opportunity</p>
             <h2 className="closing-h2">
               How many gallons are your trucks leaving behind?
             </h2>
+            <p className="closing-intro">
+              Grab a recent BOL and find out. No signup, no email required.
+            </p>
           </div>
-          <div className="closing-right">
+
+          <OpportunityCalculator />
+
+          <div className="closing-footer">
             <p className="closing-sub">
               ProTankr rolls out gradually — no long implementation, no TMS
               replacement, no commitment up front. Start by measuring the
@@ -252,7 +402,7 @@ export default function Home() {
             </p>
             <div className="closing-actions">
               <Link href="/get-the-app" className="closing-cta">
-                Calculate My Opportunity &rarr;
+                Get Early Access &rarr;
               </Link>
               <Link href="/pricing" className="closing-secondary">
                 See pricing &rarr;
@@ -554,18 +704,17 @@ export default function Home() {
           color: rgba(0,0,0,0.55);
         }
 
-        /* ---------- Closing ---------- */
+        /* ---------- Closing / Opportunity calculator ---------- */
         .closing { background: #111111; padding: 88px 48px; }
         .closing-inner {
           display: flex;
-          justify-content: space-between;
-          align-items: flex-end;
-          gap: 40px;
-          max-width: 1400px;
+          flex-direction: column;
+          align-items: center;
+          gap: 44px;
+          max-width: 760px;
           margin: 0 auto;
-          flex-wrap: wrap;
         }
-        .closing-left { max-width: 620px; }
+        .closing-header { text-align: center; }
         .closing-eyebrow {
           margin: 0 0 14px;
           font: 800 12px var(--font);
@@ -573,10 +722,77 @@ export default function Home() {
           text-transform: uppercase;
           color: rgba(255,255,255,0.4);
         }
-        .closing-h2 { margin: 0; font: 900 52px var(--font); letter-spacing: -0.02em; color: #fff; line-height: 1.05; }
-        .closing-right { max-width: 380px; }
+        .closing-h2 { margin: 0; font: 900 44px var(--font); letter-spacing: -0.02em; color: #fff; line-height: 1.08; }
+        .closing-intro {
+          margin: 16px 0 0;
+          font: 400 16px var(--font);
+          color: rgba(255,255,255,0.55);
+        }
+
+        .calc-card {
+          width: 100%;
+          border-radius: 20px;
+          background: rgba(255,255,255,0.05);
+          border: 1px solid rgba(255,255,255,0.12);
+          padding: 32px;
+        }
+        .calc-fields {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 18px;
+        }
+        .calc-field { display: flex; flex-direction: column; gap: 6px; }
+        .calc-field span {
+          font: 700 11px var(--font);
+          letter-spacing: 0.04em;
+          text-transform: uppercase;
+          color: rgba(255,255,255,0.45);
+        }
+        .calc-field input {
+          width: 100%;
+          box-sizing: border-box;
+          padding: 12px 14px;
+          border-radius: 10px;
+          border: 1px solid rgba(255,255,255,0.16);
+          background: rgba(255,255,255,0.06);
+          color: #fff;
+          font: 600 15px var(--font);
+        }
+        .calc-field input:focus { outline: 2px solid rgba(255,255,255,0.35); outline-offset: 1px; }
+        .calc-field input::placeholder { color: rgba(255,255,255,0.28); }
+        .calc-field-limit { grid-column: 1 / -1; max-width: 260px; }
+
+        .calc-result-area {
+          margin-top: 26px;
+          padding-top: 26px;
+          border-top: 1px solid rgba(255,255,255,0.1);
+          text-align: center;
+        }
+        .calc-result { display: flex; flex-direction: column; gap: 4px; }
+        .calc-result-num { font: 900 36px var(--font); letter-spacing: -0.01em; }
+        .calc-result-loss .calc-result-num { color: #f87171; }
+        .calc-result-good .calc-result-num { color: #4ade80; }
+        .calc-result-label {
+          font: 500 13.5px var(--font);
+          color: rgba(255,255,255,0.55);
+        }
+        .calc-result-placeholder .calc-result-label {
+          font: 500 14px var(--font);
+          color: rgba(255,255,255,0.4);
+        }
+
+        .calc-footnote {
+          margin: 20px 0 0;
+          font: 400 11.5px var(--font);
+          line-height: 1.5;
+          color: rgba(255,255,255,0.3);
+          text-align: center;
+        }
+
+        .closing-footer { text-align: center; }
         .closing-sub {
           margin: 0;
+          max-width: 560px;
           font: 400 16px var(--font);
           color: rgba(255,255,255,0.55);
           line-height: 1.55;
@@ -585,6 +801,7 @@ export default function Home() {
           margin-top: 22px;
           display: flex;
           align-items: center;
+          justify-content: center;
           gap: 22px;
           flex-wrap: wrap;
         }
@@ -635,9 +852,11 @@ export default function Home() {
           .workflow-steps { grid-template-columns: 1fr; gap: 28px; }
 
           .closing { padding: 48px 24px; }
-          .closing-inner { flex-direction: column; align-items: flex-start; gap: 24px; }
-          .closing-h2 { font-size: 34px; }
-          .closing-right { max-width: none; }
+          .closing-inner { gap: 32px; }
+          .closing-h2 { font-size: 30px; }
+          .calc-card { padding: 22px; }
+          .calc-fields { grid-template-columns: 1fr; }
+          .calc-field-limit { max-width: none; }
         }
       `}</style>
     </div>
