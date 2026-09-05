@@ -9219,10 +9219,30 @@ displays the number yet (Phase 2), and the staff-gated target wasn't exercised
 with a real driver-role login. Per this repo's own rule, spot-check the
 referenced columns against `information_schema.columns` before applying.
 
-**Not started:** Phase 2 (driver display), Phase 3 (fleet dashboard replacing
-the benchmark-based Underloading Dashboard), Phase 4 (incentive/payroll layer),
-and the legacy teardown — which lands **after** this engine is validated against
-real loads, not before.
+**Phase 2 shipped 2026-09-05 (driver display).** A utilization card on the
+Planner (this-load %, period average, "7,760 of 7,820 gal available planned")
+that **replaces** the legacy points card in the same slot rather than sitting
+beside it — the spec forbids two incentive systems running visibly at once, and
+two competing numbers for one load is exactly that. Legacy code/data stay intact
+underneath so the rollback is still real. A `Plan Utilization` tile in Reports
+gives the period summary plus per-load history; excluded loads show their reason
+and are counted separately, never folded into the score. **No leaderboard.**
+`useUtilizationPeriod` resolves the window once for both surfaces (company report
+period, else rolling 30 days) so they cannot disagree.
+
+Collapsed a real duplication found while building: Phase 1 had shipped two copies
+of the period aggregate and this display was about to be built on the second one.
+
+Verified without a session: the read hook's literal SELECT run against a real
+Postgres with the migration applied (a select string is what `tsc` can't check),
+and those rows through the real aggregate — 90.12% gallon-weighted where a naive
+mean of percentages would have read 95%. 25 tests, `tsc` and `next build` clean.
+Still nothing clicked through in a browser, and the migrations are still unapplied.
+
+**Not started:** Phase 3 (fleet dashboard replacing the benchmark-based
+Underloading Dashboard), Phase 4 (incentive/payroll layer), and the legacy
+teardown — which lands **after** this engine is validated against real loads,
+not before.
 
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
