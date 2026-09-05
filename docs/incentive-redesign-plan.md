@@ -528,6 +528,13 @@ too narrow in practice.
 
 ## 9. Phase 1 contents
 
+> **Status: built and verified (2026-09-05).** Both migrations are written but
+> NOT yet applied to the live database. They were, however, actually executed
+> against a throwaway PostgreSQL 16 instance with a stub of the live schema --
+> so "they apply cleanly" is a fact here, not a hope. See "Phase 1 verification"
+> at the end of this document for exactly what was and was not proven.
+
+
 Measurement only. No incentive UI, no money, no thresholds (§31).
 
 1. Migration A + B + C (new tables, RLS, indexes) — additive, nothing dropped.
@@ -579,3 +586,78 @@ Deliberately deferred, recorded so they are not rediscovered from scratch: a
 target-raise recommendation engine built on `terminal_temp_bias` maturity (§4a),
 per-compartment BOL gallons entry (§8), per-state and permitted legal limits
 above 80,000 (§4a), and dispatch-set caps (§5).
+
+---
+
+## Phase 1 verification (2026-09-05)
+
+### Proven
+
+**24 unit tests, no DB and no session** (`npm test`, node's built-in runner with
+native type-stripping -- no new dependency). Covers the spec's TEST A-K plus the
+anti-gaming rules: capacity moves correctly with tare, product density,
+temperature and product mix; underload/near-max arithmetic; a quantified
+external cap re-baselines while an unquantified one excludes; safety violations
+score nothing and are excluded from aggregates rather than penalised;
+above-target-under-legal exceeds 100% and stays eligible; a driver's capOverride
+cannot shrink their own denominator; headroom floors at zero.
+
+**Both migrations actually run.** A throwaway PostgreSQL 16 was stood up with a
+stub of the live schema (only the tables, columns and helper functions the
+migrations touch, shaped from this repo's own migrations), and both files
+applied with `ON_ERROR_STOP=1` and no errors. This is a materially stronger
+check than this project usually gets before an SQL-editor paste.
+
+**`record_load_utilization` exercised end to end** against seeded data -- a
+3-compartment diesel load, 6,300 gal actual against 6,517.12 available:
+
+| Check | Result |
+|---|---|
+| Utilization arithmetic | 96.67%, 217.12 gal unused -- matches the engine exactly |
+| `available_payload_lbs` | 45,500 -- exactly `79,500 − 34,000 tare` |
+| Idempotent | second call updates in place, one snapshot row |
+| Snapshot inputs | server-derived (tare 34,000, target 79,500, real caps and API) |
+| Quantified cap | denominator re-baselined to 6,400, utilization 98.44% |
+| Unquantified cap | `excluded_constraint`, no score invented |
+| Over legal gross | `excluded_safety` **even with a forged client capacity of 1 gal** |
+| Compartment over cap | `excluded_safety` |
+| Out of Allocation auto-link | attaches, excludes, does not stack on rerun |
+| Report older than 12h | correctly does not attach |
+| Another driver's load | `unauthorized` |
+| Direct client INSERT | blocked by RLS |
+
+`tsc --noEmit` and a full `next build` both clean.
+
+### Found while verifying, and fixed
+
+- **The solver could never return its own upper bound.** A bisection that only
+  raises its lower bound converges from below, so a load that genuinely filled
+  every compartment reported 99.99997 of 100 gal -- downstream, a phantom
+  fraction of a gallon "left unused" and a utilization of 100.00002%.
+  `solveMaxGallons` now returns total volume directly when the full tanks fit
+  under the weight ceiling, which is the exact answer. This slightly improves
+  the Planner's own volume-limited plans too.
+- **A `SELECT INTO` that matches no row nulls its targets** rather than leaving
+  them alone, so a deleted or missing combo would have silently nulled the
+  company target and taken every downstream number with it. Now assigned via a
+  scratch variable with an explicit fallback.
+- **The OOA lookback's upper bound turned out to be load-bearing.** Requiring
+  the report to precede the load is not tidiness: an excluded load can't drag a
+  driver's average down, so without it a driver could file a report after a poor
+  load to retire it from their own numbers.
+
+### Not proven, and why
+
+- **Nothing has run against the live database.** This container has no
+  `.env.local`, so there was no authenticated session and no Supabase access at
+  all this session. The stub schema was built from this repo's migrations, and
+  the migrations folder is known to lag the live database -- so the columns the
+  migrations reference still need the usual `information_schema.columns`
+  spot-check before the SQL-editor paste.
+- **No real load has been measured.** The end-to-end run used seeded rows, not
+  a load completed through the app.
+- **Nothing displays the number yet.** That is Phase 2, deliberately (spec
+  section 31: build the measurement foundation before the UI).
+- **The staff-gated target field was not exercised with a real driver-role
+  login** -- the same limitation this project has documented repeatedly for
+  role-matrix checks.

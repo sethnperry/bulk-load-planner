@@ -39,6 +39,7 @@ declare
   v_company_id         uuid;
   v_trailer_id         uuid;
   v_target             numeric;
+  v_combo_target       numeric;
   v_legal              numeric;
   v_compartments       jsonb;
   v_actual_gallons     numeric;
@@ -100,10 +101,22 @@ begin
   -- company value is the policy default behind it. This is safe to trust
   -- precisely because the same pass gates that field to staff -- if it were
   -- still driver-editable it would need clamping instead.
-  select coalesce(ec.target_weight, v_target), ec.trailer_id
-    into v_target, v_trailer_id
+  --
+  -- Assigned through scratch variables, not straight into v_target: a plpgsql
+  -- SELECT INTO that matches no row sets its targets to NULL rather than
+  -- leaving them alone, so a deleted or missing combo would silently null the
+  -- company target resolved just above and take every downstream number with
+  -- it.
+  select ec.target_weight, ec.trailer_id
+    into v_combo_target, v_trailer_id
     from equipment_combos ec
    where ec.combo_id = v_load.combo_id;
+
+  v_target := coalesce(v_combo_target, v_target);
+
+  if v_target is null or v_target <= 0 then
+    v_target := 79500;
+  end if;
 
   -- ── Actuals, from what complete_load already wrote ─────────────────────
   select coalesce(sum(actual_gallons), 0), coalesce(sum(actual_lbs), 0)
@@ -205,8 +218,14 @@ begin
   -- on screen, and reimplementing its timezone math here would be a second
   -- copy of app/planner/utils/dates.ts. A plain window is the honest fit for
   -- "was this driver capped here recently," and it is one shift wide.
+  --
+  -- The upper bound (the report must PRECEDE the load) is not just tidiness:
+  -- an excluded load is one that can't drag a driver's average down, so
+  -- without it a driver could file a report after a poor load to retire it
+  -- from their own numbers. Filing one beforehand is still possible, but it
+  -- also raises a company-visible banner, so it isn't free or invisible.
   insert into load_constraints (load_id, constraint_type, constrained_gallons, source, notes, created_by)
-  select p_load_id, 'terminal_cap', null, 'DRIVER',
+  select p_load_id, 'terminal_cap', null::numeric, 'DRIVER',
          'Auto-linked from an Out of Allocation report at this terminal.', v_load.user_id
    where exists (
      select 1

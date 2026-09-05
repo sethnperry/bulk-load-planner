@@ -9142,6 +9142,88 @@ checks -- but the reporter-only path it's additive on top of was already
 proven live, and the SQL itself is a single, simple, already-precedented
 policy shape. `npx tsc --noEmit` and `npx next build` both clean.
 
+## Payload Utilization system (2026-09-05) — replaces the incentive system
+
+Full replacement of the "Recovered Gallons" incentive system, per a pasted
+spec. Design and reasoning live in `docs/incentive-redesign-plan.md`; this
+section is the short record.
+
+**The core change**: the old system compared a load against a manager-entered
+per-product benchmark. The new one compares it against what ProTankr itself
+calculates the load could have carried. No benchmark, no manager input.
+
+**Findings from the inspection pass, worth not rediscovering:**
+- `usePlanRows` was **already** binary-searching available capacity and
+  returning it as `effectiveMaxGallons` — with **zero consumers app-wide**. The
+  capacity solver never needed writing, only persisting. It's now extracted to
+  `planMath.solveMaxGallons` and shared by the Planner and the new engine.
+- **`actual_gallons` is copied verbatim from `planned_gallons`** in
+  `useLoadWorkflow.ts`'s `onLoadedFromLoadingModal` — the driver only enters API
+  and temp at completion. Every load in the DB has `actual == plan`. So Phase 1
+  is explicitly **plan-vs-capacity**, stamped `actual_gallons_source = 'PLANNER'`
+  and named "Plan Utilization", not "Payload Utilization" — the driver screen
+  must not say "GAL LOADED", because the data doesn't support that claim.
+- `tare_lbs` and `target_weight` were **both editable by any driver** through
+  `ScaleTicketModal` (no role gate at all). Tare stays open by explicit
+  decision (the driver weighs the truck; the ticket is the check). The target
+  is now staff-gated — it's the denominator of every utilization number.
+
+**Decisions (all explicit, see the plan's "Decisions made"):** the driver's
+100% mark is the **company target**, not the legal limit; above target but under
+legal is legitimate and is **not clamped**; safety gates key off the **legal**
+limit; the legal limit is a **fleet-only** headroom metric tied to user density
+(more users → fresher API/temp → tighter prediction → safely raise the target).
+
+**Shipped:**
+- `lib/capacity/computeAvailableCapacity.ts` — pure, solves twice (target and
+  legal). Measures against the **configured** `cap_gallons`, never the driver's
+  `capOverride` handle drag: that's the anti-gaming rule, enforced in the engine
+  rather than at the call site.
+- `lib/capacity/computeUtilization.ts` — eligibility gates and gallon-weighted
+  period aggregation (never a mean of percentages).
+- `lib/capacity/useUtilization.ts` — read helpers. **No leaderboard**, by design.
+- `supabase/migrations/20260905000000_payload_utilization_phase1.sql` and
+  `20260905010000_record_load_utilization.sql` — **written, NOT applied.**
+  Purely additive; the legacy incentive system is untouched and
+  `calculate_load_points` still fires alongside, so a Phase 1 rollback never
+  leaves the app with no incentive system.
+- `npm test` — 24 tests on node's built-in runner with native type-stripping.
+  **No new dependency, no DB, no auth session, no browser.** Deliberate: live
+  verification on this project is repeatedly blocked by not having a session,
+  so whatever can be proven without one now is.
+
+**The client sends only the computed capacity** (a CG-biased binary search
+can't be reimplemented in plpgsql without becoming the second payload
+calculation the spec forbids). `record_load_utilization` re-derives every
+**input** server-side and enforces the safety gate itself — verified live that
+a forged client capacity of 1 gal still yields `excluded_safety` on an
+overweight load.
+
+**Verification — stronger than this project usually gets.** A throwaway
+PostgreSQL 16 was stood up (`apt-get install postgresql`, stub schema built
+from this repo's own migrations) and both migrations were actually executed,
+then `record_load_utilization` was exercised end to end: idempotency, quantified
+vs unquantified caps, both safety gates, the Out of Allocation auto-link and its
+12h window, ownership, and RLS write-blocking. **Worth remembering this is
+possible** — it caught two real bugs before any SQL-editor paste:
+- `solveMaxGallons` converged from below and could never return its own upper
+  bound (a full trailer read 99.99997 of 100 gal → phantom unused gallons and
+  100.00002% utilization). Fixed by returning total volume directly when the
+  full tanks fit under the weight ceiling.
+- A plpgsql `SELECT INTO` matching no row **nulls its targets**; a missing combo
+  would have silently nulled the resolved company target.
+
+**Still unproven:** nothing has touched the live DB (no `.env.local` in this
+container, so no session at all), no real load has been measured, nothing
+displays the number yet (Phase 2), and the staff-gated target wasn't exercised
+with a real driver-role login. Per this repo's own rule, spot-check the
+referenced columns against `information_schema.columns` before applying.
+
+**Not started:** Phase 2 (driver display), Phase 3 (fleet dashboard replacing
+the benchmark-based Underloading Dashboard), Phase 4 (incentive/payroll layer),
+and the legacy teardown — which lands **after** this engine is validated against
+real loads, not before.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.
