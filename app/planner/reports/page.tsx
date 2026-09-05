@@ -35,6 +35,10 @@ import CredentialsReportModal, { type LicenseData, type MedicalData, type TwicDa
 import DriverPicker from "../components/DriverPicker";
 import EquipmentComboPicker from "../components/EquipmentComboPicker";
 import { FullscreenModal } from "@/lib/ui/FullscreenModal";
+import UtilizationReportModal from "./UtilizationReportModal";
+import { useDriverPeriodUtilization } from "@/lib/capacity/useUtilization";
+import { useUtilizationPeriod } from "@/lib/capacity/useUtilizationPeriod";
+import { UTILIZATION_METRIC_LABEL } from "@/lib/capacity/computeUtilization";
 import { fetchServiceTypes } from "../modals/ServiceTypeManager";
 import { computeUnitServiceDue } from "../modals/SoloEquipmentModal";
 import { cardStateFor, type CardState } from "../cards/cardTheme";
@@ -196,6 +200,14 @@ export default function ReportsPage() {
   }, [viewedUserId]);
 
   const [myLoadsOpen, setMyLoadsOpen] = useState(false);
+  const [utilizationOpen, setUtilizationOpen] = useState(false);
+
+  // Payload utilization for whoever is being viewed -- follows viewedUserId,
+  // so admin/dispatch using the existing driver picker above see that
+  // driver's own figures. The period comes from the shared hook rather than
+  // being computed here, so this and the Planner card can't disagree.
+  const utilPeriod = useUtilizationPeriod(companyId);
+  const utilization = useDriverPeriodUtilization(viewedUserId || null, utilPeriod.since);
   // Deep-link target from the Planner's "View This Load in Reports" link
   // (RecallDifferentEquipmentSheet.tsx, via ?loadId=... -- see
   // CLAUDE.md "different-equipment recall"). Reads the query string
@@ -369,6 +381,18 @@ export default function ReportsPage() {
               stat={loadHistory.loading ? undefined : `${loadHistory.rows.length}`}
               onClick={() => setMyLoadsOpen(true)}
             />
+            <ReportTile
+              title={UTILIZATION_METRIC_LABEL}
+              sub="How much of the available capacity each load used"
+              stat={
+                utilization.isLoading
+                  ? undefined
+                  : utilization.summary.utilization_pct != null
+                    ? `${utilization.summary.utilization_pct.toFixed(1)}%`
+                    : "No data"
+              }
+              onClick={() => setUtilizationOpen(true)}
+            />
           </div>
         </div>
 
@@ -430,6 +454,17 @@ export default function ReportsPage() {
         </div>
 
       </div>
+
+      <UtilizationReportModal
+        open={utilizationOpen}
+        onClose={() => setUtilizationOpen(false)}
+        periodLabel={utilPeriod.longLabel}
+        summary={utilization.summary}
+        rows={utilization.rows}
+        loading={utilization.isLoading}
+        isViewingOther={isViewingOther}
+        driverName={viewedUserName}
+      />
 
       <MyLoadsModal
         open={myLoadsOpen} onClose={() => setMyLoadsOpen(false)}

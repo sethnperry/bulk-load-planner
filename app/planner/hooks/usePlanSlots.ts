@@ -469,6 +469,25 @@ export function usePlanSlots({
       ? pointsRows.reduce((sum: number, r: any) => sum + Number(r.recovered_points ?? 0), 0)
       : null;
 
+    // Payload utilization for this same load. Unlike points, this DOES have
+    // its own row to read back (one per load), so it's a plain lookup rather
+    // than a sum -- but the same "no row means null, not zero" rule applies:
+    // a load the measurement never ran for is unmeasured, not 0% utilized.
+    const { data: utilRow } = await supabase
+      .from("load_utilization")
+      .select("available_gallons, effective_available_gallons, actual_gallons, unused_gallons, utilization_pct, eligibility, exception_reason")
+      .eq("load_id", resolvedRow.load_id)
+      .maybeSingle();
+    const utilization = utilRow ? {
+      available_gallons: Number((utilRow as any).available_gallons ?? 0),
+      effective_available_gallons: Number((utilRow as any).effective_available_gallons ?? 0),
+      actual_gallons: Number((utilRow as any).actual_gallons ?? 0),
+      unused_gallons: Number((utilRow as any).unused_gallons ?? 0),
+      utilization_pct: (utilRow as any).utilization_pct != null ? Number((utilRow as any).utilization_pct) : null,
+      eligibility: (utilRow as any).eligibility,
+      exception_reason: (utilRow as any).exception_reason ?? null,
+    } : null;
+
     const plannedGross = resolvedRow.planned_gross_lbs != null ? Number(resolvedRow.planned_gross_lbs) : null;
     const diff = resolvedRow.diff_lbs != null ? Number(resolvedRow.diff_lbs) : null;
     const loadReport = plannedGross != null && diff != null ? {
@@ -479,6 +498,7 @@ export function usePlanSlots({
       recovered_points: recoveredPoints,
       completed_at: (resolvedRow as any).completed_at ?? null,
       plan_slot: (resolvedRow as any).plan_slot ?? null,
+      utilization,
     } : null;
 
     // Real CG the driver actually used for this load, not a hardcoded

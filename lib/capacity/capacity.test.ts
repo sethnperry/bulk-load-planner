@@ -311,3 +311,25 @@ test("period utilization is gallon-weighted, not a mean of percentages", () => {
   assert.ok(agg.utilization_pct! < meanOfPercentages,
     "one tiny perfect load must not drag the fleet number up to 95%");
 });
+
+// ── The aggregate also runs over rows read back from the database ──────────
+// aggregateUtilization is deliberately shared between the pure engine's own
+// results and load_utilization rows (one implementation, not two). PostgREST
+// hands numeric columns back as strings often enough that the shared function
+// has to tolerate them -- a bare += would silently concatenate instead of add,
+// turning a fleet total into nonsense rather than throwing.
+test("period aggregate handles DB-shaped rows with string numerics", () => {
+  const agg = aggregateUtilization([
+    { effective_available_gallons: "8000" as any, actual_gallons: "7200" as any, unused_gallons: "800" as any, eligibility: "eligible" },
+    { effective_available_gallons: "100" as any, actual_gallons: "100" as any, unused_gallons: "0" as any, eligibility: "eligible" },
+    { effective_available_gallons: "7850" as any, actual_gallons: "7480" as any, unused_gallons: "370" as any, eligibility: "excluded_constraint" },
+  ]);
+
+  assert.equal(agg.actual_gallons, 7300, "must add, not concatenate");
+  assert.equal(agg.available_gallons, 8100);
+  assert.equal(agg.eligible_loads, 2);
+  assert.equal(agg.excluded_constraint, 1, "an excluded load is still counted, just not scored");
+  assert.ok(Math.abs(agg.utilization_pct! - 90.12) < 0.01, `got ${agg.utilization_pct}`);
+  assert.ok(agg.utilization_pct! < 95,
+    "the naive mean of 90% and 100% is 95% -- gallon weighting must not flatter a tiny perfect load");
+});

@@ -15,6 +15,19 @@
 //    denominator; a cap we know about but cannot quantify excludes the load
 //    rather than guessing at a number.
 
+/**
+ * What the driver-facing metric is CALLED, in one place.
+ *
+ * "Plan" not "Payload", deliberately: actual gallons are currently copied from
+ * the plan (nothing in the app measures what really came out of the rack yet),
+ * so a screen reading "GAL LOADED" would be a claim the data does not support.
+ * When a real actual arrives -- a driver-entered BOL figure, a rack ticket, a
+ * TMS feed -- flip these two constants and the copy follows everywhere.
+ * See docs/incentive-redesign-plan.md section 8.
+ */
+export const UTILIZATION_METRIC_LABEL = "Plan Utilization";
+export const UTILIZATION_ACTUAL_WORD = "planned";
+
 export type UtilizationEligibility =
   | "eligible"
   | "excluded_constraint"      // externally capped, amount unknown
@@ -134,12 +147,37 @@ export function computeUtilization(input: UtilizationInput): UtilizationResult {
   };
 }
 
+/** The minimum a row needs for the period aggregate below. Both the pure
+ *  engine's own UtilizationResult and the load_utilization rows read back from
+ *  the database satisfy it, so there is ONE aggregation for both rather than a
+ *  near-identical copy per call site -- the drift this project keeps getting
+ *  bitten by (see CustomSelect/ServiceTypeManager, and the centering bug fixed
+ *  in one file but not its twin). */
+export type AggregatableUtilization = {
+  effective_available_gallons: number;
+  actual_gallons: number;
+  unused_gallons: number;
+  eligibility: UtilizationEligibility;
+};
+
+export type UtilizationSummary = {
+  eligible_loads: number;
+  excluded_safety: number;
+  excluded_constraint: number;
+  excluded_incomplete_data: number;
+  available_gallons: number;
+  actual_gallons: number;
+  unused_gallons: number;
+  /** Gallon-weighted, never a mean of per-load percentages -- averaging
+   *  percentages lets a string of tiny loads swamp the real number. */
+  utilization_pct: number | null;
+};
+
 /**
- * Period aggregate. Gallon-weighted, not a mean of per-load percentages -- an
- * average of percentages lets a string of tiny loads swamp the real number.
- * Only eligible loads contribute; excluded ones are counted, never scored.
+ * Period aggregate. Only eligible loads contribute; excluded ones are counted,
+ * never scored (spec section 10).
  */
-export function aggregateUtilization(rows: UtilizationResult[]) {
+export function aggregateUtilization(rows: AggregatableUtilization[]): UtilizationSummary {
   let availableSum = 0, actualSum = 0, unusedSum = 0;
   let eligible = 0, excludedSafety = 0, excludedConstraint = 0, excludedIncomplete = 0;
 
@@ -147,9 +185,9 @@ export function aggregateUtilization(rows: UtilizationResult[]) {
     switch (r.eligibility) {
       case "eligible":
         eligible++;
-        availableSum += r.effective_available_gallons;
-        actualSum += r.actual_gallons;
-        unusedSum += r.unused_gallons;
+        availableSum += Number(r.effective_available_gallons ?? 0);
+        actualSum += Number(r.actual_gallons ?? 0);
+        unusedSum += Number(r.unused_gallons ?? 0);
         break;
       case "excluded_safety": excludedSafety++; break;
       case "excluded_constraint": excludedConstraint++; break;

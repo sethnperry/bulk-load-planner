@@ -46,6 +46,9 @@ import {
   DEFAULT_LEGAL_GROSS_LBS,
   type CapacityCompartmentInput,
 } from "@/lib/capacity/computeAvailableCapacity";
+import { UTILIZATION_ACTUAL_WORD } from "@/lib/capacity/computeUtilization";
+import { useDriverPeriodUtilization } from "@/lib/capacity/useUtilization";
+import { useUtilizationPeriod } from "@/lib/capacity/useUtilizationPeriod";
 import { useFuelTempPrediction } from "./hooks/useFuelTempPrediction";
 
 // ── Sections ───────────────────────────────────────────────────────────────────
@@ -1341,6 +1344,17 @@ export default function CalculatorPage() {
     return () => { cancelled = true; };
   }, [shell.companyId]);
 
+  // ── Payload utilization (Phase 2 driver display) ──────────────────────────
+  // The period this driver's running average covers. Reuses the company's own
+  // configured report period when there IS one, and falls back to a rolling
+  // 30 days when there isn't -- measurement has to work for a company that has
+  // configured nothing at all (see docs/incentive-redesign-plan.md, TEST K),
+  // so this deliberately doesn't gate on incentive_settings the way the legacy
+  // points card does.
+  const utilPeriod = useUtilizationPeriod(shell.companyId ?? null);
+
+  const driverUtilization = useDriverPeriodUtilization(effectiveUserId || null, utilPeriod.since);
+
   // Refetches whenever a load actually completes (loadWorkflow.loadReport
   // changes) so the average reflects the just-finished load immediately,
   // not just on next mount.
@@ -2472,6 +2486,64 @@ const lastProductInfoById = useMemo(() => {
           </div>
         ) : null;
 
+        // ── Payload utilization card (Phase 2) ──────────────────────────
+        // Takes the points card's slot rather than sitting beside it: the
+        // spec is explicit that an old incentive system must not run visibly
+        // alongside the new one. The legacy points code and data are still
+        // fully intact underneath (so a Phase 1/2 rollback is real), the
+        // driver just never sees two competing numbers for the same load.
+        //
+        // Reads "PLANNED", never "LOADED" -- actual gallons are currently
+        // copied from the plan, so the stronger word would be a claim the
+        // data doesn't support. See UTILIZATION_ACTUAL_WORD.
+        const util = loadReport?.utilization ?? null;
+        const periodPct = driverUtilization.summary.utilization_pct;
+
+        const utilizationCard = (util || periodPct != null) ? (
+          <div style={{ borderRadius: 16, background: "transparent", padding: "10px 14px", flex: 1, minWidth: 0 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.4)", textTransform: "uppercase" as const, letterSpacing: 0.4 }}>This Load</div>
+                <div style={{ fontSize: 20, fontWeight: 700, color: util?.utilization_pct != null ? "#4ade80" : "rgba(255,255,255,0.85)" }}>
+                  {util?.utilization_pct != null ? `${util.utilization_pct.toFixed(1)}%` : "—"}
+                </div>
+              </div>
+              <div style={{ textAlign: "right" as const, minWidth: 0 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.4)", textTransform: "uppercase" as const, letterSpacing: 0.4 }}>
+                  {utilPeriod.shortLabel}
+                </div>
+                <div style={{ fontSize: 20, fontWeight: 700, color: "#fff" }}>
+                  {periodPct != null ? `${periodPct.toFixed(1)}%` : "—"}
+                </div>
+              </div>
+            </div>
+            {util && (
+              <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginTop: 4 }}>
+                {Math.round(util.actual_gallons).toLocaleString()} of{" "}
+                {Math.round(util.effective_available_gallons).toLocaleString()} gal available{" "}
+                {UTILIZATION_ACTUAL_WORD}
+                {util.unused_gallons >= 1 && ` · ${Math.round(util.unused_gallons).toLocaleString()} gal left`}
+              </div>
+            )}
+            {/* Why a load isn't scored, in the driver's own words -- never a
+                bare blank. An externally-capped or safety-excluded load is
+                explained, not silently dropped (spec sections 10, 11, 22). */}
+            {util?.exception_reason && (
+              <div style={{
+                fontSize: 11, marginTop: 4, lineHeight: 1.4,
+                color: util.eligibility === "excluded_safety" ? "#ef4444" : "rgba(255,255,255,0.45)",
+              }}>
+                {util.exception_reason}
+              </div>
+            )}
+          </div>
+        ) : null;
+
+        // Utilization replaces points wherever it has something real to show;
+        // points remains the fallback until the legacy teardown.
+        const perfCard = utilizationCard ?? pointsCard;
+        const hasPerfCard = perfCard != null;
+
         const loadButtonEl = (
           <button type="button"
             onClick={() => {
@@ -2539,16 +2611,16 @@ const lastProductInfoById = useMemo(() => {
         // state) to build against; a real width band to add later if
         // wanted, between isLandscape and isUltraWideLandscape.
         const statsAndLoadEl = isUltraWideLandscape ? (
-          <div style={{ display: "grid", gridTemplateColumns: incentiveEnabled ? "1fr 1fr 1fr" : "1fr 1fr", gap: 16, alignItems: "stretch" }}>
+          <div style={{ display: "grid", gridTemplateColumns: hasPerfCard ? "1fr 1fr 1fr" : "1fr 1fr", gap: 16, alignItems: "stretch" }}>
             {recapCard}
-            {pointsCard}
+            {perfCard}
             {loadButtonEl}
           </div>
         ) : isLandscape ? (
           <>
             <div style={{ display: "flex", flexDirection: "row", gap: 14 }}>
               {recapCard}
-              {pointsCard}
+              {perfCard}
             </div>
             {loadButtonEl}
           </>
@@ -2556,7 +2628,7 @@ const lastProductInfoById = useMemo(() => {
           <>
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
               {recapCard}
-              {pointsCard}
+              {perfCard}
             </div>
             {loadButtonEl}
           </>

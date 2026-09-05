@@ -661,3 +661,74 @@ check than this project usually gets before an SQL-editor paste.
 - **The staff-gated target field was not exercised with a real driver-role
   login** -- the same limitation this project has documented repeatedly for
   role-matrix checks.
+
+---
+
+## Phase 2 (driver experience) — shipped 2026-09-05
+
+Spec section 32: the load result, utilization, unused capacity, history,
+current-period performance, and an explanation of constraints. Kept simple.
+
+**The Planner card.** A utilization card takes the legacy points card's slot —
+this-load % on the left, period average on the right, with a sub-line reading
+`7,760 of 7,820 gal available planned · 60 gal left`. It **replaces** the points
+card rather than sitting beside it: the spec is explicit that an old incentive
+system must not run visibly alongside the new one, and two competing numbers for
+the same load is exactly that. The legacy points code and data stay fully intact
+underneath, so a rollback is still real; the driver just never sees both.
+
+**Copy.** "PLANNED", never "LOADED" — actual gallons are still copied from the
+plan. The wording lives in `UTILIZATION_METRIC_LABEL` / `UTILIZATION_ACTUAL_WORD`
+so the rename to "Payload Utilization" is a two-constant change the day a real
+measured actual exists.
+
+**Excluded loads are explained, never blank.** A safety exclusion shows its
+reason in red; an external cap shows it in the muted tone — the driver is told
+what happened, and an external cap never reads as their fault (sections 11, 22).
+
+**Reports.** A `Plan Utilization` tile next to My Loads opens a period summary
+(percentage, eligible loads, available / planned / left) plus a per-load history
+of date, planned-of-available, and percentage. Excluded loads appear in the list
+with their reason and are surfaced as their own count — never folded into the
+score in either direction. **No leaderboard**, no ranking, nothing about other
+drivers. It follows the existing driver picker, so admin/dispatch see whichever
+driver they've selected.
+
+**One period, one place.** `useUtilizationPeriod(companyId)` resolves the window
+for both surfaces, so the Planner and Reports cannot quote different numbers. It
+uses the company's configured report period when one exists and a rolling 30 days
+when it doesn't — measurement must not require configuration (TEST K), so it
+never gates on `incentive_settings.enabled`.
+
+### Found and fixed while building
+
+**Phase 1 had shipped two copies of the period aggregate** — `aggregateUtilization`
+in the pure engine and a near-identical `summarize` in the read hook. Phase 2's
+whole display was about to be built on the second copy. Collapsed to one
+implementation over a minimal shared row type that both the engine's results and
+`load_utilization` rows satisfy. This is the exact drift class this repo has been
+bitten by before (`CustomSelect`/`ServiceTypeManager`; the centering bug fixed in
+one file and not its twin), caught before it could diverge rather than after.
+
+### Verified
+
+- **25 unit tests** (`npm test`), including a new one pinning the aggregate's
+  behavior on database-shaped rows: PostgREST returns numerics as strings, and a
+  bare `+=` would concatenate rather than add — turning a fleet total into
+  nonsense silently rather than throwing.
+- **The read hook's literal SELECT was run against a real Postgres** (throwaway
+  instance, migration applied, seeded rows) — every column resolves. A select
+  string is precisely what `tsc` cannot check.
+- **The driver-facing numbers were computed from those same rows**: 90.12%
+  gallon-weighted where a naive mean of percentages would have flattered it to
+  95%, with the externally-capped load correctly excluded from the totals while
+  still counted for the "1 load is not counted" line.
+- `tsc --noEmit` and `next build` clean.
+
+### Not verified
+
+No live session again (no `.env.local` in this container), so nothing was
+clicked through and the migrations still have not been applied to the live
+database. The card's own layout in a real browser, and the behavior for a real
+driver-role login, remain unverified — the same gap this project has documented
+repeatedly.

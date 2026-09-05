@@ -10,8 +10,11 @@
 
 "use client";
 
+import { useMemo } from "react";
+
 import { useQuery } from "@tanstack/react-query";
 
+import { aggregateUtilization } from "./computeUtilization";
 import { supabase } from "@/lib/supabase/client";
 
 export type UtilizationRow = {
@@ -27,52 +30,17 @@ export type UtilizationRow = {
   exception_reason: string | null;
 };
 
-export type UtilizationSummary = {
-  eligible_loads: number;
-  excluded_safety: number;
-  excluded_constraint: number;
-  excluded_incomplete_data: number;
-  available_gallons: number;
-  actual_gallons: number;
-  unused_gallons: number;
-  /** Gallon-weighted, not a mean of per-load percentages -- an average of
-   *  percentages lets a string of tiny loads swamp the real number. */
-  utilization_pct: number | null;
-};
+// The period aggregate lives in computeUtilization.ts (pure, unit-tested) and
+// is re-exported here so callers have one import for the read side. There is
+// deliberately no second implementation -- an earlier draft had one here, and
+// two copies of the same gallon-weighted math is exactly how this project has
+// drifted before.
+export { aggregateUtilization as summarize } from "./computeUtilization";
+export type { UtilizationSummary } from "./computeUtilization";
 
 const SELECT =
   "load_id, driver_id, loaded_at, available_gallons, effective_available_gallons, " +
   "actual_gallons, unused_gallons, utilization_pct, eligibility, exception_reason";
-
-export function summarize(rows: UtilizationRow[]): UtilizationSummary {
-  let availableSum = 0, actualSum = 0, unusedSum = 0;
-  let eligible = 0, safety = 0, constraint = 0, incomplete = 0;
-
-  for (const r of rows) {
-    switch (r.eligibility) {
-      case "eligible":
-        eligible++;
-        availableSum += Number(r.effective_available_gallons ?? 0);
-        actualSum += Number(r.actual_gallons ?? 0);
-        unusedSum += Number(r.unused_gallons ?? 0);
-        break;
-      case "excluded_safety": safety++; break;
-      case "excluded_constraint": constraint++; break;
-      case "excluded_incomplete_data": incomplete++; break;
-    }
-  }
-
-  return {
-    eligible_loads: eligible,
-    excluded_safety: safety,
-    excluded_constraint: constraint,
-    excluded_incomplete_data: incomplete,
-    available_gallons: availableSum,
-    actual_gallons: actualSum,
-    unused_gallons: unusedSum,
-    utilization_pct: availableSum > 0 ? (actualSum / availableSum) * 100 : null,
-  };
-}
 
 async function fetchRows(filter: { driverId?: string; companyId?: string; since: string; until?: string }) {
   let q = supabase.from("load_utilization").select(SELECT).gte("loaded_at", filter.since);
@@ -152,4 +120,26 @@ export function useCompanyHeadroom(companyId: string | null, since: string | nul
       };
     },
   });
+}
+
+// Stable empty reference -- a bare `?? []` default would hand every render a
+// NEW array, and this app has already been bitten once by exactly that
+// (useProductsCatalog's infinite render loop, perf pass #3). Anything derived
+// from this via useMemo stays stable while a query is still loading.
+const EMPTY_ROWS: UtilizationRow[] = [];
+
+/**
+ * One driver's own period performance -- the summary behind the Planner card
+ * and the Reports section. Rows come back newest-first for the history list.
+ *
+ * Deliberately takes `since` rather than reading the company's report-period
+ * settings itself: measurement must work for a company that has configured
+ * nothing at all (spec TEST K), so the caller decides whether that's a real
+ * configured period or a plain rolling window.
+ */
+export function useDriverPeriodUtilization(driverId: string | null, since: string | null) {
+  const query = useDriverUtilization(driverId, since);
+  const rows = query.data ?? EMPTY_ROWS;
+  const summary = useMemo(() => aggregateUtilization(rows), [rows]);
+  return { rows, summary, isLoading: query.isLoading, error: query.error };
 }

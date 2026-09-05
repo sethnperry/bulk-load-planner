@@ -556,6 +556,18 @@ try {
         recovered_points: recoveredPoints,
         completed_at: res?.completed_at ?? new Date().toISOString(),
         plan_slot: activeSlotLetter ?? null,
+        // Same shape usePlanSlots reads back from load_utilization when a past
+        // load is restored, so the Planner card has one field to render from
+        // regardless of which path produced the report.
+        utilization: utilizationResult ? {
+          available_gallons: utilizationResult.available_gallons,
+          effective_available_gallons: utilizationResult.effective_available_gallons,
+          actual_gallons: utilizationResult.actual_gallons,
+          unused_gallons: utilizationResult.unused_gallons,
+          utilization_pct: utilizationResult.utilization_pct,
+          eligibility: utilizationResult.eligibility,
+          exception_reason: utilizationResult.exception_reason,
+        } : null,
       });
       setLoadUtilization(utilizationResult);
       setLoadingOpen(false);

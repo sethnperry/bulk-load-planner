@@ -143,6 +143,20 @@ export type PlanSnapshot = {
   name?: string;
 };
 
+/** One load's payload-utilization result, as stored by
+ *  record_load_utilization. Null percentage means the load was excluded (see
+ *  eligibility) -- null says "no score", where a 0 would read as "this driver
+ *  loaded nothing." */
+export type LoadUtilization = {
+  available_gallons: number;
+  effective_available_gallons: number;
+  actual_gallons: number;
+  unused_gallons: number;
+  utilization_pct: number | null;
+  eligibility: "eligible" | "excluded_constraint" | "excluded_safety" | "excluded_incomplete_data";
+  exception_reason: string | null;
+};
+
 export type LoadReport = {
   planned_total_gal: number;
   planned_gross_lbs: number | null;
@@ -158,4 +172,10 @@ export type LoadReport = {
   // completed before this was tracked.
   completed_at: string | null;
   plan_slot: number | null;
+  /** Payload utilization for this load. Null when the measurement hasn't run
+   *  (migrations not applied yet, or the RPC failed -- it is non-fatal). Set
+   *  from record_load_utilization's own return right after a completed load,
+   *  and re-read from load_utilization when a past load is restored/recalled,
+   *  exactly like recovered_points already is. */
+  utilization?: LoadUtilization | null;
 };
