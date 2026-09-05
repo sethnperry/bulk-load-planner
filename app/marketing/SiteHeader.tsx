@@ -8,6 +8,7 @@
 // comment for why this site is light, not the app's dark #111111 theme.
 
 import Link from "next/link";
+import { useState } from "react";
 
 const LOGO_PATH =
   "m -50.568768,-33.479618 c -0.379508,0 -0.747403,0.04834 -1.09766,0.139414 -0.241358,0.06276 -0.287389,0.279561 -0.110962,0.455988 l 2.762871,2.762871 a 1.1791924,1.1791924 22.5 0 0 0.833814,0.345377 h 4.240473 3.803385 4.844666 c 0.320197,0 0.577742,0.257545 0.577742,0.577742 0,0.320197 -0.257545,0.578259 -0.577742,0.578259 h -4.844666 -3.259536 a 0.54384869,0.54384869 135 0 0 -0.543849,0.543849 v 3.02906 0.19637 10.722212 a 0.21369808,0.21369808 22.501943 0 0 0.364795,0.151117 l 3.05794,-3.057525 a 1.2994077,1.2994077 112.50194 0 0 0.38065,-0.918882 v -3.289907 -3.607015 h 4.877222 c 2.390258,0 4.314982,-1.924207 4.314982,-4.314465 0,-2.390258 -1.924724,-4.314465 -4.314982,-4.314465 h -4.877222 -3.803385 z";
@@ -22,9 +23,24 @@ function PhoneIcon() {
   );
 }
 
+function MenuIcon() {
+  return (
+    <svg width="20" height="14" viewBox="0 0 20 14" fill="none" aria-hidden="true">
+      <line x1="0" y1="1" x2="20" y2="1" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <line x1="0" y1="7" x2="20" y2="7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <line x1="0" y1="13" x2="20" y2="13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export type ActiveNav = "about" | "pricing" | "get-the-app" | undefined;
 
 export default function SiteHeader({ active }: { active?: ActiveNav }) {
+  // Small screens collapse About/Pricing/Login behind this menu; the
+  // primary CTA stays visible beside it rather than being buried.
+  const [menuOpen, setMenuOpen] = useState(false);
+  const close = () => setMenuOpen(false);
+
   return (
     <header className="site-header">
       <div className="nav-row">
@@ -43,7 +59,33 @@ export default function SiteHeader({ active }: { active?: ActiveNav }) {
             Get the App <PhoneIcon />
           </Link>
         </nav>
+
+        <div className="nav-compact">
+          <Link href="/get-the-app" className="nav-cta">
+            Get the App <PhoneIcon />
+          </Link>
+          <button
+            type="button"
+            className="nav-menu-btn"
+            aria-label={menuOpen ? "Close menu" : "Open menu"}
+            aria-expanded={menuOpen}
+            onClick={() => setMenuOpen((v) => !v)}
+          >
+            <MenuIcon />
+          </button>
+        </div>
       </div>
+
+      {menuOpen && (
+        <>
+          <div className="nav-backdrop" onClick={close} aria-hidden="true" />
+          <div className="nav-panel">
+            <Link href="/about" onClick={close} className={active === "about" ? "is-active" : undefined}>About</Link>
+            <Link href="/pricing" onClick={close} className={active === "pricing" ? "is-active" : undefined}>Pricing</Link>
+            <Link href="/login" onClick={close}>Login</Link>
+          </div>
+        </>
+      )}
 
       {/*
         Deliberately `jsx global`, not scoped `jsx` -- scoped styled-jsx
@@ -60,8 +102,12 @@ export default function SiteHeader({ active }: { active?: ActiveNav }) {
         colliding with any other page's own global styles.
       */}
       <style jsx global>{`
-        .site-header { padding: 28px 48px 0; }
+        .site-header { padding: 28px 48px 0; position: relative; }
         .site-header .nav-row { display: flex; align-items: center; gap: 16px; }
+        /* Compact (phone) nav is hidden until the breakpoint below swaps
+           the two; the full link row is the default so nothing regresses
+           on desktop if this block ever fails to apply. */
+        .site-header .nav-compact { display: none; }
         .site-header .brand { display: flex; align-items: flex-start; gap: 14px; flex-shrink: 0; text-decoration: none; }
         .site-header .wordmark { margin-top: 14px; font: 800 24px var(--font-outfit), sans-serif; letter-spacing: 0.02em; color: #111; }
         .site-header .nav-links { display: flex; align-items: center; gap: 30px; flex-shrink: 0; margin-left: auto; }
@@ -92,6 +138,69 @@ export default function SiteHeader({ active }: { active?: ActiveNav }) {
           .site-header .wordmark { margin-top: 10px; font-size: 19px; }
           .site-header .nav-links { gap: 18px; flex-wrap: wrap; }
           .site-header .nav-links a { font-size: 15px; }
+        }
+
+        /* Phone: swap the full link row for the CTA + menu button. 700px
+           clears every common phone width in landscape and portrait while
+           leaving tablets (768+) on the full nav, which still fits there. */
+        @media (max-width: 700px) {
+          .site-header .nav-row { flex-wrap: nowrap; }
+          .site-header .nav-links { display: none; }
+          .site-header .nav-compact {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-left: auto;
+            flex-shrink: 0;
+          }
+          .site-header .nav-compact .nav-cta {
+            font: 600 14px var(--font-outfit), sans-serif;
+            padding: 10px 16px;
+            text-decoration: none;
+          }
+          .site-header .nav-menu-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 40px;
+            height: 40px;
+            padding: 0;
+            border-radius: 10px;
+            border: 1px solid rgba(0,0,0,0.14);
+            background: #fff;
+            color: #111;
+            cursor: pointer;
+          }
+          .site-header .nav-menu-btn:hover { background: rgba(0,0,0,0.04); }
+          .site-header .nav-backdrop {
+            position: fixed;
+            inset: 0;
+            z-index: 40;
+          }
+          .site-header .nav-panel {
+            position: absolute;
+            top: 100%;
+            right: 24px;
+            z-index: 41;
+            margin-top: 8px;
+            min-width: 168px;
+            display: flex;
+            flex-direction: column;
+            padding: 8px;
+            border-radius: 14px;
+            background: #fff;
+            border: 1px solid rgba(0,0,0,0.12);
+            box-shadow: 0 12px 32px rgba(0,0,0,0.14);
+          }
+          .site-header .nav-panel a {
+            padding: 11px 12px;
+            border-radius: 9px;
+            font: 600 16px var(--font-outfit), sans-serif;
+            color: #111;
+            text-decoration: none;
+          }
+          .site-header .nav-panel a:hover { background: rgba(0,0,0,0.05); }
+          .site-header .nav-panel a.is-active { opacity: 0.45; }
         }
       `}</style>
     </header>

@@ -14,7 +14,7 @@ export default function SiteFooter() {
       <div className="footer-row">
         <div className="footer-brand">
           <span className="footer-wordmark">PROTANKR</span>
-          <span className="footer-tagline">Precision fuel loading for bulk transport drivers.</span>
+          <span className="footer-tagline">Payload optimization for bulk fuel fleets.</span>
         </div>
 
         <nav className="footer-links">

@@ -3,15 +3,19 @@
 // Unauthenticated and authenticated visitors both see this; CTAs link to
 // /get-the-app (the site's one real lead-capture path today) or /pricing.
 //
-// Redesigned 2026-09 around a repositioning shift: from "avoid overweight
-// tickets" framing to "payload optimization / recover unused legal
-// capacity." Primary message: STOP LEAVING PAYLOAD AT THE RACK.
+// Restructured 2026-09 (v3): the calculator moved out of the closing
+// section up to position 2, immediately after the hero, so a visitor can
+// try the tool before reading the pitch. The hero's single CTA scrolls
+// straight to it. The historical benchmark stat moved out of the hero
+// and now appears only AFTER a visitor has produced their own number,
+// as context for something they just did rather than a cold claim.
 //
-// The hero stat below is real (Seth's own current monthly average),
-// presented as a generic "single driver" example rather than "my own
-// number" — see CURRENT_MONTHLY_AVG_GAL_PER_LOAD's own comment for what
-// it does and doesn't represent. Update that one constant as the real
-// number moves; the copy around it is written to stay honest either way.
+// Copy rule, deliberate: nothing on this page may claim ProTankr
+// prevents overweight loads outright. A sudden shift in terminal or
+// product conditions can still catch a driver out before the network
+// has data on it. What the product prevents is the PERMANENT downward
+// ratchet afterward. Avoid "never", "guaranteed", "always safe",
+// "eliminates" and similar absolutes anywhere in this file.
 
 import Link from "next/link";
 import { useState } from "react";
@@ -19,13 +23,11 @@ import SiteHeader from "./marketing/SiteHeader";
 import SiteFooter from "./marketing/SiteFooter";
 
 // Seth's own current monthly average gallons/load, measured against his
-// own conservative per-product benchmarks — shown on the page as a
-// generic "single driver" example, not attributed to him by name. Real,
-// but genuinely nuanced: it's one driver (no network effect from other
-// drivers loading at the same racks yet), it's blended across products
-// rather than a clean product-specific comparison, and it moves month to
-// month. The copy below is written to carry all three caveats honestly
-// rather than present this as a settled, proven result.
+// own conservative per-product benchmarks. Real, but genuinely nuanced:
+// it's one driver (no network effect from other drivers loading at the
+// same racks yet), it's blended across products rather than a clean
+// product-specific comparison, and it moves month to month. Displayed
+// rounded; kept precise here so the source stays accurate as it moves.
 const CURRENT_MONTHLY_AVG_GAL_PER_LOAD = 272.1;
 
 // ---------------------------------------------------------------------
@@ -68,11 +70,11 @@ function OpportunityCalculator() {
 
   // A driver checking this before leaving the rack needs three distinct
   // answers -- over legal weight, genuinely close to it (a real "nice
-  // work"), or meaningfully under. Being over is never a "nice work" case,
+  // work"), or meaningfully under. Being over is not a "nice work" case,
   // even by a little, so the tolerance only softens the boundary on the
   // UNDER side (rounding noise in the estimate could otherwise flag a
   // load that's actually fine as "left on the table" by a couple gallons)
-  // -- any real overage, no matter how small, always shows the warning.
+  // -- any real overage, however small, always shows the warning.
   const TOLERANCE_GAL = 25;
   let result:
     | { kind: "over"; lbsOver: number; liveWeightLbs: number }
@@ -124,7 +126,7 @@ function OpportunityCalculator() {
           />
         </label>
         <label className="calc-field">
-          <span>Temp &deg;F</span>
+          <span>Temp (&deg;F)</span>
           <input
             type="number"
             inputMode="decimal"
@@ -144,7 +146,7 @@ function OpportunityCalculator() {
           />
         </label>
         <label className="calc-field">
-          <span>Legal limit</span>
+          <span>Legal limit (lbs)</span>
           <input
             type="number"
             inputMode="decimal"
@@ -192,6 +194,17 @@ function OpportunityCalculator() {
             <p className="calc-live-weight">
               Live weight: {result.liveWeightLbs.toLocaleString("en-US")} lbs
               (limit {limit.toLocaleString("en-US")} lbs)
+            </p>
+            {/* Shown only once the visitor has their own number, so the
+                benchmark reads as context for what they just calculated
+                rather than a claim they hit before engaging with anything. */}
+            <p className="calc-benchmark">
+              For comparison: in testing, a single driver recovered an
+              average of{" "}
+              <strong>
+                +{Math.round(CURRENT_MONTHLY_AVG_GAL_PER_LOAD)} gal per load
+              </strong>{" "}
+              against their own prior baseline, blended across products.
             </p>
           </>
         ) : (
@@ -251,7 +264,7 @@ const PRODUCT_FEATURES = [
   },
   {
     label: "Payload focused",
-    body: "One practical answer: how much can you legally and reasonably put on this trailer, right now.",
+    body: "Every variable resolves to a single number you can act on at the rack, not a report to interpret later.",
   },
 ];
 
@@ -278,7 +291,7 @@ export default function Home() {
     <div className="page">
       <SiteHeader />
 
-      {/* 1. HERO */}
+      {/* 1. HERO — one job: get the visitor into the calculator below. */}
       <section className="hero">
         <p className="hero-eyebrow">Payload optimization for bulk fuel</p>
         <h1 className="hero-h1">Stop leaving payload at the rack.</h1>
@@ -288,28 +301,28 @@ export default function Home() {
         </p>
 
         <div className="hero-actions">
-          <a href="#opportunity" className="hero-cta">
+          <a href="#calculator" className="hero-cta">
             See what you could recover &rarr;
           </a>
-          <a href="#product" className="hero-secondary">
-            How it works &darr;
-          </a>
-        </div>
-
-        <div className="hero-stat">
-          <span className="hero-stat-num">
-            +{CURRENT_MONTHLY_AVG_GAL_PER_LOAD} GAL / LOAD
-          </span>
-          <span className="hero-stat-sub">
-            A single driver without the network effect typically sees an
-            average recovery like this, blended across products. More
-            drivers using ProTankr will improve the accuracy and shrink the
-            necessary buffer.
-          </span>
         </div>
       </section>
 
-      {/* 2. PROBLEM / MANIFESTO */}
+      {/* 2. CALCULATOR — deliberately second, before any pitch. */}
+      <section id="calculator" className="calc-section">
+        <div className="calc-inner">
+          <div className="calc-header">
+            <p className="calc-eyebrow">Free tool</p>
+            <h2 className="calc-h2">Validate a BOL.</h2>
+            <p className="calc-intro">
+              Check a real load against your legal limit. Enter what was on
+              the ticket and see where it actually landed.
+            </p>
+          </div>
+          <OpportunityCalculator />
+        </div>
+      </section>
+
+      {/* 3. PROBLEM / MANIFESTO */}
       <section className="manifesto-section">
         <div className="manifesto-inner">
           <h2 className="manifesto-h2">
@@ -330,11 +343,17 @@ export default function Home() {
               terminal&apos;s conditions for a few days. The event passes. The
               drivers have a new, lower memorized volume to load.
             </p>
+            <p>
+              Every load teaches ProTankr something. When conditions shift
+              and catch a driver off guard, the network adjusts — so the
+              truck behind them doesn&apos;t repeat it, and nobody has to guess
+              low forever because of one bad day.
+            </p>
           </div>
         </div>
       </section>
 
-      {/* FOUNDER STORY */}
+      {/* 4. FOUNDER STORY */}
       <section className="founder-section">
         <div className="founder-inner">
           <blockquote className="founder-quote">
@@ -349,13 +368,16 @@ export default function Home() {
             </p>
           </blockquote>
           <p className="founder-byline">
-            Built by a bulk fuel hauler with boots-on experience.
+            Built by a CDL-A driver with a hazmat endorsement, hauling bulk
+            fuel. Boots-on experience.
           </p>
-          <p className="founder-patent">Patent pending.</p>
+          <p className="founder-patent">
+            <span className="patent-badge">Patent Pending</span>
+          </p>
         </div>
       </section>
 
-      {/* 3. PRODUCT */}
+      {/* 5. PRODUCT */}
       <section id="product" className="product-section">
         <div className="product-inner">
           <div className="product-copy">
@@ -386,7 +408,7 @@ export default function Home() {
         </div>
       </section>
 
-      {/* 4. NOT ANOTHER TMS */}
+      {/* 6. NOT ANOTHER TMS */}
       <section className="tms-section">
         <div className="tms-inner">
           <h2 className="tms-h2">Not another TMS.</h2>
@@ -407,7 +429,7 @@ export default function Home() {
         </div>
       </section>
 
-      {/* 5. WORKFLOW */}
+      {/* 7. WORKFLOW */}
       <section className="workflow-section">
         <div className="workflow-inner">
           <h2 className="workflow-h2">Calculate. Load. Capture.</h2>
@@ -423,20 +445,15 @@ export default function Home() {
         </div>
       </section>
 
-      {/* 6. FINAL CTA / OPPORTUNITY CALCULATOR */}
-      <section id="opportunity" className="closing">
+      {/* 8. FINAL CTA */}
+      <section className="closing">
         <div className="closing-inner">
           <div className="closing-header">
             <p className="closing-eyebrow">The Opportunity</p>
             <h2 className="closing-h2">
               How many gallons are your trucks leaving behind?
             </h2>
-            <p className="closing-intro">
-              Use this free tool to validate a BOL.
-            </p>
           </div>
-
-          <OpportunityCalculator />
 
           <div className="closing-footer">
             <p className="closing-sub">
@@ -470,7 +487,7 @@ export default function Home() {
         }
 
         /* ---------- Hero ---------- */
-        .hero { padding: 40px 48px 56px; max-width: 900px; }
+        .hero { padding: 40px 48px 64px; max-width: 900px; }
         .hero-eyebrow {
           margin: 0;
           font: 800 13px var(--font);
@@ -493,7 +510,7 @@ export default function Home() {
           color: rgba(0,0,0,0.62);
         }
         .hero-actions {
-          margin-top: 30px;
+          margin-top: 32px;
           display: flex;
           align-items: center;
           gap: 26px;
@@ -508,39 +525,129 @@ export default function Home() {
           text-decoration: none;
         }
         .hero-cta:hover { opacity: 0.85; }
-        .hero-secondary {
-          font: 700 14px var(--font);
-          color: rgba(0,0,0,0.55);
-          text-decoration: none;
-        }
-        .hero-secondary:hover { color: #111; }
 
-        .hero-stat {
-          margin-top: 44px;
-          display: inline-flex;
-          flex-direction: column;
-          gap: 4px;
-          padding: 18px 22px;
-          border-radius: 16px;
-          background: repeating-linear-gradient(
-            135deg,
-            #f2f2f2,
-            #f2f2f2 10px,
-            #e9e9e9 10px,
-            #e9e9e9 20px
-          );
-          border: 1px dashed rgba(0,0,0,0.25);
+        /* ---------- Calculator (light, distinct widget block) ---------- */
+        .calc-section {
+          background: #f6f6f5;
+          border-top: 1px solid rgba(0,0,0,0.07);
+          border-bottom: 1px solid rgba(0,0,0,0.07);
+          padding: 72px 48px;
+          scroll-margin-top: 24px;
         }
-        .hero-stat-num {
-          font: 900 30px var(--font);
-          letter-spacing: -0.01em;
+        .calc-inner { max-width: 760px; margin: 0 auto; }
+        .calc-header { text-align: center; margin-bottom: 32px; }
+        .calc-eyebrow {
+          margin: 0 0 12px;
+          font: 800 12px var(--font);
+          letter-spacing: 0.14em;
+          text-transform: uppercase;
+          color: rgba(0,0,0,0.4);
+        }
+        .calc-h2 {
+          margin: 0;
+          font: 900 40px var(--font);
+          letter-spacing: -0.02em;
           color: #111;
         }
-        .hero-stat-sub {
-          max-width: 440px;
-          font: 500 12.5px var(--font);
-          color: rgba(0,0,0,0.5);
+        .calc-intro {
+          margin: 14px auto 0;
+          max-width: 500px;
+          font: 400 16px var(--font);
+          line-height: 1.55;
+          color: rgba(0,0,0,0.58);
+        }
+
+        .calc-card {
+          width: 100%;
+          border-radius: 20px;
+          background: #ffffff;
+          border: 1px solid rgba(0,0,0,0.1);
+          box-shadow: 0 4px 24px rgba(0,0,0,0.06);
+          padding: 32px;
+        }
+        .calc-fields {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 10px;
+        }
+        .calc-field {
+          flex: 1 1 120px;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 6px;
+          padding: 14px 10px;
+          border-radius: 12px;
+          border: 1px solid rgba(0,0,0,0.09);
+          background: #f4f4f3;
+        }
+        .calc-field span {
+          font: 700 10.5px var(--font);
+          letter-spacing: 0.06em;
+          text-transform: uppercase;
+          color: rgba(0,0,0,0.45);
+        }
+        .calc-field input {
+          width: 100%;
+          box-sizing: border-box;
+          border: none;
+          background: transparent;
+          color: #111;
+          font: 800 21px var(--font);
+          text-align: center;
+          padding: 0;
+        }
+        .calc-field:focus-within { border-color: rgba(0,0,0,0.4); }
+        .calc-field input:focus { outline: none; }
+        .calc-field input::placeholder { color: rgba(0,0,0,0.25); }
+        .calc-fields-note {
+          margin: 14px 0 0;
+          font: 400 12px var(--font);
           line-height: 1.5;
+          color: rgba(0,0,0,0.42);
+        }
+
+        .calc-result-area {
+          margin-top: 26px;
+          padding-top: 26px;
+          border-top: 1px solid rgba(0,0,0,0.1);
+          text-align: center;
+        }
+        .calc-result { display: flex; flex-direction: column; gap: 4px; }
+        .calc-result-num { font: 900 36px var(--font); letter-spacing: -0.01em; }
+        .calc-result-warn .calc-result-num { color: #dc2626; }
+        .calc-result-loss .calc-result-num { color: #b45309; }
+        .calc-result-good .calc-result-num { color: #15803d; }
+        .calc-result-label {
+          font: 500 13.5px var(--font);
+          color: rgba(0,0,0,0.6);
+        }
+        .calc-result-placeholder .calc-result-label {
+          font: 500 14px var(--font);
+          color: rgba(0,0,0,0.42);
+        }
+        .calc-live-weight {
+          margin: 12px 0 0;
+          font: 600 12.5px var(--font);
+          color: rgba(0,0,0,0.45);
+        }
+        .calc-benchmark {
+          margin: 20px auto 0;
+          max-width: 460px;
+          padding-top: 18px;
+          border-top: 1px solid rgba(0,0,0,0.08);
+          font: 400 13px var(--font);
+          line-height: 1.55;
+          color: rgba(0,0,0,0.55);
+        }
+        .calc-benchmark strong { color: #111; font-weight: 800; }
+
+        .calc-footnote {
+          margin: 20px 0 0;
+          font: 400 11.5px var(--font);
+          line-height: 1.5;
+          color: rgba(0,0,0,0.38);
+          text-align: center;
         }
 
         /* ---------- Problem / Manifesto ---------- */
@@ -585,11 +692,16 @@ export default function Home() {
           font: 500 13px var(--font);
           color: rgba(0,0,0,0.42);
         }
-        .founder-patent {
-          margin: 10px 0 0;
-          font: 500 11px var(--font);
-          letter-spacing: 0.04em;
-          color: rgba(0,0,0,0.3);
+        .founder-patent { margin: 18px 0 0; }
+        .patent-badge {
+          display: inline-block;
+          padding: 6px 14px;
+          border-radius: 999px;
+          border: 1px solid rgba(0,0,0,0.18);
+          font: 800 10.5px var(--font);
+          letter-spacing: 0.12em;
+          text-transform: uppercase;
+          color: rgba(0,0,0,0.5);
         }
 
         /* ---------- Product ---------- */
@@ -748,13 +860,13 @@ export default function Home() {
           color: rgba(0,0,0,0.55);
         }
 
-        /* ---------- Closing / Opportunity calculator ---------- */
+        /* ---------- Closing ---------- */
         .closing { background: #111111; padding: 88px 48px; }
         .closing-inner {
           display: flex;
           flex-direction: column;
           align-items: center;
-          gap: 44px;
+          gap: 28px;
           max-width: 760px;
           margin: 0 auto;
         }
@@ -767,104 +879,16 @@ export default function Home() {
           color: rgba(255,255,255,0.4);
         }
         .closing-h2 { margin: 0; font: 900 44px var(--font); letter-spacing: -0.02em; color: #fff; line-height: 1.08; }
-        .closing-intro {
-          margin: 16px 0 0;
-          font: 400 16px var(--font);
-          color: rgba(255,255,255,0.55);
-        }
-
-        .calc-card {
-          width: 100%;
-          border-radius: 20px;
-          background: rgba(255,255,255,0.05);
-          border: 1px solid rgba(255,255,255,0.12);
-          padding: 32px;
-        }
-        .calc-fields {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 10px;
-        }
-        .calc-field {
-          flex: 1 1 120px;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          gap: 6px;
-          padding: 14px 10px;
-          border-radius: 12px;
-          border: 1px solid rgba(255,255,255,0.1);
-          background: rgba(255,255,255,0.06);
-        }
-        .calc-field span {
-          font: 700 10.5px var(--font);
-          letter-spacing: 0.06em;
-          text-transform: uppercase;
-          color: rgba(255,255,255,0.4);
-        }
-        .calc-field input {
-          width: 100%;
-          box-sizing: border-box;
-          border: none;
-          background: transparent;
-          color: #fff;
-          font: 800 21px var(--font);
-          text-align: center;
-          padding: 0;
-        }
-        .calc-field:focus-within { border-color: rgba(255,255,255,0.35); }
-        .calc-field input:focus { outline: none; }
-        .calc-field input::placeholder { color: rgba(255,255,255,0.22); }
-        .calc-fields-note {
-          margin: 14px 0 0;
-          font: 400 12px var(--font);
-          line-height: 1.5;
-          color: rgba(255,255,255,0.4);
-        }
-
-        .calc-result-area {
-          margin-top: 26px;
-          padding-top: 26px;
-          border-top: 1px solid rgba(255,255,255,0.1);
-          text-align: center;
-        }
-        .calc-result { display: flex; flex-direction: column; gap: 4px; }
-        .calc-result-num { font: 900 36px var(--font); letter-spacing: -0.01em; }
-        .calc-result-warn .calc-result-num { color: #f87171; }
-        .calc-result-loss .calc-result-num { color: #fbbf24; }
-        .calc-result-good .calc-result-num { color: #4ade80; }
-        .calc-result-label {
-          font: 500 13.5px var(--font);
-          color: rgba(255,255,255,0.55);
-        }
-        .calc-result-placeholder .calc-result-label {
-          font: 500 14px var(--font);
-          color: rgba(255,255,255,0.4);
-        }
-        .calc-live-weight {
-          margin: 12px 0 0;
-          font: 600 12.5px var(--font);
-          color: rgba(255,255,255,0.4);
-        }
-
-        .calc-footnote {
-          margin: 20px 0 0;
-          font: 400 11.5px var(--font);
-          line-height: 1.5;
-          color: rgba(255,255,255,0.3);
-          text-align: center;
-        }
-
         .closing-footer { text-align: center; }
         .closing-sub {
-          margin: 0;
+          margin: 0 auto;
           max-width: 560px;
           font: 400 16px var(--font);
           color: rgba(255,255,255,0.55);
           line-height: 1.55;
         }
         .closing-actions {
-          margin-top: 22px;
+          margin-top: 24px;
           display: flex;
           align-items: center;
           justify-content: center;
@@ -889,11 +913,14 @@ export default function Home() {
 
         /* ---------- Mobile ---------- */
         @media (max-width: 980px) {
-          .hero { padding: 24px 24px 40px; }
+          .hero { padding: 24px 24px 44px; }
           .hero-h1 { font-size: 44px; }
           .hero-sub { font-size: 16px; }
-          .hero-stat { margin-top: 32px; }
-          .hero-stat-num { font-size: 24px; }
+
+          .calc-section { padding: 48px 24px; }
+          .calc-h2 { font-size: 30px; }
+          .calc-card { padding: 22px; }
+          .calc-field { flex-basis: calc(50% - 5px); }
 
           .manifesto-section { padding: 56px 24px; }
           .manifesto-h2 { font-size: 30px; }
@@ -918,10 +945,7 @@ export default function Home() {
           .workflow-steps { grid-template-columns: 1fr; gap: 28px; }
 
           .closing { padding: 48px 24px; }
-          .closing-inner { gap: 32px; }
           .closing-h2 { font-size: 30px; }
-          .calc-card { padding: 22px; }
-          .calc-field { flex-basis: calc(50% - 5px); }
         }
       `}</style>
     </div>
