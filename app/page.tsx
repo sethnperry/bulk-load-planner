@@ -214,10 +214,10 @@ function OpportunityCalculator() {
   );
 }
 
-// Bump whenever public/app-screens/planner.png is re-exported -- the bare
+// Bump whenever public/app-screens/planner.jpg is re-exported -- the bare
 // path alone lets browsers keep serving a stale cached copy of the old
 // screenshot indefinitely (same URL every time, no cache-buster).
-const PLANNER_SCREEN_VERSION = "20260808d-realmockup";
+const PLANNER_SCREEN_VERSION = "20260905-planreview";
 
 function PhoneScreen() {
   return (
@@ -232,7 +232,7 @@ function PhoneScreen() {
             candidate since this is a static marketing asset, not content
             that benefits from remote optimization. */}
         <img
-          src={`/app-screens/planner.png?v=${PLANNER_SCREEN_VERSION}`}
+          src={`/app-screens/planner.jpg?v=${PLANNER_SCREEN_VERSION}`}
           alt="ProTankr planner screen, showing a real compartment load plan"
           className="screen-img"
         />

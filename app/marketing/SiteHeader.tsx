@@ -37,7 +37,14 @@ export type ActiveNav = "about" | "pricing" | "get-the-app" | undefined;
 
 export default function SiteHeader({ active }: { active?: ActiveNav }) {
   // Small screens collapse About/Pricing/Login behind this menu; the
-  // primary CTA stays visible beside it rather than being buried.
+  // primary CTA stays visible beside it rather than being buried. There is
+  // only ever ONE "Get the App" element in the DOM -- it used to be two
+  // (one embedded in the desktop nav-links, one a separate mobile-only
+  // "compact" copy), toggled by non-overlapping media queries. At a
+  // viewport in between (tablets, or a desktop browser's mobile-emulation
+  // mode) both queries could end up true at once, which is exactly what
+  // produced the "two Get the App pills" bug -- a single shared element
+  // can't duplicate itself that way.
   const [menuOpen, setMenuOpen] = useState(false);
   const close = () => setMenuOpen(false);
 
@@ -65,12 +72,9 @@ export default function SiteHeader({ active }: { active?: ActiveNav }) {
           <Link href="/about" className={active === "about" ? "is-active" : undefined}>About</Link>
           <Link href="/pricing" className={active === "pricing" ? "is-active" : undefined}>Pricing</Link>
           <Link href="/login" className="nav-login">Login</Link>
-          <Link href="/get-the-app" className="nav-cta">
-            Get the App <PhoneIcon />
-          </Link>
         </nav>
 
-        <Link href="/get-the-app" className="nav-cta nav-cta-compact">
+        <Link href="/get-the-app" className="nav-cta">
           Get the App <PhoneIcon />
         </Link>
       </div>
@@ -103,11 +107,9 @@ export default function SiteHeader({ active }: { active?: ActiveNav }) {
       <style jsx global>{`
         .site-header { padding: 28px 48px 0; position: relative; }
         .site-header .nav-row { display: flex; align-items: center; gap: 16px; }
-        /* Both the hamburger and the compact CTA are mobile-only; hidden
-           by default so nothing regresses on desktop if the breakpoint
-           below ever fails to apply. */
+        /* Hidden on desktop by default so nothing regresses if the
+           breakpoint below ever fails to apply. */
         .site-header .nav-menu-btn { display: none; }
-        .site-header .nav-cta-compact { display: none; }
         .site-header .brand { display: flex; align-items: flex-start; gap: 14px; flex-shrink: 0; text-decoration: none; }
         .site-header .wordmark { margin-top: 14px; font: 800 24px var(--font-outfit), sans-serif; letter-spacing: 0.02em; color: #111; }
         .site-header .nav-links { display: flex; align-items: center; gap: 30px; flex-shrink: 0; margin-left: auto; }
@@ -127,43 +129,43 @@ export default function SiteHeader({ active }: { active?: ActiveNav }) {
           color: #fff !important;
           padding: 12px 20px;
           border-radius: 999px;
+          flex-shrink: 0;
+          text-decoration: none;
+          white-space: nowrap;
         }
         .site-header .nav-cta:hover { opacity: 0.85 !important; }
 
         @media (max-width: 980px) {
           .site-header { padding: 20px 24px 0; }
-          .site-header .nav-row { flex-wrap: wrap; row-gap: 12px; }
           .site-header .brand { gap: 10px; }
           .site-header .mark { width: 46px; height: 43px; }
           .site-header .wordmark { margin-top: 10px; font-size: 19px; }
-          .site-header .nav-links { gap: 18px; flex-wrap: wrap; }
+          .site-header .nav-links { gap: 18px; }
           .site-header .nav-links a { font-size: 15px; }
         }
 
-        /* Phone: hamburger (bare icon, no button chrome) and "Get the App"
-           on one row, logo raised onto its own full-width row above them.
-           Hamburger + logo + CTA all inline on one row genuinely doesn't
-           fit a 375px phone (measured: roughly 360px of content against
-           ~327px of available width after padding), which is what pushed
-           the CTA pill off-screen -- splitting the logo onto its own row
-           frees the room instead of shrinking anything further. 700px
+        /* Phone: About/Pricing/Login collapse behind the hamburger, but the
+           logo and the single "Get the App" pill both stay on this one row
+           at every width below this -- no more stacking the logo onto its
+           own row, which read as "in a weird spot" once tried. The logo
+           itself shrinks further (a smaller mark + smaller wordmark) so
+           hamburger + logo + CTA reliably fit a 375px phone (measured:
+           ~286px of content against ~327px of available width after
+           padding, leaving real headroom, not a razor-thin fit). 700px
            clears every common phone width in landscape and portrait while
            leaving tablets (768+) on the full nav, which still fits there. */
         @media (max-width: 700px) {
-          .site-header .nav-row { flex-wrap: wrap; }
+          .site-header .nav-row { flex-wrap: nowrap; gap: 10px; }
           .site-header .nav-links { display: none; }
-          .site-header .brand {
-            order: -1;
-            flex: 1 1 100%;
-            justify-content: center;
-            margin-bottom: 10px;
-          }
+          .site-header .brand { gap: 6px; }
+          .site-header .mark { width: 32px; height: 30px; }
+          .site-header .wordmark { margin-top: 0; font-size: 15px; }
           .site-header .nav-menu-btn {
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            width: 36px;
-            height: 36px;
+            width: 32px;
+            height: 32px;
             padding: 0;
             border: none;
             background: none;
@@ -172,16 +174,13 @@ export default function SiteHeader({ active }: { active?: ActiveNav }) {
             flex-shrink: 0;
           }
           .site-header .nav-menu-btn:hover { opacity: 0.6; }
-          .site-header .nav-cta-compact {
-            display: inline-flex;
-            align-items: center;
-            gap: 7px;
+          .site-header .nav-cta {
             margin-left: auto;
-            flex-shrink: 0;
-            font: 600 14px var(--font-outfit), sans-serif;
-            padding: 10px 16px;
-            text-decoration: none;
+            font-size: 13px;
+            padding: 9px 14px;
+            gap: 5px;
           }
+          .site-header .nav-cta svg { width: 9px; height: 13px; }
           .site-header .nav-backdrop {
             position: fixed;
             inset: 0;
