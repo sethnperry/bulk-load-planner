@@ -430,7 +430,21 @@ try {
 // shrink its own denominator or score a violation -- see that migration's
 // own header for why capacity itself can't be computed there.
 let utilizationResult: LoadUtilizationResult | null = null;
-if (capacityResult && capacityResult.available_gallons > 0) {
+// Say so when the measurement is skipped. capacityCompartments (page.tsx)
+// silently drops any compartment whose product is missing api_60/alpha_per_f
+// or whose configured cap_gallons is absent -- correct (capacity is
+// underivable without density), but if EVERY compartment drops, capacity is
+// 0, no row is ever written, and load_utilization just stays empty with
+// nothing anywhere saying why. That is indistinguishable from the engine
+// being broken, so it gets a warning rather than silence.
+if (!capacityResult || !(capacityResult.available_gallons > 0)) {
+  console.warn(
+    "record_load_utilization skipped: no solvable capacity for this load " +
+    "(a planned product is likely missing api_60/alpha_per_f, or a compartment " +
+    "has no configured cap_gallons).",
+    { available_gallons: capacityResult?.available_gallons ?? null },
+  );
+} else {
   try {
     const { data: utilRes, error: utilErr } = await supabase.rpc("record_load_utilization", {
       p_load_id: activeLoadId,

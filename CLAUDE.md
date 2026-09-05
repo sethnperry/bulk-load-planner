@@ -9310,6 +9310,51 @@ session. What would: a working anon key plus a test account, which is enough to
 sign in over the auth REST API and read `load_utilization` under real RLS with
 `curl`, no browser needed.
 
+**"All zeros" investigated against live production 2026-09-05 — benign, and
+the engine is now proven on a real load.** The user ran the Phase 2 summary
+query in the SQL editor (service role, so RLS hides nothing) and got 0 rows /
+0 eligible / NULL everywhere. Diagnosed rather than guessed at, using the
+**anon key + the demo login route over plain `curl`** — no browser needed,
+which is the method this doc predicted would work and is worth reusing:
+`GET /api/demo/start?persona=alpha` returns a redirect carrying a
+`token_hash`; `POST /auth/v1/verify` with `{type:"magiclink",token_hash}` and
+the anon key returns a real `access_token`; every PostgREST read after that
+runs under genuine RLS as that user.
+
+**Cause: nothing has completed since the migrations were applied.** The most
+recent `load_log` row with a `completed_at` is `2026-09-05T05:23:50Z`; the
+migrations were applied later the same day (checked at 21:20Z). The engine
+only ever runs in `onLoadedFromLoadingModal`, right after a real
+`complete_load`, so it has simply never had a chance to fire. Not a bug — but
+it is also not evidence the thing works, so the whole chain was verified
+link by link instead of assumed:
+- The RPC **is** wired (`useLoadWorkflow.ts:435`), gated on
+  `capacityResult && available_gallons > 0`, fed from `page.tsx:1028`.
+- All three Phase 1 tables exist live (HTTP 200, empty under anon RLS), and
+  `incentive_settings` carries `target_gross_lbs`/`legal_gross_lbs` = 79500/80000.
+- Every gate that could silently zero out capacity was checked against the
+  real last load: all three of its products have real `api_60`/`alpha_per_f`,
+  and its compartments have real `cap_gallons`. So the next completed load
+  will produce a row.
+
+**The real engine, run on that real load's real numbers** (tare 25,070,
+cg_bias 0.543, three compartments, live product densities): available 8,446.8
+gal, `limiting_factor: "company_target"` (correct — 9,650 gal of tank, so
+weight-limited not volume-limited), 8,530.0 gal at legal (83 gal of fleet
+headroom), actual 8,456.5 gal → **100.1% utilization**, safety gate passes at
+79,501 lbs gross against an 80,000 legal ceiling. That >100% figure is the
+spec's "above target but under legal is legitimate and is not clamped"
+decision behaving correctly on real data, not a rounding artifact.
+
+**One fix from this pass**: the `available_gallons > 0` gate was a *silent*
+skip. `capacityCompartments` correctly drops any compartment missing
+`api_60`/`alpha_per_f` or `cap_gallons` (capacity is underivable without
+density) — but if every compartment drops, no row is written and
+`load_utilization` just stays empty with nothing anywhere saying why, which
+is indistinguishable from the engine being broken. It now logs a
+`console.warn` naming the likely cause. That is the first thing to check if
+rows still don't appear after the next real load.
+
 **Not started:** Phase 3 (fleet dashboard replacing the benchmark-based
 Underloading Dashboard), Phase 4 (incentive/payroll layer), and the legacy
 teardown — which lands **after** this engine is validated against real loads,
