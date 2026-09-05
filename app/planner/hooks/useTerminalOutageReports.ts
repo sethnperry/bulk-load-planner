@@ -144,6 +144,34 @@ export async function clearOutageReport(reportId: string): Promise<{ error: stri
 }
 
 /**
+ * Clears every active out_of_product report for this terminal+product,
+ * regardless of who filed it -- used by RackProductStatusModal.tsx's own
+ * "Mark Available" (STUD represents the terminal's own current physical
+ * status, not any one driver's personal claim, so it should be able to
+ * clear a peer's report too). Relies on the broader
+ * terminal_outage_reports_delete_product_any RLS policy (see the
+ * 20260906000000 migration) -- clearOutageReport's own reporter-only
+ * policy alone wouldn't reach a report someone else filed. Deliberately
+ * restricted to "out_of_product" only, even though the parameter exists
+ * for clarity -- out_of_allocation is company-specific, not something
+ * STUD (a physical-terminal-status tool) has any business clearing; no
+ * caller should ever pass anything else.
+ */
+export async function clearOutageReportsForProduct(
+  terminalId: string,
+  productId: string,
+  reportType: OutageReportType = "out_of_product"
+): Promise<{ error: string | null }> {
+  const { error } = await supabase
+    .from("terminal_outage_reports")
+    .delete()
+    .eq("terminal_id", terminalId)
+    .eq("product_id", productId)
+    .eq("report_type", reportType);
+  return { error: error ? error.message : null };
+}
+
+/**
  * Polls (every OUTAGE_POLL_MS) for currently-active outage reports at
  * `terminalId` and composes them into a single joined ticker string
  * (`tickerMessage`, one continuous line for TerminalOutageBanner.tsx --

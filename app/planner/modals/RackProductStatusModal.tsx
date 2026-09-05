@@ -8,6 +8,12 @@
 // does after a load completes. No new bias-tracking path is introduced here,
 // per the Terminal Tier spec.
 //
+// 2026-09-06: marking a product Out/Available here now also raises/clears
+// the same terminal_outage_reports row (and therefore the same header
+// banner) a driver's "Report Terminal Issue" flow already posts to -- see
+// CLAUDE.md "STUD linked to the outage banner." Out of Product only --
+// Out of Allocation is company-specific and stays untouched by STUD.
+//
 // Relocated here from the now-deleted app/planner/terminal/ page -- STUD (and
 // Edit Terminal, its sibling) now open from MyTerminalsModal.tsx's expanded
 // terminal-card view instead of a dedicated Terminal tab, per explicit
@@ -19,6 +25,7 @@ import React, { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { FullscreenModal } from "@/lib/ui/FullscreenModal";
 import type { TerminalRack, RackProductStatusRow, ProductLite } from "./rackProductTypes";
+import { submitOutageReport, clearOutageReportsForProduct } from "../hooks/useTerminalOutageReports";
 
 export default function RackProductStatusModal({
   open,
@@ -29,6 +36,7 @@ export default function RackProductStatusModal({
   rackProducts,
   productsById,
   authUserId,
+  companyId,
   onSaved,
 }: {
   open: boolean;
@@ -39,6 +47,12 @@ export default function RackProductStatusModal({
   rackProducts: RackProductStatusRow[];
   productsById: Record<string, ProductLite>;
   authUserId: string;
+  // Links STUD to the same terminal-outage banner "Report Terminal Issue"
+  // already posts to -- see CLAUDE.md "STUD linked to the outage banner"
+  // (2026-09-06). Required for the outage-report insert/clear below (the
+  // row's own company_id column), same as page.tsx's handleSubmitOutageReport
+  // already requires it.
+  companyId: string | null;
   onSaved: () => void;
 }) {
   const [productId, setProductId] = useState("");
@@ -149,6 +163,44 @@ export default function RackProductStatusModal({
       } catch {
         // Non-fatal -- the rack_product_status write above already succeeded.
       }
+    }
+
+    // Link to the same terminal-outage banner "Report Terminal Issue"
+    // already posts to -- STUD marking a product Out is the same real-world
+    // fact ("this product is physically out at this terminal") a driver's
+    // outage report describes, so it should raise/clear the identical
+    // banner rather than a second, disconnected notion of "out." Never
+    // blocks the save above on failure -- the rack_product_status write is
+    // the source of truth this modal exists for; the banner link is a
+    // best-effort side effect. submitOutageReport's own rack_product_status
+    // upsert (is_out only, no api/temp) is redundant with the fuller one
+    // above but harmless -- reusing it here (rather than inserting into
+    // terminal_outage_reports directly) keeps this in the ONE place that
+    // knows how to shape that row correctly.
+    try {
+      if (isOut) {
+        const { error: outageErr } = await submitOutageReport({
+          terminalId: rack.terminal_id,
+          selectedRackId: rack.rack_id,
+          productIds: [productId],
+          reportType: "out_of_product",
+          companyId: companyId || "",
+          userId: authUserId,
+          truckLabel: "",
+        });
+        if (outageErr) console.warn("STUD->outage-report link failed (non-fatal):", outageErr);
+      } else {
+        // Marking Available clears ANY active out_of_product report for
+        // this terminal+product, not just one this same user may have
+        // filed -- STUD represents the terminal's own current status, not
+        // a personal claim, so it should be able to clear a peer driver's
+        // report too (see clearOutageReportsForProduct's own comment and
+        // the 20260906000000 migration this depends on).
+        const { error: clearErr } = await clearOutageReportsForProduct(rack.terminal_id, productId, "out_of_product");
+        if (clearErr) console.warn("STUD->outage-report clear failed (non-fatal):", clearErr);
+      }
+    } catch (err) {
+      console.warn("STUD->outage-report link/clear threw (non-fatal):", err);
     }
 
     setSaving(false);

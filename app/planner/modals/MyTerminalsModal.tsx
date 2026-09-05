@@ -64,6 +64,11 @@ export default function MyTerminalsModal(props: {
   onChangeLocation?: () => void;
   authUserId: string;
   myRole: Role | null;
+  // Threaded through to RackProductStatusModal's STUD-to-outage-banner
+  // link (see that file's own 2026-09-06 comment) -- terminal_outage_reports
+  // requires a company_id on every row, same as page.tsx's own
+  // handleSubmitOutageReport already does for the Complete-screen flow.
+  companyId: string | null;
 }) {
   const {
     open, onClose,
@@ -76,7 +81,7 @@ export default function MyTerminalsModal(props: {
     myTerminalIds, setMyTerminalIds,
     setSelectedTerminalId, setTermOpen,
     onChangeLocation,
-    authUserId, myRole,
+    authUserId, myRole, companyId,
   } = props;
 
   const isoToday = () => new Date().toISOString().slice(0, 10);
@@ -396,6 +401,7 @@ export default function MyTerminalsModal(props: {
           rackProducts={expandedRackProducts}
           productsById={productsById}
           authUserId={authUserId}
+          companyId={companyId}
           onSaved={() => loadExpandedRackProducts(expandedRackId)}
         />
       )}

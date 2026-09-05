@@ -9071,6 +9071,77 @@ an already-proven pattern (`rack_id`/`plan_slot` tagging in
 
 `npx tsc --noEmit` and `npx next build` both clean throughout.
 
+## STUD linked to the outage banner (2026-09-06)
+
+Per explicit direction: marking a product Out via STUD (the rack-level
+"Product Status Update" reachable from `MyTerminalsModal.tsx`'s expanded
+terminal card) now raises the exact same terminal-outage banner (and same
+6am/12pm/6pm/12am clearing schedule) a driver's "Report Terminal Issue"
+flow already posts to -- and marking it back Available clears that same
+banner. Deliberately Out of Product only, not Out of Allocation, per
+explicit distinction: "that is company specific, but the product being
+physically out at a terminal" is what STUD represents.
+
+`RackProductStatusModal.tsx`'s `save()` -- unchanged in every other way
+(the existing `rack_product_status` upsert with API/temp + canonical-
+sibling propagation + temp-bias feed is still the source of truth this
+modal exists for) -- now also, best-effort/non-fatal:
+- **`isOut === true`**: calls the existing `submitOutageReport()` (already
+  built for the Complete-screen "Report Terminal Issue" flow, reused
+  verbatim rather than a second insert path) with `reportType:
+  "out_of_product"`. Its own `rack_product_status` upsert (is_out only) is
+  redundant with the fuller one this modal already does, but harmless.
+- **`isOut === false`**: calls a new `clearOutageReportsForProduct(terminalId,
+  productId, "out_of_product")` (`useTerminalOutageReports.ts`) -- deletes
+  every active `out_of_product` row for that terminal+product, regardless
+  of who originally reported it (not just this same modal's own prior
+  writes) -- STUD represents the terminal's own current physical status,
+  not any one driver's personal claim, so marking Available here should be
+  able to clear a peer driver's report too, not just one this same user
+  happens to have filed.
+
+**New migration** (`supabase/migrations/20260906000000_terminal_outage_reports_stud_link.sql`,
+**not yet applied**): the existing `terminal_outage_reports_delete` RLS
+policy (from `20260829000000`) is deliberately reporter-only ("I fixed my
+own mistake," not a moderation tool) -- which would have silently limited
+STUD's own clear to 0 rows for any report someone else filed, with no
+error surfaced (RLS-filtered deletes just affect fewer rows, they don't
+fail). Added a second, additive DELETE policy scoped to `out_of_product`
+rows only (permissive policies OR together, so the existing reporter-only
+policy is untouched and still the only one governing `out_of_allocation`)
+-- any authenticated user can clear an `out_of_product` report regardless
+of who filed it, matching the same "wide open to any role" precedent
+`rack_product_status` itself already has (STUD has never been role-gated).
+
+`companyId` threaded through as a new prop --
+`CalculatorLayoutClient.tsx` → `MyTerminalsModal.tsx` →
+`RackProductStatusModal.tsx` (from `shell.companyId`) -- required by
+`terminal_outage_reports.company_id`, same as page.tsx's own
+`handleSubmitOutageReport` already needs for the other flow.
+`truckLabel` was NOT threaded through -- confirmed by reading
+`TerminalOutageDetailModal.tsx`'s own 2026-08-31 note that Out of Product
+cards deliberately drop the truck number and show only the company name,
+so a STUD-originated report (always `out_of_product`) would never
+actually render it either way.
+
+**Live-verified** via the demo login route (temporary redirect bypass,
+reverted after, confirmed via `grep`) against real Global South/North
+Rack data: opened STUD for D2 (already `Product Out` from an earlier
+session's own "Report Terminal Issue" test), tapped "Mark Available" --
+console showed no warnings (the clear succeeded), and a fresh navigation
+back to Global South confirmed the header's "Out of ULSD" banner was
+genuinely gone. Tapped STUD again, "Mark Out", confirmed no warnings, and
+a fresh navigation confirmed the banner reappeared -- full round trip
+(STUD Out → banner shows; STUD Available → banner clears) confirmed
+working. Left D2 marked Available again afterward, matching its real
+pre-test state. The migration's own *broadened* half (clearing a report
+filed by a genuinely different user) wasn't independently exercised --
+this session only has one real reporter identity to test with, same
+category of gap this project already flags for other role/multi-user
+checks -- but the reporter-only path it's additive on top of was already
+proven live, and the SQL itself is a single, simple, already-precedented
+policy shape. `npx tsc --noEmit` and `npx next build` both clean.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.

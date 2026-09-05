@@ -366,6 +366,7 @@ function ShellChrome({ children }: { children: React.ReactNode }) {
         onChangeLocation={() => { shell.setTermOpen(false); shell.setLocOpen(true); }}
         authUserId={shell.effectiveUserId}
         myRole={shell.role}
+        companyId={shell.companyId}
       />
 
       <RackSelectSheet
