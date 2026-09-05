@@ -66,13 +66,33 @@ function OpportunityCalculator() {
     (n) => Number.isFinite(n) && n > 0
   );
 
-  let result: { gal: number; short: boolean } | null = null;
+  // A driver checking this before leaving the rack needs three distinct
+  // answers, not two -- "over" and "already tight, well done" are very
+  // different situations that both used to collapse into one "short gap"
+  // case. TOLERANCE_GAL absorbs the estimate's own imprecision (this is
+  // published density math, not the real app's per-product tuning) so a
+  // load that's genuinely right at the line doesn't get flagged either
+  // way on rounding noise alone.
+  const TOLERANCE_GAL = 25;
+  let result:
+    | { kind: "over"; lbsOver: number }
+    | { kind: "good"; gal: number }
+    | { kind: "left"; gal: number }
+    | null = null;
   if (allFilled) {
     const lbsPerGal = estimateLbsPerGallon(apiNum, temp);
+    const actualTotalLbs = tare + actual * lbsPerGal;
     const maxLegalPayloadLbs = Math.max(limit - tare, 0);
     const maxLegalGallons = maxLegalPayloadLbs / lbsPerGal;
-    const gap = maxLegalGallons - actual;
-    result = { gal: Math.round(Math.abs(gap)), short: gap <= 1 };
+    const gapGallons = maxLegalGallons - actual;
+
+    if (gapGallons < -TOLERANCE_GAL) {
+      result = { kind: "over", lbsOver: Math.round(actualTotalLbs - limit) };
+    } else if (Math.abs(gapGallons) <= TOLERANCE_GAL) {
+      result = { kind: "good", gal: Math.round(Math.abs(gapGallons)) };
+    } else {
+      result = { kind: "left", gal: Math.round(gapGallons) };
+    }
   }
 
   return (
@@ -135,7 +155,16 @@ function OpportunityCalculator() {
 
       <div className="calc-result-area">
         {result ? (
-          result.short ? (
+          result.kind === "over" ? (
+            <div className="calc-result calc-result-warn">
+              <span className="calc-result-num">
+                ~{result.lbsOver.toLocaleString("en-US")} lbs over
+              </span>
+              <span className="calc-result-label">
+                You may be overweight. Recheck before you leave the rack.
+              </span>
+            </div>
+          ) : result.kind === "good" ? (
             <div className="calc-result calc-result-good">
               <span className="calc-result-num">
                 Within {result.gal.toLocaleString("en-US")} gal
@@ -392,7 +421,9 @@ export default function Home() {
               How many gallons are your trucks leaving behind?
             </h2>
             <p className="closing-intro">
-              Grab a recent BOL and find out. No signup, no email required.
+              Use this free tool to validate your BOL: check if you&apos;re
+              overweight before you leave the rack, or how much you left on
+              the table if you&apos;re not. No signup, no email required.
             </p>
           </div>
 
@@ -790,7 +821,8 @@ export default function Home() {
         }
         .calc-result { display: flex; flex-direction: column; gap: 4px; }
         .calc-result-num { font: 900 36px var(--font); letter-spacing: -0.01em; }
-        .calc-result-loss .calc-result-num { color: #f87171; }
+        .calc-result-warn .calc-result-num { color: #f87171; }
+        .calc-result-loss .calc-result-num { color: #fbbf24; }
         .calc-result-good .calc-result-num { color: #4ade80; }
         .calc-result-label {
           font: 500 13.5px var(--font);
