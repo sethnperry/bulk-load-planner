@@ -8843,6 +8843,59 @@ header itself now only renders two `aria-label`led buttons ("Open
 navigation menu", "Alerts") — no gear button left in the strip.
 `npx tsc --noEmit` and `npx next build` both clean.
 
+### Temperature confirmation moved out of the header into the LOAD flow itself (2026-09-05)
+
+Per explicit direction: the header strip's Temperature icon (a live °F
+reading, tappable any time, opening `ProductTempModal`) is removed
+entirely -- confirming/adjusting the product temp is now step one of
+tapping LOAD instead, ahead of the existing "Plan Review" step. Full
+sequence now: **tap LOAD → Confirm Temp → Plan Review → Complete**.
+
+`app/planner/page.tsx`: `headerIconsEl`'s cluster is back down to plan-
+letter/Equipment/Location (the derived `isOverride`/`tempSubColor`
+consts that only fed the removed icon's color were deleted along with
+it -- both were dead the moment the icon was gone). `loadButtonEl`'s
+`onClick` no longer captures `preLoadCardedOnRef` or calls
+`loadWorkflow.beginLoadToSupabase()` directly -- after the existing
+unavailable-products guard, it now just opens `ProductTempModal`
+(`setTempDialOpen(true)`). New `handleConfirmTempAndBeginLoad` (wired as
+`ProductTempModal`'s new `onConfirm` prop) does what the LOAD tap used
+to do immediately: captures `preLoadCardedOnRef` (unchanged logic, just
+one tap later -- still genuinely "right before the load begins," since
+nothing else touches the terminal's access date in between) and calls
+`beginLoadToSupabase()`, which opens `LoadingModal` ("Plan Review") same
+as before.
+
+`ProductTempModal.tsx`: gained a required `onConfirm: () => void` prop.
+`FullscreenModal`'s `footer` is now a "Confirm & Continue" button
+(styled via `styles.doneBtn`, same cast-to-any precedent `LoadingModal`
+already uses for this shared style) instead of the default plain "Done"
+-- calls `onConfirm`. The header's existing "Close" button (onClose) is
+still the bail-out: no load has been started yet at this point (begin_load
+hasn't run), so closing just closes, nothing to undo. Modal title changed
+from "Product Temp" to "Confirm Temp" to match its new role as a
+confirmation step rather than an always-available adjustment screen.
+Content/behavior otherwise unchanged (prediction banner, per-product temp
+list, the dial, the Learn link). This is this modal's only call site, so
+no other consumer needed updating.
+
+**Live-verified** via the demo login route against real data (Global
+South/North Rack, real D2 diesel compartments, temporarily bypassing the
+admin/dispatch landing redirect to reach the driver-style Planner, same
+pattern used for prior icon-rail passes, reverted after -- confirmed via
+`grep -n "TEMP:"` returning empty): header cluster confirmed down to
+plan-letter/EQ/pin, no temp reading anywhere in the strip. Tapped LOAD --
+"Confirm Temp" opened first (real predicted temp 89.4°F, LOW CONFIDENCE,
+already applied), screenshot-confirmed. Tapped "Confirm & Continue" --
+"Plan Review" opened next, correctly showing the same 89.4°F carried
+through into its TEMP °F field (proving the two steps share the same
+`tempF` state, not two independently-tracked values). Tapped Complete --
+the existing CancelLoadSheet confirmation ("Log the Load / Update Card,
+No Load / Report Terminal Issue / Back to Planner") appeared unchanged,
+confirming step 3→4 still hands off to the same established flow. Tapped
+"Back to Planner" to cleanly undo the test load (no fake data left in
+the demo company). `npx tsc --noEmit` and `npx next build` both clean.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.

@@ -1,5 +1,13 @@
 "use client";
 // modals/ProductTempModal.tsx
+//
+// Step one of tapping LOAD (2026-09-05) -- was previously its own
+// always-available header icon (a live °F reading, tappable any time).
+// Removed from the header per explicit direction to reduce its icon
+// count; opening this modal is now the first thing LOAD does, before
+// LoadingModal's "Plan Review" step -- see page.tsx's loadButtonEl and
+// handleConfirmTempAndBeginLoad. Content/behavior below (prediction
+// banner, per-product temp list, the dial) is otherwise unchanged.
 
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
@@ -231,6 +239,14 @@ function PredictionBanner({
 export default function ProductTempModal(props: {
   open: boolean;
   onClose: () => void;
+  // Fired by the footer's "Confirm & Continue" button -- this modal is now
+  // step one of tapping LOAD (was previously its own always-available
+  // header icon, opened at any time with no particular next step). onClose
+  // (the header's plain "Close" button, or backdrop/Escape) is the bail-
+  // out -- no load has started yet at this point, so it just closes with
+  // no further action, same as it always has. See page.tsx's
+  // handleConfirmTempAndBeginLoad for what onConfirm actually does.
+  onConfirm: () => void;
   styles: Styles;
   selectedCity: string;
   selectedState: string;
@@ -247,7 +263,7 @@ export default function ProductTempModal(props: {
   TempDial: React.ComponentType<TempDialProps>;
 }) {
   const {
-    open, onClose, styles,
+    open, onClose, onConfirm, styles,
     selectedCity, selectedState,
     ambientTempLoading, ambientTempF,
     tempF, setTempF, TempDial,
@@ -264,7 +280,20 @@ export default function ProductTempModal(props: {
   // and lets the driver override with the dial.
 
   return (
-    <FullscreenModal open={open} title="Product Temp" onClose={onClose}>
+    <FullscreenModal
+      open={open}
+      title="Confirm Temp"
+      onClose={onClose}
+      footer={
+        <button
+          type="button"
+          onClick={onConfirm}
+          style={{ ...(styles as any).doneBtn, width: "100%", textAlign: "center" as const }}
+        >
+          Confirm & Continue
+        </button>
+      }
+    >
       <div style={{ display: "grid", gap: 16 }}>
 
         <div style={{ textAlign: "center", fontWeight: 800, letterSpacing: 0.2, userSelect: "none" }}>

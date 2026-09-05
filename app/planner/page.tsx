@@ -1314,6 +1314,25 @@ export default function CalculatorPage() {
     }
   }, [loadWorkflow, terminals]);
 
+  // Step 2 of tapping LOAD -- step 1 (loadButtonEl's onClick) just opens
+  // ProductTempModal for the driver to confirm/adjust the temp; this is
+  // ProductTempModal's own "Confirm & Continue" handler, fired once they
+  // do. Closes the temp modal, captures preLoadCardedOnRef (unchanged from
+  // before this modal was interposed -- still "right before the load
+  // actually begins", just one tap later than it used to be), then calls
+  // beginLoadToSupabase, which opens LoadingModal ("Plan Review") as step
+  // 3 -- Complete there is step 4. Tapping the temp modal's own header
+  // Close instead (not this) is the bail-out: no load has been started
+  // yet at that point, so there's nothing to undo.
+  const handleConfirmTempAndBeginLoad = useCallback(() => {
+    setTempDialOpen(false);
+    preLoadCardedOnRef.current = {
+      terminalId: location.selectedTerminalId,
+      prevValue: terminals.accessDateByTerminalId[location.selectedTerminalId] ?? null,
+    };
+    loadWorkflow.beginLoadToSupabase();
+  }, [location.selectedTerminalId, terminals, loadWorkflow]);
+
   // Wired into CancelLoadSheet's new "Report Terminal Issue" flow -- see
   // CLAUDE.md "Terminal outage banners." Stays a thin call-through to the
   // actual write logic in useTerminalOutageReports.ts, matching how
@@ -2004,37 +2023,25 @@ const lastProductInfoById = useMemo(() => {
           : actualGross >= targetWeight ? "#4ade80"
           : "#fff";
 
-        // isOverride = user manually moved temp away from prediction after it auto-applied.
-        // Only tempSubColor survives here now -- the new compact Temperature
-        // icon uses color alone to carry confidence (no more text label, no
-        // more separate primary-text-color/background-alpha treatment the
-        // old big card needed -- both removed as dead code along with it,
-        // per explicit direction: "no more confidence label spelled out, we
-        // get the color scheme only").
-        const isOverride = userAdjustedTempRef.current && predictedFuelTempF != null && Math.abs(tempF - predictedFuelTempF) > 0.5;
-        const tempSubColor = isOverride ? "#fb923c"
-          : fuelTempConfidence === "high"   ? "#4ade80"
-          : fuelTempConfidence === "medium" ? "#eab308"
-          : fuelTempConfidence === "low"    ? "#ef4444"
-          : "rgba(255,255,255,0.35)";
-
         const locationSelected = Boolean(location.selectedCity && location.selectedState);
         const terminalSelected = Boolean(location.selectedTerminalId);
         const hasEquipment = Boolean(equipment.selectedCombo);
 
-        // Plan-letter / Equipment / Location / Temperature cluster --
-        // portaled into the shared header's slot div (see headerIconsSlot
-        // above and CalculatorLayoutClient.tsx's own comment) instead of
-        // rendering as its own row in the page body. Styling matches the
-        // mockup exactly: plan letter is bold text with a small active
-        // dot underneath (not a boxed icon button), Equipment is a plain
-        // "EQ" label (a flat muted tone regardless of hasEquipment -- the
-        // mockup shows this gray even with real equipment selected;
-        // Location/Temperature are the two that carry live state through
-        // color), Location is a solid/filled pin (not the stroke outline
-        // used elsewhere), and Temperature shows the real numeric value
-        // now, not just a bare icon -- color alone still carries
-        // confidence (tempSubColor), matching the reference's green "80°F".
+        // Plan-letter / Equipment / Location cluster -- portaled into the
+        // shared header's slot div (see headerIconsSlot above and
+        // CalculatorLayoutClient.tsx's own comment) instead of rendering as
+        // its own row in the page body. Styling matches the mockup: plan
+        // letter is bold text with a small active dot underneath (not a
+        // boxed icon button), Equipment is a plain "EQ" label (a flat muted
+        // tone regardless of hasEquipment -- the mockup shows this gray
+        // even with real equipment selected), Location is a solid/filled
+        // pin (not the stroke outline used elsewhere). Temperature used to
+        // be a fourth icon here (a live °F reading, color carrying
+        // confidence) -- removed per explicit direction to reduce the
+        // header's icon count; confirming/adjusting the temp is now the
+        // first step of tapping LOAD instead (see loadButtonEl's onClick
+        // and handleConfirmTempAndBeginLoad below), not a standalone
+        // always-available control.
         const headerIconsEl = (
           <>
             {(() => {
@@ -2101,10 +2108,6 @@ const lastProductInfoById = useMemo(() => {
                 <button {...locTermBtnProps}>{locTermChildren}</button>
               );
             })()}
-
-            <button type="button" onClick={() => setTempDialOpen(true)} title="Temperature" style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}>
-              <span style={{ fontSize: 16, fontWeight: 800, color: tempSubColor }}>{Math.round(tempF)}°F</span>
-            </button>
           </>
         );
 
@@ -2182,11 +2185,13 @@ const lastProductInfoById = useMemo(() => {
                 setLoadBlockedMsg(`Cannot Load, all planned products are not available at ${terminalLabel || "this terminal"}`);
                 return;
               }
-              preLoadCardedOnRef.current = {
-                terminalId: location.selectedTerminalId,
-                prevValue: terminals.accessDateByTerminalId[location.selectedTerminalId] ?? null,
-              };
-              loadWorkflow.beginLoadToSupabase();
+              // Temp confirmation is now step one of tapping LOAD (was its
+              // own always-available header icon) -- see
+              // handleConfirmTempAndBeginLoad below for the step that
+              // actually captures preLoadCardedOnRef and calls
+              // beginLoadToSupabase, once the driver confirms/adjusts the
+              // temp on the modal this opens.
+              setTempDialOpen(true);
             }}
             disabled={loadDisabled}
             style={{
@@ -2337,6 +2342,7 @@ const lastProductInfoById = useMemo(() => {
       <ProductTempModal
         open={tempDialOpen}
         onClose={() => setTempDialOpen(false)}
+        onConfirm={handleConfirmTempAndBeginLoad}
         styles={styles}
         selectedCity={location.selectedCity}
         selectedState={location.selectedState}
