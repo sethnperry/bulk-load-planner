@@ -9299,7 +9299,16 @@ It belongs with the Period Report, as one change to both.
 
 Still unverified for Phase 2: anything needing a real browser or account — the
 Planner card's layout on a device, a genuinely completed live load, driver-role
-behavior. This environment has no `.env.local` and blocks the Supabase hosts.
+behavior. **Correcting an assumption this doc carried:** the network is NOT the
+blocker in a remote cloud session. Measured 2026-09-05 from one:
+`protankr.com` returns 200 and the Supabase host returns 401 (reachable, no
+credentials) — not the `connect_rejected` an earlier environment hit. The real
+blockers here are that the container has no `.env.local`, its
+`SUPABASE_*` env vars are the literal placeholder `...`, and it has no browser
+tool at all — so a user logging in to a browser does not help this kind of
+session. What would: a working anon key plus a test account, which is enough to
+sign in over the auth REST API and read `load_utilization` under real RLS with
+`curl`, no browser needed.
 
 **Not started:** Phase 3 (fleet dashboard replacing the benchmark-based
 Underloading Dashboard), Phase 4 (incentive/payroll layer), and the legacy
