@@ -28,7 +28,7 @@ import SiteFooter from "./marketing/SiteFooter";
 // same racks yet), it's blended across products rather than a clean
 // product-specific comparison, and it moves month to month. Displayed
 // rounded; kept precise here so the source stays accurate as it moves.
-const CURRENT_MONTHLY_AVG_GAL_PER_LOAD = 272.1;
+const CURRENT_MONTHLY_AVG_GAL_PER_LOAD = 272;
 
 // ---------------------------------------------------------------------
 // Opportunity calculator — a standalone public estimate tool, not a
