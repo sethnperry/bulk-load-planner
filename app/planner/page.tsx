@@ -55,6 +55,7 @@ import { SolidPinIcon } from "./components/PlannerIcons";
 import TerminalCatalogModal from "./modals/TerminalCatalogModal";
 import LoadingModal from "./modals/LoadingModal";
 import CancelLoadSheet from "./components/CancelLoadSheet";
+import TerminalSwitchDuringLoadSheet from "./components/TerminalSwitchDuringLoadSheet";
 import RecallDifferentEquipmentSheet from "./components/RecallDifferentEquipmentSheet";
 import { submitOutageReport, type OutageReportType } from "./hooks/useTerminalOutageReports";
 import ProductTempModal from "./modals/ProductTempModal";
@@ -747,6 +748,17 @@ export default function CalculatorPage() {
     setCompPlanRaw({});
   }, [compPlanKey]);
   const [productInputs, setProductInputs] = useState<Record<string, { api?: string; tempF?: number }>>({});
+  // Named (not inline) so the mid-load terminal-switch handlers further
+  // down can call these imperatively too, not just pass them as JSX props
+  // to LoadingModal (which is all these ever were before the 2026-09-05
+  // terminal-switch feature needed to write into productInputs from
+  // outside a render).
+  const setProductApi = useCallback((productId: string, api: string) => {
+    setProductInputs((prev) => ({ ...prev, [productId]: { ...(prev[productId] ?? {}), api } }));
+  }, []);
+  const setProductTemp = useCallback((productId: string, tempFVal: number) => {
+    setProductInputs((prev) => ({ ...prev, [productId]: { ...(prev[productId] ?? {}), tempF: tempFVal } }));
+  }, []);
 
   // Fuel temp prediction — drives temp button border color and pre-fills ProductTempModal.
   //
@@ -1338,13 +1350,22 @@ export default function CalculatorPage() {
   // actual write logic in useTerminalOutageReports.ts, matching how
   // handleBackToPlannerNoUpdate above is the only place that touches
   // loadWorkflow/terminals for its own concern.
+  //
+  // Optional terminal/rack override, added for
+  // TerminalSwitchDuringLoadSheet's own "Report Terminal Issue" -- that
+  // sheet's report is about the terminal the driver was ALREADY loading
+  // at (the previous one, from the switch snapshot), not whichever
+  // terminal the picker just left `location.selectedTerminalId` pointing
+  // at. CancelLoadSheet's own call site never passes these, so its
+  // existing behavior (report against the live current selection) is
+  // completely unchanged.
   const handleSubmitOutageReport = useCallback(
-    async (reportType: OutageReportType, productIds: string[]) => {
+    async (reportType: OutageReportType, productIds: string[], overrideTerminalId?: string, overrideRackId?: string | null) => {
       const truckId = equipment.selectedCombo?.truck_id ?? "";
       const truckLabel = equipment.truckNameById[truckId] ?? truckId;
       return submitOutageReport({
-        terminalId: String(location.selectedTerminalId || ""),
-        selectedRackId: location.selectedRackId ? String(location.selectedRackId) : null,
+        terminalId: overrideTerminalId ?? String(location.selectedTerminalId || ""),
+        selectedRackId: overrideTerminalId ? (overrideRackId ?? null) : (location.selectedRackId ? String(location.selectedRackId) : null),
         productIds,
         reportType,
         companyId: shell.companyId || "",
@@ -1532,6 +1553,196 @@ export default function CalculatorPage() {
   const terminalCardedClass = terminalCardedText
     ? (isPastISO_(terminalDisplayISO!) ? "text-red-500" : "text-white/50") : undefined;
 
+  // ── Mid-load terminal switch (Plan Review's tappable terminal name) ────────
+  // Per explicit direction: tapping the terminal name in LoadingModal opens
+  // the shared location/terminal picker without leaving Plan Review. If
+  // that picker actually changes the terminal, TerminalSwitchDuringLoadSheet
+  // asks what to do about it once the picker (and any rack pick it triggers)
+  // settles -- see that component's own header comment for the three
+  // choices' exact semantics.
+  //
+  // terminalSwitchWatch is a snapshot of "what was true right before the
+  // picker opened" plus a flag that an effect below is actively waiting for
+  // the picker to close; terminalSwitchConfirm is the resolved before/after
+  // pair once it has (only set when the terminal genuinely changed -- if
+  // the driver closes the picker without picking anything, or re-picks the
+  // same terminal, nothing happens and Plan Review is exactly as it was).
+  type TerminalSnapshot = {
+    terminalId: string; terminalName: string; rackId: string; city: string; state: string;
+  };
+  const [terminalSwitchWatch, setTerminalSwitchWatch] = useState<TerminalSnapshot | null>(null);
+  const [terminalSwitchConfirm, setTerminalSwitchConfirm] = useState<{ prev: TerminalSnapshot; next: TerminalSnapshot } | null>(null);
+
+  const handleTapTerminalInLoadingModal = useCallback(() => {
+    setTerminalSwitchWatch({
+      terminalId: String(location.selectedTerminalId || ""),
+      terminalName: terminalLabel || "Terminal",
+      rackId: String(location.selectedRackId || ""),
+      city: location.selectedCity, state: location.selectedState,
+    });
+    shell.setTermOpen(true);
+  }, [location.selectedTerminalId, location.selectedRackId, location.selectedCity, location.selectedState, terminalLabel, shell]);
+
+  // Waits for the picker (and any rack-pick it triggers) to fully settle --
+  // shell.termOpen/locOpen/rackPickerOpen are the three sheets this could
+  // still be mid-flight through (picking a new city via "Change" routes
+  // through locOpen too); shell.rackResolving covers the real gap between
+  // picking a terminal and rackPickerOpen actually flipping true a moment
+  // later (an awaited network round trip) -- confirmed live this gap is
+  // real: without it, this effect could fire and open the terminal-switch
+  // confirm sheet at the same instant the rack picker was about to open,
+  // showing both at once. Only opens the confirm sheet if the terminal
+  // genuinely ended up different from the snapshot; otherwise this was just
+  // a look, not a switch, and Plan Review needs no further interruption.
+  useEffect(() => {
+    if (!terminalSwitchWatch) return;
+    if (shell.termOpen || shell.locOpen || shell.rackPickerOpen || shell.rackResolving) return;
+    const prev = terminalSwitchWatch;
+    setTerminalSwitchWatch(null);
+    const newTerminalId = String(location.selectedTerminalId || "");
+    if (!newTerminalId || newTerminalId === prev.terminalId) return;
+    setTerminalSwitchConfirm({
+      prev,
+      next: {
+        terminalId: newTerminalId,
+        terminalName: terminalLabel || "Terminal",
+        rackId: String(location.selectedRackId || ""),
+        city: location.selectedCity, state: location.selectedState,
+      },
+    });
+  }, [terminalSwitchWatch, shell.termOpen, shell.locOpen, shell.rackPickerOpen, shell.rackResolving, location.selectedTerminalId, location.selectedRackId, location.selectedCity, location.selectedState, terminalLabel]);
+
+  // Every planned product's id -- used both to re-seed API/Temp after a
+  // confirmed switch (below) and to scope the "Report Terminal Issue"
+  // product picker to this load's own plan (via handleSubmitOutageReport).
+  const plannedProductIdsForSwitch = useMemo(
+    () => Array.from(new Set(
+      (effectivePlanRows as any[])
+        .filter((r) => r?.productId && Number(r?.planned_gallons ?? 0) > 0)
+        .map((r) => String(r.productId))
+    )),
+    [effectivePlanRows]
+  );
+
+  // Option 1: discard the terminal pick entirely -- revert location back to
+  // exactly what it was before the picker opened (state/city/terminal/rack
+  // together, via location.skipResetRef -- see useLocation.ts's own
+  // "Reset city/terminal/rack on state/city change" effects; setting these
+  // one at a time without it would have each successive setter's own reset
+  // effect immediately clobber the one before it, same technique that
+  // file's own persisted-location restore already uses internally), then
+  // refresh/renew today's access date at the terminal being stayed at.
+  const handleUpdateCardAtPrevious = useCallback(() => {
+    if (!terminalSwitchConfirm) return;
+    const { prev } = terminalSwitchConfirm;
+    setTerminalSwitchConfirm(null);
+    if (prev.terminalId !== String(location.selectedTerminalId || "")) {
+      location.skipResetRef.current = true;
+      location.setSelectedState(prev.state);
+      location.setSelectedCity(prev.city);
+      location.setSelectedTerminalId(prev.terminalId);
+      location.setSelectedRackId(prev.rackId);
+      setTimeout(() => { location.skipResetRef.current = false; }, 50);
+    }
+    (async () => {
+      try {
+        await terminals.setAccessDateForTerminal(prev.terminalId, new Date().toISOString());
+        await terminals.refreshTerminalAccessForUser();
+      } catch (err) {
+        console.warn("handleUpdateCardAtPrevious: access-date refresh failed (non-fatal):", err);
+      }
+    })();
+  }, [terminalSwitchConfirm, location, terminals]);
+
+  // Option 2: keep the new terminal (already live-applied by the picker
+  // itself -- nothing to re-apply here), retag the active load's own DB row
+  // so its terminal_id/rack_id reflect reality (plain non-blocking UPDATE,
+  // same pattern beginLoadToSupabase already uses for rack_id/plan_slot),
+  // and deliberately do NOT touch terminal_access for the new terminal --
+  // that's the whole point of "No Card Update." Then re-seed API for every
+  // planned product from the new terminal (clearing lets LoadingModal's own
+  // prefill-if-empty effect re-populate once terminalProducts resolves for
+  // it, same mechanism a fresh LOAD tap already relies on) and refresh temp:
+  // silently, in the background, if the city didn't change (same city just
+  // means a different terminal-specific bias correction, not a real reason
+  // to interrupt the driver again); by reopening Confirm Temp for a real
+  // review if it did (see the two effects below).
+  const handleSwitchWithoutUpdating = useCallback(() => {
+    if (!terminalSwitchConfirm) return;
+    const { prev, next } = terminalSwitchConfirm;
+    setTerminalSwitchConfirm(null);
+
+    if (loadWorkflow.activeLoadId) {
+      supabase.from("load_log")
+        .update({ terminal_id: next.terminalId, rack_id: next.rackId || null })
+        .eq("load_id", loadWorkflow.activeLoadId)
+        .then(({ error }) => { if (error) console.error("[terminal-switch] failed to retag load_log terminal:", error.message); });
+    }
+
+    for (const pid of plannedProductIdsForSwitch) setProductApi(pid, "");
+
+    const cityChanged = prev.city !== next.city || prev.state !== next.state;
+    userAdjustedTempRef.current = false; // an explicit driver-triggered refresh should win over any earlier manual nudge
+    if (cityChanged) {
+      setTempReconfirmProductIds(plannedProductIdsForSwitch);
+      setTempDialOpen(true);
+    } else {
+      setPendingSameCityTempApply({ armed: true, sawLoadingStart: false, productIds: plannedProductIdsForSwitch });
+    }
+  }, [terminalSwitchConfirm, loadWorkflow.activeLoadId, plannedProductIdsForSwitch, setProductApi]);
+
+  // Same-city silent refresh: waits for useFuelTempPrediction's own refetch
+  // (already triggered automatically -- its signature includes terminalId,
+  // see that hook) to complete a full cycle for the NEW terminal before
+  // applying, rather than grabbing whatever predictedFuelTempF happens to
+  // be the instant the switch is confirmed (which would usually still be
+  // the OLD terminal's stale value, since the fetch is async). Watches
+  // fuelTempLoading's own true->false transition instead of guessing at a
+  // timeout.
+  const [pendingSameCityTempApply, setPendingSameCityTempApply] = useState<{ armed: boolean; sawLoadingStart: boolean; productIds: string[] } | null>(null);
+  useEffect(() => {
+    if (!pendingSameCityTempApply) return;
+    if (fuelTempLoading) {
+      if (!pendingSameCityTempApply.sawLoadingStart) {
+        setPendingSameCityTempApply((p) => (p ? { ...p, sawLoadingStart: true } : p));
+      }
+      return;
+    }
+    if (!pendingSameCityTempApply.sawLoadingStart) return; // fetch hasn't even started yet
+    const { productIds } = pendingSameCityTempApply;
+    setPendingSameCityTempApply(null);
+    if (predictedFuelTempF != null) {
+      setTempF(predictedFuelTempF);
+      for (const pid of productIds) setProductTemp(pid, predictedFuelTempF);
+    }
+  }, [pendingSameCityTempApply, fuelTempLoading, predictedFuelTempF, setProductTemp]);
+
+  // Different-city reconfirm: reopens the SAME ProductTempModal instance
+  // the initial LOAD flow uses, but with a different onConfirm (see that
+  // modal's render site below) -- this one never begins a new load, it
+  // just propagates the driver-confirmed tempF into every planned
+  // product's own tempF field (mirroring beginLoadToSupabase's own "Init
+  // per-product inputs" seeding) and returns to the still-open Plan Review.
+  const [tempReconfirmProductIds, setTempReconfirmProductIds] = useState<string[] | null>(null);
+  const handleConfirmTempReconfirm = useCallback(() => {
+    const pids = tempReconfirmProductIds ?? [];
+    setTempReconfirmProductIds(null);
+    setTempDialOpen(false);
+    for (const pid of pids) setProductTemp(pid, tempF);
+  }, [tempReconfirmProductIds, tempF, setProductTemp]);
+
+  // Terminal-switch's own "Report Terminal Issue" is about the terminal the
+  // driver was already loading at (prev), not the live selection (which by
+  // this point is `next`) -- see handleSubmitOutageReport's own override
+  // params.
+  const handleSubmitOutageReportForPreviousTerminal = useCallback(
+    (reportType: OutageReportType, productIds: string[]) => {
+      const prev = terminalSwitchConfirm?.prev;
+      return handleSubmitOutageReport(reportType, productIds, prev?.terminalId, prev?.rackId || null);
+    },
+    [terminalSwitchConfirm, handleSubmitOutageReport]
+  );
+
   // ── lastProductInfoById ────────────────────────────────────────────────────
 // IMPORTANT: derive from `terminalProducts` because that list is refreshed after LOADED.
 const lastProductInfoById = useMemo(() => {
@@ -1553,6 +1764,22 @@ const lastProductInfoById = useMemo(() => {
   const productHexCodeById = useMemo(() => {
     const rec: Record<string, string> = {};
     for (const p of terminalProducts) { if (p.product_id && p.hex_code) rec[p.product_id] = String(p.hex_code); }
+    return rec;
+  }, [terminalProducts]);
+
+  // Short button-code per product (e.g. "D2", "93", "87") -- same
+  // button_code ?? product_code ?? first-word-of-name fallback chain
+  // PlannerControls.tsx's own compartment bars already use, reused here
+  // (not reinvented) for LoadingModal's compact "C{n}-{code}" compartment
+  // rows -- see CLAUDE.md's own "duplicating this is how the bug creeps
+  // back in" precedent.
+  const productCodeById = useMemo(() => {
+    const rec: Record<string, string> = {};
+    for (const p of terminalProducts) {
+      if (!p.product_id) continue;
+      const name = (p.display_name ?? p.product_name ?? "").trim();
+      rec[p.product_id] = String(p.button_code ?? p.product_code ?? (name.split(" ")[0] || "PRD")).trim().toUpperCase();
+    }
     return rec;
   }, [terminalProducts]);
 
@@ -2298,13 +2525,15 @@ const lastProductInfoById = useMemo(() => {
         planRows={effectivePlanRows as any[]}
         productNameById={productNameById}
         productHexCodeById={productHexCodeById}
+        productCodeById={productCodeById}
         productInputs={productInputs}
         terminalTimeZone={selectedTerminalTimeZoneResolved}
         lastProductInfoById={lastProductInfoById}
         equipmentLabel={equipment.equipmentLabel}
         terminalLabel={terminalLabel}
-        setProductApi={(productId, api) => setProductInputs((prev) => ({ ...prev, [productId]: { ...(prev[productId] ?? {}), api } }))}
-        setProductTemp={(productId, tempF) => setProductInputs((prev) => ({ ...prev, [productId]: { ...(prev[productId] ?? {}), tempF } }))}
+        onTapTerminal={handleTapTerminalInLoadingModal}
+        setProductApi={setProductApi}
+        setProductTemp={setProductTemp}
         onSetCompartmentGallons={(comp, gallons) => setLoadingGallonsOverride((prev) => ({ ...prev, [comp]: gallons }))}
         persistedCapForComp={persistedCapForComp}
         livePreviewGrossLbs={livePreviewGrossLbs}
@@ -2314,6 +2543,19 @@ const lastProductInfoById = useMemo(() => {
         onBackToPlanner={handleBackToPlannerNoUpdate}
         loadedDisabled={loadWorkflow.completeBusy}
         loadedLabel={loadWorkflow.completeBusy ? "Saving…" : "Complete"}
+      />
+
+      <TerminalSwitchDuringLoadSheet
+        open={!!terminalSwitchConfirm}
+        prevTerminalName={terminalSwitchConfirm?.prev.terminalName ?? ""}
+        newTerminalName={terminalSwitchConfirm?.next.terminalName ?? ""}
+        onUpdateCardAtPrevious={handleUpdateCardAtPrevious}
+        onSwitchWithoutUpdating={handleSwitchWithoutUpdating}
+        darkMode={shell.theme.darkMode}
+        accentColor={shell.theme.accentColor}
+        planRows={effectivePlanRows as any[]}
+        productNameById={productNameById}
+        onSubmitOutageReport={handleSubmitOutageReportForPreviousTerminal}
       />
 
       <CancelLoadSheet
@@ -2341,8 +2583,14 @@ const lastProductInfoById = useMemo(() => {
 
       <ProductTempModal
         open={tempDialOpen}
-        onClose={() => setTempDialOpen(false)}
-        onConfirm={handleConfirmTempAndBeginLoad}
+        onClose={() => { setTempDialOpen(false); setTempReconfirmProductIds(null); }}
+        // Two completely different callers share this one modal instance:
+        // the original LOAD flow (tempReconfirmProductIds null -> begins a
+        // new load) and the mid-load terminal-switch's different-city
+        // reconfirm (tempReconfirmProductIds set -> just propagates the
+        // confirmed temp into the already-in-progress plan and returns to
+        // Plan Review, see handleConfirmTempReconfirm's own comment).
+        onConfirm={tempReconfirmProductIds != null ? handleConfirmTempReconfirm : handleConfirmTempAndBeginLoad}
         styles={styles}
         selectedCity={location.selectedCity}
         selectedState={location.selectedState}

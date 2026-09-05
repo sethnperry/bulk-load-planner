@@ -121,6 +121,11 @@ type ShellValue = {
   rackPickerOpen: boolean;
   rackPickerRacks: { rack_id: string; rack_name: string }[];
   resolveRackPick: (rackId: string) => void;
+  // See its own declaration's comment -- true while chooseTerminal's async
+  // rack-count lookup is in flight, before rackPickerOpen has had a chance
+  // to become the "still resolving" signal itself (multi-rack case) or the
+  // rack is auto-set (0/1-rack case).
+  rackResolving: boolean;
 };
 
 const ShellContext = createContext<ShellValue | null>(null);
@@ -439,6 +444,20 @@ export function CalculatorShellProvider({ children }: { children: React.ReactNod
   // Guards against a stale async rack-count lookup resolving after a second,
   // newer terminal pick already superseded it (see this ref's use below).
   const latestTerminalRequestRef = useRef("");
+  // True from the moment chooseTerminal starts its async rack-count lookup
+  // until either branch resolves (0/1-rack: rack auto-set; >1-rack:
+  // rackPickerOpen flips true, which itself signals "still resolving" from
+  // then on). Exists so a caller watching "is any terminal-pick machinery
+  // still in flight" (page.tsx's mid-load terminal-switch confirm, see
+  // CLAUDE.md 2026-09-05) has a real signal to wait for -- without this,
+  // there's a genuine gap between chooseTerminal being called (which sets
+  // selectedTerminalId synchronously) and rackPickerOpen actually flipping
+  // true (an awaited network round trip later) where naively checking
+  // "termOpen/locOpen/rackPickerOpen all false" reads as fully settled even
+  // though a rack picker is about to open a moment later -- confirmed live,
+  // this was a real bug (the terminal-switch confirm sheet and the rack
+  // picker briefly showed at the same time) before this flag was added.
+  const [rackResolving, setRackResolving] = useState(false);
 
   const chooseTerminal = useCallback((terminalId: string) => {
     latestTerminalRequestRef.current = terminalId;
@@ -447,6 +466,7 @@ export function CalculatorShellProvider({ children }: { children: React.ReactNod
       location.setSelectedRackId("");
       return;
     }
+    setRackResolving(true);
     (async () => {
       const { data } = await supabase
         .from("terminal_racks")
@@ -457,11 +477,13 @@ export function CalculatorShellProvider({ children }: { children: React.ReactNod
       const racks = (data ?? []) as { rack_id: string; rack_name: string }[];
       if (racks.length <= 1) {
         location.setSelectedRackId(racks[0]?.rack_id ?? "");
+        setRackResolving(false);
         return;
       }
       rackPickerTerminalIdRef.current = terminalId;
       setRackPickerRacks(racks);
       setRackPickerOpen(true);
+      setRackResolving(false);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.setSelectedTerminalId, location.setSelectedRackId]);
@@ -501,7 +523,7 @@ export function CalculatorShellProvider({ children }: { children: React.ReactNod
     role, companyId, isSuperAdmin, isSuperAdminResolved,
     selectedDriverId, setSelectedDriverId,
     plannedProductIds, setPlannedProductIds,
-    chooseTerminal, rackPickerOpen, rackPickerRacks, resolveRackPick,
+    chooseTerminal, rackPickerOpen, rackPickerRacks, resolveRackPick, rackResolving,
   }), [
     authEmail, authUserId, setupSession, effectiveUserId,
     equipment, location, terminals, expirations,
@@ -517,7 +539,7 @@ export function CalculatorShellProvider({ children }: { children: React.ReactNod
     role, companyId, isSuperAdmin, isSuperAdminResolved,
     selectedDriverId, setSelectedDriverId,
     plannedProductIds, setPlannedProductIds,
-    chooseTerminal, rackPickerOpen, rackPickerRacks, resolveRackPick,
+    chooseTerminal, rackPickerOpen, rackPickerRacks, resolveRackPick, rackResolving,
   ]);
 
   return <ShellContext.Provider value={value}>{children}</ShellContext.Provider>;

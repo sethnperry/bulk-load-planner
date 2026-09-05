@@ -17,6 +17,8 @@
 // used here on purpose) -- picking a row is the only way out.
 
 import React from "react";
+import { GRAPHITE, GRAPHITE_DARKER } from "../theme";
+import { CARD_BG, CARD_BORDER, CARD_SHADOW } from "../cards/cardTheme";
 
 type RackOption = { rack_id: string; rack_name: string };
 
@@ -27,9 +29,18 @@ type Props = {
   onPick: (rackId: string) => void;
 };
 
+// Restyled 2026-09-05, per explicit direction ("all these windows... need
+// our themed color treatment and not have the generic grey hue") -- this
+// sheet was still the flat #111518/rgba(255,255,255,0.05) look every other
+// bottom sheet in the app (CancelLoadSheet, PresetActionSheet) already
+// moved off of; now matches CancelLoadSheet's own GRAPHITE-gradient sheet +
+// CARD_BG/CARD_BORDER/CARD_SHADOW row treatment exactly, since it now also
+// appears as part of the mid-load terminal-switch flow (page.tsx) where
+// the two would otherwise sit right next to each other looking inconsistent.
 const rowStyle: React.CSSProperties = {
-  width: "100%", padding: "14px 16px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)",
-  background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.90)", fontSize: 15, fontWeight: 700,
+  width: "100%", padding: "14px 16px", borderRadius: 10,
+  border: CARD_BORDER, background: CARD_BG, boxShadow: CARD_SHADOW,
+  color: "rgba(255,255,255,0.90)", fontSize: 15, fontWeight: 700,
   cursor: "pointer", textAlign: "left" as const, marginBottom: 8,
 };
 
@@ -41,7 +52,12 @@ export default function RackSelectSheet({ open, terminalLabel, racks, onPick }: 
       style={{ position: "fixed", inset: 0, zIndex: 10500, background: "rgba(0,0,0,0.72)", display: "flex", alignItems: "flex-end", justifyContent: "center" }}
     >
       <div
-        style={{ width: "100%", maxWidth: 480, background: "#111518", borderRadius: "16px 16px 0 0", border: "1px solid rgba(255,255,255,0.1)", padding: "18px 16px calc(18px + env(safe-area-inset-bottom))" }}
+        style={{
+          width: "100%", maxWidth: 480,
+          background: `linear-gradient(180deg, ${GRAPHITE} 0%, ${GRAPHITE_DARKER} 100%)`,
+          borderRadius: "16px 16px 0 0", border: "1px solid rgba(255,255,255,0.1)",
+          padding: "18px 16px calc(18px + env(safe-area-inset-bottom))",
+        }}
       >
         <div style={{ fontSize: 15, fontWeight: 700, color: "rgba(255,255,255,0.90)", marginBottom: 4 }}>
           Which rack are you loading at?

@@ -8896,6 +8896,181 @@ confirming step 3→4 still hands off to the same established flow. Tapped
 "Back to Planner" to cleanly undo the test load (no fake data left in
 the demo company). `npx tsc --noEmit` and `npx next build` both clean.
 
+## Plan Review redesign: mid-load terminal switch, compact compartment rows, themed sheets (2026-09-05)
+
+Four-part request, all shipped together: (1) a real, fairly deep new
+feature -- tapping the terminal name in Plan Review (`LoadingModal.tsx`)
+now opens the shared location/terminal picker without leaving the modal,
+and if the driver actually picks a different terminal, a new confirm
+sheet asks what to do about it; (2)/(3) redesigned the compartment/API
+section to drop product names in favor of compact codes with API/Temp
+inline; (4) confirmed Live Weight/vs. Target stays as-is.
+
+### Part 1 — mid-load terminal switch
+
+**Top row**: Terminal moved to the left (was Equipment), Equipment to the
+right; both bigger (13px→15px). Terminal text is now white/700 (was the
+same muted `rgba(255,255,255,0.65)` both used) and, when
+`onTapTerminal` is wired, a real button with a trailing "›" that opens
+the picker.
+
+**The confirm flow itself** (`app/planner/components/TerminalSwitchDuringLoadSheet.tsx`,
+new) -- `page.tsx`'s `handleTapTerminalInLoadingModal` snapshots
+terminal/rack/city/state, then calls `shell.setTermOpen(true)` (the same
+shared `MyTerminalsModal` instance the Planner's own Location card
+already opens -- no second picker built). A `useEffect` watches
+`shell.termOpen`/`locOpen`/`rackPickerOpen` (all three, since "Change" on
+the picker routes through `locOpen` too, and a multi-rack terminal pick
+routes through `rackPickerOpen`) and, once every one of them is false
+again, compares the live `location.selectedTerminalId` against the
+snapshot -- only opens the confirm sheet if it genuinely changed (a
+closed-without-picking or re-picked-the-same-terminal case needs no
+further interruption).
+
+**Real race condition found and fixed while verifying this, not shipped
+blind**: `chooseTerminal` (`CalculatorShellContext.tsx`) sets
+`location.selectedTerminalId` synchronously but resolves whether to open
+`rackPickerOpen` only after an awaited `terminal_racks` count query --
+live-tested proof that the naive "all three flags are false" check could
+fire in the real gap between those two moments, briefly showing the new
+confirm sheet and the rack picker at the same time. Fixed by adding a new
+`rackResolving` boolean to the shell (true from the instant
+`chooseTerminal`'s async lookup starts until either branch resolves),
+added to my watcher effect's guard. Re-verified live afterward: the same
+repro sequence that used to show both sheets at once now correctly shows
+only the rack picker, then only the confirm sheet once rack-picking
+settles.
+
+**The three choices** (matching the literal spec): "Switch to {new}
+(No Card Update)" (primary), "Update Card at {previous}", "Report
+Terminal Issue" -- in that order.
+- **Update Card at {previous}**: discards the pick entirely. Reverting
+  city/state/terminal/rack together needed `location.skipResetRef`
+  (already exposed on the `location` hook's return object, previously
+  only ever used internally by `useLocation.ts`'s own persisted-location-
+  restore effect) -- without it, `useLocation.ts`'s own "reset city/
+  terminal/rack when state changes" / "reset terminal/rack when city
+  changes" effects would clobber each successive setter call in the same
+  revert. Then re-renews today's access date at the terminal being
+  stayed at (`terminals.setAccessDateForTerminal` + `refreshTerminalAccessForUser`,
+  both already existing).
+- **Switch to {new} (No Card Update)**: the terminal/rack are already
+  live-applied by the picker itself (nothing to re-apply) -- retags the
+  active load's own `load_log.terminal_id`/`rack_id` (plain non-blocking
+  UPDATE, same pattern `beginLoadToSupabase` already uses for
+  `rack_id`/`plan_slot`), deliberately never touches `terminal_access` for
+  the new terminal (the whole point of "No Card Update"), clears every
+  planned product's API input (`setProductApi(pid, "")` -- lets
+  `LoadingModal`'s own existing prefill-if-empty effect re-seed once
+  `terminalProducts` refetches for the new terminal/rack, already fully
+  reactive, no new fetch needed), and refreshes temp:
+  - **Same city** -- silently, in the background: waits for
+    `useFuelTempPrediction`'s own automatic refetch (its signature
+    already includes `terminalId`, so a terminal-only change already
+    triggers a fresh prediction with no code change needed there) to
+    complete a full loading cycle, then force-applies the new
+    `predictedFuelTempF` to both the shared dial and every planned
+    product's own `tempF` (mirroring `beginLoadToSupabase`'s "Init
+    per-product inputs" seeding).
+  - **Different city** -- reopens the exact same `ProductTempModal`
+    instance the original LOAD flow uses, but with a different
+    `onConfirm` (the modal's `onConfirm` prop is now dynamic --
+    `tempReconfirmProductIds != null` routes to `handleConfirmTempReconfirm`,
+    which just propagates the confirmed temp into the in-progress plan and
+    returns to Plan Review, instead of `handleConfirmTempAndBeginLoad`,
+    which begins a brand new load).
+- **Report Terminal Issue**: reuses the exact submission logic
+  `CancelLoadSheet.tsx`'s own report flow already built
+  (`onSubmitOutageReport`, unchanged) via a new override on
+  `handleSubmitOutageReport` (`overrideTerminalId`/`overrideRackId`,
+  optional -- `CancelLoadSheet`'s own call site never passes them, so its
+  existing behavior is completely unchanged) so the report targets the
+  terminal the driver was actually loading at (the snapshot's "previous"),
+  not the live selection (which by this point is already "next"). Unlike
+  `CancelLoadSheet`'s own version, a successful submit here does **not**
+  end the load or ask a card-renewal follow-up -- per explicit direction,
+  it just returns to this sheet's own main menu so the driver can still
+  pick update-card/switch, or report another issue.
+
+**Named (not inline) `setProductApi`/`setProductTemp`** -- both used to
+only exist as inline arrow functions passed directly as `LoadingModal`
+JSX props; hoisted into real `useCallback`s in `page.tsx` so the new
+terminal-switch handlers (which need to call them imperatively, not just
+hand them to a render) have something to call. `LoadingModal`'s own prop
+values are unchanged in behavior, just point at the named versions now.
+
+**`RackSelectSheet.tsx` restyled** to the same GRAPHITE-gradient +
+CARD_BG/CARD_BORDER/CARD_SHADOW treatment `CancelLoadSheet.tsx` already
+established -- per explicit direction that every window in this flow
+needs the app's own themed look, not the flat `#111518`/plain-rgba
+"generic grey" this sheet still had (it now sits directly alongside the
+new terminal-switch sheet in the same flow, where the mismatch would
+otherwise be obvious).
+
+### Parts 2/3 — compartment rows redesigned, API history restyled as a print-out
+
+Compartment rows dropped the full product name in favor of just the dot
++ short code (`C1-D2`, `C2-93`, `C3-87`) -- new `productCodeById` map in
+`page.tsx` (same `button_code ?? product_code ?? first-word-of-name`
+fallback chain `PlannerControls.tsx`'s own compartment bars already use,
+reused rather than reinvented), freeing room to bring GAL/API/°F onto the
+same row as three independent tap targets instead of gallons alone (API/
+Temp both open the same per-product overlay as before -- two
+compartments sharing a product still correctly show/edit one shared
+value). A transparent (no card, no border) "Total" row was added last,
+summing `plannedLines`.
+
+The old separate "API + Temperature" card-list section is gone entirely
+-- replaced with a plain "API History" print-out: one line per product,
+no card/background, using a new `apiLineParts()` helper (replacing the
+old single pre-formatted `fmtLastApiLine_` string) so the date/time
+portion (`08/04 @ 12:16 hrs`) renders bold/white while the rest of the
+line (`API last updated`, `— may be stale`) stays quiet -- the numeric API
+value itself is no longer restated here, since it's already visible
+directly in the compartment row above.
+
+### Part 4
+
+Live Weight / vs. Target card confirmed unchanged, per explicit direction
+("is good I think").
+
+**Live-verified** via the demo login route (temporary redirect bypass,
+reverted after, confirmed via `grep`), against real Global South (North
+Rack, multi-rack) and Chevron (Main Rack, single-rack) data, both in Fort
+Lauderdale, FL: redesigned top row and compartment rows screenshot-
+confirmed (white/bold Terminal left, gray Equipment right, themed
+compartment rows, transparent Total, print-out API History with the
+date/time portion visibly whiter than its surrounding text); tapped the
+terminal name mid-load, picked a different terminal, confirmed the
+themed switch sheet appeared with the correct previous/new names;
+"Report Terminal Issue" → Out of Product (single-product auto-submit)
+correctly posted against the *previous* terminal (confirmed via the
+header's own outage-ticker showing "Out of ULSD" for Global South
+immediately after) and returned to the same 3-option menu, not the load-
+ending flow `CancelLoadSheet`'s own version uses; "Switch to {new} (No
+Card Update)" correctly re-seeded API from the new terminal (50.6 →
+36.5, matching Chevron's own real last-observed reading) with no
+unwanted modal interruption (same city); "Update Card at {previous}"
+correctly reverted terminal/rack identity back to the snapshot. The
+`rackResolving` race-condition fix was independently re-verified live
+after adding it -- the same repro sequence that used to show the rack
+picker and the confirm sheet simultaneously now correctly shows them in
+sequence.
+
+**Not live-verified this pass**: the different-city reconfirm path
+(reopening `ProductTempModal` mid-load) -- this session's available demo
+terminals were all in the same city (Fort Lauderdale, FL), so a genuine
+cross-city switch wasn't reproducible without changing city data this
+pass didn't have reason to touch; the code mirrors the already-verified
+same-city path's structure closely (same clearing/re-seeding, just a real
+confirm step in between) but flagged here rather than assumed. The
+`load_log.terminal_id`/`rack_id` retag write (best-effort, non-blocking)
+was not independently confirmed via a direct DB query, though it mirrors
+an already-proven pattern (`rack_id`/`plan_slot` tagging in
+`beginLoadToSupabase`) exactly.
+
+`npx tsc --noEmit` and `npx next build` both clean throughout.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.

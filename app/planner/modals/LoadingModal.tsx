@@ -3,6 +3,7 @@
 import React, { useMemo, useEffect, useState } from "react";
 import { FullscreenModal } from "@/lib/ui/FullscreenModal";
 import ValueEntryOverlay from "../components/ValueEntryOverlay";
+import { CARD_BG, CARD_BORDER, CARD_SHADOW } from "../cards/cardTheme";
 
 type PlanRowLike = {
   comp_number: number;
@@ -23,51 +24,67 @@ type LastProductInfo = {
   last_api_updated_at?: string | null; // timestamptz string from Supabase
 };
 
-function fmtLastApiLine_(args: {
-  lastApi?: number | null;
-  lastApiUpdatedAt?: string | null;
-  timeZone?: string | null;
-}): string | null {
-  const api = args.lastApi;
-  const ts = args.lastApiUpdatedAt;
-  const tz = args.timeZone;
-
-  if (api == null || !Number.isFinite(Number(api))) return null;
-
-  // If we have an API but no timestamp, still show something.
-  if (!ts) return `API was ${api}`;
-
-  const d = new Date(ts);
-  if (Number.isNaN(d.getTime())) return `API was ${api}`;
-
-  // MM/DD @ HH:mm (24h) in terminal timezone (if provided)
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: tz ?? undefined,
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).formatToParts(d);
-
-  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
-  const mm = get("month");
-  const dd = get("day");
-  const hh = get("hour");
-  const mi = get("minute");
-
-  if (mm && dd && hh && mi) {
-    return `API was ${api} on ${mm}/${dd} @ ${hh}:${mi} hrs`;
-  }
-  return `API was ${api}`;
-}
-
 function isApiStale(lastApiUpdatedAt?: string | null, thresholdDays = 7): boolean {
   if (!lastApiUpdatedAt) return false; // no timestamp = unknown, don't warn
   const d = new Date(lastApiUpdatedAt);
   if (isNaN(d.getTime())) return false;
   return (Date.now() - d.getTime()) > thresholdDays * 24 * 60 * 60 * 1000;
 }
+
+// Structured, "print-out" API-history line -- replaces the old single
+// pre-formatted string (fmtLastApiLine_) so the date/time portion can be
+// rendered bold/white while the rest of the line stays quiet, per explicit
+// direction ("the warning... should be bigger with the date/time part in
+// white and bold"). The live numeric API value itself is no longer restated
+// here -- it's already shown directly in the compartment row now (see the
+// compartment-row redesign below), so this line is purely about freshness.
+type ApiLineParts = {
+  state: "missing" | "stale" | "fresh";
+  leading: string;
+  dateTime: string | null; // bolded/white when present
+  trailing: string;
+};
+
+function apiLineParts(args: {
+  lastApi?: number | null;
+  lastApiUpdatedAt?: string | null;
+  timeZone?: string | null;
+}): ApiLineParts {
+  const api = args.lastApi;
+  const ts = args.lastApiUpdatedAt;
+  const tz = args.timeZone;
+
+  if (api == null || !Number.isFinite(Number(api))) {
+    return { state: "missing", leading: "No API on file", dateTime: null, trailing: "" };
+  }
+  if (!ts) return { state: "fresh", leading: "API on file", dateTime: null, trailing: "" };
+
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return { state: "fresh", leading: "API on file", dateTime: null, trailing: "" };
+
+  // MM/DD @ HH:mm (24h) in terminal timezone (if provided)
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz ?? undefined,
+    month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false,
+  }).formatToParts(d);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+  const mm = get("month"), dd = get("day"), hh = get("hour"), mi = get("minute");
+  const dateTime = mm && dd && hh && mi ? `${mm}/${dd} @ ${hh}:${mi} hrs` : null;
+
+  const stale = isApiStale(ts, 7);
+  return {
+    state: stale ? "stale" : "fresh",
+    leading: "API last updated ",
+    dateTime,
+    trailing: stale ? " — may be stale" : "",
+  };
+}
+
+const API_LINE_COLOR: Record<ApiLineParts["state"], string> = {
+  missing: "#f87171",
+  stale: "#fb923c",
+  fresh: "rgba(255,255,255,0.45)",
+};
 
 function fmtSignedLbs(v: number): string {
   const rounded = Math.round(v);
@@ -89,6 +106,10 @@ export default function LoadingModal(props: {
 
   // Optional: product styling overrides from catalog
   productHexCodeById?: Record<string, string>;
+  // Short button-code per product ("D2"/"93"/"87") -- compartment rows show
+  // this instead of the full product name now (see part 2 of the 2026-09-05
+  // redesign: "C1-D2, C2-93, C3-87" next to the colored dot).
+  productCodeById?: Record<string, string>;
 
   productInputs: ProductInputs;
   setProductApi: (productId: string, api: string) => void;
@@ -147,6 +168,12 @@ export default function LoadingModal(props: {
   // the top-level terminalLabel), passed straight through, no new fetch.
   equipmentLabel?: string | null;
   terminalLabel?: string | null;
+  // Tapping the terminal name in the safety-confirmation row opens the
+  // shared location/terminal picker without leaving this modal -- see
+  // page.tsx's handleTapTerminalInLoadingModal for the mid-load switch
+  // flow this kicks off. Optional so this modal degrades gracefully
+  // (plain, non-interactive text) if a future caller doesn't wire it.
+  onTapTerminal?: () => void;
 }) {
   const {
     open,
@@ -155,6 +182,7 @@ export default function LoadingModal(props: {
     planRows,
     productNameById,
     productHexCodeById,
+    productCodeById,
     productInputs,
     setProductApi,
     setProductTemp,
@@ -173,6 +201,7 @@ export default function LoadingModal(props: {
     errorMessage,
     equipmentLabel,
     terminalLabel,
+    onTapTerminal,
   } = props;
 
   const plannedLines = useMemo(() => {
@@ -257,21 +286,59 @@ useEffect(() => {
   const showLivePreview = livePreviewGrossLbs != null;
   const overTarget = livePreviewDiffLbs != null && livePreviewDiffLbs > 0;
 
+  const totalPlannedGallons = useMemo(
+    () => plannedLines.reduce((sum, x) => sum + x.gallons, 0),
+    [plannedLines]
+  );
+
   return (
     <FullscreenModal open={open} title="Plan Review" onClose={onClose} footer={null} hideCloseButton>
       <div style={{ display: "flex", flexDirection: "column", gap: 12, maxWidth: "100%", boxSizing: "border-box" }}>
-        {/* Safety-confirmation block -- read-only, no interaction. Exactly
-            what's about to be loaded and where, at a glance, before
-            reviewing/adjusting the actual plan below. */}
+        {/* Safety-confirmation block -- Terminal left (white/bold, tappable
+            when onTapTerminal is wired -- opens the shared location/
+            terminal picker without leaving this modal, see page.tsx's
+            handleTapTerminalInLoadingModal), Equipment right (unchanged
+            muted tone). Swapped order + bigger font per explicit direction
+            ("shift Terminal to the left and Equipment to the right,
+            increase the font size, switch the terminal text only to
+            white"). */}
         {(equipmentLabel || terminalLabel) && (
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,0.65)", padding: "8px 2px", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
-            {equipmentLabel && <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>{equipmentLabel}</span>}
-            {terminalLabel && <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const, textAlign: "right" as const }}>{terminalLabel}</span>}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "8px 2px", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+            {terminalLabel && (
+              onTapTerminal ? (
+                <button
+                  type="button"
+                  onClick={onTapTerminal}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", padding: 0,
+                    cursor: "pointer", minWidth: 0, fontSize: 15, fontWeight: 800, color: "#fff",
+                  }}
+                >
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>{terminalLabel}</span>
+                  <span style={{ color: "rgba(255,255,255,0.35)", fontWeight: 700, flexShrink: 0 }}>›</span>
+                </button>
+              ) : (
+                <span style={{ fontSize: 15, fontWeight: 800, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>{terminalLabel}</span>
+              )
+            )}
+            {equipmentLabel && (
+              <span style={{ fontSize: 15, fontWeight: 700, color: "rgba(255,255,255,0.65)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const, textAlign: "right" as const, flexShrink: 0 }}>
+                {equipmentLabel}
+              </span>
+            )}
           </div>
         )}
 
-        {/* A) Compartments -- tap a card to adjust just that compartment's
-            gallons in isolation (siblings never move). */}
+        {/* A) Compartments -- redesigned per explicit direction: product
+            names dropped in favor of just the short code next to the dot
+            ("C1-D2, C2-93, C3-87"), which frees up room to bring API/Temp
+            inline with gallons on the same row instead of a second,
+            separate section below. Each value is its own tap target now
+            (not the whole row) -- gallons opens the per-compartment
+            gallons overlay (unchanged, siblings never move); API/Temp both
+            open the per-PRODUCT API+Temp overlay (unchanged data model --
+            two compartments carrying the same product still correctly
+            show/edit the same shared value, just from either row). */}
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <div style={{ fontWeight: 800, fontSize: 13, letterSpacing: 0.2, opacity: 0.7, textTransform: "uppercase" }}>Planned compartments</div>
 
@@ -281,37 +348,59 @@ useEffect(() => {
             <div style={{ display: "grid", gap: 8 }}>
               {plannedLines.map((x) => {
                 const dotColor = (productHexCodeById?.[x.productId] && String(productHexCodeById[x.productId]).trim()) || "rgba(255,255,255,0.5)";
+                const code = (productCodeById?.[x.productId] && String(productCodeById[x.productId]).trim()) || (productNameById.get(x.productId) ?? x.productId);
+                const apiVal = productInputs[x.productId]?.api ?? "";
+                const tempVal = productInputs[x.productId]?.tempF;
                 return (
-                  <button
-                    type="button"
+                  <div
                     key={`${x.comp}-${x.productId}`}
-                    onClick={() => openGallonsOverlay(x.comp, x.productId, x.gallons)}
                     style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      gap: 8,
-                      padding: "9px 12px",
-                      borderRadius: 6,
-                      border: "1px solid rgba(255,255,255,0.10)",
-                      background: "rgba(255,255,255,0.04)",
-                      cursor: "pointer",
-                      width: "100%",
-                      textAlign: "left" as const,
+                      display: "flex", alignItems: "center", gap: 6,
+                      padding: "9px 10px", borderRadius: 10,
+                      border: CARD_BORDER, background: CARD_BG, boxShadow: CARD_SHADOW,
                     }}
                   >
-                    <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flex: "1 1 auto" }}>
                       <span style={{ width: 8, height: 8, borderRadius: "50%", background: dotColor, flexShrink: 0 }} />
-                      <span style={{ fontSize: 14, fontWeight: 600, color: "rgba(255,255,255,0.60)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
-                        C{x.comp} — {productNameById.get(x.productId) ?? x.productId}
+                      <span style={{ fontSize: 15, fontWeight: 800, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
+                        C{x.comp}-{code}
                       </span>
                     </div>
-                    <div style={{ color: "#fff", fontWeight: 800, fontSize: 16, flexShrink: 0 }}>
-                      {Math.round(x.gallons)}
-                    </div>
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => openGallonsOverlay(x.comp, x.productId, x.gallons)}
+                      style={{ background: "none", border: "none", padding: "2px 6px", cursor: "pointer", textAlign: "center" as const, flexShrink: 0 }}
+                    >
+                      <div style={{ fontSize: 9, fontWeight: 700, color: "rgba(255,255,255,0.35)", letterSpacing: 0.4 }}>GAL</div>
+                      <div style={{ fontSize: 16, fontWeight: 800, color: "#fff" }}>{Math.round(x.gallons)}</div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openApiTempOverlay(x.productId, apiVal, tempVal)}
+                      style={{ background: "none", border: "none", padding: "2px 6px", cursor: "pointer", textAlign: "center" as const, flexShrink: 0 }}
+                    >
+                      <div style={{ fontSize: 9, fontWeight: 700, color: "rgba(255,255,255,0.35)", letterSpacing: 0.4 }}>API</div>
+                      <div style={{ fontSize: 16, fontWeight: 800, color: apiVal ? "#fff" : "rgba(255,255,255,0.30)" }}>{apiVal || "—"}</div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openApiTempOverlay(x.productId, apiVal, tempVal)}
+                      style={{ background: "none", border: "none", padding: "2px 6px", cursor: "pointer", textAlign: "center" as const, flexShrink: 0 }}
+                    >
+                      <div style={{ fontSize: 9, fontWeight: 700, color: "rgba(255,255,255,0.35)", letterSpacing: 0.4 }}>°F</div>
+                      <div style={{ fontSize: 16, fontWeight: 800, color: tempVal != null ? "#fff" : "rgba(255,255,255,0.30)" }}>{tempVal != null ? tempVal.toFixed(1) : "—"}</div>
+                    </button>
+                  </div>
                 );
               })}
+
+              {/* Total -- deliberately transparent (no card fill/border)
+                  so it reads as a plain summary line, not another
+                  compartment. */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 10px" }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.45)", letterSpacing: 0.4, textTransform: "uppercase" as const }}>Total</span>
+                <span style={{ fontSize: 16, fontWeight: 800, color: "rgba(255,255,255,0.75)" }}>{Math.round(totalPlannedGallons)} gal</span>
+              </div>
             </div>
           )}
         </div>
@@ -319,9 +408,15 @@ useEffect(() => {
         {/* Ghost line */}
         <div style={{ height: 1, background: "rgba(255,255,255,0.10)", margin: "6px 0" }} />
 
-        {/* B) Product groups -- tap a card to adjust its API/Temp together. */}
-        <div style={{ display: "grid", gap: 10 }}>
-          <div style={{ fontWeight: 800, fontSize: 13, letterSpacing: 0.2, opacity: 0.7, textTransform: "uppercase" }}>API + Temperature</div>
+        {/* B) API history -- per explicit direction, no longer its own
+            card-list section (API/Temp itself moved inline into the
+            compartment rows above); this is now just a quiet "print-out"
+            of when each product's API was last observed, one line per
+            product, no card/background. The date/time portion is bolded
+            white so it's the one thing that stands out on an otherwise
+            plain line. */}
+        <div style={{ display: "grid", gap: 8 }}>
+          <div style={{ fontWeight: 800, fontSize: 13, letterSpacing: 0.2, opacity: 0.7, textTransform: "uppercase" }}>API History</div>
 
           {errorMessage ? (
             <div
@@ -342,81 +437,23 @@ useEffect(() => {
           {productGroups.length === 0 ? (
             <div style={styles.help}>No products to enter.</div>
           ) : (
-            <div style={{ display: "grid", gap: 10 }}>
+            <div style={{ display: "grid", gap: 6 }}>
               {productGroups.map((g) => {
-                const name = productNameById.get(g.productId) ?? g.productId;
-                const dotColor = (productHexCodeById?.[g.productId] && String(productHexCodeById[g.productId]).trim()) || "rgba(255,255,255,0.5)";
-                const apiVal = productInputs[g.productId]?.api ?? "";
-                const tempVal = productInputs[g.productId]?.tempF;
-
+                const code = (productCodeById?.[g.productId] && String(productCodeById[g.productId]).trim()) || (productNameById.get(g.productId) ?? g.productId);
                 const lastInfo: LastProductInfo | undefined = lastProductInfoById?.[g.productId];
-                const apiLine = fmtLastApiLine_({
+                const parts = apiLineParts({
                   lastApi: lastInfo?.last_api,
                   lastApiUpdatedAt: lastInfo?.last_api_updated_at,
                   timeZone: terminalTimeZone ?? null,
                 });
-                const stale = isApiStale(lastInfo?.last_api_updated_at, 7);
-                const missing = lastInfo?.last_api == null || !Number.isFinite(Number(lastInfo?.last_api));
-                const warn = stale || missing;
-
                 return (
-                  <button
-                    type="button"
-                    key={g.productId}
-                    onClick={() => openApiTempOverlay(g.productId, apiVal, tempVal)}
-                    style={{
-                      padding: "10px 12px",
-                      borderRadius: 6,
-                      border: "1px solid rgba(255,255,255,0.10)",
-                      background: "rgba(255,255,255,0.04)",
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: 8,
-                      cursor: "pointer",
-                      width: "100%",
-                      textAlign: "left" as const,
-                    }}
-                  >
-                    {/* Top row: dot + name + gallons */}
-                    <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-                      <span style={{ width: 8, height: 8, borderRadius: "50%", background: dotColor, flexShrink: 0 }} />
-                      <span style={{ flex: 1, fontSize: 14, fontWeight: 600, color: "rgba(255,255,255,0.60)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
-                        {name}
-                      </span>
-                      <div style={{ color: "#fff", fontWeight: 800, fontSize: 16, flexShrink: 0 }}>{Math.round(g.gallons)}</div>
-                    </div>
-
-                    {/* API status -- a quiet line when fresh, a bold highlighted
-                        chip when stale/missing so a driver glancing quickly
-                        can't miss it. */}
-                    {warn ? (
-                      <div style={{
-                        display: "flex", alignItems: "center", gap: 6,
-                        padding: "7px 10px", borderRadius: 6,
-                        background: missing ? "rgba(248,113,113,0.14)" : "rgba(251,146,60,0.16)",
-                        border: `1px solid ${missing ? "rgba(248,113,113,0.40)" : "rgba(251,146,60,0.45)"}`,
-                      }}>
-                        <span style={{ fontSize: 13, fontWeight: 800, color: missing ? "#f87171" : "#fb923c", lineHeight: 1.3 }}>
-                          ⚠ {missing ? "No API recorded — tap to enter" : `${apiLine} — may be stale, tap to correct`}
-                        </span>
-                      </div>
-                    ) : apiLine ? (
-                      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.45)" }}>{apiLine}</div>
-                    ) : null}
-
-                    {/* Current values, read-only display -- tap the whole
-                        card to open the blown-up entry overlay. */}
-                    <div style={{ display: "flex", gap: 8 }}>
-                      <div style={{ flex: 1, padding: "8px 0", borderRadius: 6, background: "rgba(255,255,255,0.05)", textAlign: "center" as const }}>
-                        <div style={{ fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.35)", letterSpacing: 0.4 }}>API</div>
-                        <div style={{ fontSize: 18, fontWeight: 800, color: apiVal ? "#fff" : "rgba(255,255,255,0.30)" }}>{apiVal || "—"}</div>
-                      </div>
-                      <div style={{ flex: 1, padding: "8px 0", borderRadius: 6, background: "rgba(255,255,255,0.05)", textAlign: "center" as const }}>
-                        <div style={{ fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.35)", letterSpacing: 0.4 }}>TEMP °F</div>
-                        <div style={{ fontSize: 18, fontWeight: 800, color: tempVal != null ? "#fff" : "rgba(255,255,255,0.30)" }}>{tempVal != null ? tempVal.toFixed(1) : "—"}</div>
-                      </div>
-                    </div>
-                  </button>
+                  <div key={g.productId} style={{ fontSize: 14, lineHeight: 1.5, color: API_LINE_COLOR[parts.state] }}>
+                    {parts.state === "missing" && "⚠ "}
+                    <span style={{ fontWeight: 700 }}>{code}:</span>{" "}
+                    {parts.leading}
+                    {parts.dateTime && <span style={{ color: "#fff", fontWeight: 800 }}>{parts.dateTime}</span>}
+                    {parts.trailing}
+                  </div>
                 );
               })}
             </div>
