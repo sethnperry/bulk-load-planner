@@ -356,6 +356,9 @@ END;
 $function$;
 
 -- ── decouple_combo(p_combo_id uuid) short overload ─────────────────────────
+-- DROP first: the live return type differs from this definition, and
+-- CREATE OR REPLACE cannot change a function's return type.
+drop function if exists public.decouple_combo(uuid);
 create or replace function public.decouple_combo(p_combo_id uuid)
 returns jsonb
 language plpgsql
@@ -387,7 +390,11 @@ $function$;
 
 -- ── decouple_combo(text, 12-arg) client overload ───────────────────────────
 -- Adds the ownership check AND a pinned search_path (the pre-fix definition
--- had none). Body otherwise verbatim.
+-- had none). Body otherwise verbatim. DROP first in case the live return
+-- type differs from this definition (CREATE OR REPLACE cannot change it).
+drop function if exists public.decouple_combo(
+  text, text, text, text, double precision, double precision, text,
+  text, text, double precision, double precision, text);
 create or replace function public.decouple_combo(
   p_combo_id text, p_scenario text, p_truck_status text,
   p_truck_location text default null, p_truck_lat double precision default null,
@@ -450,3 +457,11 @@ BEGIN
     'trailer_id', v_trailer_id, 'scenario', p_scenario);
 END;
 $function$;
+
+-- Dropping a function removes its privileges, so re-grant EXECUTE on the two
+-- decouple overloads that were dropped above (the CREATE OR REPLACE functions
+-- kept their existing grants and need no re-grant).
+grant execute on function public.decouple_combo(uuid) to authenticated, service_role;
+grant execute on function public.decouple_combo(
+  text, text, text, text, double precision, double precision, text,
+  text, text, double precision, double precision, text) to authenticated, service_role;
