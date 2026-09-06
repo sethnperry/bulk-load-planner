@@ -9509,8 +9509,122 @@ driver who is also an admin of that company, so it is visible through
 does not prove `load_utilization_staff_read` works.** That needs a staff user
 looking at someone else's load.
 
-**Not started:** Phase 4 (incentive/payroll layer) and the legacy teardown —
-which lands **after** this engine is validated against real loads, not before.
+### Phase 3 verified live, and the two-account setup that made it possible (2026-09-06)
+
+The operator ran a second real account (`sethandashleyperry@gmail.com`, role
+`driver`, same company) on a phone alongside super admin on desktop, and ran
+real loads on it. That is what finally closed the gap this file had flagged
+repeatedly: **`load_utilization_staff_read` is verified.** The fleet dashboard
+renders that driver's two loads to a viewer whose `driver_id` is different,
+and no other policy can return them. A single self-owned row could never have
+proven it, however many times it was looked at.
+
+Every predicted figure matched the database exactly — fleet 100.1%, 4 loads,
+0 unused, 33,192 available, 33,222 planned, two driver rows sorted by name, no
+excluded-loads section, headroom +324 gal over 4 target-limited loads (≈81/load,
+consistent with the 83 measured on the earlier single load).
+
+**A verification that looked like a pass and wasn't.** The prediction "the
+gallon-weighted figure almost certainly won't equal the naive mean of the two
+drivers' percentages" was wrong: 33,222 ÷ 33,192 = 100.090%, and the mean of
+100.00 and 100.18 is also 100.09. The two drivers moved near-identical gallons,
+so both formulas collapse onto the same displayed number. **That check was
+inconclusive, not passed** — this dataset cannot distinguish gallon-weighting
+from a mean of percentages. Test P3-B pins it instead (94.44% weighted vs
+75.00% unweighted, deliberately non-coincident). Separating them live needs one
+lopsided load: a small one loaded badly.
+
+### Phase 4 (Period Report) + legacy teardown — shipped and applied 2026-09-06
+
+**The ordering was forced, and the original plan had it backwards.** §1 lists
+`PayrollReportModal` as a Phase 4 item to leave alone during the teardown — but
+it was a live reader of `load_points`. Doing the teardown first would have
+removed the `calculate_load_points` write path while Period Report kept reading
+that table: no error, it would simply have frozen at that day's numbers and
+quietly become a lie. Period Report had to be rebuilt first.
+
+**Period Report, rebuilt on `load_utilization`** (scope decided explicitly:
+"same shape, new numbers"). Kept: period picker, driver-group filter, employee
+ID, roster-membership filtering, CSV export with the blank `$ Amount` column,
+driver → per-load expansion. New columns: loads measured, gallon-weighted
+utilization %, gallons planned, unused gallons. It runs through the **same**
+`groupUtilizationByDriver`/`aggregateUtilization` as the fleet dashboard and the
+driver's own card — three surfaces, one implementation, so they cannot quote
+different figures for one period.
+
+Dropped from it, deliberately: per-compartment detail and inline
+edit-and-recalculate. Both were `load_points`-shaped — `load_utilization` is one
+row per LOAD, and `edit_load_line`/`recalculate_load_points` are points-specific.
+Correcting a load under the new engine is a *different* mechanism, not a smaller
+version of that one, so it was not reimplemented on a guess. The "points changed
+since export" banner went too: `flag_stale_payroll_reports` only ever fired
+because editing existed.
+
+**Period settings moved.** `pay_period_type`/`pay_period_anchor_date` had
+`IncentiveSettingsModal` as their only editor, and `useUtilizationPeriod` reads
+them for the driver's own window. They now live behind a **Settings** toggle
+inside Period Report rather than a second admin tile — "Report Period" sitting
+next to "Period Report" would have been genuinely confusing. Admin is down to
+three tiles: Fleet Cards, Period Report, Utilization.
+
+**Teardown, app code** (commit `a0aa3b8`): `IncentiveSettingsModal` and its tile
+deleted; the driver-side points card, its `incentive_settings`/`load_points`
+queries, the `calculate_load_points` call in `useLoadWorkflow`, the `load_points`
+sum in `usePlanSlots`, and `LoadReport.recovered_points` all removed. The
+utilization card is now the driver's only performance card, not a
+preferred-over-points fallback.
+
+**Teardown, database — APPLIED 2026-09-06**
+(`20260906010000_drop_legacy_incentive_system.sql`). Drops `load_points`,
+`product_benchmarks`, all six legacy functions (by NAME across every overload,
+not by signature — several were recreated with changed parameter lists, and this
+repo's migrations folder lags the live DB, so a hardcoded signature silently
+drops nothing), and `incentive_settings.weight_cap_lbs`. Kept: `payroll_reports`
+(Period Report still writes an export marker; its `is_stale` column is now
+inert), `load_edit_history` (real audit history, not machinery),
+`incentive_settings` itself including `enabled` and the period columns.
+
+The operator authorized the data loss explicitly ("There's no audit value. all
+good to go.") after being told it was irreversible and, with one operator, the
+only copy.
+
+**Two real bugs found in the pre-flight checklist itself**
+(`docs/legacy-incentive-drop-checklist.sql`), both of which would have made it
+useless in exactly the case it exists for:
+- `conrelid not in (to_regclass(...), to_regclass(...))` — an absent table puts
+  a NULL in that list, and `x NOT IN (NULL)` is NULL, not true. The inbound-FK
+  check would have returned zero rows and reported **"SAFE TO DROP"** precisely
+  when it should have stopped. Now `NOT IN` over a subquery, where an empty set
+  correctly yields true.
+- `select count(*) from public.load_points` is a **parse** error once the table
+  is gone, so no `coalesce` could rescue it. Counts now go through
+  `query_to_xml` behind a lazily-evaluated `CASE` guarded by `to_regclass`.
+
+Verified on a throwaway PostgreSQL 16 rather than reasoned about (same technique
+as Phase 1, third time it has paid off): planted a deliberate inbound FK and a
+dependent view, confirmed PART 1 names both and refuses to say safe; removed
+them, confirmed it flips; ran the migration; PART 2 all PASS; re-ran both to
+confirm idempotency.
+
+**A process lesson worth keeping.** The first live PART 2 came back with checks
+1–4 FAIL and 5–8 PASS — everything to be dropped still present, everything to
+survive intact. That all-or-nothing shape says "the DDL never ran," not "it ran
+badly." Cause: the migration file still opened with a `⚠ DELIBERATELY NOT
+APPLIED` banner written before authorization, and the run instructions described
+the checklist as "top half / bottom half," which invites pasting the checklist
+file alone. **When a file's own header contradicts the instruction to run it,
+the header wins** — fix the header before asking anyone to run it, and paste
+short destructive SQL inline rather than pointing at a path.
+
+**Noted, not fixed:** `ManageTerminalProductsModal`'s `"pick"` mode lost its only
+consumer with `IncentiveSettingsModal`. It is unreachable but woven through eight
+render branches of a file on the live load path, so it carries a comment rather
+than being unpicked without a click-test of the compartment product picker.
+
+**Not started:** the incentive/payout layer proper (points → dollars stays
+company-side; the app deliberately has no payout calculator), and the
+admin-visibility gap — an ordinary fleet admin still cannot reach `/planner`,
+so they cannot see the utilization card their drivers see.
 
 ### Production deploy failed on the merge: a module-scope service-role read (2026-09-06)
 
