@@ -9355,6 +9355,29 @@ is indistinguishable from the engine being broken. It now logs a
 `console.warn` naming the likely cause. That is the first thing to check if
 rows still don't appear after the next real load.
 
+**That prediction was wrong, and the real cause is a deployment gap
+(2026-09-06).** The user completed a real load and re-ran the query: still
+zero rows. The diagnosis above was right about the database and right about
+the engine's math, and still missed the obvious thing -- *which branch
+production actually runs*. Vercel deploys `main`. Checked directly:
+`record_load_utilization` appears **0 times** anywhere on `origin/main`,
+`lib/capacity/` **does not exist** on `origin/main`, and neither Phase 1
+migration file is on it either -- the whole Payload Utilization feature lives
+only on `claude/protankr-incentive-redesign-i1whfi`, 15 commits ahead. The
+migrations were applied to the live database by hand in the SQL editor, which
+is exactly why the tables exist and the summary query *runs* and returns 0
+rows instead of erroring -- the schema shipped ahead of the code. Production
+has no code path that calls the RPC, so no completed load on production can
+ever write a `load_utilization` row until this branch reaches `main`.
+
+The lesson worth keeping: when live data is missing for a feature verified
+only on a branch, check the deployed ref **before** investigating the data.
+Every check in the diagnosis above was sound and none of them could have
+found this, because none of them asked what production is running. Note also
+that a Vercel *Preview* build is not an available shortcut here -- see
+"Pre-launch cleanup" below: Preview is missing `SUPABASE_SERVICE_ROLE_KEY`,
+so any Preview build of this repo fails at page-data collection.
+
 **Not started:** Phase 3 (fleet dashboard replacing the benchmark-based
 Underloading Dashboard), Phase 4 (incentive/payroll layer), and the legacy
 teardown — which lands **after** this engine is validated against real loads,
