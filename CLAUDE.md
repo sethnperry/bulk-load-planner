@@ -9378,6 +9378,32 @@ that a Vercel *Preview* build is not an available shortcut here -- see
 "Pre-launch cleanup" below: Preview is missing `SUPABASE_SERVICE_ROLE_KEY`,
 so any Preview build of this repo fails at page-data collection.
 
+**VALIDATED ON A REAL PRODUCTION LOAD 2026-09-06.** After the deployment gap
+above was closed (merge to `main`) and the build fix below, a real completed
+load finally wrote a real row:
+
+| available | effective | actual | unused | utilization | constraints |
+|---|---|---|---|---|---|
+| 7940.911 | 7940.911 | 7824.00 | 116.911 | **98.5277%** | 0 |
+
+Eligible, no external cap, `effective == available` (nothing narrowed it),
+`unused = available - actual` exactly. That is the whole chain proven end to
+end on production data for the first time: Planner capacity solve →
+`record_load_utilization` → `load_utilization`. The engine is no longer
+theoretical.
+
+One loose end from the same check, **not** a defect: an ad-hoc summary query
+reported "min = null" alongside the correct count. Both candidate causes were
+chased and ruled out against the real row and the RPC source -- `utilization_pct`
+is populated (98.53), and `loaded_at` is `coalesce(loaded_at, completed_at,
+now())` so it can never be null. Whatever `min` aggregated, it was not a null
+in this table. Left as a question about that query, not a tracked bug.
+
+**Still unseen: the Phase 2 UI in a browser.** The data is right; the Planner
+utilization card and the Reports "Plan Utilization" tile have still never been
+looked at on a real device with a real row behind them. That is the next
+check, and it is the last thing gating Phase 3.
+
 **Not started:** Phase 3 (fleet dashboard replacing the benchmark-based
 Underloading Dashboard), Phase 4 (incentive/payroll layer), and the legacy
 teardown — which lands **after** this engine is validated against real loads,
