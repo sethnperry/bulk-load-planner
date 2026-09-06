@@ -9468,6 +9468,37 @@ non-blocking, since the build no longer needs it. Worth checking that
 `/api/admin/setup` at runtime; a lazy client that throws on first request
 is a correct build, not a working feature.
 
+### Service-role key restored to Production, verified live (2026-09-06)
+
+`SUPABASE_SERVICE_ROLE_KEY` had been re-scoped to Preview-only, which is what
+actually broke the production build (see the deployment-gap entry above). Set
+back to "Production and Preview" and redeployed. Verified against real
+production, not assumed:
+
+- `GET /api/demo/start?persona=alpha` -> **307** with a real `token_hash`
+  (it would 500 if `getAdmin()` still threw). Covers the four routes that
+  fail loudly: invite, demo login, both vault-reset routes.
+- `POST /api/fuel-temp` for Marathon/Tampa -> `biasApplied: 1.4`,
+  `biasSampleCount: 5`, `historyPoints: 14`, confidence high. The
+  silent-degradation path is genuinely healthy: bias correction is being
+  applied again.
+
+**A trap worth not re-panicking over**: the same call for Global South
+returned `biasSampleCount: 0`, which looks like the missing-key symptom and
+is not. Bias is keyed `(terminal_id, 3-hour bucket, month)`. The check ran at
+UTC hour bucket 3; Global South's September samples sit at bucket 15, so
+there was legitimately nothing to apply. Confirmed by reading
+`terminal_temp_bias` directly. **Before concluding the bias lookup is broken,
+check whether the terminal has a row for the CURRENT bucket and month** --
+`lat`/`lon` and `historyPoints` in the same response are the better tell that
+the Supabase client itself is alive, since both come from it.
+
+**Reusable verification recipe, no browser needed** (this is the third time
+it has paid off): `GET /api/demo/start?persona=alpha` -> pull `token_hash`
+out of the `Location` header -> `POST {SUPABASE_URL}/auth/v1/verify` with
+`{type:"magiclink",token_hash}` and the anon key -> a real `access_token`,
+after which every PostgREST read runs under genuine RLS as that user.
+
 ### "Set up planner for another driver" is slated for removal -- benched 2026-09-06
 
 Stated intent: the admin full-app impersonation feature (`setupSession`) is
