@@ -9383,6 +9383,65 @@ Underloading Dashboard), Phase 4 (incentive/payroll layer), and the legacy
 teardown — which lands **after** this engine is validated against real loads,
 not before.
 
+### Production deploy failed on the merge: a module-scope service-role read (2026-09-06)
+
+Merging the Payload Utilization branch to `main` triggered the first
+production build in a while and it **failed**, with a real error that had
+nothing to do with the merged code:
+
+```
+Error: Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY
+  at Object.<anonymous> (.next/server/app/api/admin/setup/route.js:7:3)
+> Build error occurred
+Error: Failed to collect page data for /api/admin/setup
+```
+
+**Not a regression from the merge** -- confirmed by checking ancestry, not
+assumed: `lib/supabase/serviceClient.ts` and the route's import of it are
+byte-identical on the previous `main` (`7b61241`), both introduced back in
+the vault-redesign merge. The merge only *triggered* a build that would
+have failed on any commit.
+
+**Root cause**: `serviceClient.ts` read `SUPABASE_SERVICE_ROLE_KEY` at
+**module scope** and threw there if it was missing. `next build`'s
+"Collecting page data" step imports every route module, so the build itself
+depended on a *runtime* secret being present in the build environment. It
+wasn't, so importing the module threw before any request could ever exist.
+
+**Why local builds could never have caught this** -- the important part.
+This container's `SUPABASE_SERVICE_ROLE_KEY` is the literal 3-character
+placeholder `"..."` (checked directly: `len 3`). That is **truthy**, so
+`if (!supabaseUrl || !serviceRoleKey)` passed and the module constructed a
+useless-but-valid client. Every local `next build` sailed through. A
+placeholder env value is worse than an absent one: it silently satisfies
+presence checks while proving nothing. **Reproduce this class of failure
+with `env -u VAR npx next build`, not by trusting a clean local build.**
+Doing exactly that reproduced Vercel's error byte-for-byte, same stack
+frames, before any fix was written.
+
+**Fixed**: `getServiceSupabase()` builds and caches the client on first
+call, never at import. `app/api/admin/setup/route.ts` (the only importer,
+21 usages across two functions) binds it once at the top of `verifyAdmin`
+and `POST`, so every existing call site is untouched. A missing key now
+surfaces as a 500 on the one route that needs it instead of failing the
+deploy of the entire app. Verified by rebuilding with the key unset: the
+previously-failing build now exits 0.
+
+**Left alone, deliberately**: `lib/supabase/client.ts` has the same
+module-scope shape, but reads `NEXT_PUBLIC_*` vars, which are inlined at
+build time and were genuinely present in the failing build. It is not this
+bug, and it is the one Supabase singleton every authenticated call in the
+app goes through -- not worth the blast radius during an incident.
+
+**Still open, on the Vercel side**: why the key stopped being available to
+this Production build at all. The log flags "Sensitive Environment Variable
+Redacted 2", and Vercel treats Sensitive vars as runtime-only, so a var
+re-added as Sensitive is the leading candidate -- unconfirmed, and now
+non-blocking, since the build no longer needs it. Worth checking that
+`SUPABASE_SERVICE_ROLE_KEY` is still set for Production before relying on
+`/api/admin/setup` at runtime; a lazy client that throws on first request
+is a correct build, not a working feature.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.

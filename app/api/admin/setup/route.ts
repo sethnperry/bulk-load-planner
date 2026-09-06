@@ -25,10 +25,11 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { serviceSupabase } from "@/lib/supabase/serviceClient";
+import { getServiceSupabase } from "@/lib/supabase/serviceClient";
 
 // Verify the caller is authenticated and is an admin/lead for their active company.
 async function verifyAdmin(req: NextRequest): Promise<{ adminUserId: string } | NextResponse> {
+  const serviceSupabase = getServiceSupabase();
   const authHeader = req.headers.get("authorization") ?? "";
   const token = authHeader.replace("Bearer ", "").trim();
   if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -66,6 +67,7 @@ async function verifyAdmin(req: NextRequest): Promise<{ adminUserId: string } | 
 }
 
 export async function POST(req: NextRequest) {
+  const serviceSupabase = getServiceSupabase();
   const adminResult = await verifyAdmin(req);
   if (adminResult instanceof NextResponse) return adminResult;
 
