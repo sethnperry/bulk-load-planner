@@ -269,3 +269,45 @@ tightened to strict `is_company_staff(company_id)` (a NULL insert is now rejecte
 by WITH CHECK) and `company_id` set NOT NULL (both tables empty). The app always
 sets company_id, so legit writes are unaffected. Verified on Postgres 16: NULL
 insert rejected, own-company write ok, cross-company read → 0.
+
+## Live-only SECURITY DEFINER functions + user_companies/user_settings CRUD (2026-09-06)
+
+set_active_company (rejects non-member — verified earlier), is_company_admin,
+is_super_admin, get_active_company_id: self-scoped read helpers, no cross-company
+exposure. admin_set_user_company: gated (Forbidden for non-admin). redeem_invite /
+generate_invite_code: generate_invite_code takes no args (cannot target another
+company or elevate role); company_invites is unreadable to a normal admin (strict
+RLS), no cross-company leak. update_terminal_temp_bias: writes global crowdsourced
+data only.
+
+user_companies / user_settings cross-user writes — all DENIED:
+```
+UPDATE Beta member role (cross-company) ..... DENIED
+DELETE Beta member membership ............... DENIED
+INSERT membership into Beta company ......... DENIED
+UPDATE Beta user_settings (cross-user) ...... DENIED
+INSERT/DELETE Beta user_settings ............ DENIED
+```
+
+### 🟠 New finding R3 — get_display_names_full leaks profile PII cross-company
+`get_display_names_full(p_user_ids uuid[])` (SECURITY DEFINER) returns any user's
+full profile — display_name, hire_date, division, region, local_area,
+employee_number — with NO company-membership check, bypassing the `profiles`
+table's own RLS (which correctly returns 0 for the same cross-company read).
+Proven live: Company A resolved Company B's user to "Demo Demopoulos", hire date,
+employee #349807, etc. The function is called throughout the app (roster, loads,
+credentials), so the fix must preserve its exact signature/return shape — the
+live definition (`pg_get_functiondef`) is needed to harden it precisely by adding
+a "shares a company with the caller, or is the caller" filter. **Not yet fixed —
+awaiting the exact definition.**
+
+### 🟠 New finding R4 — a user can delete their own user_companies membership (irrecoverable)
+`user_companies` DELETE allows a user to remove their OWN membership row
+(confirmed live — the demo Alpha admin deleted its Company A membership). Because
+`user_companies_no_direct_insert` blocks client inserts, there is no client path
+to re-add it: the user is locked out and, for a solo / sole-admin company, the
+company is orphaned. Cross-user DELETE is correctly denied; only self-delete is
+the issue. Recommended fix: a DELETE policy / trigger that forbids removing the
+last owner/admin of a company (or removes the self-delete grant entirely if
+"leave company" is not a real feature). Restore SQL for the demo account:
+`docs/apply-restore-alpha-membership.sql`.
