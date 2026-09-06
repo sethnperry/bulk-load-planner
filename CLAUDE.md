@@ -9468,6 +9468,35 @@ non-blocking, since the build no longer needs it. Worth checking that
 `/api/admin/setup` at runtime; a lazy client that throws on first request
 is a correct build, not a working feature.
 
+### "Set up planner for another driver" is slated for removal -- benched 2026-09-06
+
+Stated intent: the admin full-app impersonation feature (`setupSession`) is
+going away. **Not started, deliberately benched** -- recorded here so no
+future pass invests further in it, and so nobody re-derives the scope.
+
+What it would touch: 69 references across 11 files. Delete outright ->
+`app/api/admin/setup/route.ts`, `lib/adminSetupClient.ts`,
+`lib/setupSession.ts`, `lib/supabase/serviceClient.ts` (that route is its
+only importer). Unwind the `setupSession` plumbing in
+`CalculatorShellContext`, `useEquipment`, `useTerminals`,
+`SoloEquipmentModal`, `EquipmentModal`, the Planner's own banner,
+`/admin`'s "Set up planner for X" button, and Dispatch's "Use app as X".
+The payoff is that `effectiveUserId = setupSession?.targetUserId ??
+authUserId` collapses to `authUserId`, retiring a branch threaded through
+much of the app. The `claim_combo`/`couple_combo` service-role overloads in
+the DB go dead -- leave them, per this project's own precedent for
+abandoned columns and functions.
+
+**Do not treat this as a reason to skip `SUPABASE_SERVICE_ROLE_KEY` in
+Production.** Checked, not assumed: five other routes read that key
+independently of impersonation -- `api/admin/invite`, `api/demo/start`,
+`api/vault/request-reset`, `api/vault/confirm-reset` (all throw without it),
+and `api/fuel-temp`, which is the dangerous one: `tryGetSupabaseAdmin()`
+returns null and the route carries on, so a missing key **silently** drops
+the per-terminal bias correction and city lat/lon lookup. No error, no log,
+just quieter and less accurate predictions -- the one failure mode here that
+nobody would notice.
+
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.
