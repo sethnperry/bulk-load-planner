@@ -58,7 +58,7 @@ operator with two tabs open.
 skip deleting a `planned` row whose `started_at` is within the last few minutes;
 or accept it and document (one physical load = one device is the intended model).
 
-### F3 — Orphaned `planned` rows accumulate (slowly) and show in My Loads · LOW
+### F3 — Orphaned `planned` rows show in My Loads · LOW · **FIXED**
 A LOAD tapped but never completed (app backgrounded/closed, refresh, lost
 begin_load response after commit) leaves a `planned` row. `begin_load`'s cleanup
 removes it on the **next** load of that same combo, so a combo the driver never
@@ -130,3 +130,32 @@ If any are actioned: **F1** (real data loss, small safe fix) first, then **F3**
 symptom). F2/F4/F5/F6 are low-severity edge cases acceptable for a pre-launch,
 one-operator app; revisit before real multi-driver load. None is a security
 issue and none needs a migration.
+
+## Live test results (2026-09-06, production, two isolated demo companies)
+
+Load-RPC isolation and the F1/F3 fixes, run over PostgREST as authenticated
+users (no mutation on the isolation tests; happy-path load created + deleted;
+the pre-existing planned orphan was cleaned up):
+
+```
+A. LOAD-RPC ISOLATION (cross-company / cross-user)
+   begin_load    Alpha -> Beta combo ....... DENIED (Not authorized)
+   complete_load Alpha -> Beta load ........ DENIED (unauthorized: not owner)
+   delete_load   Alpha -> Beta load ........ DENIED (not owned by you)
+   Beta's load still present after all three .. yes (loaded, untouched)
+
+B. HAPPY-PATH REGRESSION (Alpha, own equipment, cleaned up)
+   begin_load own combo ................... OK (row created, status=planned)
+   delete_load own (cancel path) .......... OK (row gone)
+
+C. F1 GUARD LOGIC (cancelActiveLoad status re-read)
+   completed row status='loaded'  -> SKIP delete (completed load preserved) ✓
+   planned   row status='planned' -> DELETE (normal cancel proceeds)        ✓
+
+D. F3 MY-LOADS FILTER
+   old query (no filter):  {planned: 1, loaded: 283}
+   new query (loaded only):{loaded: 283}   -- no planned row reaches history
+
+E. CLEANUP
+   deleted the one pre-existing planned orphan; Alpha now {loaded: 283}, 0 planned
+```

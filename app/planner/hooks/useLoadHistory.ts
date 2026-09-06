@@ -72,6 +72,14 @@ export function useLoadHistory(authUserId: string) {
           cities(city_name)
         `)
         .eq("user_id", authUserId)
+        // Only finalized loads belong in history. A "planned" row is a LOAD
+        // tapped but never confirmed LOADED (app backgrounded, refreshed, or a
+        // begin_load whose response was lost after commit) -- it has no actual
+        // gallons/lbs and renders as a blank "PLANNED" entry. begin_load's own
+        // per-combo cleanup removes most, but an abandoned-combo orphan can
+        // linger; excluding non-"loaded" rows here keeps every history view
+        // (My Loads, Admin Loads, Reports) showing real loads only.
+        .eq("status", "loaded")
         .order("started_at", { ascending: false })
         .limit(200);
 

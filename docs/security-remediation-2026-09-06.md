@@ -177,3 +177,49 @@ reproducing the cross-company leak on the same stub, then re-applying the fix.
 - **Driver-role empirical checks**: both demo accounts are admins, so the
   "driver cannot escalate / driver read-only" paths are verified architecturally
   (the `is_company_admin` gate) but not with a live driver login.
+
+## Live post-fix verification (PRODUCTION, 2026-09-06)
+
+All four migrations were applied to the live database (Supabase SQL editor) and
+the demo Alpha role restored. The full cross-company attack matrix was then re-run
+over PostgREST against production (two isolated demo companies), plus a happy-path
+regression on own-company equipment. Actual results:
+
+```
+Cross-company RPC attacks — Alpha (Company A) against Company B equipment:
+   claim_combo ...................... DENIED (Not authorized)
+   slip_seat_combo .................. DENIED (Not authorized)
+   begin_load ....................... DENIED (Not authorized)
+   decouple_combo(uuid) ............. DENIED (Not authorized)
+   decouple_combo(12-arg) ........... DENIED (Not authorized)
+   couple_combo (no force) .......... DENIED (Not authorized)
+   couple_combo (p_force STEAL) ..... DENIED (Not authorized)
+   Beta's active combo after attacks .. active, unclaimed — untouched
+
+Cross-user owner checks — Alpha against a Beta load:
+   complete_load Alpha -> Beta load .. DENIED (unauthorized: not owner)
+   delete_load   Alpha -> Beta load .. DENIED (not owned by you)
+   Beta's load after attacks ......... loaded — untouched
+
+Happy path — Alpha on its OWN equipment (created + cleaned up):
+   claim_combo own .................. OK
+   begin_load own ................... OK (planned row created)
+   complete/… … own equipment ....... OK (283 real loaded rows in history)
+   delete_load own .................. OK (row removed)
+```
+
+A post-apply issue was found and fixed **because** the test ran against live,
+not the migration files: `couple_combo` first returned `PGRST203` (overload
+ambiguity). Migration `20260720000000` had dropped the 5-arg base overload and
+replaced it with a 6-arg `p_force` version (the one the client calls); the first
+remediation pass hardened + re-created the dropped 5-arg, reintroducing the
+ambiguity and leaving the live 6-arg unprotected — the 6-arg being the worse hole
+(under `p_force` it forcibly deactivates and steals already-coupled equipment by
+id). Corrected in `20260907030000_couple_combo_force_authorization.sql`: drop the
+errant 5-arg, harden the 6-arg. Re-verified live above (both couple_combo
+variants DENIED). Lesson reinforced: the migration files lag live — test the
+running database.
+
+This supersedes the "NOT applied to live" and "live post-fix pentest can only run
+after the migrations are applied" caveats in the earlier sections: the migrations
+are applied and the pentest has run against production with the results above.
