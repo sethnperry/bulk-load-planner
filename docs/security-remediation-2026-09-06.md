@@ -311,3 +311,34 @@ the issue. Recommended fix: a DELETE policy / trigger that forbids removing the
 last owner/admin of a company (or removes the self-delete grant entirely if
 "leave company" is not a real feature). Restore SQL for the demo account:
 `docs/apply-restore-alpha-membership.sql`.
+
+## API routes / server actions audit (2026-09-06)
+
+No `"use server"` server actions exist. Seven API routes; service-role usage in
+all but early-access:
+
+| Route | Auth | Company/target scoping | Verdict |
+|---|---|---|---|
+| `/api/admin/invite` | Bearer + verifyAdmin (admin of the target company) | company from body, admin-checked; role-preservation fix already shipped | OK |
+| `/api/admin/setup` | Bearer + verifyAdmin (admin/lead of own company) | **was MISSING target scoping** — see R5 below | FIXED |
+| `/api/vault/request-reset` | Bearer → getUser | self-scoped (user.id) | OK |
+| `/api/vault/confirm-reset` | Bearer → getUser | self-scoped | OK |
+| `/api/fuel-temp` | none | writes only global crowdsourced bias/ambient (no company scope) | low-sev (unauth write/spend surface) |
+| `/api/early-access` | none (public contact form) | no data access | OK |
+| `/api/demo/start` | none; persona key → fixed demo email only | cannot select an arbitrary account | OK |
+
+### 🔴 New finding R5 — /api/admin/setup: any company admin could read/write ANY company's users (FIXED, needs deploy)
+`verifyAdmin` proved the caller is an admin/lead of *their own* active company,
+but every op then ran through the **service-role client (bypasses RLS)** on a
+caller-supplied `targetUserId` with **no check that the target belongs to the
+caller's company**. Proven live: Company B's admin called
+`get_card_data` with Company A's user id and received Company A's terminal
+**card numbers, PINs, and private notes**. The same hole exposed set_card_data,
+set/remove_primary_truck/trailer, get/set_terminal_access, get/set_my_terminals,
+and claim/couple/slip_seat_combo for arbitrary cross-company users.
+**Fix (app code, `app/api/admin/setup/route.ts`):** verifyAdmin now also returns
+the caller's companyId, and POST rejects (403) any `targetUserId` that is not a
+member of that company before dispatching any op. Legit same-company setup
+(the driver picker only lists company members) is unaffected. Deploys with the
+branch merge; `tsc`/`next build` clean. (This whole impersonation feature is
+slated for removal per CLAUDE.md — the fix secures it until then.)

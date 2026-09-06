@@ -28,7 +28,7 @@ import { createClient } from "@supabase/supabase-js";
 import { getServiceSupabase } from "@/lib/supabase/serviceClient";
 
 // Verify the caller is authenticated and is an admin/lead for their active company.
-async function verifyAdmin(req: NextRequest): Promise<{ adminUserId: string } | NextResponse> {
+async function verifyAdmin(req: NextRequest): Promise<{ adminUserId: string; companyId: string } | NextResponse> {
   const serviceSupabase = getServiceSupabase();
   const authHeader = req.headers.get("authorization") ?? "";
   const token = authHeader.replace("Bearer ", "").trim();
@@ -63,7 +63,7 @@ async function verifyAdmin(req: NextRequest): Promise<{ adminUserId: string } | 
 
   if (!membership) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-  return { adminUserId: user.id };
+  return { adminUserId: user.id, companyId };
 }
 
 export async function POST(req: NextRequest) {
@@ -79,6 +79,25 @@ export async function POST(req: NextRequest) {
   const { op, targetUserId } = body;
   if (!op || !targetUserId) {
     return NextResponse.json({ error: "Missing op or targetUserId" }, { status: 400 });
+  }
+
+  // AUTHORIZATION: every op below runs through the SERVICE-ROLE client, which
+  // bypasses RLS -- so we must independently confirm the target user actually
+  // belongs to the caller's own company. verifyAdmin only proves the caller is
+  // an admin/lead of SOME company; without this check a Company A admin could
+  // read/write any other company's drivers' primary equipment, terminal access,
+  // my_terminals, and terminal CARD NUMBERS/PINS (get_card_data), and couple/
+  // claim combos on their behalf, just by supplying a foreign targetUserId.
+  {
+    const { data: targetMembership } = await serviceSupabase
+      .from("user_companies")
+      .select("user_id")
+      .eq("user_id", targetUserId)
+      .eq("company_id", adminResult.companyId)
+      .maybeSingle();
+    if (!targetMembership) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
   }
 
   try {
