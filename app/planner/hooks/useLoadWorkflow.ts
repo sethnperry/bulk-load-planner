@@ -287,7 +287,29 @@ export function useLoadWorkflow({
     setActiveLoadId(null);
     setCancelBusy(true);
     try {
-      await deleteLoad(loadId);
+      // Safety guard: only delete a load that is still "planned". If
+      // complete_load already committed status='loaded' but its RESPONSE was
+      // lost to a network drop, the client lands in its catch with the modal
+      // still open and activeLoadId still set -- and if the driver then taps
+      // "Back to Planner" (rather than retrying), a blind delete here would
+      // destroy a load that genuinely completed, with no recovery. Re-read
+      // the status first: in the normal cancel path the row is "planned" and
+      // this deletes exactly as before; a row that already reached "loaded"
+      // is kept (the completion stands and shows in My Loads).
+      let status: string | null = null;
+      try {
+        const { data } = await supabase
+          .from("load_log").select("status").eq("load_id", loadId).maybeSingle();
+        status = (data as any)?.status ?? null;
+      } catch {
+        // Couldn't read status (offline/RLS) -- fall through to the delete
+        // attempt below, which is delete_load's owner-checked behavior anyway.
+      }
+      if (status === "loaded") {
+        console.warn("cancelActiveLoad: load already completed; keeping it.");
+      } else {
+        await deleteLoad(loadId);
+      }
     } catch (err) {
       console.warn("cancelActiveLoad: delete_load failed (non-fatal):", err);
     } finally {
