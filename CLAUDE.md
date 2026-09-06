@@ -9806,11 +9806,30 @@ Add to this as more turn up.
   its own `token_hash` link and delivers it via Resend, so the invite and demo
   routes were never exposed.
 
-  Code side, done: `app/auth/confirm/page.tsx` gained `"email_change"` to its
-  accepted type union. That is what Supabase's Change Email Address template
-  actually sends, and it was missing, so that link would have verified against
-  the wrong type. (`"email"` was already there and is also valid in the
-  installed SDK — both are kept.)
+  Code side: `app/auth/confirm/page.tsx` gained `"email_change"` to its
+  accepted type union — what Supabase's Change Email Address template actually
+  sends. (`"email"` was already there and is also valid in the installed SDK;
+  both are kept.)
+
+  **That commit had zero runtime effect, and an earlier version of this note
+  claiming otherwise was wrong** — worth recording, because the same mistake is
+  easy to repeat. The union lives inside an `as` cast, and TypeScript types are
+  erased at compile time: `verifyOtp` is handed whatever string the URL carries
+  regardless of what the union lists, so production already handled
+  `type=email_change` correctly before the change. It was a type-level accuracy
+  fix, not a behavior fix, and **no deploy was needed before the template edits
+  below could be tested.** Proven, not reasoned: grepping the deployed
+  `/auth/confirm` JS chunk finds the control string `No token found in this
+  link` but never `email_change` — in any version — because that literal only
+  ever existed as a type annotation.
+
+  A second, real gap the type change surfaced (fixed separately): the error
+  screen's only way forward was "Ask your administrator to send a new invite."
+  Correct when invites were all that landed here; a dead end once magic-link and
+  signup failures route to the same page, and wrong for a solo user with no
+  administrator. It now branches on the link type — sign-in kinds get a real
+  "Request a new link" button to `/login`, `email_change` points at Settings,
+  invites keep the original wording.
 
   **Still requires a Supabase dashboard change — it cannot be done from code.**
   In Authentication → Email Templates, replace `{{ .ConfirmationURL }}` in the
