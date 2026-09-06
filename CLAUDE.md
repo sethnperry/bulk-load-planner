@@ -9616,10 +9616,24 @@ file alone. **When a file's own header contradicts the instruction to run it,
 the header wins** — fix the header before asking anyone to run it, and paste
 short destructive SQL inline rather than pointing at a path.
 
-**Noted, not fixed:** `ManageTerminalProductsModal`'s `"pick"` mode lost its only
-consumer with `IncentiveSettingsModal`. It is unreachable but woven through eight
-render branches of a file on the live load path, so it carries a comment rather
-than being unpicked without a click-test of the compartment product picker.
+**`ManageTerminalProductsModal`'s `"pick"` mode removed (same day).** It lost its
+only consumer with `IncentiveSettingsModal` and was briefly left in place with a
+comment, then removed properly once there was time to do it carefully. Every
+change was either a pick-mode branch deleted or a ternary collapsed to its
+rack-mode arm — the rack path (`toggle()`, the insert-never-delete
+`rack_product_status` write, the query, the grouping heuristic, the styling) is
+byte-identical, verified by reading the diff line by line rather than trusting
+the typechecker. Two small wins fell out: `rackId` is now required rather than
+`rackId?` plus a `rackId!` assertion (the only call site renders inside a
+`{selectedRackId && ...}` guard, so it was never actually optional), and the
+local `CatalogProduct` type is no longer exported — nothing imported it, and the
+similarly-named export in `lib/queries/useProductsCatalog.ts` is a different
+type.
+
+Not click-tested from the session that made the change (no browser tool
+available); `tsc --noEmit` and `next build` clean, and the effect's guard is
+provably equivalent for the surviving mode (`!open || !rackId` versus the old
+`!open` then `mode === "rack" && !rackId`).
 
 **Not started:** the incentive/payout layer proper (points → dollars stays
 company-side; the app deliberately has no payout calculator), and the

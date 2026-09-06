@@ -17,7 +17,7 @@ import { supabase } from "@/lib/supabase/client";
 import { FullscreenModal } from "@/lib/ui/FullscreenModal";
 import { useProductsCatalog } from "@/lib/queries/useProductsCatalog";
 
-export type CatalogProduct = {
+type CatalogProduct = {
   product_id: string;
   product_name: string | null;
   display_name: string | null;
@@ -46,32 +46,22 @@ function groupFor(name: string): string {
 export default function ManageTerminalProductsModal({
   open,
   onClose,
-  mode = "rack",
   rackId,
   rackName,
   terminalName,
   onChanged,
-  onPick,
-  pickedProductIds,
 }: {
   open: boolean;
   onClose: () => void;
-  // "rack" (default): the original behavior -- tapping a product toggles
-  // rack_product_status.active for `rackId`. "pick": a neutral catalog
-  // browser -- tapping a product calls onPick(product) instead, and
-  // nothing gets written here. Added for IncentiveSettingsModal's benchmark
-  // product entry, which was deleted in the 2026-09-06 legacy-incentive
-  // teardown -- so "pick" mode currently has NO consumer. Left in place
-  // deliberately rather than unpicked from eight render branches of a file
-  // on the live load path; it is unreachable, not broken. Remove it in a
-  // pass that can click-test the compartment product picker afterward.
-  mode?: "rack" | "pick";
-  rackId?: string; // required in "rack" mode only
+  // Always a real rack: the only call site (CompartmentModal) renders this
+  // inside a `{selectedRackId && ...}` guard, so this is required rather
+  // than optional-with-a-non-null-assertion. A second "pick" mode existed
+  // here for IncentiveSettingsModal's benchmark entry; both were removed in
+  // the 2026-09-06 legacy-incentive teardown.
+  rackId: string;
   rackName?: string;
   terminalName?: string;
   onChanged?: () => void;
-  onPick?: (product: CatalogProduct) => void;
-  pickedProductIds?: Set<string>;
 }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -88,17 +78,13 @@ export default function ManageTerminalProductsModal({
   const [search, setSearch] = useState("");
 
   useEffect(() => {
-    if (!open) return;
-    if (mode === "rack" && !rackId) return;
-    // Pick mode has no rack context -- just the plain catalog above, no
-    // rack_product_status query at all.
-    if (mode !== "rack") { setActiveMap({}); return; }
+    if (!open || !rackId) return;
     let cancelled = false;
     (async () => {
       setLoading(true);
       setError(null);
       const { data: rps, error: rpsErr } = await supabase
-        .from("rack_product_status").select("product_id, active").eq("rack_id", rackId!);
+        .from("rack_product_status").select("product_id, active").eq("rack_id", rackId);
       if (cancelled) return;
       if (rpsErr) {
         setError(rpsErr.message ?? "Failed to load products.");
@@ -111,7 +97,7 @@ export default function ManageTerminalProductsModal({
       setLoading(false);
     })();
     return () => { cancelled = true; };
-  }, [open, mode, rackId]);
+  }, [open, rackId]);
 
   async function toggle(productId: string) {
     const isActive = activeMap[productId] === true;
@@ -167,12 +153,10 @@ export default function ManageTerminalProductsModal({
   const showRackName = rackName && rackName !== "Main Rack";
 
   return (
-    <FullscreenModal open={open} title={mode === "pick" ? "Add a Product" : "Terminal Products"} onClose={onClose}>
+    <FullscreenModal open={open} title="Terminal Products" onClose={onClose}>
       <div style={{ display: "grid", gap: 12 }}>
         <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)" }}>
-          {mode === "pick" ? (
-            "Search or browse the full catalog. Tap a product to add it — you can add more than one before closing."
-          ) : terminalName ? (
+          {terminalName ? (
             <>
               Active products at <span style={{ color: "rgba(255,255,255,0.75)", fontWeight: 700 }}>{terminalName}</span>
               {showRackName && <> — <span style={{ color: "rgba(255,255,255,0.75)", fontWeight: 700 }}>{rackName}</span></>}.
@@ -209,9 +193,7 @@ export default function ManageTerminalProductsModal({
               {label}
             </div>
             {products.map((p) => {
-              const isActive = mode === "pick"
-                ? Boolean(pickedProductIds?.has(p.product_id))
-                : activeMap[p.product_id] === true;
+              const isActive = activeMap[p.product_id] === true;
               const btnCode = ((p.button_code ?? "").trim() || "PRD").toUpperCase();
               const btnColor = (p.hex_code ?? "").trim() || "rgba(255,255,255,0.85)";
               const name = (p.product_name ?? p.display_name ?? "").trim() || "Product";
@@ -222,7 +204,7 @@ export default function ManageTerminalProductsModal({
                   type="button"
                   disabled={saving}
                   style={{ ...rowStyle, opacity: saving ? 0.5 : 1 }}
-                  onClick={() => mode === "pick" ? onPick?.(p) : toggle(p.product_id)}
+                  onClick={() => toggle(p.product_id)}
                 >
                   <span style={{ width: 8, height: 8, borderRadius: "50%", background: btnColor, flexShrink: 0 }} />
                   <div style={{ minWidth: 0, flex: 1, overflow: "hidden", textAlign: "left" }}>
@@ -243,7 +225,7 @@ export default function ManageTerminalProductsModal({
                     fontSize: 12, fontWeight: 800, flexShrink: 0,
                     color: isActive ? "rgba(255,255,255,0.92)" : "rgba(255,255,255,0.30)",
                   }}>
-                    {isActive ? (mode === "pick" ? "✓ Added" : "✓ Active") : "+ Add"}
+                    {isActive ? "✓ Active" : "+ Add"}
                   </span>
                 </button>
               );
