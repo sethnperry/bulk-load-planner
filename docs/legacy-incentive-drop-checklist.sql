@@ -12,48 +12,71 @@
 
 
 -- ─── PART 1 — BEFORE. What exists, what dies, and what it would take with it.
-with target_fns as (
-  select p.oid, p.proname, p.oid::regprocedure::text as sig
+-- Safe to run in either state: every reference to a doomed table is guarded by
+-- to_regclass, so this reports "already gone" rather than erroring if the
+-- migration has already been applied.
+with doomed as (
+  select oid, relname from pg_class
+  where relnamespace = 'public'::regnamespace
+    and relname in ('load_points','product_benchmarks')
+),
+target_fns as (
+  select p.oid::regprocedure::text as sig
   from pg_proc p join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public' and p.proname in (
     'calculate_load_points','_calculate_load_points_core','recalculate_load_points',
     'backfill_incentive_points','edit_load_line','flag_stale_payroll_reports')
 ),
--- Anything OUTSIDE the drop set holding a foreign key INTO the doomed tables.
--- This is the one that would hurt: `drop table ... cascade` silently removes
--- those constraints, quietly de-linking a table nobody meant to touch.
+-- The one that would actually hurt: a foreign key pointing INTO a doomed
+-- table from a table OUTSIDE the drop set. `drop table ... cascade` removes
+-- those constraints silently, de-linking something nobody meant to touch.
+--
+-- Written as NOT IN over a SUBQUERY, never over a list of to_regclass()
+-- calls: if a doomed table is already absent that list contains NULL, and
+-- `x NOT IN (NULL)` evaluates to NULL rather than true -- which would return
+-- zero rows and report "safe" precisely when the check matters. An empty
+-- subquery makes NOT IN true, which is the behaviour wanted here.
 inbound_fks as (
   select c.conrelid::regclass::text as referencing_table, c.conname
   from pg_constraint c
   where c.contype = 'f'
-    and c.confrelid in ('public.load_points'::regclass, 'public.product_benchmarks'::regclass)
-    and c.conrelid not in ('public.load_points'::regclass, 'public.product_benchmarks'::regclass)
+    and c.confrelid in (select oid from doomed)
+    and c.conrelid not in (select oid from doomed)
 ),
--- Views over the doomed tables would also be cascaded away.
 dependent_views as (
   select distinct v.viewname
   from pg_views v
   where v.schemaname = 'public'
     and (v.definition ilike '%load_points%' or v.definition ilike '%product_benchmarks%')
+),
+-- Exact row counts without naming the tables statically -- a bare
+-- `select count(*) from public.load_points` is a PARSE error when the table
+-- is gone, which no coalesce can rescue. CASE is lazily evaluated, so the
+-- query_to_xml branch never runs for an absent table.
+counts as (
+  select
+    case when to_regclass('public.load_points') is null then 'already gone'
+         else (xpath('/row/c/text()', query_to_xml(
+                'select count(*) as c from public.load_points', false, true, '')))[1]::text
+    end as load_points_rows,
+    case when to_regclass('public.product_benchmarks') is null then 'already gone'
+         else (xpath('/row/c/text()', query_to_xml(
+                'select count(*) as c from public.product_benchmarks', false, true, '')))[1]::text
+    end as benchmark_rows
 )
 select * from (
   select 0 as ord, 'SUMMARY' as item,
          (select count(*)::text from target_fns) || ' fns, ' ||
          (select count(*)::text from inbound_fks) || ' inbound FKs, ' ||
-         (select count(*)::text from dependent_views) || ' dependent views'
-           as detail,
+         (select count(*)::text from dependent_views) || ' dependent views' as detail,
          case when (select count(*) from inbound_fks) = 0
                and (select count(*) from dependent_views) = 0
               then 'SAFE TO DROP'
-              else '*** STOP — read the CASCADE RISK rows below ***' end as status
+              else '*** STOP - read the CASCADE RISK rows below ***' end as status
   union all
-  select 1, 'rows: load_points',
-         coalesce((select count(*)::text from public.load_points), 'table absent'),
-         'destroyed'
+  select 1, 'rows destroyed: load_points', (select load_points_rows from counts), 'destroyed'
   union all
-  select 2, 'rows: product_benchmarks',
-         coalesce((select count(*)::text from public.product_benchmarks), 'table absent'),
-         'destroyed'
+  select 2, 'rows destroyed: product_benchmarks', (select benchmark_rows from counts), 'destroyed'
   union all
   select 3, 'function', sig, 'dropped' from target_fns
   union all
@@ -66,12 +89,12 @@ select * from (
   select 6, 'column: incentive_settings.weight_cap_lbs',
          coalesce((select data_type from information_schema.columns
                    where table_schema='public' and table_name='incentive_settings'
-                     and column_name='weight_cap_lbs'), 'already absent'),
-         'dropped'
+                     and column_name='weight_cap_lbs'), 'already gone'), 'dropped'
   union all
-  -- Explicitly NOT in the drop set. Listed so their survival is visible
-  -- rather than assumed.
-  select 7, 'KEPT: ' || t, coalesce((select 'exists'), ''), 'must survive'
+  -- Explicitly NOT in the drop set. Listed so survival is visible, not assumed.
+  select 7, 'KEPT: ' || t,
+         case when to_regclass('public.' || t) is null then '*** MISSING ***' else 'present' end,
+         'must survive'
   from unnest(array['payroll_reports','load_edit_history','incentive_settings',
                     'load_utilization','load_capacity_snapshot','load_constraints']) as t
 ) x order by ord, item;
