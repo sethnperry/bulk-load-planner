@@ -1,7 +1,11 @@
 -- Terminal outage banners: Out of Product + Out of Allocation
 -- See CLAUDE.md "Terminal outage banners" for the full design.
 --
--- NOT YET APPLIED as of writing -- run in the Supabase SQL editor. Column
+-- APPLIED 2026-08-28, and re-confirmed live 2026-09-06 (terminal_outage_reports
+-- returns real rows over PostgREST). The stale "not yet applied" header this
+-- line replaces is the same contradiction that cost a cycle on the legacy
+-- incentive drop: when a file's own header disagrees with reality, the header
+-- is what people act on. Column
 -- types below are written to match this project's established naming
 -- (terminals.terminal_id, terminal_racks.rack_id, products.product_id,
 -- companies.company_id all confirmed as uuid PKs elsewhere in this repo's

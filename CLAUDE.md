@@ -9635,10 +9635,28 @@ available); `tsc --noEmit` and `next build` clean, and the effect's guard is
 provably equivalent for the surviving mode (`!open || !rackId` versus the old
 `!open` then `mode === "rack" && !rackId`).
 
-**Not started:** the incentive/payout layer proper (points → dollars stays
-company-side; the app deliberately has no payout calculator), and the
-admin-visibility gap — an ordinary fleet admin still cannot reach `/planner`,
-so they cannot see the utilization card their drivers see.
+**Not started:** the incentive/payout layer proper — points → dollars stays
+company-side; the app deliberately has no payout calculator. That is a design
+decision, not a gap.
+
+**Admin visibility — resolved 2026-09-06, deferred by decision, not oversight.**
+An ordinary fleet admin still cannot reach `/planner` and so cannot see the
+driver's utilization card. Per explicit direction: "I don't think the admin
+needs a full planner view just to see the utilization card. We can extend that
+to the admin dashboard in a good way any time." Correct on the merits too — the
+card assumes one driver's single active load, so an admin-facing version wants
+to be per-driver or fleet-shaped, not a copy of the driver screen. Do NOT close
+this by widening `navDestinations.ts` to let admins into `/planner`; that would
+hand them a screen built around loading a truck they are not in.
+
+**The one real open item is the period boundary.** `useUtilizationPeriod` builds
+`${start}T00:00:00Z` — UTC midnight, 4-7 hours before a US fleet's actual local
+period start, so an evening load from the previous period can land in the new
+window. Left alone deliberately: the Period Report filters with
+`${start}T00:00:00` (no zone, also resolved as UTC), so the two surfaces agree
+with each other today, and there is no per-company timezone column to do it
+properly. It belongs with the Period Report, as one change to both — never fix
+only one, or they will silently disagree about which period a load falls in.
 
 ### Production deploy failed on the merge: a module-scope service-role read (2026-09-06)
 
