@@ -9763,7 +9763,10 @@ nobody would notice.
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.
 
-- **The `/login` magic link is still a consuming link — burned by Outlook.**
+- ~~**The `/login` magic link is still a consuming link — burned by Outlook.**~~
+  — **code side done 2026-09-06; one dashboard change left, see below.**
+
+  **Original diagnosis, confirmed live:**
   Confirmed live 2026-09-06: signing in to a fresh address through Outlook
   produced an already-expired link on the first tap; the same flow to a Gmail
   address worked. This is the SAME consuming-link bug already fixed three times
@@ -9794,6 +9797,42 @@ Add to this as more turn up.
   and redirects to `/planner`. Same shape the invite and demo routes already
   produce in code. **Apply the same edit to the Confirm signup and Change email
   templates** — identical default, identical exposure.
+
+  **Resolution (2026-09-06).** Audited every Supabase-sent email this app can
+  actually trigger, rather than fixing only the one that was reported:
+  `signInWithOtp` in `app/login/page.tsx` is the **only** call in the codebase
+  that makes Supabase send an email at all. Every other flow goes through
+  `admin.auth.admin.generateLink`, which never sends anything — the app builds
+  its own `token_hash` link and delivers it via Resend, so the invite and demo
+  routes were never exposed.
+
+  Code side, done: `app/auth/confirm/page.tsx` gained `"email_change"` to its
+  accepted type union. That is what Supabase's Change Email Address template
+  actually sends, and it was missing, so that link would have verified against
+  the wrong type. (`"email"` was already there and is also valid in the
+  installed SDK — both are kept.)
+
+  **Still requires a Supabase dashboard change — it cannot be done from code.**
+  In Authentication → Email Templates, replace `{{ .ConfirmationURL }}` in the
+  link's `href` with `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=<T>`,
+  where `<T>` is `magiclink` for **Magic Link**, `signup` for **Confirm signup**,
+  and `email_change` for **Change Email Address**. Leave the rest of each
+  template alone.
+
+  All three, not just Magic Link: `signInWithOtp` against an address that
+  doesn't exist yet creates the user, and which of Magic Link / Confirm signup
+  fires in that case is a Supabase implementation detail not worth reasoning
+  about — fixing both removes the question. Change Email is latent today (the
+  app never calls `updateUser({email})`) but has the identical default.
+
+  **Reset Password deliberately left alone**: this app has no password auth at
+  all, and pointing a recovery link at `/auth/confirm` would verify the token
+  and drop the user on `/planner` with no way to set a password. If password
+  auth is ever added it needs its own landing screen, not this one.
+
+  Bypassing `/auth/callback` costs nothing: `/auth/confirm` calls
+  `provision_solo_company` in both of its branches, exactly as the callback
+  does, so a brand-new signup still gets its company.
 
 - **Vercel Preview environment is missing `SUPABASE_SERVICE_ROLE_KEY`.**
   Found 2026-08-31 when pushing `perf/memoize-shell-context` triggered

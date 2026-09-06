@@ -37,8 +37,13 @@ function ConfirmInner() {
 
     async function exchange() {
       const tokenHash = params.get("token_hash");
+      // Every type any Supabase email template can send. "email_change" is
+      // the one the Change Email Address template actually uses -- it was
+      // missing here, so that link would have verified against the wrong
+      // type. Kept alongside "email" rather than replacing it: both are
+      // valid EmailOtpType values in the installed SDK.
       const type = (params.get("type") ?? "invite") as
-        | "invite" | "magiclink" | "recovery" | "signup" | "email";
+        | "invite" | "magiclink" | "recovery" | "signup" | "email" | "email_change";
 
       if (!tokenHash) {
         const { data: { session } } = await supabase.auth.getSession();
