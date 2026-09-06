@@ -1,18 +1,22 @@
 -- Legacy incentive system teardown ("Recovered Gallons"), superseded by the
 -- payload-utilization engine. See docs/incentive-redesign-plan.md section 1.
 --
--- ⚠ DELIBERATELY NOT APPLIED. Every app-code consumer is gone as of
--- 2026-09-06 -- no screen reads load_points or product_benchmarks, and
--- nothing calls calculate_load_points anymore -- so there is ZERO urgency
--- here. Dropping these tables permanently destroys the historical incentive
--- data, and with a single operator that data is the only copy in existence.
--- Leaving it costs nothing: this project's own precedent is to leave
--- abandoned columns and functions in place (lane_alpha/arm_alpha,
--- terminal_racks.lane_count, load_log.trainee_id) rather than drop them.
+-- APPROVED TO RUN 2026-09-06. Every app-code consumer was removed the same
+-- day -- no screen reads load_points or product_benchmarks, and nothing calls
+-- calculate_load_points anymore -- and the operator confirmed the historical
+-- incentive numbers carry no audit value ("There's no audit value. all good
+-- to go."), so the data loss here is intentional and accepted.
 --
--- Run this only once you're satisfied the utilization engine is the system
--- of record and the old numbers have no further audit value. Until then it
--- doubles as an executable inventory of exactly what went dead.
+-- This IS destructive and irreversible: it permanently deletes the recovered
+-- gallons/points history and the per-product benchmarks.
+--
+-- Run docs/legacy-incentive-drop-checklist.sql PART 1 first. If its SUMMARY
+-- row does not read "SAFE TO DROP", stop -- something outside the drop set
+-- points into these tables and `cascade` would remove it silently. Run PART 2
+-- afterwards; every row must read PASS.
+--
+-- Verified end to end against a throwaway PostgreSQL 16 before being handed
+-- over, including a re-run to confirm it is idempotent.
 --
 -- Order matters: dependents before the tables they hang off.
 
