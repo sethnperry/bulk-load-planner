@@ -9424,10 +9424,78 @@ ordinary fleet admin — the actual customer case — cannot reach the page at a
 and so cannot see what their drivers see. Fine today with one admin; not fine
 at launch. Belongs with Phase 3's fleet dashboard, not a patch here.
 
-**Not started:** Phase 3 (fleet dashboard replacing the benchmark-based
-Underloading Dashboard), Phase 4 (incentive/payroll layer), and the legacy
-teardown — which lands **after** this engine is validated against real loads,
-not before.
+### Phase 3 shipped 2026-09-06 — fleet dashboard, replacing Underloading
+
+`app/admin/UnderloadingDashboardModal.tsx` is **deleted**, replaced by
+`FleetUtilizationModal.tsx` (data) + `FleetUtilizationView.tsx` (presentation).
+The admin header tile is relabelled **Underloading → Utilization**; its
+`admin || lead || dispatch` gate is unchanged, and so is the RLS behind it
+(`load_utilization_staff_read` is `is_company_staff(company_id)` — owner/admin/
+lead/dispatch — the same audience the old dashboard had, so **no migration was
+needed for this phase at all**).
+
+Three behavioural changes fall out of the new data source, none of them
+cosmetic:
+- **No `incentive_settings.enabled` gate.** The old dashboard's "turn
+  Incentives on and set a benchmark" empty state was honest for a
+  benchmark-driven metric. The capacity engine needs no benchmark and no
+  configuration, and the spec (§9/§21, TEST K) forbids measurement reading
+  `enabled` at all. A company that has configured nothing now gets real
+  numbers; the empty state says "there is nothing to turn on."
+- **Not a leaderboard (§17).** The per-driver table sorts by **name**, never by
+  score. This deliberately reverses the old dashboard's own recorded decision
+  ("sorted by gallons desc, not alphabetical — a leaderboard framing fits the
+  number that justifies the subscription"). Utilization is shaped by dispatch,
+  terminal allocation and equipment as much as by the driver, so ranking on it
+  produces a blame chart wearing a scoreboard's clothes.
+- **Excluded loads shown, never folded in (§10/§11).** Safety-excluded and
+  externally-capped loads get their own count under the table and contribute to
+  no figure above it.
+
+**Headroom (§4a) has its own block** — the gap between fleet capacity at the
+company target and at the legal limit, framed as opportunity, with the
+target-limited load count and an explicit "raising it is always a decision,
+never automatic." Never driver-facing; staff-only by living behind `/admin`.
+
+**A real bug found before building on it, not after.** `useCompanyHeadroom`
+had shipped in Phase 1 with **no consumer**, and its query was a PostgREST
+embed: `load_utilization?select=...,load_capacity_snapshot(...)`. Both tables
+carry a foreign key to `load_log` and **none to each other**, which is not an
+embeddable relationship — verified against production, which answers
+`PGRST200 "Could not find a relationship"`. Every call would have thrown. Fixed
+as two queries with a client-side join (chunked `.in()` at 200 ids, since
+PostgREST filters ride in the URL); going through `load_utilization` first is
+still required because `load_capacity_snapshot` has no `company_id` of its own.
+All three queries Phase 3 issues were then re-run against production and come
+back clean. **Lesson worth keeping: a hook with no consumer has never been
+executed, whatever the typechecker says.**
+
+Headroom now sums **eligible loads only** — not a scoring decision (headroom
+is not a score), but an `excluded_incomplete_data` load is by definition one
+whose capacity could not be established, so its snapshot can read 0 available
+against a real legal figure and manufacture headroom out of a measurement
+failure. That would inflate the exact number used to argue for raising a
+company's weight target, the one direction this must never overstate.
+
+**Verification.** 8 new pure tests (35 total, all passing): name-ordering,
+gallon-weighting per driver, excluded loads counted-not-scored, unknown driver
+id, headroom math, a nonsensical snapshot unable to cancel real headroom, empty
+input, and string-shaped numerics. Plus the render check that caught the Phase 2
+crash — `FleetUtilizationView` compiled and actually rendered through
+`renderToStaticMarkup` with **PostgREST-shaped string numerics**, 16 assertions
+covering the full render, the empty state and hostile input. This is why the
+view was split out of the modal: a component importing the Supabase client
+cannot be rendered outside a browser. `tsc --noEmit` and `next build` clean.
+
+**Not verified live.** Nothing clicked through in a browser. One caveat worth
+knowing before a live check: the only real `load_utilization` row belongs to a
+driver who is also an admin of that company, so it is visible through
+`load_utilization_own_read` regardless — **opening the dashboard as that user
+does not prove `load_utilization_staff_read` works.** That needs a staff user
+looking at someone else's load.
+
+**Not started:** Phase 4 (incentive/payroll layer) and the legacy teardown —
+which lands **after** this engine is validated against real loads, not before.
 
 ### Production deploy failed on the merge: a module-scope service-role read (2026-09-06)
 

@@ -21,7 +21,7 @@ import {
   type CapacityCompartmentInput,
 } from "./computeAvailableCapacity.ts";
 import { computeUtilization, aggregateUtilization,
-  normalizeUtilizationRow,
+  normalizeUtilizationRow, groupUtilizationByDriver, aggregateHeadroom,
 } from "./computeUtilization.ts";
 
 // ── fixtures ────────────────────────────────────────────────────────────────
@@ -374,4 +374,101 @@ test("normalizeUtilizationRow keeps a null percentage null, never 0", () => {
   // 0% would read as "this driver loaded nothing"; an excluded load has no score.
   assert.equal(row.utilization_pct, null);
   assert.equal(row.actual_gallons, 3200);
+});
+
+// ── Phase 3: fleet aggregation ──────────────────────────────────────────────
+
+const u = (driver_id: string, avail: number, actual: number, eligibility = "eligible") => ({
+  driver_id,
+  effective_available_gallons: avail,
+  actual_gallons: actual,
+  unused_gallons: Math.max(0, avail - actual),
+  eligibility: eligibility as any,
+});
+
+test("P3-A: the fleet table is sorted by name, never by score", () => {
+  // Zoe is the best performer and must still come last. Section 17: this is
+  // deliberately not a leaderboard, reversing the old dashboard's own
+  // gallons-descending ordering.
+  const groups = groupUtilizationByDriver(
+    [u("z", 8000, 8000), u("a", 8000, 4000), u("m", 8000, 6000)],
+    { z: "Zoe Adams", a: "Aaron Diaz", m: "Mia Brooks" }
+  );
+
+  assert.deepEqual(groups.map((g) => g.display_name), ["Aaron Diaz", "Mia Brooks", "Zoe Adams"]);
+  assert.equal(groups[0].summary.utilization_pct?.toFixed(1), "50.0");
+  assert.equal(groups[2].summary.utilization_pct?.toFixed(1), "100.0");
+});
+
+test("P3-B: a driver's percentage is gallon-weighted, matching the fleet headline", () => {
+  // One big well-loaded trip and one tiny poor one. A mean of percentages
+  // would read 75%; the gallon-weighted answer is what both surfaces show.
+  const groups = groupUtilizationByDriver(
+    [u("a", 8000, 8000), u("a", 1000, 500)],
+    { a: "Aaron Diaz" }
+  );
+
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].summary.utilization_pct?.toFixed(2), "94.44");
+  assert.notEqual(groups[0].summary.utilization_pct?.toFixed(2), "75.00");
+});
+
+test("P3-C: excluded loads are counted per driver but never scored", () => {
+  const groups = groupUtilizationByDriver(
+    [u("a", 8000, 8000), u("a", 8000, 9000, "excluded_safety"), u("a", 8000, 2000, "excluded_constraint")],
+    { a: "Aaron Diaz" }
+  );
+
+  const g = groups[0];
+  assert.equal(g.total_loads, 3, "all three loads belong to this driver");
+  assert.equal(g.summary.eligible_loads, 1);
+  assert.equal(g.summary.excluded_safety, 1);
+  assert.equal(g.summary.excluded_constraint, 1);
+  // The overweight load would have pushed this above 100 if it were folded in.
+  assert.equal(g.summary.utilization_pct?.toFixed(1), "100.0");
+  assert.equal(g.summary.actual_gallons, 8000, "excluded gallons stay out of the totals");
+});
+
+test("P3-D: an unknown driver id degrades to a name, not a crash", () => {
+  const groups = groupUtilizationByDriver([u("ghost", 8000, 8000)], {});
+  assert.equal(groups[0].display_name, "Unknown");
+});
+
+test("P3-E: headroom is the gap from the company target up to the legal limit", () => {
+  const h = aggregateHeadroom([
+    { available_gallons: 8000, capacity_at_legal_gallons: 8100, limiting_factor: "company_target" },
+    { available_gallons: 7500, capacity_at_legal_gallons: 7580, limiting_factor: "company_target" },
+    // Volume-limited: full tanks under both ceilings, so a target raise buys nothing.
+    { available_gallons: 9650, capacity_at_legal_gallons: 9650, limiting_factor: "volume" },
+  ]);
+
+  assert.equal(h.headroom_gallons, 180);
+  assert.equal(h.loads, 3);
+  assert.equal(h.target_limited_loads, 2, "only target-limited loads can be helped by a raise");
+  assert.equal(h.capacity_at_target_gallons, 25150);
+  assert.equal(h.capacity_at_legal_gallons, 25330);
+});
+
+test("P3-F: a nonsensical snapshot cannot cancel out real headroom", () => {
+  // A legal ceiling below the target ceiling is impossible; clamping at the
+  // row keeps one bad snapshot from silently eating another load's headroom.
+  const h = aggregateHeadroom([
+    { available_gallons: 8000, capacity_at_legal_gallons: 8100, limiting_factor: "company_target" },
+    { available_gallons: 8000, capacity_at_legal_gallons: 7000, limiting_factor: "company_target" },
+  ]);
+  assert.equal(h.headroom_gallons, 100);
+});
+
+test("P3-G: no snapshots means zero headroom, not NaN", () => {
+  const h = aggregateHeadroom([]);
+  assert.equal(h.headroom_gallons, 0);
+  assert.equal(h.loads, 0);
+  assert.equal(h.target_limited_loads, 0);
+});
+
+test("P3-H: string numerics from PostgREST still add up", () => {
+  const h = aggregateHeadroom([
+    { available_gallons: "7940.911" as any, capacity_at_legal_gallons: "8030.5" as any, limiting_factor: "company_target" },
+  ]);
+  assert.equal(h.headroom_gallons.toFixed(3), "89.589");
 });

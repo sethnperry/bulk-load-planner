@@ -237,3 +237,91 @@ export function normalizeUtilizationRow<T extends Record<string, unknown>>(row: 
     utilization_pct: row.utilization_pct == null ? null : Number(row.utilization_pct),
   };
 }
+
+/**
+ * Per-driver breakdown for the fleet view.
+ *
+ * Deliberately NOT a leaderboard (spec section 17). Rows come back sorted by
+ * name, never by score, and carry no rank -- the fleet question is "where is
+ * capacity going unused," not "who is worst." The old benchmark-era dashboard
+ * sorted by recovered gallons descending on purpose ("a leaderboard framing
+ * fits the number that justifies the subscription"); that framing is
+ * explicitly reversed here, because a per-driver ranking on a metric partly
+ * driven by dispatch, terminal allocation and equipment is a blame chart
+ * dressed as a scoreboard.
+ *
+ * Each driver's own percentage is gallon-weighted through the same
+ * aggregateUtilization used for the fleet total, so a driver's row and the
+ * headline can never be computed two different ways.
+ */
+export type DriverUtilizationGroup = {
+  driver_id: string;
+  display_name: string;
+  summary: UtilizationSummary;
+  total_loads: number;
+};
+
+export function groupUtilizationByDriver<
+  T extends AggregatableUtilization & { driver_id: string }
+>(rows: T[], nameById: Record<string, string>): DriverUtilizationGroup[] {
+  const byDriver = new Map<string, T[]>();
+  for (const r of rows) {
+    const list = byDriver.get(r.driver_id);
+    if (list) list.push(r);
+    else byDriver.set(r.driver_id, [r]);
+  }
+
+  return Array.from(byDriver.entries())
+    .map(([driver_id, driverRows]) => ({
+      driver_id,
+      display_name: nameById[driver_id] ?? "Unknown",
+      summary: aggregateUtilization(driverRows),
+      total_loads: driverRows.length,
+    }))
+    .sort((a, b) => a.display_name.localeCompare(b.display_name));
+}
+
+/** One capacity snapshot's contribution to fleet headroom (spec section 4a). */
+export type AggregatableHeadroom = {
+  available_gallons: number;
+  capacity_at_legal_gallons: number;
+  limiting_factor: string | null;
+};
+
+export type HeadroomSummary = {
+  capacity_at_target_gallons: number;
+  capacity_at_legal_gallons: number;
+  /** What a safely-raised company target would unlock over this period. */
+  headroom_gallons: number;
+  /** Loads whose ceiling was the company target rather than tank volume --
+   *  the only ones a target raise could actually help. */
+  target_limited_loads: number;
+  loads: number;
+};
+
+/**
+ * Sums headroom across a period. Never negative per load: a legal ceiling
+ * below the target ceiling is nonsense, and clamping at the row keeps one
+ * bad snapshot from silently cancelling out real headroom elsewhere.
+ */
+export function aggregateHeadroom(snapshots: AggregatableHeadroom[]): HeadroomSummary {
+  let atTarget = 0, atLegal = 0, headroom = 0, targetLimited = 0;
+
+  for (const s of snapshots) {
+    const t = Number(s.available_gallons ?? 0);
+    const l = Number(s.capacity_at_legal_gallons ?? 0);
+    if (!Number.isFinite(t) || !Number.isFinite(l)) continue;
+    atTarget += t;
+    atLegal += l;
+    headroom += Math.max(0, l - t);
+    if (s.limiting_factor === "company_target") targetLimited++;
+  }
+
+  return {
+    capacity_at_target_gallons: atTarget,
+    capacity_at_legal_gallons: atLegal,
+    headroom_gallons: headroom,
+    target_limited_loads: targetLimited,
+    loads: snapshots.length,
+  };
+}

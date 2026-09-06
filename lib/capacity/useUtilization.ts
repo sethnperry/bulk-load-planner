@@ -14,7 +14,13 @@ import { useMemo } from "react";
 
 import { useQuery } from "@tanstack/react-query";
 
-import { aggregateUtilization, normalizeUtilizationRow } from "./computeUtilization";
+import {
+  aggregateHeadroom,
+  aggregateUtilization,
+  groupUtilizationByDriver,
+  normalizeUtilizationRow,
+} from "./computeUtilization";
+import type { AggregatableHeadroom, HeadroomSummary } from "./computeUtilization";
 import { supabase } from "@/lib/supabase/client";
 
 export type UtilizationRow = {
@@ -36,7 +42,17 @@ export type UtilizationRow = {
 // two copies of the same gallon-weighted math is exactly how this project has
 // drifted before.
 export { aggregateUtilization as summarize } from "./computeUtilization";
-export type { UtilizationSummary } from "./computeUtilization";
+export { groupUtilizationByDriver } from "./computeUtilization";
+export type {
+  DriverUtilizationGroup,
+  HeadroomSummary,
+  UtilizationSummary,
+} from "./computeUtilization";
+
+// PostgREST puts filters in the query string, so an `.in()` of raw UUIDs is
+// bounded by URL length. 200 ids is ~7.5KB of list -- comfortably under the
+// usual 8KB request-line ceiling with the rest of the URL to spare.
+const ID_CHUNK = 200;
 
 const SELECT =
   "load_id, driver_id, loaded_at, available_gallons, effective_available_gallons, " +
@@ -84,53 +100,65 @@ export function useCompanyUtilization(companyId: string | null, since: string | 
 
 /**
  * Fleet headroom: what a safely-raised company target would unlock (see the
- * plan's section 4a). Reads the capacity snapshots rather than load_utilization,
- * because headroom is a property of what the equipment could have carried, not
- * of how well the driver did.
+ * plan's section 4a). Reads the capacity snapshots rather than
+ * load_utilization, because headroom is a property of what the equipment
+ * could have carried, not of how well the driver did.
  *
  * Never shown to a driver -- their score must not move because of a
  * company-level decision they had no part in.
+ *
+ * TWO queries, not a PostgREST embed. `load_capacity_snapshot` and
+ * `load_utilization` both have a foreign key to `load_log` and none to each
+ * other, so `load_utilization?select=...,load_capacity_snapshot(...)` is not
+ * an embeddable relationship: PostgREST answers PGRST200 ("could not find a
+ * relationship"), verified against production. Going through load_utilization
+ * first is still necessary rather than querying snapshots directly, because
+ * `load_capacity_snapshot` carries no company_id of its own -- company
+ * scoping only exists on the utilization row.
+ *
+ * Only ELIGIBLE loads contribute. Not a scoring decision -- headroom is not a
+ * score -- but an excluded_incomplete_data load is one whose capacity could
+ * not be established, so its snapshot can read 0 available against a real
+ * legal figure and manufacture headroom out of a measurement failure. That
+ * would inflate the exact number used to argue for raising a company's weight
+ * target, which is the one direction this must never overstate. Restricting to
+ * eligible loads also keeps this figure comparable with the utilization
+ * percentage shown beside it, which covers the same loads.
  */
 export function useCompanyHeadroom(companyId: string | null, since: string | null) {
   return useQuery({
     queryKey: ["utilization", "headroom", companyId, since],
     enabled: Boolean(companyId && since),
     staleTime: 60_000,
-    queryFn: async () => {
-      const { data, error } = await supabase
+    queryFn: async (): Promise<HeadroomSummary> => {
+      const { data: idRows, error: idErr } = await supabase
         .from("load_utilization")
-        .select("load_id, load_capacity_snapshot(available_gallons, capacity_at_legal_gallons, limiting_factor)")
+        .select("load_id")
         .eq("company_id", companyId!)
+        .eq("eligibility", "eligible")
         .gte("loaded_at", since!);
-      if (error) throw error;
+      if (idErr) throw idErr;
 
-      let headroom = 0, atTarget = 0, atLegal = 0, targetLimited = 0;
-      for (const row of (data ?? []) as any[]) {
-        const snap = Array.isArray(row.load_capacity_snapshot)
-          ? row.load_capacity_snapshot[0]
-          : row.load_capacity_snapshot;
-        if (!snap) continue;
-        const t = Number(snap.available_gallons ?? 0);
-        const l = Number(snap.capacity_at_legal_gallons ?? 0);
-        atTarget += t;
-        atLegal += l;
-        headroom += Math.max(0, l - t);
-        if (snap.limiting_factor === "company_target") targetLimited++;
+      const ids = ((idRows ?? []) as { load_id: string }[]).map((r) => r.load_id);
+      if (ids.length === 0) return aggregateHeadroom([]);
+
+      // Chunked: a period with hundreds of loads would otherwise put hundreds
+      // of UUIDs into one request URL.
+      const snapshots: AggregatableHeadroom[] = [];
+      for (let i = 0; i < ids.length; i += ID_CHUNK) {
+        const { data, error } = await supabase
+          .from("load_capacity_snapshot")
+          .select("available_gallons, capacity_at_legal_gallons, limiting_factor")
+          .in("load_id", ids.slice(i, i + ID_CHUNK));
+        if (error) throw error;
+        snapshots.push(...((data ?? []) as unknown as AggregatableHeadroom[]));
       }
-      return {
-        capacity_at_target_gallons: atTarget,
-        capacity_at_legal_gallons: atLegal,
-        headroom_gallons: headroom,
-        target_limited_loads: targetLimited,
-      };
+
+      return aggregateHeadroom(snapshots);
     },
   });
 }
 
-// Stable empty reference -- a bare `?? []` default would hand every render a
-// NEW array, and this app has already been bitten once by exactly that
-// (useProductsCatalog's infinite render loop, perf pass #3). Anything derived
-// from this via useMemo stays stable while a query is still loading.
 const EMPTY_ROWS: UtilizationRow[] = [];
 
 /**
@@ -144,6 +172,22 @@ const EMPTY_ROWS: UtilizationRow[] = [];
  */
 export function useDriverPeriodUtilization(driverId: string | null, since: string | null) {
   const query = useDriverUtilization(driverId, since);
+  const rows = query.data ?? EMPTY_ROWS;
+  const summary = useMemo(() => aggregateUtilization(rows), [rows]);
+  return { rows, summary, isLoading: query.isLoading, error: query.error };
+}
+
+/**
+ * The whole company's period performance -- the summary behind the fleet
+ * dashboard. Staff-only by RLS (`load_utilization_staff_read` covers
+ * owner/admin/lead/dispatch via is_company_staff), not by anything here.
+ *
+ * Mirrors useDriverPeriodUtilization deliberately: same rows, same aggregate,
+ * same shape, so the fleet headline and a driver's own card can never be
+ * computed two different ways.
+ */
+export function useFleetPeriodUtilization(companyId: string | null, since: string | null) {
+  const query = useCompanyUtilization(companyId, since);
   const rows = query.data ?? EMPTY_ROWS;
   const summary = useMemo(() => aggregateUtilization(rows), [rows]);
   return { rows, summary, isLoading: query.isLoading, error: query.error };

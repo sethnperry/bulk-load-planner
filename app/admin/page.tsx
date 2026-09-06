@@ -23,7 +23,7 @@ import AdminLoadsModal from "./AdminLoadsModal";
 import FleetCardsModal from "./FleetCardsModal";
 import IncentiveSettingsModal from "./IncentiveSettingsModal";
 import PayrollReportModal from "./PayrollReportModal";
-import UnderloadingDashboardModal from "./UnderloadingDashboardModal";
+import FleetUtilizationModal from "./FleetUtilizationModal";
 import { useCompanySubscription, computeSeatCapacity, wouldExceedCapacity, type SeatCapacity } from "@/lib/billing/useCompanySubscription";
 
 // Paginated fetch -- PostgREST/Supabase caps every response at a
@@ -1159,7 +1159,7 @@ export default function AdminPage() {
   const [fleetCardsOpen, setFleetCardsOpen] = useState(false);
   const [incentiveSettingsOpen, setIncentiveSettingsOpen] = useState(false);
   const [payrollReportOpen, setPayrollReportOpen] = useState(false);
-  const [underloadingOpen, setUnderloadingOpen] = useState(false);
+  const [fleetUtilOpen, setFleetUtilOpen] = useState(false);
   const [truckModal,   setTruckModal]   = useState<Truck | null | "new">(null);
   const [trailerModal, setTrailerModal] = useState<Trailer | null | "new">(null);
   const [comboModal,   setComboModal]   = useState<Combo | null | "new">(null);
@@ -1461,8 +1461,8 @@ export default function AdminPage() {
           </button>
         )}
         {(myRole === "admin" || myRole === "lead" || myRole === "dispatch") && (
-          <button type="button" className="admin-header-tile" onClick={() => setUnderloadingOpen(true)}>
-            Underloading
+          <button type="button" className="admin-header-tile" onClick={() => setFleetUtilOpen(true)}>
+            Utilization
           </button>
         )}
       </div>
@@ -1821,7 +1821,7 @@ export default function AdminPage() {
       <FleetCardsModal open={fleetCardsOpen} onClose={() => setFleetCardsOpen(false)} companyId={companyId!} />
       <IncentiveSettingsModal open={incentiveSettingsOpen} onClose={() => setIncentiveSettingsOpen(false)} companyId={companyId!} />
       <PayrollReportModal open={payrollReportOpen} onClose={() => setPayrollReportOpen(false)} companyId={companyId!} />
-      <UnderloadingDashboardModal open={underloadingOpen} onClose={() => setUnderloadingOpen(false)} companyId={companyId!} />
+      <FleetUtilizationModal open={fleetUtilOpen} onClose={() => setFleetUtilOpen(false)} companyId={companyId!} />
     </div>
   );
 }
