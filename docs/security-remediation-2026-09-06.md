@@ -223,3 +223,49 @@ running database.
 This supersedes the "NOT applied to live" and "live post-fix pentest can only run
 after the migrations are applied" caveats in the earlier sections: the migrations
 are applied and the pentest has run against production with the results above.
+
+## RLS verification — every table (live, 2026-09-06)
+
+Systematic cross-company read test: authenticated as Company A, attempted to read
+Company B's rows in every table (by company_id / user_id / parent load_id /
+equipment id). Global reference tables checked for readability instead.
+
+**Isolated ✓ (company- or user-owned, Company A sees 0 of Company B's):**
+companies, equipment_combos, trucks, trailers, trailer_compartments,
+equipment_regions, equipment_local_areas, incentive_settings, payroll_reports,
+weight_records, equipment_permits, equipment_sensitive_data, service_records,
+wash_records, load_log, load_utilization, load_capacity_snapshot,
+load_constraints, load_edit_history, user_plan_slots, terminal_access,
+my_terminals, user_primary_trucks, user_primary_trailers, user_terminal_cards,
+driver_licenses, driver_medical_cards, driver_twic_cards, driver_port_ids,
+driver_schedules, profiles, user_settings, user_vault_pin, vault_entries,
+vault_reset_tokens, demo_sessions, decouple_events, company_invites.
+
+**Global reference (readable by all authenticated — correct):**
+cities, states, products, seed_products, terminals, terminal_products,
+permit_types, terminal_temp_bias, fuel_temp_cache, terminal_racks, rack_arms,
+rack_lanes, rack_product_status, super_admins (empty).
+
+**Not present live:** company_subscriptions (migration written, not applied —
+fails open by design), equipment_attachments / attachments (empty, live-only).
+
+### 🔴 New finding R1 — load_lines globally readable  (FIXED, needs apply)
+`load_log` isolates but its child `load_lines` did not — Company A read Company
+B's compartment-level load detail (product, planned/actual gallons, temp), and
+could see lines from 463 distinct loads vs its own 283. A broad policy exists on
+the LIVE table that is absent from every migration file (drift in the dangerous
+direction). Fix `20260907040000_load_lines_rls_isolation.sql`: a catalog-driven
+DO block drops every policy on load_lines and reinstalls exactly the owner-scoped
+CRUD + admin/dispatch company-member read. Verified on Postgres 16: cross-company
+read → 0, own read → ok, same-company dispatch read → ok.
+
+### 🟠 New finding R2 — NULL-company rows global on dispatcher_notes / driver_schedules  (FIXED, needs apply)
+Both staff policies were `company_id is null OR is_company_staff(company_id)`.
+Proven live: Company A inserted a `dispatcher_notes` row with `company_id = NULL`
+and Company B read it. Any authenticated user can plant globally-visible/writable
+rows, and any accidental NULL-company write becomes cross-tenant. Fix
+`20260907050000_dispatcher_notes_schedules_null_company_fix.sql`: policies
+tightened to strict `is_company_staff(company_id)` (a NULL insert is now rejected
+by WITH CHECK) and `company_id` set NOT NULL (both tables empty). The app always
+sets company_id, so legit writes are unaffected. Verified on Postgres 16: NULL
+insert rejected, own-company write ok, cross-company read → 0.
