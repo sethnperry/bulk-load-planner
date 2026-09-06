@@ -1,7 +1,6 @@
 -- ============================================================================
--- ProTankr pre-audit security remediation -- apply in the Supabase SQL editor.
--- Contains 3 migrations (RPC authorization, RLS, role guard). All DDL; paste
--- the whole file and run once. Order among them does not matter.
+-- ProTankr pre-audit security remediation -- full set, apply in SQL editor.
+-- 4 migrations (RPC auth, couple_combo fix-up, RLS, role guard). All DDL.
 -- ============================================================================
 
 -- ============================================================================
@@ -216,94 +215,12 @@ BEGIN
 END;
 $function$;
 
--- ── couple_combo(truck, trailer, tare, target, buffer) 5-arg client overload ─
--- Adds: both pieces of equipment must belong to the SAME company, and the
--- caller must be a member of it. The new combo is stamped with that company
--- (derived from the equipment, never a client-supplied or arbitrary-first
--- membership). Historical-combo reuse and the tare/target logic are preserved.
-create or replace function public.couple_combo(
-  p_truck_id uuid, p_trailer_id uuid,
-  p_tare_lbs numeric default null, p_target_weight numeric default null,
-  p_buffer_lbs numeric default null
-)
-returns jsonb
-language plpgsql
-security definer
-set search_path to 'public'
-as $function$
-DECLARE
-  v_combo_id     uuid;
-  v_tare_lbs     numeric;
-  v_created      boolean := false;
-  v_company_id   uuid;
-  v_truck_co     uuid;
-  v_trailer_co   uuid;
-  v_truck_name   text;
-  v_trailer_name text;
-BEGIN
-  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Not authenticated'; END IF;
-
-  SELECT company_id INTO v_truck_co   FROM public.trucks   WHERE truck_id   = p_truck_id;
-  SELECT company_id INTO v_trailer_co FROM public.trailers WHERE trailer_id = p_trailer_id;
-
-  -- AUTHORIZATION: both exist, belong to the same company, and the caller is
-  -- a member of it. Generic error for missing/foreign/mismatched -- no oracle.
-  IF v_truck_co IS NULL OR v_trailer_co IS NULL
-     OR v_truck_co <> v_trailer_co
-     OR NOT public._caller_in_company(v_truck_co) THEN
-    RAISE EXCEPTION 'Not authorized';
-  END IF;
-  v_company_id := v_truck_co;
-
-  UPDATE public.equipment_combos
-     SET claimed_by = NULL, claimed_at = NULL
-   WHERE claimed_by = auth.uid() AND active = true;
-
-  IF EXISTS (
-    SELECT 1 FROM public.equipment_combos
-     WHERE (truck_id = p_truck_id OR trailer_id = p_trailer_id) AND active = true
-  ) THEN
-    RAISE EXCEPTION 'One or both pieces of equipment are already coupled';
-  END IF;
-
-  SELECT combo_id, tare_lbs
-    INTO v_combo_id, v_tare_lbs
-    FROM public.equipment_combos
-   WHERE truck_id = p_truck_id AND trailer_id = p_trailer_id AND active = false
-   ORDER BY claimed_at DESC NULLS LAST
-   LIMIT 1;
-
-  IF FOUND THEN
-    UPDATE public.equipment_combos
-       SET active = true, claimed_by = auth.uid(), claimed_at = now(),
-           company_id = v_company_id,
-           target_weight = COALESCE(p_target_weight, target_weight)
-     WHERE combo_id = v_combo_id;
-  ELSE
-    IF p_tare_lbs IS NULL OR p_tare_lbs <= 0 THEN
-      RAISE EXCEPTION 'No historical combo found. Please provide a tare weight.';
-    END IF;
-
-    SELECT truck_name   INTO v_truck_name   FROM public.trucks   WHERE truck_id   = p_truck_id;
-    SELECT trailer_name INTO v_trailer_name FROM public.trailers WHERE trailer_id = p_trailer_id;
-
-    v_combo_id := gen_random_uuid();
-    v_tare_lbs := p_tare_lbs;
-
-    INSERT INTO public.equipment_combos (
-      combo_id, combo_name, truck_id, trailer_id, tare_lbs, target_weight,
-      active, claimed_by, claimed_at, company_id
-    ) VALUES (
-      v_combo_id, COALESCE(v_truck_name,'') || ' / ' || COALESCE(v_trailer_name,''),
-      p_truck_id, p_trailer_id, p_tare_lbs, COALESCE(p_target_weight, 80000),
-      true, auth.uid(), now(), v_company_id
-    );
-    v_created := true;
-  END IF;
-
-  RETURN jsonb_build_object('combo_id', v_combo_id, 'tare_lbs', v_tare_lbs, 'created', v_created);
-END;
-$function$;
+-- ── couple_combo ───────────────────────────────────────────────────────────
+-- NOTE: the client-facing couple_combo overload is the 6-arg (p_force)
+-- version from 20260720000000, not a 5-arg one (that was dropped there).
+-- It is hardened in 20260907030000_couple_combo_force_authorization.sql --
+-- kept as its own migration so the fix-up also applies to a DB where an
+-- earlier version of THIS file had wrongly re-created the 5-arg overload.
 
 -- ── create_combo(...) ──────────────────────────────────────────────────────
 -- No client caller today, but live-callable. Add the same ownership check,
@@ -474,6 +391,161 @@ grant execute on function public.decouple_combo(
 
 
 -- ============================================================================
+-- Pre-audit remediation FIX-UP: harden the correct couple_combo overload
+-- ============================================================================
+-- 20260907000000 hardened couple_combo(uuid,uuid,numeric,numeric,numeric) --
+-- but that 5-arg overload had been DROPPED by 20260720000000, which replaced it
+-- with a 6-arg version carrying `p_force`. The client calls the 6-arg. So the
+-- first pass (a) RE-CREATED the 5-arg, reintroducing the exact
+-- "could not choose the best candidate function" (PGRST203) ambiguity that
+-- 20260720000000 deliberately removed, and (b) left the actually-live 6-arg
+-- overload UNprotected. The 6-arg is in fact the worse hole: under p_force it
+-- deactivates any active combo holding the truck OR trailer *by id* and
+-- re-stamps them into the caller's active company, with no ownership check --
+-- i.e. it can forcibly steal another company's already-coupled equipment.
+--
+-- This migration:
+--   1. Drops the errant 5-arg overload the first pass created.
+--   2. Re-defines the 6-arg overload with the company-ownership check: the
+--      truck AND trailer must both belong to the caller's active company.
+--      All other behavior (p_force deactivation, historical-combo reuse,
+--      get_active_company_id, tare/target handling) is preserved verbatim.
+-- Idempotent and safe to re-run.
+-- ============================================================================
+
+-- 1) Remove the 5-arg overload re-created by 20260907000000 (restores the
+--    single-client-overload state 20260720000000 intended; no client uses it).
+drop function if exists public.couple_combo(uuid, uuid, numeric, numeric, numeric);
+
+-- 2) Harden the live 6-arg (p_force) overload.
+create or replace function public.couple_combo(
+  p_truck_id uuid,
+  p_trailer_id uuid,
+  p_tare_lbs numeric default null,
+  p_target_weight numeric default null,
+  p_buffer_lbs numeric default null,
+  p_force boolean default false
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path to 'public'
+as $function$
+DECLARE
+  v_combo_id     uuid;
+  v_tare_lbs     numeric;
+  v_created      boolean := false;
+  v_company_id   uuid;
+  v_truck_co     uuid;
+  v_trailer_co   uuid;
+  v_truck_name   text;
+  v_trailer_name text;
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RAISE EXCEPTION 'Not authenticated';
+  END IF;
+
+  -- Use active company (not just first membership)
+  v_company_id := get_active_company_id();
+
+  IF v_company_id IS NULL THEN
+    RAISE EXCEPTION 'No active company set. Please select a company first.';
+  END IF;
+
+  -- AUTHORIZATION: the truck AND trailer being coupled must both belong to the
+  -- caller's active company. Without this, a caller could force-couple (and,
+  -- under p_force, forcibly decouple) another company's equipment by id.
+  -- Generic error whether the piece is missing or foreign -- no existence oracle.
+  SELECT company_id INTO v_truck_co   FROM public.trucks   WHERE truck_id   = p_truck_id;
+  SELECT company_id INTO v_trailer_co FROM public.trailers WHERE trailer_id = p_trailer_id;
+  IF v_truck_co IS NULL OR v_trailer_co IS NULL
+     OR v_truck_co <> v_company_id
+     OR v_trailer_co <> v_company_id THEN
+    RAISE EXCEPTION 'Not authorized';
+  END IF;
+
+  -- Release any combo the user currently holds
+  UPDATE public.equipment_combos
+     SET claimed_by = NULL,
+         claimed_at = NULL
+   WHERE claimed_by = auth.uid()
+     AND active     = true;
+
+  IF p_force THEN
+    UPDATE public.equipment_combos
+       SET active     = false,
+           claimed_by = NULL,
+           claimed_at = NULL
+     WHERE (truck_id = p_truck_id OR trailer_id = p_trailer_id)
+       AND active = true;
+  ELSE
+    IF EXISTS (
+      SELECT 1 FROM public.equipment_combos
+       WHERE (truck_id = p_truck_id OR trailer_id = p_trailer_id)
+         AND active = true
+    ) THEN
+      RAISE EXCEPTION 'One or both pieces of equipment are already coupled';
+    END IF;
+  END IF;
+
+  SELECT combo_id, tare_lbs
+    INTO v_combo_id, v_tare_lbs
+    FROM public.equipment_combos
+   WHERE truck_id   = p_truck_id
+     AND trailer_id = p_trailer_id
+     AND active     = false
+   ORDER BY claimed_at DESC NULLS LAST
+   LIMIT 1;
+
+  IF FOUND THEN
+    UPDATE public.equipment_combos
+       SET active        = true,
+           claimed_by    = auth.uid(),
+           claimed_at    = now(),
+           company_id    = v_company_id,
+           target_weight = COALESCE(p_target_weight, target_weight)
+     WHERE combo_id = v_combo_id;
+  ELSE
+    IF p_tare_lbs IS NULL OR p_tare_lbs <= 0 THEN
+      RAISE EXCEPTION 'No historical combo found. Please provide a tare weight.';
+    END IF;
+
+    SELECT truck_name   INTO v_truck_name   FROM public.trucks   WHERE truck_id   = p_truck_id;
+    SELECT trailer_name INTO v_trailer_name FROM public.trailers WHERE trailer_id = p_trailer_id;
+
+    v_combo_id := gen_random_uuid();
+    v_tare_lbs := p_tare_lbs;
+
+    INSERT INTO public.equipment_combos (
+      combo_id, combo_name, truck_id, trailer_id,
+      tare_lbs, target_weight,
+      active, claimed_by, claimed_at, company_id
+    ) VALUES (
+      v_combo_id,
+      COALESCE(v_truck_name, '') || ' / ' || COALESCE(v_trailer_name, ''),
+      p_truck_id,
+      p_trailer_id,
+      p_tare_lbs,
+      COALESCE(p_target_weight, 80000),
+      true,
+      auth.uid(),
+      now(),
+      v_company_id
+    );
+
+    v_created := true;
+  END IF;
+
+  RETURN jsonb_build_object(
+    'combo_id', v_combo_id,
+    'tare_lbs', v_tare_lbs,
+    'created',  v_created
+  );
+END;
+$function$;
+
+
+-- ============================================================================
 -- Pre-audit remediation: remove permissive `using (true)` SELECT policies that
 -- expose company-OWNED data
 -- ============================================================================
@@ -579,10 +651,5 @@ create trigger trg_enforce_valid_user_company_role
   for each row execute function public.enforce_valid_user_company_role();
 
 
--- ============================================================================
--- OPTIONAL: restore the demo Alpha account role (only if you ran the item-8
--- pentest that set it to 'superadmin'). Safe no-op if already 'admin'.
--- ============================================================================
-update public.user_companies set role='admin'
-where user_id='605375f1-f4c1-4be0-9cf0-86827906393d'
-  and company_id='1391e05e-27f1-44d3-85ae-c416b472b183';
+-- OPTIONAL: restore demo Alpha role (no-op if already 'admin').
+update public.user_companies set role='admin' where user_id='605375f1-f4c1-4be0-9cf0-86827906393d' and company_id='1391e05e-27f1-44d3-85ae-c416b472b183';
