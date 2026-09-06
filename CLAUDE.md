@@ -8,6 +8,21 @@ Dark #111111 theme, inline React styles. Prefer complete replacement files over
 diffs when editing — VS Code edits sometimes don't write to disk, causing git to
 miss changes, so always confirm a change actually landed rather than assuming it did.
 
+## Operating posture (stated 2026-09-06)
+
+**There are no real users yet — the app has exactly one operator.** Per
+explicit direction: "I am the only user at this point so we don't need to be
+overly cautious. I will let you know when we have users." So merging to `main`
+(which auto-deploys to production via Vercel), applying migrations, and testing
+against live data do **not** need a confirmation round each time. Ship, then
+verify.
+
+This is a standing grant with a stated expiry — **it lapses the moment the user
+says real users exist.** Until then it covers deploys and schema changes; it is
+not a licence to skip verification, and destructive operations against real data
+(bulk DELETEs, dropping columns) still get flagged first, because "one user"
+means their data is the only copy that exists.
+
 ## Product direction
 
 Splitting into two tiers:
@@ -9619,6 +9634,38 @@ nobody would notice.
 ## Pre-launch cleanup (before app store submission)
 Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.
+
+- **The `/login` magic link is still a consuming link — burned by Outlook.**
+  Confirmed live 2026-09-06: signing in to a fresh address through Outlook
+  produced an already-expired link on the first tap; the same flow to a Gmail
+  address worked. This is the SAME consuming-link bug already fixed three times
+  (`api/admin/invite`, `api/demo/start`, and the callback), in the one place
+  those fixes structurally could not reach. Those three build their own link
+  from `hashed_token` and send it via Resend. `/login`'s `signInWithOtp` sends
+  through **Supabase's own email service and template**, which the app never
+  touches — and that template ships with `{{ .ConfirmationURL }}`, i.e.
+  `<project>.supabase.co/auth/v1/verify?token=...`, a GET that consumes the
+  token the instant anything fetches it. Outlook's Safe Links scanner fetches
+  it. Gmail does not, which is exactly why it looks intermittent.
+
+  **The 2026-08-13 implicit-flow fix did not and could not fix this.** That
+  changed what the verify endpoint *returns* (fragment vs `?code=`), solving
+  the cross-device PKCE problem. Being consumed on first GET is a property of
+  the URL shape, not the flow type.
+
+  **Fix is a Supabase dashboard change, not code** — Authentication → Email
+  Templates → **Magic Link**, replace the `{{ .ConfirmationURL }}` anchor with:
+
+  ```html
+  <a href="{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=magiclink">Log In</a>
+  ```
+
+  `/auth/confirm/page.tsx` already handles `type=magiclink`, consumes it only
+  via an explicit client-side `verifyOtp()` (a scanner's GET does nothing),
+  calls `provision_solo_company` so a brand-new signup still lands correctly,
+  and redirects to `/planner`. Same shape the invite and demo routes already
+  produce in code. **Apply the same edit to the Confirm signup and Change email
+  templates** — identical default, identical exposure.
 
 - **Vercel Preview environment is missing `SUPABASE_SERVICE_ROLE_KEY`.**
   Found 2026-08-31 when pushing `perf/memoize-shell-context` triggered
