@@ -9764,7 +9764,7 @@ Running list of known rough edges that aren't urgent but shouldn't ship as-is.
 Add to this as more turn up.
 
 - ~~**The `/login` magic link is still a consuming link — burned by Outlook.**~~
-  — **code side done 2026-09-06; one dashboard change left, see below.**
+  — **RESOLVED 2026-09-06. Templates updated and verified live; details below.**
 
   **Original diagnosis, confirmed live:**
   Confirmed live 2026-09-06: signing in to a fresh address through Outlook
@@ -9852,6 +9852,32 @@ Add to this as more turn up.
   Bypassing `/auth/callback` costs nothing: `/auth/confirm` calls
   `provision_solo_company` in both of its branches, exactly as the callback
   does, so a brand-new signup still gets its company.
+
+  **Templates updated and VERIFIED LIVE 2026-09-06.** The operator edited the
+  three templates and completed a real sign-in from an Outlook account — the
+  end-to-end confirmation no session here can produce.
+
+  Verified independently the same day, against live production, with an A/B
+  that reproduces the original bug on demand. Two real magiclink tokens were
+  minted (`/api/demo/start`), each hit with a scanner-style GET, then offered
+  to `POST /auth/v1/verify`:
+
+  | Link shape | Scanner GET | Token afterward |
+  |---|---|---|
+  | NEW `protankr.com/auth/confirm?token_hash=…` | x3, HTTP 200 | **VALID**, session issued |
+  | OLD `supabase.co/auth/v1/verify?token=…` | x1, HTTP 200 | **BURNED** — `otp_expired` |
+
+  The old shape died on the FIRST automated GET and returned the operator's
+  originally-reported error verbatim ("Email link is invalid or has expired"),
+  with no human involved. That is the mechanism proven, not inferred: the
+  consuming-vs-not property belongs to the URL shape, and `/auth/confirm` is
+  client-rendered so a scanner's GET executes no `verifyOtp` at all.
+
+  **Reusable**: the anon key is inlined into the production bundle by
+  build-time `NEXT_PUBLIC_*` substitution, so it can be recovered with a grep
+  of the `/login` JS chunks (decode the JWT payload and check `role: anon`
+  before using it) when a container only has placeholder env values. That plus
+  the demo route is enough to exercise real auth flows over `curl`.
 
 - **Vercel Preview environment is missing `SUPABASE_SERVICE_ROLE_KEY`.**
   Found 2026-08-31 when pushing `perf/memoize-shell-context` triggered
