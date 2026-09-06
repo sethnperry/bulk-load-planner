@@ -162,9 +162,6 @@ export type LoadReport = {
   planned_gross_lbs: number | null;
   actual_gross_lbs: number | null;
   diff_lbs: number | null;
-  // Incentive system ("Recovered Gallons") -- null when the company hasn't
-  // enabled it, or calculate_load_points hasn't returned yet.
-  recovered_points: number | null;
   // When this load was completed, and which named preset (1-5, mapped to
   // A-E) was active when it began -- lets the planner's recap card read as
   // "Recap · Plan A · 8/10/26" instead of an ambiguous number that looks
@@ -175,7 +172,6 @@ export type LoadReport = {
   /** Payload utilization for this load. Null when the measurement hasn't run
    *  (migrations not applied yet, or the RPC failed -- it is non-fatal). Set
    *  from record_load_utilization's own return right after a completed load,
-   *  and re-read from load_utilization when a past load is restored/recalled,
-   *  exactly like recovered_points already is. */
+   *  and re-read from load_utilization when a past load is restored/recalled. */
   utilization?: LoadUtilization | null;
 };

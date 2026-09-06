@@ -78,14 +78,10 @@ import { addDaysISO_, daysUntilISO_, formatMDYWithCountdown_, formatMDYWithTime_
 import { normState } from "./utils/normalize";
 import { cgSliderToBias, bestLbsPerGallon, planForGallons, CG_NEUTRAL, computeActualLbsForLine } from "./utils/planMath";
 import { productColorFor } from "./utils/productColor";
-import { generatePayPeriods, type PayPeriodType } from "@/app/admin/payPeriods";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 import type { ActiveComp, CompPlanInput, CompRow, ProductRow } from "./types";
 
-const PERIOD_TYPE_LABELS: Record<PayPeriodType, string> = {
-  weekly: "Weekly", biweekly: "Biweekly", semi_monthly: "Semi-Monthly", monthly: "Monthly",
-};
 
 
 // ─── Local UI helpers ─────────────────────────────────────────────────────────
@@ -1322,28 +1318,6 @@ export default function CalculatorPage() {
   // to that same period") -- this reverses the same-day decision to add an
   // independent, anchor-less averaging period. Whole card only renders once
   // incentive_settings.enabled is confirmed true for this company.
-  const [incentiveEnabled, setIncentiveEnabled] = useState(false);
-  const [payPeriodType, setPayPeriodType] = useState<PayPeriodType>("biweekly");
-  const [payPeriodAnchorDate, setPayPeriodAnchorDate] = useState("");
-  const [avgRecoveredPoints, setAvgRecoveredPoints] = useState<number | null>(null);
-
-  useEffect(() => {
-    if (!shell.companyId) { setIncentiveEnabled(false); return; }
-    let cancelled = false;
-    (async () => {
-      const { data } = await supabase
-        .from("incentive_settings")
-        .select("enabled, pay_period_type, pay_period_anchor_date")
-        .eq("company_id", shell.companyId)
-        .maybeSingle();
-      if (cancelled) return;
-      setIncentiveEnabled(Boolean(data?.enabled));
-      setPayPeriodType((data?.pay_period_type as PayPeriodType) ?? "biweekly");
-      setPayPeriodAnchorDate((data?.pay_period_anchor_date as string | null) ?? new Date().toISOString().slice(0, 10));
-    })();
-    return () => { cancelled = true; };
-  }, [shell.companyId]);
-
   // ── Payload utilization (Phase 2 driver display) ──────────────────────────
   // The period this driver's running average covers. Reuses the company's own
   // configured report period when there IS one, and falls back to a rolling
@@ -1354,37 +1328,6 @@ export default function CalculatorPage() {
   const utilPeriod = useUtilizationPeriod(shell.companyId ?? null);
 
   const driverUtilization = useDriverPeriodUtilization(effectiveUserId || null, utilPeriod.since);
-
-  // Refetches whenever a load actually completes (loadWorkflow.loadReport
-  // changes) so the average reflects the just-finished load immediately,
-  // not just on next mount.
-  useEffect(() => {
-    if (!incentiveEnabled || !effectiveUserId || !shell.companyId || !payPeriodAnchorDate) { setAvgRecoveredPoints(null); return; }
-    let cancelled = false;
-    (async () => {
-      const periodStart = generatePayPeriods(payPeriodType, payPeriodAnchorDate, 1)[0]?.start;
-      if (!periodStart) { setAvgRecoveredPoints(null); return; }
-      const { data } = await supabase
-        .from("load_points")
-        .select("load_id, recovered_points")
-        .eq("driver_id", effectiveUserId)
-        .eq("company_id", shell.companyId)
-        .gte("created_at", `${periodStart}T00:00:00Z`);
-      if (cancelled) return;
-      if (!data || data.length === 0) { setAvgRecoveredPoints(null); return; }
-      // Sum per load first (a split load has one load_points row per
-      // compartment), then average across distinct loads -- mirrors
-      // PayrollReportModal.tsx's own totalPoints / loadIds.size pattern.
-      const byLoad = new Map<string, number>();
-      for (const row of data as any[]) {
-        byLoad.set(row.load_id, (byLoad.get(row.load_id) ?? 0) + Number(row.recovered_points ?? 0));
-      }
-      const totals = Array.from(byLoad.values());
-      const avg = totals.reduce((a, b) => a + b, 0) / totals.length;
-      setAvgRecoveredPoints(avg);
-    })();
-    return () => { cancelled = true; };
-  }, [incentiveEnabled, payPeriodType, payPeriodAnchorDate, effectiveUserId, shell.companyId, loadWorkflow.loadReport]);
 
   // "Back to Planner" -- per explicit follow-up, this must genuinely undo
   // everything: no load logged AND the terminal card reverted to whatever
@@ -2463,35 +2406,12 @@ const lastProductInfoById = useMemo(() => {
           </div>
         );
 
-        // Incentive running-average card -- see the effects that compute
-        // incentiveEnabled/payPeriodType/avgRecoveredPoints above. Only
-        // rendered once the company has actually turned the incentive
-        // system on.
-        const pointsCard = incentiveEnabled ? (
-          <div style={{ borderRadius: 16, background: "transparent", padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center", flex: 1, minWidth: 0 }}>
-            <div>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.4)", textTransform: "uppercase" as const, letterSpacing: 0.4 }}>This Load</div>
-              <div style={{ fontSize: 20, fontWeight: 700, color: "#4ade80" }}>
-                {loadReport?.recovered_points != null ? loadReport.recovered_points.toFixed(1) : "—"} pts
-              </div>
-            </div>
-            <div style={{ textAlign: "right" as const }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.4)", textTransform: "uppercase" as const, letterSpacing: 0.4 }}>
-                {PERIOD_TYPE_LABELS[payPeriodType]} Avg
-              </div>
-              <div style={{ fontSize: 20, fontWeight: 700, color: "#fff" }}>
-                {avgRecoveredPoints != null ? `${avgRecoveredPoints.toFixed(1)} pts` : "—"}
-              </div>
-            </div>
-          </div>
-        ) : null;
-
         // ── Payload utilization card (Phase 2) ──────────────────────────
-        // Takes the points card's slot rather than sitting beside it: the
-        // spec is explicit that an old incentive system must not run visibly
-        // alongside the new one. The legacy points code and data are still
-        // fully intact underneath (so a Phase 1/2 rollback is real), the
-        // driver just never sees two competing numbers for the same load.
+        // The driver's one performance card. It replaced the legacy
+        // "recovered points" card, which is now deleted outright along with
+        // the rest of the benchmark-driven incentive system -- the spec is
+        // explicit that two incentive systems must not run visibly at once,
+        // and there is no longer a second one to fall back to.
         //
         // Reads "PLANNED", never "LOADED" -- actual gallons are currently
         // copied from the plan, so the stronger word would be a claim the
@@ -2539,9 +2459,7 @@ const lastProductInfoById = useMemo(() => {
           </div>
         ) : null;
 
-        // Utilization replaces points wherever it has something real to show;
-        // points remains the fallback until the legacy teardown.
-        const perfCard = utilizationCard ?? pointsCard;
+        const perfCard = utilizationCard;
         const hasPerfCard = perfCard != null;
 
         const loadButtonEl = (

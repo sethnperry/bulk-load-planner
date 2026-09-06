@@ -407,22 +407,10 @@ try {
   console.warn("terminal_temp_bias update failed (non-fatal):", e);
 }
 
-// Incentive system ("Recovered Gallons") -- silent, non-fatal. No-ops
-// server-side if the company hasn't enabled it (calculate_load_points
-// returns { enabled: false }).
-let recoveredPoints: number | null = null;
-try {
-  const { data: pointsRes } = await supabase.rpc("calculate_load_points", { p_load_id: activeLoadId });
-  if (pointsRes?.enabled) recoveredPoints = Number(pointsRes.recovered_gallons ?? 0);
-} catch (e) {
-  console.warn("calculate_load_points failed (non-fatal):", e);
-}
-
-// Payload utilization (Phase 1) -- silent, non-fatal, same fire-and-forget
-// shape as the two calls above. Runs ALONGSIDE calculate_load_points rather
-// than replacing it: the legacy incentive system stays live until this
-// engine has been validated against real loads, so a rollback never leaves
-// the app with no incentive system at all.
+// Payload utilization -- silent, non-fatal, same fire-and-forget shape as
+// the temp-bias update above. This is now the only incentive calculation
+// the app runs: the legacy calculate_load_points call that used to sit
+// here was removed once this engine was validated against real loads.
 //
 // The client sends only the computed capacity. record_load_utilization
 // re-derives every INPUT server-side (tare, target, caps, densities,
@@ -567,7 +555,6 @@ try {
         planned_gross_lbs: plannedGross,
         actual_gross_lbs: actualGross,
         diff_lbs: diff,
-        recovered_points: recoveredPoints,
         completed_at: res?.completed_at ?? new Date().toISOString(),
         plan_slot: activeSlotLetter ?? null,
         // Same shape usePlanSlots reads back from load_utilization when a past

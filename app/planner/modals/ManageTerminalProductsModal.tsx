@@ -59,9 +59,12 @@ export default function ManageTerminalProductsModal({
   // "rack" (default): the original behavior -- tapping a product toggles
   // rack_product_status.active for `rackId`. "pick": a neutral catalog
   // browser -- tapping a product calls onPick(product) instead, and
-  // nothing gets written here. Added so IncentiveSettingsModal.tsx can
-  // reuse this same search+category-grouped browser for benchmark product
-  // entry instead of its own plain-input search, per explicit request.
+  // nothing gets written here. Added for IncentiveSettingsModal's benchmark
+  // product entry, which was deleted in the 2026-09-06 legacy-incentive
+  // teardown -- so "pick" mode currently has NO consumer. Left in place
+  // deliberately rather than unpicked from eight render branches of a file
+  // on the live load path; it is unreachable, not broken. Remove it in a
+  // pass that can click-test the compartment product picker afterward.
   mode?: "rack" | "pick";
   rackId?: string; // required in "rack" mode only
   rackName?: string;

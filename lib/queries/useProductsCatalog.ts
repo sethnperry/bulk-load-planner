@@ -4,8 +4,9 @@
 // Shared, cached fetch for the `products` table. Before this hook
 // existed, 7 independent files each issued their own
 // supabase.from("products") query with a slightly different column set
-// -- app/admin/page.tsx, IncentiveSettingsModal.tsx,
-// PayrollReportModal.tsx, ManageTerminalProductsModal.tsx,
+// -- app/admin/page.tsx, IncentiveSettingsModal.tsx (since deleted),
+// PayrollReportModal.tsx (no longer a consumer -- rebuilt on
+// load_utilization), ManageTerminalProductsModal.tsx,
 // EditTerminalModal.tsx (Terminal tab), terminal/page.tsx, and
 // useTerminalOutageReports.ts (which refetched on every 90s poll tick).
 // See CLAUDE.md's "Performance pass #3" for the full audit.

@@ -88,7 +88,7 @@ export function usePlanSlots({
   const presetsReadyForComboRef = useRef<string | null>(null);
   const [lastLoadLines, setLastLoadLines] = useState<any[]>([]);
   const [lastLoadReport, setLastLoadReport] = useState<{
-    planned_total_gal: number; planned_gross_lbs: number | null; actual_gross_lbs: number | null; diff_lbs: number | null; recovered_points: number | null;
+    planned_total_gal: number; planned_gross_lbs: number | null; actual_gross_lbs: number | null; diff_lbs: number | null;
     completed_at: string | null; plan_slot: number | null;
   } | null>(null);
 
@@ -452,22 +452,6 @@ export function usePlanSlots({
       }
     }
 
-    // Incentive points for this specific load -- calculate_load_points
-    // only ever runs live, right after a real complete_load succeeds
-    // (useLoadWorkflow.ts), so there's no column on load_log itself to
-    // read this back from; it has to be summed from load_points (one row
-    // per compartment/product on a split load, same "sum per load" pattern
-    // PayrollReportModal.tsx and the Planner's own running-average card
-    // already use). Zero ROWS (never calculated -- company didn't have
-    // incentives on, or no benchmark matched) is null, not 0 -- a real
-    // "earned zero points" load still has real rows, just summing to 0.
-    const { data: pointsRows } = await supabase
-      .from("load_points")
-      .select("recovered_points")
-      .eq("load_id", resolvedRow.load_id);
-    const recoveredPoints = pointsRows && pointsRows.length > 0
-      ? pointsRows.reduce((sum: number, r: any) => sum + Number(r.recovered_points ?? 0), 0)
-      : null;
 
     // Payload utilization for this same load. Unlike points, this DOES have
     // its own row to read back (one per load), so it's a plain lookup rather
@@ -495,7 +479,6 @@ export function usePlanSlots({
       planned_gross_lbs: plannedGross,
       actual_gross_lbs: plannedGross + diff,
       diff_lbs: diff,
-      recovered_points: recoveredPoints,
       completed_at: (resolvedRow as any).completed_at ?? null,
       plan_slot: (resolvedRow as any).plan_slot ?? null,
       utilization,
@@ -758,7 +741,7 @@ export function usePlanSlots({
       const llKey = `proTankr:${authUserId ? "u:" + authUserId : "anon"}:combo:${selectedComboId}:lastLoadLines`;
       safeWrite(llKey, { lastLoadLines: dbPayload.lastLoadLines, lastLoadId: dbPayload.lastLoadId });
       setLastLoadLines(dbPayload.lastLoadLines ?? []);
-      setLastLoadReport(dbPayload.loadReport ? { ...dbPayload.loadReport, recovered_points: dbPayload.loadReport.recovered_points ?? null } : null);
+      setLastLoadReport(dbPayload.loadReport ?? null);
 
       // Only restore the plan (compPlan/temp/CG) if slot 0 is empty — i.e. fresh page load
       // with no autosaved state. If slot 0 has data the driver is mid-plan; don't clobber it.
@@ -995,7 +978,7 @@ export function usePlanSlots({
       setLastLoadLines(dbPayload.lastLoadLines ?? []);
     }
     applySnapshot(dbPayload, { restoreCg: true });
-    const report = dbPayload.loadReport ? { ...dbPayload.loadReport, recovered_points: dbPayload.loadReport.recovered_points ?? null } : null;
+    const report = dbPayload.loadReport ?? null;
     setLastLoadReport(report);
     refreshSlotHas();
     // Returned (not just set on internal lastLoadReport state) because

@@ -21,7 +21,6 @@ import type { Member } from "@/lib/ui/driver/types";
 import type { Role } from "@/lib/ui/driver/role";
 import AdminLoadsModal from "./AdminLoadsModal";
 import FleetCardsModal from "./FleetCardsModal";
-import IncentiveSettingsModal from "./IncentiveSettingsModal";
 import PayrollReportModal from "./PayrollReportModal";
 import FleetUtilizationModal from "./FleetUtilizationModal";
 import { useCompanySubscription, computeSeatCapacity, wouldExceedCapacity, type SeatCapacity } from "@/lib/billing/useCompanySubscription";
@@ -1157,7 +1156,6 @@ export default function AdminPage() {
   const [profileModal, setProfileModal] = useState<{ member: Member; onSaved: (u: Partial<Member>) => void } | null>(null);
   const [loadsModal, setLoadsModal] = useState<{ userId: string; displayName: string } | null>(null);
   const [fleetCardsOpen, setFleetCardsOpen] = useState(false);
-  const [incentiveSettingsOpen, setIncentiveSettingsOpen] = useState(false);
   const [payrollReportOpen, setPayrollReportOpen] = useState(false);
   const [fleetUtilOpen, setFleetUtilOpen] = useState(false);
   const [truckModal,   setTruckModal]   = useState<Truck | null | "new">(null);
@@ -1448,11 +1446,6 @@ export default function AdminPage() {
         {(myRole === "admin" || myRole === "dispatch") && (
           <button type="button" className="admin-header-tile" onClick={() => setFleetCardsOpen(true)}>
             Fleet Cards
-          </button>
-        )}
-        {myRole === "admin" && (
-          <button type="button" className="admin-header-tile" onClick={() => setIncentiveSettingsOpen(true)}>
-            Incentives
           </button>
         )}
         {myRole === "admin" && (
@@ -1819,7 +1812,6 @@ export default function AdminPage() {
         />
       )}
       <FleetCardsModal open={fleetCardsOpen} onClose={() => setFleetCardsOpen(false)} companyId={companyId!} />
-      <IncentiveSettingsModal open={incentiveSettingsOpen} onClose={() => setIncentiveSettingsOpen(false)} companyId={companyId!} />
       <PayrollReportModal open={payrollReportOpen} onClose={() => setPayrollReportOpen(false)} companyId={companyId!} />
       <FleetUtilizationModal open={fleetUtilOpen} onClose={() => setFleetUtilOpen(false)} companyId={companyId!} />
     </div>
