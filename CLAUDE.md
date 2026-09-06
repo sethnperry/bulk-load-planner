@@ -9399,10 +9399,30 @@ is populated (98.53), and `loaded_at` is `coalesce(loaded_at, completed_at,
 now())` so it can never be null. Whatever `min` aggregated, it was not a null
 in this table. Left as a question about that query, not a tracked bug.
 
-**Still unseen: the Phase 2 UI in a browser.** The data is right; the Planner
-utilization card and the Reports "Plan Utilization" tile have still never been
-looked at on a real device with a real row behind them. That is the next
-check, and it is the last thing gating Phase 3.
+**Phase 2 UI seen on a real device 2026-09-06 — Phase 3's last gate is closed.**
+The Planner card and the Reports "Plan Utilization" tile have both now been
+looked at on production with real rows behind them. The card renders in the
+legacy points card's slot (it replaces it, per the spec's "two incentive
+systems must not run visibly at once"), reading **THIS LOAD 100.2% / MONTHLY
+AVG 99.4%**, with the sub-line "8,462 of 8,447 gal available planned" — both
+halves populated, not an em-dash fallback. That 100.2% is the spec's "above
+target but under legal is legitimate and is **not** clamped" decision behaving
+correctly on real data: the recap on the same screen reads 79,500 lbs against
+a 79,500 target (diff +0), safely under the 80,000 legal ceiling, while the
+plan carried 15 gal more than the solver's target-weight capacity figure. The
+Reports tile reads the identical data through the same
+`useDriverPeriodUtilization` hook, so the two surfaces cannot disagree.
+
+**Why it was hard to find, and who can actually see it — a real product gap,
+not a bug.** The card lives only on the driver-style Planner (`/planner`), and
+`navDestinations.ts` gates that to `isSuperAdmin || role === "driver" || role
+=== "lead"`, with `defaultLandingPath` hard-redirecting `admin`/`dispatch` to
+`/planner/dispatch`. It was reachable here only because this account is a
+**super admin** (`defaultLandingPath` short-circuits to `null` for them, by the
+same standing "one account can verify every role's view" precedent). An
+ordinary fleet admin — the actual customer case — cannot reach the page at all
+and so cannot see what their drivers see. Fine today with one admin; not fine
+at launch. Belongs with Phase 3's fleet dashboard, not a patch here.
 
 **Not started:** Phase 3 (fleet dashboard replacing the benchmark-based
 Underloading Dashboard), Phase 4 (incentive/payroll layer), and the legacy
