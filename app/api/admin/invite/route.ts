@@ -123,11 +123,20 @@ export async function POST(req: NextRequest) {
       }
       confirmUrl = `${redirectTo}?token_hash=${encodeURIComponent(linkData.properties.hashed_token)}&type=magiclink`;
 
-      // Ensure they're in the company (re-invite may change role)
-      await admin.from("user_companies").upsert(
-        { user_id: existing.id, company_id: companyId, role },
-        { onConflict: "user_id,company_id" }
-      );
+      // Ensure they're in the company -- but do NOT silently overwrite the
+      // role of someone who is ALREADY a member. An invite is an "add someone"
+      // action; re-sending it (a common thing to do when the first email is
+      // lost) must not quietly demote a lead/dispatch/admin back to the
+      // default "driver". Role changes for existing members go through the
+      // admin roster dropdown, not the invite endpoint.
+      const { data: existingMembership } = await admin
+        .from("user_companies").select("role")
+        .eq("user_id", existing.id).eq("company_id", companyId).maybeSingle();
+      if (!existingMembership) {
+        await admin.from("user_companies").insert(
+          { user_id: existing.id, company_id: companyId, role }
+        );
+      }
 
       // Set active_company_id so the app knows which company to load
       await admin.from("user_settings").upsert(
