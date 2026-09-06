@@ -22,12 +22,19 @@ function isOutlookWebview(): boolean {
   );
 }
 
+// Every type any Supabase email template can send here. Drives both the
+// verifyOtp call and the dead-end copy on the error screen -- an expired
+// magic link must not tell a solo driver to "ask your administrator."
+type LinkKind =
+  | "invite" | "magiclink" | "recovery" | "signup" | "email" | "email_change";
+
 // ── Inner component ───────────────────────────────────────────────────────────
 function ConfirmInner() {
   const router = useRouter();
   const params = useSearchParams();
   const [status, setStatus] = useState<"loading" | "error" | "webview">("loading");
   const [errMsg, setErrMsg] = useState("");
+  const [linkKind, setLinkKind] = useState<LinkKind>("invite");
 
   useEffect(() => {
     if (isOutlookWebview()) {
@@ -37,13 +44,12 @@ function ConfirmInner() {
 
     async function exchange() {
       const tokenHash = params.get("token_hash");
-      // Every type any Supabase email template can send. "email_change" is
-      // the one the Change Email Address template actually uses -- it was
-      // missing here, so that link would have verified against the wrong
-      // type. Kept alongside "email" rather than replacing it: both are
-      // valid EmailOtpType values in the installed SDK.
-      const type = (params.get("type") ?? "invite") as
-        | "invite" | "magiclink" | "recovery" | "signup" | "email" | "email_change";
+      // "email_change" is what the Change Email Address template actually
+      // sends -- it was missing here, so that link verified against the
+      // wrong type. Kept alongside "email" rather than replacing it: both
+      // are valid EmailOtpType values in the installed SDK.
+      const type = (params.get("type") ?? "invite") as LinkKind;
+      setLinkKind(type);
 
       if (!tokenHash) {
         const { data: { session } } = await supabase.auth.getSession();
@@ -82,7 +88,7 @@ function ConfirmInner() {
 
   if (status === "loading") return <LoadingScreen />;
   if (status === "webview") return <WebviewScreen />;
-  return <ErrorScreen msg={errMsg} />;
+  return <ErrorScreen msg={errMsg} kind={linkKind} />;
 }
 
 // ── Page export ───────────────────────────────────────────────────────────────
@@ -237,7 +243,11 @@ function WebviewScreen() {
 }
 
 // ── Error screen ──────────────────────────────────────────────────────────────
-function ErrorScreen({ msg }: { msg: string }) {
+function ErrorScreen({ msg, kind }: { msg: string; kind: LinkKind }) {
+  // A sign-in link that expires needs a way to get a new one, not an
+  // instruction to contact an administrator the user may not have.
+  const isSignIn =
+    kind === "magiclink" || kind === "signup" || kind === "email" || kind === "recovery";
   return (
     <Screen>
       <Logo size={48} />
@@ -256,9 +266,31 @@ function ErrorScreen({ msg }: { msg: string }) {
         <div style={{ fontSize: 13, color: "rgba(255,255,255,0.45)", lineHeight: 1.6, marginBottom: 16 }}>
           {msg}
         </div>
-        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.28)", lineHeight: 1.6 }}>
-          Ask your administrator to send a new invite.
-        </div>
+        {isSignIn ? (
+          <a
+            href="/login"
+            style={{
+              display: "inline-block",
+              fontSize: 13,
+              fontWeight: 600,
+              color: "rgba(255,255,255,0.85)",
+              textDecoration: "none",
+              border: "1px solid rgba(255,255,255,0.16)",
+              borderRadius: 10,
+              padding: "10px 18px",
+            }}
+          >
+            Request a new link
+          </a>
+        ) : kind === "email_change" ? (
+          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.28)", lineHeight: 1.6 }}>
+            Start the email change again from Settings.
+          </div>
+        ) : (
+          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.28)", lineHeight: 1.6 }}>
+            Ask your administrator to send a new invite.
+          </div>
+        )}
       </div>
     </Screen>
   );
