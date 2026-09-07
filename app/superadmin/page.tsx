@@ -15,6 +15,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import NavMenu from "@/lib/ui/NavMenu";
 import { supabase } from "@/lib/supabase/client";
+import { DEFAULT_STALE_API_DAYS } from "@/lib/config/plannerSafety";
 
 type CompanyRow = {
   company_id: string;
@@ -243,6 +244,42 @@ export default function SuperAdminPage() {
           ))}
         </div>
       )}
+
+      {/* ── Planner safety (placeholder) ──────────────────────────────────
+          Not yet editable -- a reminder/anchor so the stale-API threshold
+          has a home when the dashboard-polish pass happens. The value is
+          read from lib/config/plannerSafety.ts (DEFAULT_STALE_API_DAYS),
+          the single source of truth the Planner already reads; wiring this
+          control to a DB-backed, operator-editable value is the follow-up.
+          See CLAUDE.md / the stale-API overlay work. */}
+      <div style={{ marginTop: 28 }}>
+        <div style={{ fontSize: 16, fontWeight: 900, marginBottom: 4 }}>Planner Safety</div>
+        <div style={{ fontSize: 13, color: "rgba(255,255,255,0.45)", marginBottom: 12 }}>
+          Operator-tunable safety knobs. Not editable yet -- placeholder for the dashboard pass.
+        </div>
+        <div
+          style={{
+            display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16,
+            padding: "14px 16px", borderRadius: 14,
+            border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.04)",
+            opacity: 0.75,
+          }}
+        >
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 800 }}>Stale-API threshold</div>
+            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginTop: 2 }}>
+              How old a terminal's API reading may be before LOAD shows the Safest / Safe / Ignore prompt.
+            </div>
+          </div>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 6, whiteSpace: "nowrap" }}>
+            <span style={{ fontSize: 22, fontWeight: 900 }}>{DEFAULT_STALE_API_DAYS}</span>
+            <span style={{ fontSize: 12, color: "rgba(255,255,255,0.45)" }}>days</span>
+          </div>
+        </div>
+        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", marginTop: 8 }}>
+          Change the default in <code>lib/config/plannerSafety.ts</code> until this becomes editable here.
+        </div>
+      </div>
     </div>
   );
 }

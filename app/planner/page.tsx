@@ -79,6 +79,7 @@ import { addDaysISO_, daysUntilISO_, formatMDYWithCountdown_, formatMDYWithTime_
 import { normState } from "./utils/normalize";
 import { cgSliderToBias, bestLbsPerGallon, lbsPerGallonAtTemp, planForGallons, CG_NEUTRAL, computeActualLbsForLine } from "./utils/planMath";
 import { productColorFor } from "./utils/productColor";
+import { DEFAULT_STALE_API_DAYS } from "@/lib/config/plannerSafety";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 import type { ActiveComp, CompPlanInput, CompRow, ProductRow } from "./types";
@@ -921,9 +922,17 @@ export default function CalculatorPage() {
     // product's entry current -- but keeps this callable safely regardless).
     const t = productTempF[productId] ?? tempF;
     // Use driver-observed API (last_api @ last_temp_f) when available — more accurate
-    // than the static api_60 reference. bestLbsPerGallon back-corrects to 60°F first.
+    // than any static reference. bestLbsPerGallon back-corrects to 60°F first.
+    //
+    // When there's NO observed reading at this terminal yet (a product never
+    // loaded here), fall back to the product's published MINIMUM API (api_min,
+    // = heaviest) rather than the mid-range api_60 -- per explicit direction,
+    // an unproven product should be assumed at its heaviest until a real load
+    // corrects it, so the driver never plans over weight on a guess. Falls
+    // back to api_60 only if api_min was never seeded.
+    const referenceApi60 = p.api_min != null && Number.isFinite(Number(p.api_min)) ? Number(p.api_min) : Number(p.api_60);
     return bestLbsPerGallon(
-      Number(p.api_60),
+      referenceApi60,
       Number(p.alpha_per_f),
       t,
       p.last_api     != null ? Number(p.last_api)     : null,
@@ -1835,7 +1844,9 @@ const lastProductInfoById = useMemo(() => {
   // (Placed here, after lastProductInfoById + productHexCodeById, which they
   // read; requestBegin + the begin/clear effects live up near the other load
   // handlers since they don't depend on these.)
-  const STALE_API_DAYS = 7;
+  // Sourced from lib/config/plannerSafety.ts so it can move to a super-admin
+  // dashboard control later without hunting for a hardcoded 7 (see #2).
+  const STALE_API_DAYS = DEFAULT_STALE_API_DAYS;
   const computeStalePlannedProducts = useCallback((): StaleProduct[] => {
     const out: StaleProduct[] = [];
     for (const pid of plannedProductIds) {
@@ -1844,7 +1855,10 @@ const lastProductInfoById = useMemo(() => {
       const ts = info?.last_api_updated_at;
       let stale = false;
       if (lastApi == null || !Number.isFinite(Number(lastApi))) {
-        stale = true; // no reading at all
+        // Never loaded here -> NOT prompted. lbsPerGalForProductId already
+        // defaults an unproven product to its published heaviest (api_min),
+        // so there's nothing to decide -- the safe assumption is automatic.
+        stale = false;
       } else if (!ts) {
         stale = false; // have a value but no timestamp -- can't call it stale
       } else {
@@ -1900,6 +1914,22 @@ const lastProductInfoById = useMemo(() => {
     setStaleApiPrompt(null);
     requestBegin({}); // proceed on the last-known reading
   }, [requestBegin]);
+
+  // ProductTempModal's "Confirm & Continue" for the LOAD flow (step 2, after
+  // the driver confirms/adjusts temp). Closes the temp modal, then runs the
+  // stale-API check: if anything's stale, open the Good/Better/Best overlay;
+  // otherwise begin directly. requestBegin's effect captures
+  // preLoadCardedOnRef and starts begin_load. (The temp modal's own header
+  // Close is the bail-out -- nothing has begun yet, nothing to undo.)
+  const handleConfirmTempAndBeginLoad = useCallback(() => {
+    setTempDialOpen(false);
+    const stale = computeStalePlannedProducts();
+    if (stale.length > 0) {
+      setStaleApiPrompt({ products: stale });
+    } else {
+      requestBegin({});
+    }
+  }, [computeStalePlannedProducts, requestBegin]);
 
   // Per-product rows for the Temp modal's product list (dot + name + own
   // temp, tap to adjust just that one) -- same shape as LoadingModal's own
@@ -2383,9 +2413,9 @@ const lastProductInfoById = useMemo(() => {
         // pin (not the stroke outline used elsewhere). Temperature used to
         // be a fourth icon here (a live °F reading, color carrying
         // confidence) -- removed per explicit direction to reduce the
-        // header's icon count; temp is now entered per product at Log the
-        // Load, not confirmed up front, so there's no standalone temp
-        // control here anymore.
+        // header's icon count. Temp is confirmed/adjusted on the LOAD tap
+        // (ProductTempModal, step 1) and again per product at Log the Load,
+        // so there's no standalone always-on temp control in the header.
         const headerIconsEl = (
           <>
             {(() => {
@@ -2562,18 +2592,14 @@ const lastProductInfoById = useMemo(() => {
                 setLoadBlockedMsg(`Cannot Load, all planned products are not available at ${terminalLabel || "this terminal"}`);
                 return;
               }
-              // Stale-API safety check is now step one of tapping LOAD (the
-              // pre-load temp-confirm modal is gone -- temp is entered per
-              // product at Log the Load). If any planned product's reading is
-              // stale/missing, offer Good/Better/Best; otherwise begin
-              // directly. requestBegin captures preLoadCardedOnRef and starts
-              // begin_load via the deferred effect.
-              const stale = computeStalePlannedProducts();
-              if (stale.length > 0) {
-                setStaleApiPrompt({ products: stale });
-              } else {
-                requestBegin({});
-              }
+              // Step 1 of LOAD: confirm/adjust the planned temp. This is a
+              // must-have -- the prediction can be low-confidence, or the
+              // driver may know the exact product temp -- so temp is
+              // confirmed up front here (in addition to being editable per
+              // product at Log the Load). handleConfirmTempAndBeginLoad
+              // (the modal's Confirm & Continue) then runs the stale-API
+              // check and begins.
+              setTempDialOpen(true);
             }}
             disabled={loadDisabled}
             style={{
@@ -2751,14 +2777,13 @@ const lastProductInfoById = useMemo(() => {
       <ProductTempModal
         open={tempDialOpen}
         onClose={() => { setTempDialOpen(false); setTempReconfirmProductIds(null); }}
-        // This modal is now only opened by the mid-load terminal-switch's
+        // Two callers share this instance: the LOAD flow's pre-load temp
+        // confirm (tempReconfirmProductIds null -> confirm temp, then
+        // stale-API check, then begin) and the mid-load terminal-switch
         // different-city reconfirm (tempReconfirmProductIds set -> propagate
-        // the confirmed temp into the already-in-progress plan and return to
-        // Plan Review). The pre-load temp-confirm step was removed -- temp is
-        // entered per product at Log the Load. The ?? onClose guard keeps the
-        // Confirm button harmless if this ever renders without a reconfirm
-        // target.
-        onConfirm={tempReconfirmProductIds != null ? handleConfirmTempReconfirm : (() => setTempDialOpen(false))}
+        // the confirmed temp into the in-progress plan and return to Plan
+        // Review).
+        onConfirm={tempReconfirmProductIds != null ? handleConfirmTempReconfirm : handleConfirmTempAndBeginLoad}
         styles={styles}
         selectedCity={location.selectedCity}
         selectedState={location.selectedState}
