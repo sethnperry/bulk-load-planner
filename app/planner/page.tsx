@@ -742,9 +742,25 @@ export default function CalculatorPage() {
 
   // Ref holds the hydrated plan so compartments init doesn't overwrite it
   const hydratedCompPlanRef = useRef<Record<number, CompPlanInput> | null>(null);
+  // Which combo this effect last (re)hydrated compPlan for. compPlanKey embeds
+  // the TERMINAL, so it also changes on a plain terminal switch -- but the live
+  // plan is combo-scoped (see usePlanSlots' planScopeKey and the 2026-08-27
+  // "one setup persists across all terminals" decision), so a terminal-only
+  // change must NOT touch compPlan. This ref lets the effect tell a real combo
+  // change apart from a terminal switch and skip the latter -- previously it
+  // wiped the plan to {} on every terminal switch (the new terminal has no
+  // saved compPlanKey), which is exactly what emptied a plan when switching
+  // terminals from inside Plan Review.
+  const compPlanHydratedComboRef = useRef<string | null>(null);
 
-  // Hydrate compPlan when combo+terminal key changes
+  // Hydrate compPlan on a real combo change (or fresh mount); leave it alone
+  // on a terminal-only change.
   useEffect(() => {
+    const cid = equipment.selectedComboId ? String(equipment.selectedComboId) : "";
+    const sameCombo = cid !== "" && compPlanHydratedComboRef.current === cid;
+    compPlanHydratedComboRef.current = cid;
+    if (sameCombo) return; // terminal switch (or other non-combo key change) -- keep the live plan
+
     if (!compPlanKey) {
       hydratedCompPlanRef.current = null;
       setCompPlanRaw({});
@@ -763,7 +779,7 @@ export default function CalculatorPage() {
     } catch {}
     hydratedCompPlanRef.current = null;
     setCompPlanRaw({});
-  }, [compPlanKey]);
+  }, [compPlanKey, equipment.selectedComboId]);
   const [productInputs, setProductInputs] = useState<Record<string, { api?: string; tempF?: number }>>({});
   // Named (not inline) so the mid-load terminal-switch handlers further
   // down can call these imperatively too, not just pass them as JSX props
