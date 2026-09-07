@@ -39,13 +39,22 @@ the submission. `complete_load` keeping the modal open mitigates (retry in
 place), but there's no background queue/resend. A real offline-queue is a
 feature, not a quick fix — flagged for its own scoped work, not this pass.
 
-### P3-3 [LOW] Reload mid-load loses the in-progress modal
-`activeLoadId` is React state, not persisted, so a page reload between LOAD
-and Complete drops the Loading modal. The plan itself is autosaved (slot 0)
-and restored, and re-tapping LOAD pre-deletes the orphaned planned row and
-re-begins — so no data loss, but the in-progress state isn't resumed. Could
-persist `activeLoadId` (sessionStorage) and re-open the modal on reload if
-field feedback shows this matters.
+### P3-3 [PARTLY FIXED] Reload mid-load
+CORRECTION: an earlier version of this note claimed "the plan itself is
+autosaved (slot 0) and restored" on reload — that was WRONG. usePlanSlots
+*deliberately* discards an unfinalized in-progress plan on a fresh mount (so
+only a completed load's residue pre-fills), so a device reopen mid-load
+landed on empty compartments (device-checklist bug 4c).
+
+Now fixed (2026-09-07): a user-scoped `activePlannedLoad` localStorage marker
+(written at begin_load, cleared at complete/cancel) makes usePlanSlots skip
+its fresh-mount discard AND makes useLocation restore that load's terminal
+instead of snapping to the last completed load — so a close-and-reopen
+mid-load brings the plan + terminal back. Still not resumed: `activeLoadId`
+is React state, so the Loading *modal* itself doesn't re-open; the driver
+re-taps LOAD, which pre-deletes the orphaned planned row and re-begins from
+the restored plan. Re-opening the modal on reload (persist `activeLoadId`)
+remains an optional further step, not done.
 
 ### P3-4 [LOW] Accessibility coverage is thin
 ~12 `aria-label` + ~11 `role=` across the whole app. Header icon buttons are
