@@ -131,3 +131,55 @@ open to every authenticated user — the worst case), any unexpected
 the functions already audited/hardened this session (only the un-reviewed ones
 need their bodies pulled). From Query 2 I read every policy's `qual`/
 `with_check` to confirm each RLS table is scoped and to resolve F-D.
+
+---
+
+## Structural findings (from live pg_policies + Query 1)
+
+- **RLS enabled on every base table** (`rls_disabled_base_tables: []`) — no
+  wide-open tables. `rls_enabled_but_no_policy` = vault_reset_tokens,
+  ambient_temp_history, fuel_temp_cache, seed_products — all correctly
+  deny-all-to-clients (service-role/definer only). No anon-role policies.
+- **Views respect RLS** — `my_terminals_with_status/_access`,
+  `v_terminal_product_catalog/_admin` return 0 to anon and only the caller's
+  company data to Alpha (security_invoker). No view bypass.
+
+### F-E [MEDIUM] decouple_events readable across all companies — FIX WRITTEN
+`SELECT qual = true` (role authenticated) → any authenticated user read every
+company's decouple history incl. equipment GPS/location/notes. Proven live
+(Alpha and Beta saw identical rows). App never reads the table; INSERT is
+self-scoped. Fixed: `20260907110000_decouple_events_scope_read.sql`
+(actor-or-equipment-company-staff).
+
+### F-D [LOW-MED] profiles co-worker read exposed HR PII to any member — FIX WRITTEN
+"Company members can read co-worker profiles" allowed any member (incl. plain
+driver) to read a co-worker's full row (employee_number, hire_date, division).
+Every direct profiles read in the app is self or an admin/dispatch tool, so
+narrowing to staff is safe. Fixed:
+`20260907120000_profiles_coworker_read_staff_only.sql`.
+
+### load_edit_history [LOW] policy checked the wrong user's role — FIX WRITTEN
+Granted read based on the LOAD OWNER's role, not the caller's (intra-company
+only). Fixed: `20260907130000_load_edit_history_caller_role_fix.sql`.
+
+### F-C [LOW] duplicate user_companies rows — FIX WRITTEN
+No unique(user_id,company_id); both demo users had 2 identical rows. Dedupe +
+constraint: `20260907140000_user_companies_unique_membership.sql`.
+
+### Accepted-risk (known, per CLAUDE.md): rack_arms/rack_lanes `allow_all_authenticated`
+`[ALL] qual=true` — any authenticated user can write shared terminal rack
+config (UI-gated only, not RLS-gated). Documented accepted risk; reflagged.
+
+## STILL OPEN — needs the mutating SECURITY DEFINER bodies (privilege-escalation check)
+These are directly callable by any authenticated user; names alone don't prove
+they check the caller. Bodies requested (query below). Highest risk:
+`admin_set_user_company`, `invite_user_to_company` (set membership/role);
+`get_carded(…, p_user_id)`, `admin_get_carded`, `admin_remove_member`,
+`admin_remove_terminal_access`, `upsert_driver_profile` (cross-user writes);
+`demo_commandeer` (demo backdoor scope).
+
+## Findings NOT auto-fixed (need product decision)
+- **F-A [MED]** load_log/load_lines no company_id — multi-company driver load
+  exposure. Schema + begin_load + policy rework; deferred.
+- **F-B [HIGH for launch]** /api/demo/start public admin login — gate before
+  real data. Owner's call on demo mechanics.
