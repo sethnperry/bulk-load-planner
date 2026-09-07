@@ -509,7 +509,20 @@ try {
       siblingsByRoot.set(root, list);
     }
 
+    // Fold each observed API into the rack's running lowest-ever ("min
+    // observed") -- the basis for the Loading modal's "Safe (this terminal's
+    // heaviest)" stale-API choice. Client-side LEAST against the value from
+    // the last fetch: a two-load race could miss one update, acceptable for
+    // this app's one-operator reality and consistent with the non-fatal
+    // write-through pattern here. Only folds a genuinely finite reading.
+    const minObservedFor = (productId: string, api: number): number | null => {
+      if (!Number.isFinite(api)) return null;
+      const existing = terminalProducts.find((p) => p.product_id === productId)?.min_api_observed;
+      return existing != null && Number.isFinite(Number(existing)) ? Math.min(Number(existing), api) : api;
+    };
+
     for (const u of product_updates) {
+      const newMin = minObservedFor(u.product_id, u.api);
       // Update-then-insert-if-missing instead of a blind upsert: the
       // Terminal tab's rack Product List filters rack_product_status on
       // active = true (page.tsx / EditTerminalModal.tsx), an admin/lead-
@@ -522,7 +535,7 @@ try {
       // never touched either way.
       const { data: rpsUpdated, error: rpsUpdateErr } = await supabase
         .from("rack_product_status")
-        .update({ last_api: u.api, last_temp_f: u.temp_f, updated_at: now, updated_by: authUserId || null })
+        .update({ last_api: u.api, last_temp_f: u.temp_f, updated_at: now, updated_by: authUserId || null, ...(newMin != null ? { min_api_observed: newMin } : {}) })
         .eq("rack_id", effectiveRackId)
         .eq("product_id", u.product_id)
         .select("rack_id");
@@ -538,6 +551,7 @@ try {
           updated_at: now,
           updated_by: authUserId || null,
           active: false,
+          ...(newMin != null ? { min_api_observed: newMin } : {}),
         });
         if (rpsInsertErr) console.warn("rack_product_status insert failed (non-fatal):", rpsInsertErr);
       }
@@ -545,9 +559,10 @@ try {
       const root = canonicalRootByProductId.get(u.product_id) ?? u.product_id;
       const siblingIds = (siblingsByRoot.get(root) ?? []).filter((pid) => pid !== u.product_id);
       for (const siblingId of siblingIds) {
+        const sibMin = minObservedFor(siblingId, u.api);
         const { error: siblingErr } = await supabase
           .from("rack_product_status")
-          .update({ last_api: u.api, last_temp_f: u.temp_f, updated_at: now, updated_by: authUserId || null })
+          .update({ last_api: u.api, last_temp_f: u.temp_f, updated_at: now, updated_by: authUserId || null, ...(sibMin != null ? { min_api_observed: sibMin } : {}) })
           .eq("rack_id", effectiveRackId)
           .eq("product_id", siblingId);
         if (siblingErr) console.warn("rack_product_status sibling propagation failed (non-fatal):", siblingErr);

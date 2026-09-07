@@ -89,6 +89,14 @@ export type ProductRow = {
   hex_code?: string | null;
   api_60: number | null;
   alpha_per_f: number | null;
+  // Published API range (products.api_min / api_max) -- "Safest" stale-API
+  // choice assumes api_min (lowest = densest = heaviest). Nullable until the
+  // published min/max is seeded (see migration 20260907070000).
+  api_min?: number | null;
+  api_max?: number | null;
+  // Lowest API ever observed on this rack (rack_product_status.min_api_observed)
+  // -- "Safe" stale-API choice assumes this terminal's own heaviest reading.
+  min_api_observed?: number | null;
   last_api?: number | null;
   last_api_updated_at?: string | null;
   last_temp_f?: number | null;   // observed temp when last_api was recorded

@@ -486,8 +486,8 @@ export default function CalculatorPage() {
     if (!location.selectedTerminalId || !location.selectedRackId) { setTerminalProducts([]); return; }
     const { data, error } = await supabase
       .from("rack_product_status")
-      .select(`active, last_api, last_temp_f, updated_at,
-        products (product_id, product_name, display_name, description, product_code, button_code, hex_code, api_60, alpha_per_f, un_number, is_dyed, canonical_product_id)`)
+      .select(`active, last_api, last_temp_f, updated_at, min_api_observed,
+        products (product_id, product_name, display_name, description, product_code, button_code, hex_code, api_60, alpha_per_f, api_min, api_max, un_number, is_dyed, canonical_product_id)`)
       .eq("rack_id", location.selectedRackId);
     if (error) { setTerminalProducts([]); return; }
     // Stats lookup by product_id across ALL rows on this rack (not just
@@ -495,7 +495,7 @@ export default function CalculatorPage() {
     // pools its tracking onto the canonical product's row, which needs to
     // be found here even if the canonical product itself isn't separately
     // offered/active on this rack's driver-facing list.
-    const statsByProductId: Record<string, { last_api: number | null; last_api_updated_at: string | null; last_temp_f: number | null; last_loaded_at: string | null }> = {};
+    const statsByProductId: Record<string, { last_api: number | null; last_api_updated_at: string | null; last_temp_f: number | null; last_loaded_at: string | null; min_api_observed: number | null }> = {};
     for (const row of (data ?? []) as any[]) {
       const pid = row.products?.product_id;
       if (!pid) continue;
@@ -504,6 +504,7 @@ export default function CalculatorPage() {
         last_api_updated_at: row.updated_at ?? null,
         last_temp_f: row.last_temp_f ?? null,
         last_loaded_at: row.updated_at ?? null,
+        min_api_observed: row.min_api_observed ?? null,
       };
     }
 
