@@ -20,6 +20,17 @@ import { createClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
 
+// F-B (audit pass 1): this endpoint mints a real admin session for a demo
+// account with no authentication of the caller. That's fine in dev/preview
+// (throwaway QA data) but must NOT be reachable on production -- anyone on the
+// internet could log in as the demo company admin. Refuse on production
+// (VERCEL_ENV === "production"); dev (VERCEL_ENV unset) and preview stay
+// functional. Escape hatch DEMO_START_ALLOW_PROD="true" if it's ever needed
+// live intentionally, so this is a policy toggle, not a redeploy.
+function demoStartBlockedInProd(): boolean {
+  return process.env.VERCEL_ENV === "production" && process.env.DEMO_START_ALLOW_PROD !== "true";
+}
+
 const PERSONA_EMAIL_ENV: Record<string, string | undefined> = {
   alpha: process.env.DEMO_ACCOUNT_EMAIL_ALPHA,
   beta: process.env.DEMO_ACCOUNT_EMAIL_BETA,
@@ -34,6 +45,10 @@ function getAdmin() {
 
 export async function GET(req: NextRequest) {
   const origin = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ?? new URL(req.url).origin;
+
+  if (demoStartBlockedInProd()) {
+    return NextResponse.json({ error: "Demo login is disabled in production." }, { status: 403 });
+  }
 
   try {
     const persona = (new URL(req.url).searchParams.get("persona") ?? "alpha").toLowerCase();

@@ -181,8 +181,11 @@ they check the caller. Bodies requested (query below). Highest risk:
 ## Findings NOT auto-fixed (need product decision)
 - **F-A [MED]** load_log/load_lines no company_id — multi-company driver load
   exposure. Schema + begin_load + policy rework; deferred.
-- **F-B [HIGH for launch]** /api/demo/start public admin login — gate before
-  real data. Owner's call on demo mechanics.
+- **F-B [HIGH for launch]** /api/demo/start public admin login — FIXED: now
+  refuses on production (VERCEL_ENV=production) unless DEMO_START_ALLOW_PROD=
+  "true"; dev/preview unchanged. (Note: this disables the live pen-test
+  recipe against prod going forward — flip the escape hatch for a testing
+  window if needed.)
 
 ---
 
