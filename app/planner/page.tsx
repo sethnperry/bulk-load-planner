@@ -754,18 +754,34 @@ export default function CalculatorPage() {
   const compPlanHydratedComboRef = useRef<string | null>(null);
 
   // Hydrate compPlan on a real combo change (or fresh mount); leave it alone
-  // on a terminal-only change.
+  // on a terminal-only change. The combo is only marked "hydrated" once we've
+  // actually read a real (non-null) compPlanKey -- crucial because on a fresh
+  // mount the combo usually resolves BEFORE the terminal, so compPlanKey goes
+  // null -> value; marking the combo hydrated on that first null run would
+  // make the terminal ARRIVING look like a terminal switch and skip loading
+  // the saved plan (empty compartments on reload -- the bug this guards
+  // against without over-firing).
   useEffect(() => {
     const cid = equipment.selectedComboId ? String(equipment.selectedComboId) : "";
-    const sameCombo = cid !== "" && compPlanHydratedComboRef.current === cid;
-    compPlanHydratedComboRef.current = cid;
-    if (sameCombo) return; // terminal switch (or other non-combo key change) -- keep the live plan
 
-    if (!compPlanKey) {
+    // No combo -> nothing to scope a plan to.
+    if (!cid) {
+      compPlanHydratedComboRef.current = null;
       hydratedCompPlanRef.current = null;
       setCompPlanRaw({});
       return;
     }
+
+    // Terminal not resolved yet (compPlanKey needs both combo AND terminal):
+    // wait for the real key rather than clearing the plan in the gap.
+    if (!compPlanKey) return;
+
+    // Already hydrated this combo from a real key -> a later compPlanKey change
+    // is a terminal switch; the live plan is combo-scoped, so leave it alone.
+    if (compPlanHydratedComboRef.current === cid) return;
+
+    // First real hydration for this combo (fresh mount or genuine combo change).
+    compPlanHydratedComboRef.current = cid;
     try {
       const raw = localStorage.getItem(compPlanKey);
       if (raw) {
