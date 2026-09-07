@@ -103,6 +103,13 @@ type Props = {
   planRows: PlanRowLike[];
   productNameById: Map<string, string>;
   onSubmitOutageReport: (reportType: OutageReportType, productIds: string[]) => Promise<{ error: string | null }>;
+
+  // Which step to open on. The Loading modal now shows Log the Load / Update
+  // Card / Back to Planner as its own buttons, so it opens this sheet
+  // directly on "reportType" for the outage-report flow only; the legacy
+  // "menu" mode (all four choices in the sheet) is still supported for any
+  // other caller. Defaults to "menu".
+  initialMode?: "menu" | "reportType";
 };
 
 const secondaryRowStyle: React.CSSProperties = {
@@ -118,9 +125,9 @@ const cancelStyle: React.CSSProperties = {
 
 export default function CancelLoadSheet({
   open, onDismiss, onBackToPlanner, onLogTheLoad, onUpdateCardOnly, darkMode, accentColor,
-  planRows, productNameById, onSubmitOutageReport,
+  planRows, productNameById, onSubmitOutageReport, initialMode = "menu",
 }: Props) {
-  const [mode, setMode] = useState<"menu" | "reportType" | "reportProducts" | "cardRenewal">("menu");
+  const [mode, setMode] = useState<"menu" | "reportType" | "reportProducts" | "cardRenewal">(initialMode);
   const [reportType, setReportType] = useState<OutageReportType | null>(null);
   const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(new Set());
   const [submitBusy, setSubmitBusy] = useState(false);
@@ -131,7 +138,7 @@ export default function CancelLoadSheet({
   // pass through this flow must never silently carry over.
   useEffect(() => {
     if (open) {
-      setMode("menu");
+      setMode(initialMode);
       setReportType(null);
       setSelectedProductIds(new Set());
       setSubmitBusy(false);
@@ -278,7 +285,7 @@ export default function CancelLoadSheet({
             >
               {submitBusy && reportType === "out_of_allocation" ? "Submitting…" : "Out of Allocation"}
             </button>
-            <button type="button" style={cancelStyle} onClick={() => setMode("menu")} disabled={submitBusy}>Back</button>
+            <button type="button" style={cancelStyle} onClick={() => (initialMode === "reportType" ? dismissAll() : setMode("menu"))} disabled={submitBusy}>Back</button>
           </>
         )}
 

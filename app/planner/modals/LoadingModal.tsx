@@ -5,6 +5,21 @@ import { FullscreenModal } from "@/lib/ui/FullscreenModal";
 import ValueEntryOverlay from "../components/ValueEntryOverlay";
 import { CARD_BG, CARD_BORDER, CARD_SHADOW } from "../cards/cardTheme";
 
+// ── Plan Review (redesign 2026-09-05) ──────────────────────────────────────
+// Per explicit direction, this screen went back to being clean and simple:
+// compartments show the product LABEL + a colored dot + gallons, and nothing
+// else -- "the gallons are all the driver needs before getting out to load."
+// API and temperature were removed from this screen entirely; they're now
+// entered only when the driver comes back with a BOL and taps "Log the Load"
+// (one product at a time, via ValueEntryOverlay with the product's colored
+// dot at the top -- see the log-the-load sequence below).
+//
+// The "next steps" that used to live in a separate bottom sheet (CancelLoadSheet)
+// are now the modal's own action buttons: Log the Load / Update Card, No Load /
+// Report Terminal Issue / Back to Planner. Report Terminal Issue still hands
+// off to CancelLoadSheet (opened directly in its report flow by page.tsx) so
+// the multi-step outage-report UI lives in one place.
+
 type PlanRowLike = {
   comp_number: number;
   planned_gallons?: number | null;
@@ -18,73 +33,6 @@ export type ProductInputs = Record<
     tempF?: number;
   }
 >;
-
-type LastProductInfo = {
-  last_api?: number | null;
-  last_api_updated_at?: string | null; // timestamptz string from Supabase
-};
-
-function isApiStale(lastApiUpdatedAt?: string | null, thresholdDays = 7): boolean {
-  if (!lastApiUpdatedAt) return false; // no timestamp = unknown, don't warn
-  const d = new Date(lastApiUpdatedAt);
-  if (isNaN(d.getTime())) return false;
-  return (Date.now() - d.getTime()) > thresholdDays * 24 * 60 * 60 * 1000;
-}
-
-// Structured, "print-out" API-history line -- replaces the old single
-// pre-formatted string (fmtLastApiLine_) so the date/time portion can be
-// rendered bold/white while the rest of the line stays quiet, per explicit
-// direction ("the warning... should be bigger with the date/time part in
-// white and bold"). The live numeric API value itself is no longer restated
-// here -- it's already shown directly in the compartment row now (see the
-// compartment-row redesign below), so this line is purely about freshness.
-type ApiLineParts = {
-  state: "missing" | "stale" | "fresh";
-  leading: string;
-  dateTime: string | null; // bolded/white when present
-  trailing: string;
-};
-
-function apiLineParts(args: {
-  lastApi?: number | null;
-  lastApiUpdatedAt?: string | null;
-  timeZone?: string | null;
-}): ApiLineParts {
-  const api = args.lastApi;
-  const ts = args.lastApiUpdatedAt;
-  const tz = args.timeZone;
-
-  if (api == null || !Number.isFinite(Number(api))) {
-    return { state: "missing", leading: "No API on file", dateTime: null, trailing: "" };
-  }
-  if (!ts) return { state: "fresh", leading: "API on file", dateTime: null, trailing: "" };
-
-  const d = new Date(ts);
-  if (Number.isNaN(d.getTime())) return { state: "fresh", leading: "API on file", dateTime: null, trailing: "" };
-
-  // MM/DD @ HH:mm (24h) in terminal timezone (if provided)
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: tz ?? undefined,
-    month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false,
-  }).formatToParts(d);
-  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
-  const mm = get("month"), dd = get("day"), hh = get("hour"), mi = get("minute");
-  const dateTime = mm && dd && hh && mi ? `${mm}/${dd} @ ${hh}:${mi} hrs` : null;
-
-  const stale = isApiStale(ts, 7);
-  return {
-    state: stale ? "stale" : "fresh",
-    leading: "API last updated ",
-    dateTime,
-    trailing: stale ? " — may be stale" : "",
-  };
-}
-
-const API_LINE_COLOR: Record<ApiLineParts["state"], string> = {
-  missing: "#f87171",
-  stale: "#fb923c",
-  fresh: "rgba(255,255,255,0.45)",
-};
 
 function fmtSignedLbs(v: number): string {
   const rounded = Math.round(v);
@@ -104,12 +52,9 @@ export default function LoadingModal(props: {
   planRows: PlanRowLike[];
   productNameById: Map<string, string>;
 
-  // Optional: product styling overrides from catalog
+  // Product dot color (catalog hex_code) -- the one visual carried through
+  // everywhere a product appears, to avoid cross-drops.
   productHexCodeById?: Record<string, string>;
-  // Short button-code per product ("D2"/"93"/"87") -- compartment rows show
-  // this instead of the full product name now (see part 2 of the 2026-09-05
-  // redesign: "C1-D2, C2-93, C3-87" next to the colored dot).
-  productCodeById?: Record<string, string>;
 
   productInputs: ProductInputs;
   setProductApi: (productId: string, api: string) => void;
@@ -130,49 +75,30 @@ export default function LoadingModal(props: {
   livePreviewDiffLbs?: number | null;
   targetWeight?: number;
 
-  onOpenTempDial?: (productId: string) => void;
-  // Fired by the bottom button (and, via FullscreenModal's onClose, by
-  // backdrop-click/Escape too -- see page.tsx). No longer submits directly;
-  // opens a 3-way confirmation (Log the Load / Update Card Only / Keep
-  // Editing) so there's a single, deliberate exit point instead of a
-  // silent header Close button plus a separate submit button.
+  // ── Action buttons (now in the modal itself, not a separate sheet) ──
+  // Log the Load: runs the per-product API/Temp entry sequence internally,
+  // then fires this once every product has values -- page.tsx then submits.
   onLoaded: () => void;
-
-  // A direct, always-visible way out -- per explicit user direction ("we
-  // always want a way out regardless of the screen"), not buried behind
-  // tapping Complete first to reach CancelLoadSheet's own Back to Planner
-  // row (that path still exists too, via backdrop-click/Escape/Complete).
-  // Genuinely undoes the load + re-card, same as CancelLoadSheet's own
-  // button -- see handleBackToPlannerNoUpdate in page.tsx.
+  // Update Card, No Load: cancels the load, keeps today's terminal access.
+  onUpdateCardOnly: () => void;
+  // Report Terminal Issue: hands off to CancelLoadSheet's report flow.
+  onReportTerminalIssue: () => void;
+  // Back to Planner: genuinely undoes the load + re-card (page.tsx).
   onBackToPlanner: () => void;
 
+  // Disables the action buttons + relabels Log the Load while completing.
   loadedDisabled?: boolean;
   loadedLabel?: string;
-
-  // NEW: for “API was …” and terminal-local formatting
-  lastProductInfoById?: Record<string, LastProductInfo>;
-  terminalTimeZone?: string | null;
 
   // Optional: styled warning block (if you wire it from page.tsx)
   errorMessage?: string | null;
 
   // Safety-confirmation block -- equipment/location identification shown
-  // before a driver commits to a load. Previously absent from this modal
-  // entirely (confirmed by reading the whole file before this was added --
-  // no truck/trailer/terminal identification appeared anywhere), a real
-  // gap flagged in the icon-rail design conversation: "we should add
-  // details in the loading modal for equipment numbers, location just to
-  // give a visual confirmation before logging a load after forgetting to
-  // change locations or equipment." Both optional/plain strings -- page.tsx
-  // already holds them for its own icon row (equipment.equipmentLabel,
-  // the top-level terminalLabel), passed straight through, no new fetch.
+  // before a driver commits to a load.
   equipmentLabel?: string | null;
   terminalLabel?: string | null;
-  // Tapping the terminal name in the safety-confirmation row opens the
-  // shared location/terminal picker without leaving this modal -- see
-  // page.tsx's handleTapTerminalInLoadingModal for the mid-load switch
-  // flow this kicks off. Optional so this modal degrades gracefully
-  // (plain, non-interactive text) if a future caller doesn't wire it.
+  // Tapping the terminal name opens the shared location/terminal picker
+  // without leaving this modal (mid-load switch flow, see page.tsx).
   onTapTerminal?: () => void;
 }) {
   const {
@@ -182,7 +108,6 @@ export default function LoadingModal(props: {
     planRows,
     productNameById,
     productHexCodeById,
-    productCodeById,
     productInputs,
     setProductApi,
     setProductTemp,
@@ -190,14 +115,12 @@ export default function LoadingModal(props: {
     persistedCapForComp,
     livePreviewGrossLbs,
     livePreviewDiffLbs,
-    targetWeight,
-    onOpenTempDial,
     onLoaded,
+    onUpdateCardOnly,
+    onReportTerminalIssue,
     onBackToPlanner,
     loadedDisabled,
     loadedLabel,
-    lastProductInfoById,
-    terminalTimeZone,
     errorMessage,
     equipmentLabel,
     terminalLabel,
@@ -215,45 +138,25 @@ export default function LoadingModal(props: {
       .filter((x) => Number.isFinite(x.comp) && x.comp > 0 && Number.isFinite(x.gallons) && x.gallons > 0);
   }, [planRows]);
 
+  // Distinct products in the plan, in a stable order -- the Log-the-Load
+  // API/Temp sequence walks these one at a time.
   const productGroups = useMemo(() => {
-    const m = new Map<string, { productId: string; gallons: number }>();
+    const seen = new Set<string>();
+    const out: string[] = [];
     for (const line of plannedLines) {
-      const prev = m.get(line.productId);
-      if (!prev) m.set(line.productId, { productId: line.productId, gallons: line.gallons });
-      else prev.gallons += line.gallons;
+      if (!seen.has(line.productId)) { seen.add(line.productId); out.push(line.productId); }
     }
-    return Array.from(m.values()).sort((a, b) => {
-      const an = productNameById.get(a.productId) ?? a.productId;
-      const bn = productNameById.get(b.productId) ?? b.productId;
+    return out.sort((a, b) => {
+      const an = productNameById.get(a) ?? a;
+      const bn = productNameById.get(b) ?? b;
       return String(an).localeCompare(String(bn));
     });
   }, [plannedLines, productNameById]);
 
-useEffect(() => {
-  if (!open) return;
-
-  for (const g of productGroups) {
-    const pid = String(g.productId ?? "");
-    if (!pid) continue;
-
-    const last = lastProductInfoById?.[pid]?.last_api;
-    const current = (productInputs?.[pid]?.api ?? "").toString().trim();
-
-    // Only prefill if empty and we actually have a previous API
-    if (!current && last != null && Number.isFinite(Number(last))) {
-      setProductApi(pid, String(last));
-    }
-  }
-}, [open, productGroups, lastProductInfoById, productInputs, setProductApi]);
-
-  // ── Phase-1 tap-to-adjust overlays ──────────────────────────────────────
+  // ── Phase-1 gallons tap-to-adjust overlay (unchanged) ───────────────────
   const [gallonsTarget, setGallonsTarget] = useState<{ comp: number; productId: string } | null>(null);
   const [gallonsInput, setGallonsInput] = useState("");
   const gallonsCap = gallonsTarget ? persistedCapForComp?.(gallonsTarget.comp) ?? null : null;
-
-  const [apiTempTarget, setApiTempTarget] = useState<string | null>(null); // productId
-  const [apiInput, setApiInput] = useState("");
-  const [tempInput, setTempInput] = useState("");
 
   function openGallonsOverlay(comp: number, productId: string, currentGallons: number) {
     setGallonsTarget({ comp, productId });
@@ -269,18 +172,76 @@ useEffect(() => {
     setGallonsTarget(null);
   }
 
-  function openApiTempOverlay(productId: string, currentApi: string, currentTemp?: number) {
-    setApiTempTarget(productId);
-    setApiInput(currentApi ?? "");
-    setTempInput(currentTemp == null ? "" : currentTemp.toFixed(1));
+  // ── Log the Load: per-product API/Temp entry sequence ───────────────────
+  const [logSeqIndex, setLogSeqIndex] = useState<number | null>(null);
+  const [seqApi, setSeqApi] = useState("");
+  const [seqTemp, setSeqTemp] = useState("");
+  const [awaitingComplete, setAwaitingComplete] = useState(false);
+
+  // Reset all sequence state whenever the modal closes, so a re-open never
+  // resumes a half-finished sequence from a previous load.
+  useEffect(() => {
+    if (!open) {
+      setLogSeqIndex(null);
+      setAwaitingComplete(false);
+      setGallonsTarget(null);
+    }
+  }, [open]);
+
+  // Load the current sequence step's prefill (API from last-observed, Temp
+  // from the plan's predicted temp -- both already seeded into productInputs
+  // at begin_load) into the overlay inputs.
+  useEffect(() => {
+    if (logSeqIndex == null) return;
+    const pid = productGroups[logSeqIndex];
+    if (!pid) return;
+    const pi = productInputs[pid];
+    setSeqApi(pi?.api ? String(pi.api) : "");
+    setSeqTemp(pi?.tempF != null ? Number(pi.tempF).toFixed(1) : "");
+    // Intentionally keyed on the index only -- re-seeding on every
+    // productInputs change would clobber what the driver is typing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [logSeqIndex]);
+
+  // Once the last product has been committed, wait until page.tsx's
+  // productInputs prop actually reflects every entry before firing onLoaded
+  // (which reads productInputs) -- avoids submitting with the final edit
+  // still pending in state.
+  useEffect(() => {
+    if (!awaitingComplete) return;
+    const allReady = productGroups.every((pid) => {
+      const pi = productInputs[pid];
+      return pi && String(pi.api ?? "").trim() !== "" && pi.tempF != null && Number.isFinite(Number(pi.tempF));
+    });
+    if (allReady) {
+      setAwaitingComplete(false);
+      onLoaded();
+    }
+  }, [awaitingComplete, productInputs, productGroups, onLoaded]);
+
+  function startLogSequence() {
+    if (productGroups.length === 0) { onLoaded(); return; }
+    setLogSeqIndex(0);
   }
-  function commitApiTempOverlay() {
-    if (!apiTempTarget) return;
-    const apiN = parseFloat(apiInput);
-    if (Number.isFinite(apiN)) setProductApi(apiTempTarget, apiN.toFixed(1));
-    const tempN = parseFloat(tempInput);
-    if (Number.isFinite(tempN)) setProductTemp(apiTempTarget, parseFloat(tempN.toFixed(1)));
-    setApiTempTarget(null);
+  function cancelLogSequence() {
+    setLogSeqIndex(null);
+  }
+  function commitLogStep() {
+    if (logSeqIndex == null) return;
+    const pid = productGroups[logSeqIndex];
+    if (!pid) { setLogSeqIndex(null); return; }
+    const apiN = parseFloat(seqApi);
+    if (Number.isFinite(apiN)) setProductApi(pid, apiN.toFixed(1));
+    const tempN = parseFloat(seqTemp);
+    if (Number.isFinite(tempN)) setProductTemp(pid, parseFloat(tempN.toFixed(1)));
+
+    const isLast = logSeqIndex >= productGroups.length - 1;
+    if (isLast) {
+      setLogSeqIndex(null);
+      setAwaitingComplete(true);
+    } else {
+      setLogSeqIndex(logSeqIndex + 1);
+    }
   }
 
   const showLivePreview = livePreviewGrossLbs != null;
@@ -291,17 +252,18 @@ useEffect(() => {
     [plannedLines]
   );
 
+  const seqPid = logSeqIndex != null ? productGroups[logSeqIndex] : null;
+  const seqDot = seqPid ? ((productHexCodeById?.[seqPid] && String(productHexCodeById[seqPid]).trim()) || "rgba(255,255,255,0.5)") : undefined;
+  const seqLabel = seqPid ? (productNameById.get(seqPid) ?? seqPid) : "";
+  const seqSubmitLabel = logSeqIndex != null && logSeqIndex < productGroups.length - 1 ? "Next" : "Log Load";
+
+  const busy = Boolean(loadedDisabled) || awaitingComplete;
+
   return (
     <FullscreenModal open={open} title="Plan Review" onClose={onClose} footer={null} hideCloseButton>
       <div style={{ display: "flex", flexDirection: "column", gap: 12, maxWidth: "100%", boxSizing: "border-box" }}>
-        {/* Safety-confirmation block -- Terminal left (white/bold, tappable
-            when onTapTerminal is wired -- opens the shared location/
-            terminal picker without leaving this modal, see page.tsx's
-            handleTapTerminalInLoadingModal), Equipment right (unchanged
-            muted tone). Swapped order + bigger font per explicit direction
-            ("shift Terminal to the left and Equipment to the right,
-            increase the font size, switch the terminal text only to
-            white"). */}
+        {/* Safety-confirmation block -- Terminal left (white/bold, tappable),
+            Equipment right. */}
         {(equipmentLabel || terminalLabel) && (
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "8px 2px", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
             {terminalLabel && (
@@ -329,16 +291,9 @@ useEffect(() => {
           </div>
         )}
 
-        {/* A) Compartments -- redesigned per explicit direction: product
-            names dropped in favor of just the short code next to the dot
-            ("C1-D2, C2-93, C3-87"), which frees up room to bring API/Temp
-            inline with gallons on the same row instead of a second,
-            separate section below. Each value is its own tap target now
-            (not the whole row) -- gallons opens the per-compartment
-            gallons overlay (unchanged, siblings never move); API/Temp both
-            open the per-PRODUCT API+Temp overlay (unchanged data model --
-            two compartments carrying the same product still correctly
-            show/edit the same shared value, just from either row). */}
+        {/* Compartments -- clean: dot + full product label + gallons.
+            Gallons stay tap-to-adjust (react to a stale reading by loading
+            one compartment light without redistributing to siblings). */}
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <div style={{ fontWeight: 800, fontSize: 13, letterSpacing: 0.2, opacity: 0.7, textTransform: "uppercase" }}>Planned compartments</div>
 
@@ -348,55 +303,36 @@ useEffect(() => {
             <div style={{ display: "grid", gap: 8 }}>
               {plannedLines.map((x) => {
                 const dotColor = (productHexCodeById?.[x.productId] && String(productHexCodeById[x.productId]).trim()) || "rgba(255,255,255,0.5)";
-                const code = (productCodeById?.[x.productId] && String(productCodeById[x.productId]).trim()) || (productNameById.get(x.productId) ?? x.productId);
-                const apiVal = productInputs[x.productId]?.api ?? "";
-                const tempVal = productInputs[x.productId]?.tempF;
+                const label = productNameById.get(x.productId) ?? x.productId;
                 return (
                   <div
                     key={`${x.comp}-${x.productId}`}
                     style={{
-                      display: "flex", alignItems: "center", gap: 6,
-                      padding: "9px 10px", borderRadius: 10,
+                      display: "flex", alignItems: "center", gap: 8,
+                      padding: "10px 12px", borderRadius: 10,
                       border: CARD_BORDER, background: CARD_BG, boxShadow: CARD_SHADOW,
                     }}
                   >
+                    <span style={{ fontSize: 13, fontWeight: 800, color: "rgba(255,255,255,0.5)", flexShrink: 0, width: 24 }}>C{x.comp}</span>
                     <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flex: "1 1 auto" }}>
-                      <span style={{ width: 8, height: 8, borderRadius: "50%", background: dotColor, flexShrink: 0 }} />
-                      <span style={{ fontSize: 15, fontWeight: 800, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
-                        C{x.comp}-{code}
+                      <span style={{ width: 10, height: 10, borderRadius: "50%", background: dotColor, flexShrink: 0 }} />
+                      <span style={{ fontSize: 15, fontWeight: 700, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
+                        {label}
                       </span>
                     </div>
                     <button
                       type="button"
                       onClick={() => openGallonsOverlay(x.comp, x.productId, x.gallons)}
-                      style={{ background: "none", border: "none", padding: "2px 6px", cursor: "pointer", textAlign: "center" as const, flexShrink: 0 }}
+                      style={{ background: "none", border: "none", padding: "2px 6px", cursor: "pointer", textAlign: "right" as const, flexShrink: 0 }}
                     >
                       <div style={{ fontSize: 9, fontWeight: 700, color: "rgba(255,255,255,0.35)", letterSpacing: 0.4 }}>GAL</div>
-                      <div style={{ fontSize: 16, fontWeight: 800, color: "#fff" }}>{Math.round(x.gallons)}</div>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => openApiTempOverlay(x.productId, apiVal, tempVal)}
-                      style={{ background: "none", border: "none", padding: "2px 6px", cursor: "pointer", textAlign: "center" as const, flexShrink: 0 }}
-                    >
-                      <div style={{ fontSize: 9, fontWeight: 700, color: "rgba(255,255,255,0.35)", letterSpacing: 0.4 }}>API</div>
-                      <div style={{ fontSize: 16, fontWeight: 800, color: apiVal ? "#fff" : "rgba(255,255,255,0.30)" }}>{apiVal || "—"}</div>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => openApiTempOverlay(x.productId, apiVal, tempVal)}
-                      style={{ background: "none", border: "none", padding: "2px 6px", cursor: "pointer", textAlign: "center" as const, flexShrink: 0 }}
-                    >
-                      <div style={{ fontSize: 9, fontWeight: 700, color: "rgba(255,255,255,0.35)", letterSpacing: 0.4 }}>°F</div>
-                      <div style={{ fontSize: 16, fontWeight: 800, color: tempVal != null ? "#fff" : "rgba(255,255,255,0.30)" }}>{tempVal != null ? tempVal.toFixed(1) : "—"}</div>
+                      <div style={{ fontSize: 18, fontWeight: 800, color: "#fff" }}>{Math.round(x.gallons)}</div>
                     </button>
                   </div>
                 );
               })}
 
-              {/* Total -- deliberately transparent (no card fill/border)
-                  so it reads as a plain summary line, not another
-                  compartment. */}
+              {/* Total -- plain summary line, not another compartment. */}
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 10px" }}>
                 <span style={{ fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.45)", letterSpacing: 0.4, textTransform: "uppercase" as const }}>Total</span>
                 <span style={{ fontSize: 16, fontWeight: 800, color: "rgba(255,255,255,0.75)" }}>{Math.round(totalPlannedGallons)} gal</span>
@@ -405,105 +341,95 @@ useEffect(() => {
           )}
         </div>
 
-        {/* Ghost line */}
-        <div style={{ height: 1, background: "rgba(255,255,255,0.10)", margin: "6px 0" }} />
-
-        {/* B) API history -- per explicit direction, no longer its own
-            card-list section (API/Temp itself moved inline into the
-            compartment rows above); this is now just a quiet "print-out"
-            of when each product's API was last observed, one line per
-            product, no card/background. The date/time portion is bolded
-            white so it's the one thing that stands out on an otherwise
-            plain line. */}
-        <div style={{ display: "grid", gap: 8 }}>
-          <div style={{ fontWeight: 800, fontSize: 13, letterSpacing: 0.2, opacity: 0.7, textTransform: "uppercase" }}>API History</div>
-
-          {errorMessage ? (
-            <div
-              style={{
-                borderRadius: 6,
-                border: "1px solid rgba(255,80,80,0.35)",
-                background: "rgba(255,80,80,0.10)",
-                padding: "10px 12px",
-                color: "rgba(255,210,210,0.95)",
-                fontWeight: 850,
-                lineHeight: 1.25,
-              }}
-            >
-              {errorMessage}
+        {/* Live weight / diff-vs-target preview -- plan density (API/Temp are
+            entered later at Log the Load). Same math the final submission
+            uses, so it can never disagree with the recap. */}
+        {showLivePreview && (
+          <div style={{
+            display: "flex", justifyContent: "space-between", alignItems: "center",
+            padding: "10px 12px", borderRadius: 6,
+            border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)",
+          }}>
+            <div>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.4)", letterSpacing: 0.4, textTransform: "uppercase" as const }}>Live Weight</div>
+              <div style={{ fontSize: 20, fontWeight: 800, color: "#fff" }}>{Math.round(livePreviewGrossLbs!).toLocaleString()} lbs</div>
             </div>
-          ) : null}
-
-          {productGroups.length === 0 ? (
-            <div style={styles.help}>No products to enter.</div>
-          ) : (
-            <div style={{ display: "grid", gap: 6 }}>
-              {productGroups.map((g) => {
-                const code = (productCodeById?.[g.productId] && String(productCodeById[g.productId]).trim()) || (productNameById.get(g.productId) ?? g.productId);
-                const lastInfo: LastProductInfo | undefined = lastProductInfoById?.[g.productId];
-                const parts = apiLineParts({
-                  lastApi: lastInfo?.last_api,
-                  lastApiUpdatedAt: lastInfo?.last_api_updated_at,
-                  timeZone: terminalTimeZone ?? null,
-                });
-                return (
-                  <div key={g.productId} style={{ fontSize: 14, lineHeight: 1.5, color: API_LINE_COLOR[parts.state] }}>
-                    {parts.state === "missing" && "⚠ "}
-                    <span style={{ fontWeight: 700 }}>{code}:</span>{" "}
-                    {parts.leading}
-                    {parts.dateTime && <span style={{ color: "#fff", fontWeight: 800 }}>{parts.dateTime}</span>}
-                    {parts.trailing}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {/* C) Live weight / diff-vs-target preview -- same math the final
-              submission uses, so this can never disagree with the recap. */}
-          {showLivePreview && (
-            <div style={{
-              display: "flex", justifyContent: "space-between", alignItems: "center",
-              padding: "10px 12px", borderRadius: 6,
-              border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)",
-            }}>
-              <div>
-                <div style={{ fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.4)", letterSpacing: 0.4, textTransform: "uppercase" as const }}>Live Weight</div>
-                <div style={{ fontSize: 20, fontWeight: 800, color: "#fff" }}>{Math.round(livePreviewGrossLbs!).toLocaleString()} lbs</div>
-              </div>
-              {livePreviewDiffLbs != null && (
-                <div style={{ textAlign: "right" as const }}>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.4)", letterSpacing: 0.4, textTransform: "uppercase" as const }}>vs. Target</div>
-                  <div style={{ fontSize: 20, fontWeight: 800, color: overTarget ? "#f87171" : "#4ade80" }}>
-                    {fmtSignedLbs(livePreviewDiffLbs)} lbs
-                  </div>
+            {livePreviewDiffLbs != null && (
+              <div style={{ textAlign: "right" as const }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.4)", letterSpacing: 0.4, textTransform: "uppercase" as const }}>vs. Target</div>
+                <div style={{ fontSize: 20, fontWeight: 800, color: overTarget ? "#f87171" : "#4ade80" }}>
+                  {fmtSignedLbs(livePreviewDiffLbs)} lbs
                 </div>
-              )}
-            </div>
-          )}
-
-          <div style={{ display: "flex", width: "100%", marginTop: 6 }}>
-            <button
-              type="button"
-              onClick={onLoaded}
-              disabled={Boolean(loadedDisabled)}
-              style={{
-                ...(styles as any).doneBtn,
-                opacity: loadedDisabled ? 0.55 : 1,
-                width: "100%",
-              }}
-            >
-              {loadedLabel ?? "Complete"}
-            </button>
+              </div>
+            )}
           </div>
+        )}
+
+        {errorMessage ? (
+          <div
+            style={{
+              borderRadius: 6,
+              border: "1px solid rgba(255,80,80,0.35)",
+              background: "rgba(255,80,80,0.10)",
+              padding: "10px 12px",
+              color: "rgba(255,210,210,0.95)",
+              fontWeight: 850,
+              lineHeight: 1.25,
+            }}
+          >
+            {errorMessage}
+          </div>
+        ) : null}
+
+        {/* Action buttons -- the "next steps" that used to live in a separate
+            sheet, now directly in the modal. */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 4 }}>
+          <button
+            type="button"
+            onClick={startLogSequence}
+            disabled={busy}
+            style={{ ...(styles as any).doneBtn, opacity: busy ? 0.55 : 1, width: "100%" }}
+          >
+            {awaitingComplete || loadedDisabled ? (loadedLabel ?? "Saving…") : "Log the Load"}
+          </button>
+
+          <button
+            type="button"
+            onClick={onUpdateCardOnly}
+            disabled={busy}
+            style={{
+              width: "100%", padding: "12px 16px", borderRadius: 10,
+              border: CARD_BORDER, background: CARD_BG, boxShadow: CARD_SHADOW,
+              color: "rgba(255,255,255,0.90)", fontSize: 15, fontWeight: 700, cursor: "pointer",
+              opacity: busy ? 0.55 : 1,
+            }}
+          >
+            Update Card, No Load
+          </button>
+
+          <button
+            type="button"
+            onClick={onReportTerminalIssue}
+            disabled={busy}
+            style={{
+              width: "100%", padding: "12px 16px", borderRadius: 10,
+              border: CARD_BORDER, background: CARD_BG, boxShadow: CARD_SHADOW,
+              color: "rgba(255,255,255,0.90)", fontSize: 15, fontWeight: 700, cursor: "pointer",
+              opacity: busy ? 0.55 : 1,
+            }}
+          >
+            Report Terminal Issue
+          </button>
 
           <button
             type="button"
             onClick={onBackToPlanner}
+            disabled={busy}
             style={{
               width: "100%", padding: "10px 0",
               borderRadius: 6, border: "none", background: "transparent",
               color: "rgba(255,255,255,0.40)", fontSize: 13, fontWeight: 700, cursor: "pointer",
+              opacity: busy ? 0.55 : 1,
             }}
           >
             Back to Planner
@@ -511,6 +437,7 @@ useEffect(() => {
         </div>
       </div>
 
+      {/* Gallons tap-to-adjust */}
       <ValueEntryOverlay
         open={gallonsTarget != null}
         title={gallonsTarget ? `C${gallonsTarget.comp} Gallons` : "Gallons"}
@@ -520,15 +447,19 @@ useEffect(() => {
         onSubmit={commitGallonsOverlay}
       />
 
+      {/* Log the Load: one product at a time, dot + label at the top. */}
       <ValueEntryOverlay
-        open={apiTempTarget != null}
-        title={apiTempTarget ? productNameById.get(apiTempTarget) ?? "Product" : "Product"}
+        open={logSeqIndex != null}
+        title={seqLabel}
+        dotColor={seqDot}
         fields={[
-          { key: "api", label: "API", value: apiInput, onChange: setApiInput, decimal: true },
-          { key: "temp", label: "Temp", value: tempInput, onChange: setTempInput, suffix: "°F", decimal: true },
+          { key: "api", label: "API", value: seqApi, onChange: setSeqApi, decimal: true },
+          { key: "temp", label: "Temp", value: seqTemp, onChange: setSeqTemp, suffix: "°F", decimal: true },
         ]}
-        onCancel={() => setApiTempTarget(null)}
-        onSubmit={commitApiTempOverlay}
+        hint={productGroups.length > 1 && logSeqIndex != null ? `Product ${logSeqIndex + 1} of ${productGroups.length}` : undefined}
+        onCancel={cancelLogSequence}
+        onSubmit={commitLogStep}
+        submitLabel={seqSubmitLabel}
       />
     </FullscreenModal>
   );

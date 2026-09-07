@@ -31,6 +31,10 @@ type Props = {
   onCancel: () => void;
   onSubmit: () => void;
   submitLabel?: string;
+  /** Optional product color dot rendered before the title -- per explicit
+   *  direction, drivers need the same colored-dot visual next to the product
+   *  everywhere it appears, to avoid mix-ups / cross-drops. */
+  dotColor?: string;
 };
 
 function sanitize(raw: string, decimal: boolean): string {
@@ -41,7 +45,7 @@ function sanitize(raw: string, decimal: boolean): string {
   return v;
 }
 
-export default function ValueEntryOverlay({ open, title, fields, hint, onCancel, onSubmit, submitLabel = "Set" }: Props) {
+export default function ValueEntryOverlay({ open, title, fields, hint, onCancel, onSubmit, submitLabel = "Set", dotColor }: Props) {
   if (!open) return null;
 
   return (
@@ -63,7 +67,8 @@ export default function ValueEntryOverlay({ open, title, fields, hint, onCancel,
           display: "flex", flexDirection: "column", alignItems: "center", gap: 14,
         }}
       >
-        <div style={{ fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.45)", letterSpacing: 0.4, textTransform: "uppercase" as const }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.45)", letterSpacing: 0.4, textTransform: "uppercase" as const }}>
+          {dotColor && <span style={{ width: 10, height: 10, borderRadius: "50%", background: dotColor, flexShrink: 0 }} />}
           {title}
         </div>
 

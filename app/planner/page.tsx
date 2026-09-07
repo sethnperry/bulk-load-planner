@@ -414,13 +414,6 @@ export default function CalculatorPage() {
   // equipment/location/terminals come from the shared shell context (see above).
 
   // Resolve timezone after both hooks exist
-  const selectedTerminalTimeZoneResolved = useMemo(() => {
-    const tid = String(location.selectedTerminalId ?? "");
-    if (!tid) return null;
-    // timezone lives in terminalCatalog (from terminals table), not in my_terminals_with_status view
-    return (terminals.terminalCatalog as any[])?.find((x) => String(x.terminal_id) === tid)?.timezone ?? null;
-  }, [location.selectedTerminalId, terminals.terminalCatalog]);
-
   // ── Compartments ───────────────────────────────────────────────────────────
   const [compartments, setCompartments] = useState<CompRow[]>([]);
   const [compLoading, setCompLoading] = useState(false);
@@ -1792,22 +1785,6 @@ const lastProductInfoById = useMemo(() => {
     return rec;
   }, [terminalProducts]);
 
-  // Short button-code per product (e.g. "D2", "93", "87") -- same
-  // button_code ?? product_code ?? first-word-of-name fallback chain
-  // PlannerControls.tsx's own compartment bars already use, reused here
-  // (not reinvented) for LoadingModal's compact "C{n}-{code}" compartment
-  // rows -- see CLAUDE.md's own "duplicating this is how the bug creeps
-  // back in" precedent.
-  const productCodeById = useMemo(() => {
-    const rec: Record<string, string> = {};
-    for (const p of terminalProducts) {
-      if (!p.product_id) continue;
-      const name = (p.display_name ?? p.product_name ?? "").trim();
-      rec[p.product_id] = String(p.button_code ?? p.product_code ?? (name.split(" ")[0] || "PRD")).trim().toUpperCase();
-    }
-    return rec;
-  }, [terminalProducts]);
-
   // Per-product rows for the Temp modal's product list (dot + name + own
   // temp, tap to adjust just that one) -- same shape as LoadingModal's own
   // planned-compartments/product-groups rows, for visual continuity.
@@ -2578,15 +2555,12 @@ const lastProductInfoById = useMemo(() => {
 
       {/* ── Modals ── */}
       <LoadingModal
-        open={loadWorkflow.loadingOpen} onClose={() => setCancelLoadConfirmOpen(true)}
+        open={loadWorkflow.loadingOpen} onClose={() => { /* no accidental dismissal -- exits are the explicit buttons */ }}
         styles={styles}
         planRows={effectivePlanRows as any[]}
         productNameById={productNameById}
         productHexCodeById={productHexCodeById}
-        productCodeById={productCodeById}
         productInputs={productInputs}
-        terminalTimeZone={selectedTerminalTimeZoneResolved}
-        lastProductInfoById={lastProductInfoById}
         equipmentLabel={equipment.equipmentLabel}
         terminalLabel={terminalLabel}
         onTapTerminal={handleTapTerminalInLoadingModal}
@@ -2597,10 +2571,12 @@ const lastProductInfoById = useMemo(() => {
         livePreviewGrossLbs={livePreviewGrossLbs}
         livePreviewDiffLbs={livePreviewDiffLbs}
         targetWeight={targetWeight}
-        onLoaded={() => setCancelLoadConfirmOpen(true)}
+        onLoaded={() => loadWorkflow.onLoadedFromLoadingModal()}
+        onUpdateCardOnly={() => loadWorkflow.cancelActiveLoad()}
+        onReportTerminalIssue={() => setCancelLoadConfirmOpen(true)}
         onBackToPlanner={handleBackToPlannerNoUpdate}
         loadedDisabled={loadWorkflow.completeBusy}
-        loadedLabel={loadWorkflow.completeBusy ? "Saving…" : "Complete"}
+        loadedLabel={loadWorkflow.completeBusy ? "Saving…" : "Log the Load"}
       />
 
       <TerminalSwitchDuringLoadSheet
@@ -2616,10 +2592,14 @@ const lastProductInfoById = useMemo(() => {
         onSubmitOutageReport={handleSubmitOutageReportForPreviousTerminal}
       />
 
+      {/* Opened only from the Loading modal's "Report Terminal Issue" button
+          now (the other three actions are the modal's own buttons), so it
+          opens straight into the outage-report flow. */}
       <CancelLoadSheet
         open={cancelLoadConfirmOpen}
+        initialMode="reportType"
         onDismiss={() => setCancelLoadConfirmOpen(false)}
-        onBackToPlanner={handleBackToPlannerNoUpdate}
+        onBackToPlanner={() => { setCancelLoadConfirmOpen(false); handleBackToPlannerNoUpdate(); }}
         onLogTheLoad={() => { setCancelLoadConfirmOpen(false); loadWorkflow.onLoadedFromLoadingModal(); }}
         onUpdateCardOnly={() => { setCancelLoadConfirmOpen(false); loadWorkflow.cancelActiveLoad(); }}
         darkMode={shell.theme.darkMode}
