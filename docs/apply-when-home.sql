@@ -150,6 +150,19 @@ where not exists (
 );
 
 
+
+-- ###### 4of4: R4 -- block a user from deleting their own membership ######
+-- (per your decision; legit removal still works via the admin_remove_member RPC)
+revoke delete on table public.user_companies from authenticated;
+revoke delete on table public.user_companies from anon;
+do $$
+declare pol record;
+begin
+  for pol in select policyname from pg_policies
+     where schemaname='public' and tablename='user_companies' and cmd='DELETE'
+  loop execute format('drop policy if exists %I on public.user_companies', pol.policyname); end loop;
+end $$;
+
 -- ==========================================================================
 -- SEPARATELY: run this ONE line and paste the result back to me so I can fix
 -- R3 (get_display_names_full leaks profile PII cross-company) precisely.

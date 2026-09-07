@@ -342,3 +342,15 @@ member of that company before dispatching any op. Legit same-company setup
 (the driver picker only lists company members) is unaffected. Deploys with the
 branch merge; `tsc`/`next build` clean. (This whole impersonation feature is
 slated for removal per CLAUDE.md — the fix secures it until then.)
+
+### R4 fix (decided 2026-09-07): drivers may not self-remove
+Per operator decision, a driver must not be able to remove themselves from a
+company. `20260907060000_user_companies_block_self_delete.sql` revokes the direct
+DELETE grant on `user_companies` from authenticated/anon (and drops any DELETE
+policy). All legit removal already flows through `admin_remove_member` (SECURITY
+DEFINER, verified live to reject non-admin/cross-company callers with "Admin
+access required"), which is unaffected by the revoke. Joining a new company is an
+INSERT via `redeem_invite`, also unaffected — a re-hired driver keeps the same
+account/email and is added to the new company. Verified on Postgres 16: after the
+revoke a direct authenticated self-delete is "permission denied", while a
+SECURITY DEFINER remove still works.

@@ -23,7 +23,7 @@ Company Beta* — two genuinely isolated single-member tenants.
 | R5 | 🔴 | API | `/api/admin/setup` — any company admin read/wrote ANY company's users incl. terminal **card numbers/PINs** (proven live B→A) | **Fixed (code); needs deploy** |
 | R2 | 🟠 | RLS | `dispatcher_notes` / `driver_schedules` NULL-company rows global (insertable by anyone, readable cross-tenant) | **Fixed; needs apply** |
 | R3 | 🟠 | RPC | `get_display_names_full` returns any user's profile PII (name, hire date, employee #, division) cross-company, bypassing `profiles` RLS | **Awaiting function def to fix** |
-| R4 | 🟠 | RLS | A user can DELETE their own `user_companies` membership → self-lockout / orphaned company (no client re-add) | **Documented; fix recommended** |
+| R4 | 🟠 | RLS | A user can DELETE their own `user_companies` membership → self-lockout / orphaned company | **Fixed (revoke direct DELETE); needs apply** |
 | A1 | 🟠 | Authz | Company admin can set their own `user_companies.role` to an arbitrary string, self-locking out of admin | **Fixed (role guard trigger); applied** |
 | F1 | 🟠 | Load flow | A completed load could be deleted by "Back to Planner" after a lost completion response | **Fixed + deployed logic + live-verified guard** |
 | F3 | 🟢 | Load flow | Abandoned "planned" rows showed as blank entries in My Loads | **Fixed (history filter)** |
@@ -53,9 +53,10 @@ invariant sweep, 15 tests).
    its exact return shape).
 3. **Deploy the branch** — **R5** (`/api/admin/setup` target-company scoping) and
    **F1/F3** are app code that take effect on deploy.
-4. **Decide on R4** — recommended: a policy/trigger forbidding removal of the last
-   owner/admin of a company (or drop the self-delete grant if "leave company"
-   isn't a feature).
+4. **R4 decided** (operator: drivers may not self-remove) — fix included in
+   `apply-when-home.sql`: direct DELETE revoked so all removal goes through the
+   admin-gated `admin_remove_member` RPC (verified live it rejects non-admin /
+   cross-company). Joining a new company later is unaffected (INSERT via redeem).
 
 ---
 
