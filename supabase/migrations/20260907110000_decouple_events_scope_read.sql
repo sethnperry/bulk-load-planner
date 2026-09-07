@@ -11,15 +11,19 @@
 -- company (joined via truck/trailer -> company_id). No cross-company reads.
 
 drop policy if exists "Users can read decouple events" on public.decouple_events;
+drop policy if exists "decouple_events_read_scoped" on public.decouple_events;
 
 create policy "decouple_events_read_scoped" on public.decouple_events
   as permissive for select to authenticated
   using (
     user_id = auth.uid()
+    -- decouple_events.truck_id / trailer_id are TEXT (written by the
+    -- decouple_combo(text,...) overload); trucks/trailers PKs are uuid.
+    -- Compare as text to avoid uuid = text.
     or exists (select 1 from public.trucks t
-                where t.truck_id = decouple_events.truck_id
+                where t.truck_id::text = decouple_events.truck_id
                   and public.is_company_staff(t.company_id))
     or exists (select 1 from public.trailers tr
-                where tr.trailer_id = decouple_events.trailer_id
+                where tr.trailer_id::text = decouple_events.trailer_id
                   and public.is_company_staff(tr.company_id))
   );
