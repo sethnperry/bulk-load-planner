@@ -79,4 +79,15 @@ export async function deleteLoad(loadId: string) {
   if (error) throw error;
 }
 
+// Atomically cancel a load ONLY while it is still "planned" (server-enforced
+// with a row lock -- see migration 20260907100000). A load that has already
+// reached "loaded" is left intact and this returns false, so a raced/lost-
+// response completion can never be destroyed by a cancel. Use this for the
+// in-flight cancel path, not delete_load.
+export async function cancelPlannedLoad(loadId: string): Promise<boolean> {
+  const { data, error } = await supabase.rpc("cancel_planned_load", { p_load_id: loadId });
+  if (error) throw error;
+  return Boolean(data);
+}
+
 

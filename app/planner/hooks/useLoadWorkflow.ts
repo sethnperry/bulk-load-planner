@@ -4,7 +4,7 @@
 
 import { useCallback, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
-import { beginLoad, completeLoad, deleteLoad } from "@/lib/supabase/load";
+import { beginLoad, completeLoad, deleteLoad, cancelPlannedLoad } from "@/lib/supabase/load";
 import { computeActualLbsForLine } from "../utils/planMath";
 import { resolveEffectiveRackId } from "../utils/rack";
 import type { LoadReport, PlanRow, ProductRow } from "../types";
@@ -287,31 +287,18 @@ export function useLoadWorkflow({
     setActiveLoadId(null);
     setCancelBusy(true);
     try {
-      // Safety guard: only delete a load that is still "planned". If
-      // complete_load already committed status='loaded' but its RESPONSE was
-      // lost to a network drop, the client lands in its catch with the modal
-      // still open and activeLoadId still set -- and if the driver then taps
-      // "Back to Planner" (rather than retrying), a blind delete here would
-      // destroy a load that genuinely completed, with no recovery. Re-read
-      // the status first: in the normal cancel path the row is "planned" and
-      // this deletes exactly as before; a row that already reached "loaded"
-      // is kept (the completion stands and shows in My Loads).
-      let status: string | null = null;
-      try {
-        const { data } = await supabase
-          .from("load_log").select("status").eq("load_id", loadId).maybeSingle();
-        status = (data as any)?.status ?? null;
-      } catch {
-        // Couldn't read status (offline/RLS) -- fall through to the delete
-        // attempt below, which is delete_load's owner-checked behavior anyway.
-      }
-      if (status === "loaded") {
-        console.warn("cancelActiveLoad: load already completed; keeping it.");
-      } else {
-        await deleteLoad(loadId);
+      // Server-enforced, atomic: cancel_planned_load deletes the row ONLY
+      // while it is still "planned", under a row lock, so a completion that
+      // raced this cancel (or whose response was lost to a network drop) can
+      // never be destroyed -- it stays and shows in My Loads. This replaces
+      // the old client-side read-status-then-delete, which had a TOCTOU gap
+      // and put the decision on the client instead of the DB.
+      const cancelled = await cancelPlannedLoad(loadId);
+      if (!cancelled) {
+        console.warn("cancelActiveLoad: load was not planned (kept); nothing cancelled.");
       }
     } catch (err) {
-      console.warn("cancelActiveLoad: delete_load failed (non-fatal):", err);
+      console.warn("cancelActiveLoad: cancel_planned_load failed (non-fatal):", err);
     } finally {
       setCancelBusy(false);
     }

@@ -1860,7 +1860,9 @@ const lastProductInfoById = useMemo(() => {
         // so there's nothing to decide -- the safe assumption is automatic.
         stale = false;
       } else if (!ts) {
-        stale = false; // have a value but no timestamp -- can't call it stale
+        // A reading with no timestamp is unknown-age, not fresh -- we can't
+        // prove it's current, so treat it as stale and let the driver decide.
+        stale = true;
       } else {
         const d = new Date(ts);
         stale = !Number.isNaN(d.getTime()) && (Date.now() - d.getTime()) > STALE_API_DAYS * 86400000;
@@ -1898,14 +1900,22 @@ const lastProductInfoById = useMemo(() => {
   }, [buildStaleOverride, requestBegin]);
 
   const handleStaleSafe = useCallback(() => {
-    // Heaviest this terminal has seen -> min_api_observed (fall back to
-    // api_min, then api_60).
-    const map = buildStaleOverride((p) =>
-      p.min_api_observed != null ? Number(p.min_api_observed)
-      : p.api_min != null ? Number(p.api_min)
-      : p.api_60 != null ? Number(p.api_60)
-      : null
-    );
+    // "Heaviest this terminal has seen" -> min_api_observed, but clamped so it
+    // can NEVER be lighter than the established safe reference (api_min, else
+    // api_60). Lower API = heavier, so the safe value is the MIN (heavier) of
+    // the observed reading and the reference: Safe is always at least as heavy
+    // as Safest, never lighter -- a terminal that has only ever seen a light
+    // reading can't talk the plan into assuming lighter-than-published.
+    const map = buildStaleOverride((p) => {
+      const ref =
+        p.api_min != null && Number.isFinite(Number(p.api_min)) ? Number(p.api_min)
+        : p.api_60 != null && Number.isFinite(Number(p.api_60)) ? Number(p.api_60)
+        : null;
+      const observed =
+        p.min_api_observed != null && Number.isFinite(Number(p.min_api_observed)) ? Number(p.min_api_observed) : null;
+      if (ref == null) return observed;           // no reference -> best effort
+      return observed != null ? Math.min(observed, ref) : ref;
+    });
     setStaleApiPrompt(null);
     requestBegin(map);
   }, [buildStaleOverride, requestBegin]);
