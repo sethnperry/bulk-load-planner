@@ -77,7 +77,7 @@ import { styles } from "./ui/styles";
 // ── Utils ──────────────────────────────────────────────────────────────────────
 import { addDaysISO_, daysUntilISO_, formatMDYWithCountdown_, formatMDYWithTime_, isPastISO_ } from "./utils/dates";
 import { normState } from "./utils/normalize";
-import { cgSliderToBias, bestLbsPerGallon, lbsPerGallonAtTemp, planForGallons, CG_NEUTRAL, computeActualLbsForLine } from "./utils/planMath";
+import { cgSliderToBias, bestLbsPerGallon, lbsPerGallonAtTemp, planForGallons, CG_NEUTRAL } from "./utils/planMath";
 import { productColorFor } from "./utils/productColor";
 import { DEFAULT_STALE_API_DAYS } from "@/lib/config/plannerSafety";
 
@@ -1108,32 +1108,20 @@ export default function CalculatorPage() {
   );
   const effectivePlannedGallonsTotal = effectivePlanRows.reduce((s, r) => s + r.planned_gallons, 0);
 
-  // Live weight/diff preview for the Loading modal's Plan Review phase --
-  // reuses computeActualLbsForLine, the exact same formula the final
-  // complete_load submission uses (see useLoadWorkflow.ts), so this preview
-  // can never disagree with what actually gets submitted. Falls back to
-  // planned density for any line whose product doesn't have a valid
-  // API+Temp entered yet (matches how the plan's own weight calc already
-  // treats an unentered product).
-  const livePreviewTotalLbs = useMemo(() => {
-    let sum = 0;
-    for (const r of effectivePlanRows as any[]) {
-      const pid = r.productId as string | undefined;
-      const gallons = Number(r.planned_gallons ?? 0);
-      const prod = pid ? terminalProducts.find((p) => p.product_id === pid) : null;
-      const apiNum = pid ? Number(String(productInputs[pid]?.api ?? "").trim()) : NaN;
-      const tempVal = pid ? Number(productInputs[pid]?.tempF) : NaN;
-      const alpha = prod?.alpha_per_f != null ? Number(prod.alpha_per_f) : null;
-      if (alpha != null && Number.isFinite(apiNum) && Number.isFinite(tempVal)) {
-        sum += computeActualLbsForLine(gallons, apiNum, tempVal, alpha);
-      } else {
-        sum += gallons * Number(r.lbsPerGal ?? 0);
-      }
-    }
-    return sum;
-  }, [effectivePlanRows, productInputs, terminalProducts]);
-
-  const livePreviewGrossLbs = Number.isFinite(tare) ? tare + livePreviewTotalLbs : null;
+  // Live weight/diff shown in the Loading modal's Plan Review phase. This is
+  // the PLAN's own solved weight (effectivePlannedWeightLbs = Σ gallons ×
+  // each comp's solved lbsPerGal), which solveMaxGallons already caps at
+  // allowedLbs (= target − tare), so a fresh plan's live weight can never
+  // exceed target -- exactly the safety guarantee the driver expects.
+  //
+  // It deliberately does NOT recompute from productInputs here: API/temp are
+  // now entered at Log the Load (a later step), so in Plan Review those are
+  // just prefilled defaults. Recomputing with them re-derived density on a
+  // different back-correction basis than the solve used (observed temp vs.
+  // current temp), which made the preview drift HEAVIER than the plan and
+  // read as "over target" on a plan that was actually under it. Using the
+  // solved weight keeps the preview and the plan identical.
+  const livePreviewGrossLbs = Number.isFinite(tare) ? tare + effectivePlannedWeightLbs : null;
   const livePreviewDiffLbs = livePreviewGrossLbs != null && targetWeight > 0 ? livePreviewGrossLbs - targetWeight : null;
 
   // ── Plan slots ─────────────────────────────────────────────────────────────
