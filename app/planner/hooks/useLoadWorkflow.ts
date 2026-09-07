@@ -246,11 +246,23 @@ export function useLoadWorkflow({
         const pid = r?.productId ? String(r.productId) : null;
         if (!pid || !Number.isFinite(Number(r?.planned_gallons ?? 0))) continue;
         if (!nextInputs[pid]) {
-          // Pre-fill with last observed API from this terminal so driver sees it immediately
+          // Pre-fill the API the driver sees at Log the Load. Prefer this
+          // terminal's last observed reading; when the product has never been
+          // loaded here, fall back to its published MINIMUM API (api_min =
+          // heaviest) rather than leaving it blank -- this matches the plan's
+          // own density assumption for an unproven product (lbsPerGalForProductId
+          // uses api_min in that case), so the entry field and the plan agree.
+          // Falls back to api_60, then "" only if neither is seeded.
           const product = terminalProducts.find((p) => p.product_id === pid);
-          const prefilledApi = product?.last_api != null && Number.isFinite(Number(product.last_api))
-            ? String(product.last_api)
-            : "";
+          const firstFinite = (...vals: Array<number | null | undefined>) => {
+            for (const v of vals) if (v != null && Number.isFinite(Number(v))) return String(v);
+            return "";
+          };
+          const prefilledApi = firstFinite(
+            product?.last_api,
+            (product as any)?.api_min,
+            product?.api_60,
+          );
           nextInputs[pid] = { api: prefilledApi, tempF: Number(tempF) };
         }
       }
