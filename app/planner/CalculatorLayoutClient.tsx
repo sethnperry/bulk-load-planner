@@ -235,54 +235,53 @@ function ShellChrome({ children }: { children: React.ReactNode }) {
   return (
     <div style={{ height: "100dvh", background: "#0b0b0b", color: "#fff", display: "flex", flexDirection: isLandscape ? "row" : "column", overflow: "hidden" }}>
       <Header onOpenSettings={() => setSettingsOpen(true)} isLandscape={isLandscape} outageBanner={outageBanner} />
-      {/* Landscape: everything besides the rail -- the outage banner (see
-          Header's own comment on why it can't render inside the rail
-          itself) and the scrollable content -- lives in this second
-          column, which takes up the rest of the screen's width. Portrait
-          needs no such wrapper (Header's own row + this content div were
-          already correctly stacked as direct children of the outer
-          flexDirection:"column" div above), so it's only introduced when
-          isLandscape to avoid adding an extra DOM layer/any layout
-          difference for the unchanged portrait case. */}
-      {isLandscape ? (
-        <div style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0, overflow: "hidden" }}>
+      {/* The content wrapper is rendered with an IDENTICAL structure in both
+          orientations so {children} (the entire planner page) keeps the same
+          position in the React tree across an orientation flip. A previous
+          version branched {children} into two structurally different subtrees
+          -- landscape nested it an extra div deep behind the outage banner,
+          portrait rendered it one div up -- so on every rotation React could
+          not reconcile the moved subtree and unmounted+remounted the whole
+          page. That wiped all page-local state: an in-progress compPlan
+          cleared to empty compartments, and loadingOpen reset so an open Plan
+          Review "backed out" to the planner. Keeping the wrapper shape
+          constant and only toggling the banner's presence (via a stable
+          ternary slot, so the pt-tabscroll div stays at child index 1 either
+          way) and the padding preserves the subtree -- no remount, the plan
+          survives rotation.
+
+          Landscape shows the outage banner HERE (the icon rail is too narrow
+          for a horizontal ticker); portrait shows it inside Header instead
+          (see Header), so it's gated on isLandscape to avoid a double banner.
+
+          Padding: left/right add the device's safe-area inset (real, non-zero
+          now that layout.tsx declares viewportFit:"cover") on top of the base
+          12px -- background stays #0b0b0b to the physical edge (padding never
+          shrinks an element's own background), only CONTENT is pushed clear of
+          the unsafe strip. Portrait keeps its 0px top (Header owns the top
+          inset); landscape's left inset is owned by the rail, so its content
+          padding needs no extra left inset. */}
+      <div style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0, overflow: "hidden" }}>
+        {isLandscape ? (
           <TerminalOutageBanner
             tickerMessage={outageBanner.tickerMessage}
             reports={outageBanner.reports}
             timeZone={outageBanner.timeZone}
             refresh={outageBanner.refresh}
           />
-          <div
-            className="pt-tabscroll"
-            style={{
-              flex: 1, overflowY: "auto", background: "#0b0b0b",
-              padding: "12px calc(env(safe-area-inset-right, 0px) + 12px) 12px 12px",
-            }}
-          >
-            {children}
-          </div>
-        </div>
-      ) : (
-        // Left/right padding adds the device's safe-area inset (real,
-        // non-zero now that layout.tsx declares viewportFit:"cover") ON TOP
-        // of the existing 12px, same reasoning as Header's own icon-row
-        // padding above -- background stays #0b0b0b all the way to the
-        // physical edge (this div's own width is never constrained, so it
-        // already reaches as far as the now-extended layout viewport does),
-        // only CONTENT gets pushed clear of the unsafe strip. Bottom keeps
-        // its own existing safe-area handling wherever it already existed
-        // (unaffected here) -- this fix is specifically the left/right
-        // "black bars" the user pointed at, not a bottom-inset change.
+        ) : null}
         <div
           className="pt-tabscroll"
           style={{
             flex: 1, overflowY: "auto", background: "#0b0b0b",
-            padding: "0px calc(env(safe-area-inset-right, 0px) + 12px) 12px calc(env(safe-area-inset-left, 0px) + 12px)",
+            padding: isLandscape
+              ? "12px calc(env(safe-area-inset-right, 0px) + 12px) 12px 12px"
+              : "0px calc(env(safe-area-inset-right, 0px) + 12px) 12px calc(env(safe-area-inset-left, 0px) + 12px)",
           }}
         >
           {children}
         </div>
-      )}
+      </div>
 
       <EquipmentModal
         open={shell.equipOpen}

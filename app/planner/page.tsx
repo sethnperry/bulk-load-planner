@@ -2721,6 +2721,7 @@ const lastProductInfoById = useMemo(() => {
         onBackToPlanner={handleBackToPlannerNoUpdate}
         loadedDisabled={loadWorkflow.completeBusy}
         loadedLabel={loadWorkflow.completeBusy ? "Saving…" : "Log the Load"}
+        errorMessage={loadWorkflow.completeError}
       />
 
       <TerminalSwitchDuringLoadSheet

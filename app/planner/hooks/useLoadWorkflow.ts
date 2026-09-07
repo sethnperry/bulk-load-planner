@@ -25,6 +25,28 @@ export type LoadUtilizationResult = {
   limiting_factor: string | null;
 };
 
+// Turn a raw fetch/network failure into something a driver at a terminal can
+// act on. Offline load writes surface as a bare "TypeError: Failed to fetch"
+// (Chrome), "Load failed" / "The network connection was lost" (WebKit/iOS),
+// or "NetworkError when attempting to fetch resource" (Firefox) -- unreadable
+// in the field, and the exact strings the device checklist flagged. Anything
+// we don't recognize falls back to the real message so a genuine server error
+// is never hidden behind a generic "no connection."
+function friendlyLoadError(err: any, fallback: string): string {
+  const raw = String(err?.message ?? err ?? "").toLowerCase();
+  if (
+    raw.includes("failed to fetch") ||
+    raw.includes("load failed") ||
+    raw.includes("networkerror") ||
+    raw.includes("network request failed") ||
+    raw.includes("network connection was lost") ||
+    raw.includes("internet connection appears to be offline")
+  ) {
+    return "No connection — nothing was submitted. Check your signal and try again.";
+  }
+  return err?.message ?? fallback;
+}
+
 // ─── Hook ─────────────────────────────────────────────────────────────────────
 
 type Props = {
@@ -271,9 +293,13 @@ export function useLoadWorkflow({
       setLoadingGallonsOverride?.({});
       setLoadingOpen(true);
       setLoadingModalError(null);
+      setCompleteError(null); // don't carry a prior load's error into a fresh one
     } catch (err: any) {
       console.error(err);
-      alert(err?.message ?? "Failed to begin load.");
+      // No Loading modal is open yet on a begin failure (this throws before
+      // setLoadingOpen(true)), so an alert is the only channel here -- but a
+      // readable one, not a raw "TypeError: Failed to fetch."
+      alert(friendlyLoadError(err, "Failed to begin load."));
     } finally {
       setBeginLoadBusy(false);
     }
@@ -625,8 +651,12 @@ try {
 
     } catch (e: any) {
       console.error("complete_load failed:", e);
-      alert(e?.message ?? String(e));
-      setCompleteError(e?.message ?? String(e));
+      // The Loading modal is still open here (setLoadingOpen(false) only runs
+      // on success), so surface the error in its own themed banner
+      // (errorMessage <- completeError, wired in page.tsx) and let the driver
+      // re-tap "Log the Load" once signal returns -- no blocking native alert,
+      // and nothing was submitted, so the completed physical load isn't lost.
+      setCompleteError(friendlyLoadError(e, "Could not log the load."));
     } finally {
       setCompleteBusy(false);
     }
