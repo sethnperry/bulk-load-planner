@@ -183,3 +183,47 @@ they check the caller. Bodies requested (query below). Highest risk:
   exposure. Schema + begin_load + policy rework; deferred.
 - **F-B [HIGH for launch]** /api/demo/start public admin login — gate before
   real data. Owner's call on demo mechanics.
+
+---
+
+## SECURITY DEFINER function review (bodies pulled from live)
+
+All 47 SECURITY DEFINER functions reviewed. Authorization verdicts:
+
+**SAFE (correctly gated):**
+- `admin_set_user_company` — `is_super_admin()` only (the highest-risk one:
+  sets arbitrary membership/role; correctly super-admin-gated).
+- `get_carded(p_terminal_id, p_carded_on, p_user_id)` — the cross-user card
+  variant is **service_role-only** (checks `request.jwt.claims` role).
+- `invite_user_to_company`, `admin_remove_member` — require caller = admin of
+  the target company; only touch that company's rows.
+- `admin_get_carded` / `admin_remove_terminal_access` — caller admin check
+  present (but see F-H below re: target membership).
+- Self-scoped: `redeem_invite` (atomic, row-locked; grants only the invite's
+  role), `provision_solo_company`, `demo_commandeer`, `get_carded` 1-/2-arg,
+  `set_active_company`, `cancel_planned_load`, plus the combo/load RPCs
+  hardened earlier this session.
+- Predicate helpers (`is_company_admin/staff/member`, `is_member_of`,
+  `is_super_admin`, `get_active_company_id`, `_caller_in_company`,
+  `_combo_company`) — read-only.
+- `get_display_names` / `get_display_names_full` — hardened earlier (R3).
+
+### F-G [MEDIUM] upsert_driver_profile: arbitrary-user profile overwrite — FIX WRITTEN
+Checked caller = admin of `p_company_id` but not that `p_user_id` is a member
+of it. `profiles` is keyed by `user_id` alone (global), so an admin of ANY
+company could overwrite ANY user's profile PII (name, employee_number,
+hire_date), including users in other companies. Fixed:
+`20260907150000_secdef_target_membership_checks.sql` (adds target-membership
+requirement + pins search_path).
+
+### F-H [LOW] admin_get_carded / admin_remove_terminal_access: arbitrary-user card writes — FIX WRITTEN
+Same missing target-membership check → an admin could create/delete
+`terminal_access` for arbitrary users. Same fix migration (also adds
+`SET search_path`, which both lacked).
+
+## PASS 1 STATUS
+Structural + behavioral coverage complete. Fix migrations written (NOT yet
+applied): 20260907110000, 120000, 130000, 140000, 150000. Deferred for
+product decision: F-A (load company_id), F-B (demo/start gating). Everything
+else — RPC authz, RLS on every table, cross-company/cross-user/IDOR/NULL/anon
+— verified clean or fixed.
