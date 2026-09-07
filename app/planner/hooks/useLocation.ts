@@ -6,6 +6,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { normCity, normState } from "../utils/normalize";
+import { readActivePlannedLoad } from "../utils/activePlannedLoad";
 import type { CityRow, StateRow } from "../types";
 
 // ─── Ambient cache (per tab) ────────────────────────────────────────────────
@@ -222,6 +223,27 @@ export function useLocation(authUserId: string) {
     if (!authUserId) return;
     if (loadLocationSyncRef.current === effectiveLocKey) return;
     loadLocationSyncRef.current = effectiveLocKey;
+
+    // If the driver has a load IN PROGRESS (begin_load ran, not completed --
+    // see activePlannedLoad), reopening should return them to THAT load's
+    // terminal, not snap to their most recent COMPLETED load's terminal. The
+    // in-progress plan is resumed alongside (usePlanSlots' matching skip-
+    // discard), and keeping the terminal consistent with it means the plan's
+    // products stay available rather than reading as "not sold here."
+    const active = readActivePlannedLoad(authUserId);
+    if (active?.state) {
+      hydratingRef.current = true;
+      skipResetRef.current = true;
+      setSelectedState(active.state);
+      setSelectedCity(active.city || "");
+      setSelectedTerminalId(active.terminalId || "");
+      setSelectedRackId(active.rackId || "");
+      setTimeout(() => {
+        skipResetRef.current = false;
+        hydratingRef.current = false;
+      }, 50);
+      return;
+    }
 
     (async () => {
       const { data: rows } = await supabase

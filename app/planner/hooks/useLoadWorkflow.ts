@@ -7,6 +7,7 @@ import { supabase } from "@/lib/supabase/client";
 import { beginLoad, completeLoad, deleteLoad, cancelPlannedLoad } from "@/lib/supabase/load";
 import { computeActualLbsForLine } from "../utils/planMath";
 import { resolveEffectiveRackId } from "../utils/rack";
+import { writeActivePlannedLoad, clearActivePlannedLoad } from "../utils/activePlannedLoad";
 import type { LoadReport, PlanRow, ProductRow } from "../types";
 import type { CapacityResult } from "@/lib/capacity/computeAvailableCapacity";
 
@@ -223,6 +224,18 @@ export function useLoadWorkflow({
 
       setActiveLoadId(result.load_id);
 
+      // Mark this as the driver's in-progress load so a reopen resumes its
+      // plan + terminal instead of starting fresh (see activePlannedLoad).
+      // Cleared on completion (below) and on cancel.
+      writeActivePlannedLoad(authUserId, {
+        loadId: result.load_id,
+        comboId: String(selectedComboId),
+        terminalId: String(selectedTerminalId || ""),
+        rackId: selectedRackId ? String(selectedRackId) : null,
+        state: String(selectedState || ""),
+        city: String(selectedCity || ""),
+      });
+
       // Rack-aware loading: tag which physical rack this load happened at
       // (see CLAUDE.md "rack-aware loading"). Plain UPDATE on the row just
       // created, same non-blocking pattern as plan_slot below -- a failure
@@ -321,6 +334,9 @@ export function useLoadWorkflow({
   const cancelActiveLoad = useCallback(async () => {
     const loadId = activeLoadId;
     setLoadingOpen(false);
+    // Whichever exit this is (Update Card / Back to Planner), the load is no
+    // longer in progress -- a reopen should not resume it. See activePlannedLoad.
+    clearActivePlannedLoad(authUserId);
     if (!loadId) return;
     setActiveLoadId(null);
     setCancelBusy(true);
@@ -340,7 +356,7 @@ export function useLoadWorkflow({
     } finally {
       setCancelBusy(false);
     }
-  }, [activeLoadId]);
+  }, [activeLoadId, authUserId]);
 
   // ── On loaded (from loading modal) ────────────────────────────────────────
 
@@ -640,6 +656,9 @@ try {
       // until a full page reload. Clear it here too so loadLabel correctly
       // falls back to RELOAD/LOAD immediately after a real completed load.
       setActiveLoadId(null);
+      // Load is finalized -- a reopen should NOT resume it (only a completed
+      // load's residue pre-fills, the pre-existing behavior). See activePlannedLoad.
+      clearActivePlannedLoad(authUserId);
 
       // ── Post-load refresh (don't reset loadReport — it's set above) ─────────
       // Fire in parallel — neither touches loadReport state
@@ -662,7 +681,7 @@ try {
     }
   }, [activeLoadId, planRows, productInputs, productNameById, tare, plannedGallonsTotal, terminalProducts,
       selectedTerminalId, selectedRackId, tempF, onRefreshTerminalProducts, onRefreshTerminalAccess,
-      onPostLoadComplete, activeSlotLetter, capacityResult]);
+      onPostLoadComplete, activeSlotLetter, capacityResult, authUserId]);
 
   return {
     activeLoadId,

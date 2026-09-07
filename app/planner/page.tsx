@@ -78,6 +78,7 @@ import { styles } from "./ui/styles";
 import { addDaysISO_, daysUntilISO_, formatMDYWithCountdown_, formatMDYWithTime_, isPastISO_ } from "./utils/dates";
 import { normState } from "./utils/normalize";
 import { cgSliderToBias, bestLbsPerGallon, lbsPerGallonAtTemp, planForGallons, CG_NEUTRAL } from "./utils/planMath";
+import { writeActivePlannedLoad } from "./utils/activePlannedLoad";
 import { productColorFor } from "./utils/productColor";
 import { DEFAULT_STALE_API_DAYS } from "@/lib/config/plannerSafety";
 
@@ -1738,6 +1739,18 @@ export default function CalculatorPage() {
         .update({ terminal_id: next.terminalId, rack_id: next.rackId || null })
         .eq("load_id", loadWorkflow.activeLoadId)
         .then(({ error }) => { if (error) console.error("[terminal-switch] failed to retag load_log terminal:", error.message); });
+
+      // Keep the in-progress-load marker in sync with the new terminal so a
+      // close-and-reopen after a mid-review switch resumes HERE, not at the
+      // terminal where begin_load originally ran (see activePlannedLoad).
+      writeActivePlannedLoad(effectiveUserId || null, {
+        loadId: loadWorkflow.activeLoadId,
+        comboId: String(equipment.selectedComboId || ""),
+        terminalId: String(next.terminalId || ""),
+        rackId: next.rackId ? String(next.rackId) : null,
+        state: String(next.state || ""),
+        city: String(next.city || ""),
+      });
     }
 
     for (const pid of plannedProductIdsForSwitch) setProductApi(pid, "");
@@ -1750,7 +1763,7 @@ export default function CalculatorPage() {
     } else {
       setPendingSameCityTempApply({ armed: true, sawLoadingStart: false, productIds: plannedProductIdsForSwitch });
     }
-  }, [terminalSwitchConfirm, loadWorkflow.activeLoadId, plannedProductIdsForSwitch, setProductApi]);
+  }, [terminalSwitchConfirm, loadWorkflow.activeLoadId, plannedProductIdsForSwitch, setProductApi, effectiveUserId, equipment.selectedComboId]);
 
   // Same-city silent refresh: waits for useFuelTempPrediction's own refetch
   // (already triggered automatically -- its signature includes terminalId,
@@ -2722,6 +2735,7 @@ const lastProductInfoById = useMemo(() => {
         loadedDisabled={loadWorkflow.completeBusy}
         loadedLabel={loadWorkflow.completeBusy ? "Saving…" : "Log the Load"}
         errorMessage={loadWorkflow.completeError}
+        allPlannedUnavailable={unavailableComps.length > 0}
       />
 
       <TerminalSwitchDuringLoadSheet

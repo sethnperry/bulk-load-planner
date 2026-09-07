@@ -100,6 +100,14 @@ export default function LoadingModal(props: {
   // Tapping the terminal name opens the shared location/terminal picker
   // without leaving this modal (mid-load switch flow, see page.tsx).
   onTapTerminal?: () => void;
+  // True when the plan HAS products but none of them are sold at the
+  // currently-selected terminal -- e.g. after a mid-review terminal switch
+  // to a place that carries different products. Those comps get dropped
+  // upstream (page.tsx's activeComps, no density -> no planRow), so the modal
+  // can't tell this apart from a genuinely empty plan on its own; page.tsx
+  // passes it in so the empty state reads as a real explanation instead of a
+  // dead-end "No filled compartments." (see page.tsx unavailableComps).
+  allPlannedUnavailable?: boolean;
 }) {
   const {
     open,
@@ -125,6 +133,7 @@ export default function LoadingModal(props: {
     equipmentLabel,
     terminalLabel,
     onTapTerminal,
+    allPlannedUnavailable,
   } = props;
 
   const plannedLines = useMemo(() => {
@@ -298,7 +307,23 @@ export default function LoadingModal(props: {
           <div style={{ fontWeight: 800, fontSize: 13, letterSpacing: 0.2, opacity: 0.7, textTransform: "uppercase" }}>Planned compartments</div>
 
           {plannedLines.length === 0 ? (
-            <div style={styles.help}>No filled compartments in the plan.</div>
+            allPlannedUnavailable ? (
+              <div
+                style={{
+                  borderRadius: 6,
+                  border: "1px solid rgba(255,170,60,0.35)",
+                  background: "rgba(255,170,60,0.10)",
+                  padding: "10px 12px",
+                  color: "rgba(255,225,190,0.95)",
+                  fontWeight: 700,
+                  lineHeight: 1.3,
+                }}
+              >
+                None of your planned products are sold at {terminalLabel || "this terminal"}. Tap “Back to Planner” below to swap them for products carried here.
+              </div>
+            ) : (
+              <div style={styles.help}>No filled compartments in the plan.</div>
+            )
           ) : (
             <div style={{ display: "grid", gap: 8 }}>
               {plannedLines.map((x) => {

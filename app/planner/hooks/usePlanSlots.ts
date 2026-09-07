@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { biasToCgSlider } from "../utils/planMath";
+import { readActivePlannedLoad } from "../utils/activePlannedLoad";
 import type { CompPlanInput, PlanSnapshot } from "../types";
 
 const PLAN_SLOTS = [1, 2, 3, 4, 5] as const;
@@ -783,7 +784,15 @@ export function usePlanSlots({
     planRestoreReadyRef.current = planScopeKey;
 
     const consumesFreshFlag = !!authUserId;
-    const skipLocalRestore = isFreshMountRef.current && consumesFreshFlag;
+    // Exception to the fresh-mount discard: if the driver has a load in
+    // progress on THIS combo (begin_load ran, not completed -- see
+    // activePlannedLoad), resume its plan instead of throwing it away, so a
+    // close-and-reopen mid-load brings the plan back rather than empty
+    // compartments. A completed load clears the marker, so this never
+    // resurrects finalized work.
+    const resumable = readActivePlannedLoad(authUserId);
+    const hasActiveForThisCombo = !!resumable && resumable.comboId === String(selectedComboId);
+    const skipLocalRestore = isFreshMountRef.current && consumesFreshFlag && !hasActiveForThisCombo;
     if (consumesFreshFlag) isFreshMountRef.current = false;
 
     if (skipLocalRestore) {
