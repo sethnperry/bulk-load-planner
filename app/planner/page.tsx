@@ -66,6 +66,7 @@ import LoadingModal from "./modals/LoadingModal";
 import CancelLoadSheet from "./components/CancelLoadSheet";
 import TerminalSwitchDuringLoadSheet from "./components/TerminalSwitchDuringLoadSheet";
 import RecallDifferentEquipmentSheet from "./components/RecallDifferentEquipmentSheet";
+import StaleApiOverlay, { type StaleProduct } from "./components/StaleApiOverlay";
 import { submitOutageReport, type OutageReportType } from "./hooks/useTerminalOutageReports";
 import ProductTempModal from "./modals/ProductTempModal";
 import CompartmentModal from "./modals/CompartmentModal";
@@ -76,7 +77,7 @@ import { styles } from "./ui/styles";
 // ── Utils ──────────────────────────────────────────────────────────────────────
 import { addDaysISO_, daysUntilISO_, formatMDYWithCountdown_, formatMDYWithTime_, isPastISO_ } from "./utils/dates";
 import { normState } from "./utils/normalize";
-import { cgSliderToBias, bestLbsPerGallon, planForGallons, CG_NEUTRAL, computeActualLbsForLine } from "./utils/planMath";
+import { cgSliderToBias, bestLbsPerGallon, lbsPerGallonAtTemp, planForGallons, CG_NEUTRAL, computeActualLbsForLine } from "./utils/planMath";
 import { productColorFor } from "./utils/productColor";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -368,6 +369,21 @@ export default function CalculatorPage() {
   // Planner" can genuinely undo it (see handleBackToPlannerNoUpdate below).
   // null prevValue means the terminal had no prior access record at all.
   const preLoadCardedOnRef = useRef<{ terminalId: string; prevValue: string | null } | null>(null);
+
+  // ── Stale-API safety (Good / Better / Best on LOAD) ──────────────────────
+  // Per-product API_60 override that forces the plan's density calc heavier
+  // when the driver chose "Safest"/"Safe" for a stale product at LOAD time.
+  // Empty = use the normal last-observed/reference density (the "Ignore"
+  // choice, and every product with a fresh reading). Cleared whenever the
+  // Loading modal closes so it can never leak into the planner view.
+  const [apiSafetyOverride, setApiSafetyOverride] = useState<Record<string, number>>({});
+  // The stale-API decision overlay's own open state + which products it lists.
+  const [staleApiPrompt, setStaleApiPrompt] = useState<{ products: StaleProduct[] } | null>(null);
+  // Deferred begin: a choice sets the override AND flips this true; an effect
+  // then begins the load on the NEXT render, once planRows has recomputed
+  // against the new override (see the effect below -- begins with fresh
+  // planRows, not the stale pre-override closure).
+  const [beginAfterOverride, setBeginAfterOverride] = useState(false);
 
   // ── Action row state ────────────────────────────────────────────────────────
   // activeSlotLetter mirrors PresetDial's own (cosmetic) centered/last-tapped
@@ -887,6 +903,15 @@ export default function CalculatorPage() {
   const lbsPerGalForProductId = useCallback((productId: string): number | null => {
     const p = terminalProducts.find((x) => x.product_id === productId);
     if (!p || p.api_60 == null || p.alpha_per_f == null) return null;
+    // Stale-API safety override wins outright: the driver chose to assume a
+    // specific (heavier) API_60 for this product on the LOAD stale-API
+    // prompt, so density is computed from that directly -- never the
+    // last-observed/reference reading, which is exactly what they overrode.
+    const overrideApi60 = apiSafetyOverride[productId];
+    if (overrideApi60 != null && Number.isFinite(overrideApi60)) {
+      const t = productTempF[productId] ?? tempF;
+      return lbsPerGallonAtTemp(Number(overrideApi60), Number(p.alpha_per_f), t);
+    }
     // Each product uses its OWN planned temp now, not the shared dial value --
     // a split load (e.g. diesel + regular in the same trailer) really can sit
     // at two different temps at once, and the weight math needs to reflect
@@ -904,7 +929,7 @@ export default function CalculatorPage() {
       p.last_api     != null ? Number(p.last_api)     : null,
       p.last_temp_f  != null ? Number(p.last_temp_f)  : null,
     );
-  }, [terminalProducts, tempF, productTempF]);
+  }, [terminalProducts, tempF, productTempF, apiSafetyOverride]);
 
   // ── Active compartments ────────────────────────────────────────────────────
   const activeComps = useMemo<ActiveComp[]>(() => {
@@ -924,7 +949,7 @@ export default function CalculatorPage() {
     }
     out.sort((a, b) => a.position - b.position);
     return out;
-  }, [selectedTrailerId, compartments, terminalProducts, compPlan, tempF]);
+  }, [selectedTrailerId, compartments, terminalProducts, compPlan, tempF, apiSafetyOverride, lbsPerGalForProductId]);
 
   // Seed productTempF for any planned product that doesn't have an entry yet
   // (new product just added to the plan), and drop entries for products no
@@ -1344,24 +1369,45 @@ export default function CalculatorPage() {
     }
   }, [loadWorkflow, terminals]);
 
-  // Step 2 of tapping LOAD -- step 1 (loadButtonEl's onClick) just opens
-  // ProductTempModal for the driver to confirm/adjust the temp; this is
-  // ProductTempModal's own "Confirm & Continue" handler, fired once they
-  // do. Closes the temp modal, captures preLoadCardedOnRef (unchanged from
-  // before this modal was interposed -- still "right before the load
-  // actually begins", just one tap later than it used to be), then calls
-  // beginLoadToSupabase, which opens LoadingModal ("Plan Review") as step
-  // 3 -- Complete there is step 4. Tapping the temp modal's own header
-  // Close instead (not this) is the bail-out: no load has been started
-  // yet at that point, so there's nothing to undo.
-  const handleConfirmTempAndBeginLoad = useCallback(() => {
-    setTempDialOpen(false);
+  // ── LOAD -> (stale-API check) -> begin ───────────────────────────────────
+  // The pre-load temp-confirm step (ProductTempModal on the LOAD tap) is
+  // gone -- temp is now entered per product at Log the Load. LOAD instead
+  // checks for stale/missing API readings and, if any, offers the Good /
+  // Better / Best safety overlay before beginning; otherwise it begins
+  // directly. (ProductTempModal is still used for the mid-load different-
+  // city reconfirm -- handleConfirmTempReconfirm below.)
+  //
+  // requestBegin sets the chosen per-product density override and defers the
+  // actual begin to the effect below, so the load snapshots planRows that
+  // already reflect the override (not the stale pre-override closure).
+  const requestBegin = useCallback((override: Record<string, number>) => {
+    setApiSafetyOverride(override);
+    setBeginAfterOverride(true);
+  }, []);
+
+  useEffect(() => {
+    if (!beginAfterOverride) return;
+    setBeginAfterOverride(false);
     preLoadCardedOnRef.current = {
       terminalId: location.selectedTerminalId,
       prevValue: terminals.accessDateByTerminalId[location.selectedTerminalId] ?? null,
     };
     loadWorkflow.beginLoadToSupabase();
-  }, [location.selectedTerminalId, terminals, loadWorkflow]);
+    // beginLoadToSupabase closes over the current (post-override) planRows;
+    // this effect runs after that render commits, so the snapshot is fresh.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [beginAfterOverride]);
+
+  // Clear the safety override whenever the Loading modal closes (complete,
+  // cancel, update-card, or back) so a heavier assumption never lingers into
+  // the planner view or the next load.
+  useEffect(() => {
+    if (!loadWorkflow.loadingOpen) setApiSafetyOverride({});
+  }, [loadWorkflow.loadingOpen]);
+
+  // computeStalePlannedProducts / buildStaleOverride / handleStale* live
+  // further down, after lastProductInfoById + productHexCodeById are declared
+  // (they reference those), so they aren't in this block.
 
   // Wired into CancelLoadSheet's new "Report Terminal Issue" flow -- see
   // CLAUDE.md "Terminal outage banners." Stays a thin call-through to the
@@ -1784,6 +1830,76 @@ const lastProductInfoById = useMemo(() => {
     for (const p of terminalProducts) { if (p.product_id && p.hex_code) rec[p.product_id] = String(p.hex_code); }
     return rec;
   }, [terminalProducts]);
+
+  // ── Stale-API decision helpers ────────────────────────────────────────────
+  // (Placed here, after lastProductInfoById + productHexCodeById, which they
+  // read; requestBegin + the begin/clear effects live up near the other load
+  // handlers since they don't depend on these.)
+  const STALE_API_DAYS = 7;
+  const computeStalePlannedProducts = useCallback((): StaleProduct[] => {
+    const out: StaleProduct[] = [];
+    for (const pid of plannedProductIds) {
+      const info = lastProductInfoById[pid];
+      const lastApi = info?.last_api;
+      const ts = info?.last_api_updated_at;
+      let stale = false;
+      if (lastApi == null || !Number.isFinite(Number(lastApi))) {
+        stale = true; // no reading at all
+      } else if (!ts) {
+        stale = false; // have a value but no timestamp -- can't call it stale
+      } else {
+        const d = new Date(ts);
+        stale = !Number.isNaN(d.getTime()) && (Date.now() - d.getTime()) > STALE_API_DAYS * 86400000;
+      }
+      if (stale) {
+        out.push({
+          productId: pid,
+          name: productNameById.get(pid) ?? pid,
+          dotColor: (productHexCodeById[pid] && productHexCodeById[pid].trim()) || "rgba(255,255,255,0.5)",
+        });
+      }
+    }
+    return out;
+  }, [plannedProductIds, lastProductInfoById, productNameById, productHexCodeById]);
+
+  // Build the per-product API_60 override for a stale-API choice. `pick`
+  // returns the chosen API for one product, or null to leave it on its
+  // normal density (fresh products are never in the stale list anyway).
+  const buildStaleOverride = useCallback((pick: (p: ProductRow) => number | null): Record<string, number> => {
+    const map: Record<string, number> = {};
+    for (const sp of staleApiPrompt?.products ?? []) {
+      const prod = terminalProducts.find((p) => p.product_id === sp.productId);
+      if (!prod) continue;
+      const v = pick(prod);
+      if (v != null && Number.isFinite(v)) map[sp.productId] = Number(v);
+    }
+    return map;
+  }, [staleApiPrompt, terminalProducts]);
+
+  const handleStaleSafest = useCallback(() => {
+    // Published heaviest -> api_min (fall back to api_60 if not seeded yet).
+    const map = buildStaleOverride((p) => (p.api_min != null ? Number(p.api_min) : (p.api_60 != null ? Number(p.api_60) : null)));
+    setStaleApiPrompt(null);
+    requestBegin(map);
+  }, [buildStaleOverride, requestBegin]);
+
+  const handleStaleSafe = useCallback(() => {
+    // Heaviest this terminal has seen -> min_api_observed (fall back to
+    // api_min, then api_60).
+    const map = buildStaleOverride((p) =>
+      p.min_api_observed != null ? Number(p.min_api_observed)
+      : p.api_min != null ? Number(p.api_min)
+      : p.api_60 != null ? Number(p.api_60)
+      : null
+    );
+    setStaleApiPrompt(null);
+    requestBegin(map);
+  }, [buildStaleOverride, requestBegin]);
+
+  const handleStaleIgnore = useCallback(() => {
+    setStaleApiPrompt(null);
+    requestBegin({}); // proceed on the last-known reading
+  }, [requestBegin]);
 
   // Per-product rows for the Temp modal's product list (dot + name + own
   // temp, tap to adjust just that one) -- same shape as LoadingModal's own
@@ -2267,10 +2383,9 @@ const lastProductInfoById = useMemo(() => {
         // pin (not the stroke outline used elsewhere). Temperature used to
         // be a fourth icon here (a live °F reading, color carrying
         // confidence) -- removed per explicit direction to reduce the
-        // header's icon count; confirming/adjusting the temp is now the
-        // first step of tapping LOAD instead (see loadButtonEl's onClick
-        // and handleConfirmTempAndBeginLoad below), not a standalone
-        // always-available control.
+        // header's icon count; temp is now entered per product at Log the
+        // Load, not confirmed up front, so there's no standalone temp
+        // control here anymore.
         const headerIconsEl = (
           <>
             {(() => {
@@ -2447,13 +2562,18 @@ const lastProductInfoById = useMemo(() => {
                 setLoadBlockedMsg(`Cannot Load, all planned products are not available at ${terminalLabel || "this terminal"}`);
                 return;
               }
-              // Temp confirmation is now step one of tapping LOAD (was its
-              // own always-available header icon) -- see
-              // handleConfirmTempAndBeginLoad below for the step that
-              // actually captures preLoadCardedOnRef and calls
-              // beginLoadToSupabase, once the driver confirms/adjusts the
-              // temp on the modal this opens.
-              setTempDialOpen(true);
+              // Stale-API safety check is now step one of tapping LOAD (the
+              // pre-load temp-confirm modal is gone -- temp is entered per
+              // product at Log the Load). If any planned product's reading is
+              // stale/missing, offer Good/Better/Best; otherwise begin
+              // directly. requestBegin captures preLoadCardedOnRef and starts
+              // begin_load via the deferred effect.
+              const stale = computeStalePlannedProducts();
+              if (stale.length > 0) {
+                setStaleApiPrompt({ products: stale });
+              } else {
+                requestBegin({});
+              }
             }}
             disabled={loadDisabled}
             style={{
@@ -2609,6 +2729,15 @@ const lastProductInfoById = useMemo(() => {
         onSubmitOutageReport={handleSubmitOutageReport}
       />
 
+      <StaleApiOverlay
+        open={!!staleApiPrompt}
+        products={staleApiPrompt?.products ?? []}
+        onSafest={handleStaleSafest}
+        onSafe={handleStaleSafe}
+        onIgnore={handleStaleIgnore}
+        onCancel={() => setStaleApiPrompt(null)}
+      />
+
       <RecallDifferentEquipmentSheet
         open={!!altEquipmentPrompt}
         truckLabel={altEquipmentPrompt?.truckLabel ?? ""}
@@ -2622,13 +2751,14 @@ const lastProductInfoById = useMemo(() => {
       <ProductTempModal
         open={tempDialOpen}
         onClose={() => { setTempDialOpen(false); setTempReconfirmProductIds(null); }}
-        // Two completely different callers share this one modal instance:
-        // the original LOAD flow (tempReconfirmProductIds null -> begins a
-        // new load) and the mid-load terminal-switch's different-city
-        // reconfirm (tempReconfirmProductIds set -> just propagates the
-        // confirmed temp into the already-in-progress plan and returns to
-        // Plan Review, see handleConfirmTempReconfirm's own comment).
-        onConfirm={tempReconfirmProductIds != null ? handleConfirmTempReconfirm : handleConfirmTempAndBeginLoad}
+        // This modal is now only opened by the mid-load terminal-switch's
+        // different-city reconfirm (tempReconfirmProductIds set -> propagate
+        // the confirmed temp into the already-in-progress plan and return to
+        // Plan Review). The pre-load temp-confirm step was removed -- temp is
+        // entered per product at Log the Load. The ?? onClose guard keeps the
+        // Confirm button harmless if this ever renders without a reconfirm
+        // target.
+        onConfirm={tempReconfirmProductIds != null ? handleConfirmTempReconfirm : (() => setTempDialOpen(false))}
         styles={styles}
         selectedCity={location.selectedCity}
         selectedState={location.selectedState}
