@@ -34,9 +34,109 @@ export type ProductInputs = Record<
   }
 >;
 
+// One row of the "Load basis" / Tune panel -- the density basis behind the
+// planned gallons, per product. All values are precomputed in page.tsx so this
+// modal stays presentational; lbsPerGal already reflects any tune, so the panel
+// and the planned gallons can never disagree.
+export type TuneRow = {
+  productId: string;
+  code: string;
+  dotColor: string;
+  tempF: number;
+  api: number | null;
+  lbsPerGal: number | null;
+  dateLabel: string;
+  tuned: boolean;
+};
+
 function fmtSignedLbs(v: number): string {
   const rounded = Math.round(v);
   return rounded > 0 ? `+${rounded}` : String(rounded);
+}
+
+// The Tune panel: shows the density basis (code · temp · API · lbs/gal · date)
+// per product and lets the driver correct it with a fresh gauge/BOL reading.
+// Tapping a row opens the same numeric overlay used to update temp/api
+// elsewhere; a correction recomputes the planned gallons live (page.tsx's
+// onTuneProduct feeds the density). Temp keeps its confidence color.
+function TunePanel({ rows, tempColor, onTune }: {
+  rows: TuneRow[];
+  tempColor: string;
+  onTune: (productId: string, api: number, tempF: number) => void;
+}) {
+  const [editing, setEditing] = useState<TuneRow | null>(null);
+  const [apiStr, setApiStr] = useState("");
+  const [tempStr, setTempStr] = useState("");
+
+  if (!rows || rows.length === 0) return null;
+
+  function openEdit(r: TuneRow) {
+    setTempStr(String(Math.round(r.tempF * 10) / 10));
+    setApiStr(r.api != null ? String(Math.round(r.api * 10) / 10) : "");
+    setEditing(r);
+  }
+  function commit() {
+    if (!editing) return;
+    const api = Number(apiStr);
+    const t = Number(tempStr);
+    if (Number.isFinite(api) && api > 0 && Number.isFinite(t)) {
+      onTune(editing.productId, Math.round(api * 10) / 10, Math.round(t * 10) / 10);
+    }
+    setEditing(null);
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <div style={{ fontWeight: 800, fontSize: 13, letterSpacing: 0.2, opacity: 0.7, textTransform: "uppercase" }}>
+        Load basis · tap to tune
+      </div>
+      <div style={{ display: "grid", gap: 8 }}>
+        {rows.map((r) => (
+          <button
+            key={r.productId}
+            type="button"
+            onClick={() => openEdit(r)}
+            style={{
+              display: "flex", flexDirection: "column", gap: 4,
+              padding: "9px 12px", borderRadius: 10,
+              border: CARD_BORDER, background: CARD_BG, boxShadow: CARD_SHADOW,
+              cursor: "pointer", width: "100%", textAlign: "left" as const,
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+              <span style={{ width: 10, height: 10, borderRadius: "50%", background: r.dotColor, flexShrink: 0, alignSelf: "center" }} />
+              <span style={{ fontSize: 14, fontWeight: 800, color: "#fff", flexShrink: 0 }}>{r.code}</span>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginLeft: "auto", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                <span style={{ fontSize: 14, fontWeight: 800, color: tempColor }}>{r.tempF.toFixed(1)}°F</span>
+                <span style={{ fontSize: 14, fontWeight: 800, color: "#fff" }}>{r.api != null ? `${r.api.toFixed(1)} API` : "— API"}</span>
+                <span style={{ fontSize: 14, fontWeight: 800, color: "rgba(255,255,255,0.9)" }}>{r.lbsPerGal != null ? `${r.lbsPerGal.toFixed(2)} lb/gal` : "—"}</span>
+              </div>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontSize: 11, fontWeight: 600, color: r.tuned ? "#4ade80" : "rgba(255,255,255,0.4)" }}>
+                {r.tuned ? "edited · just now" : r.dateLabel}
+              </span>
+              <span style={{ fontSize: 12, color: "rgba(255,255,255,0.3)" }}>tune ›</span>
+            </div>
+          </button>
+        ))}
+      </div>
+
+      <ValueEntryOverlay
+        open={!!editing}
+        title={editing ? `Tune ${editing.code}` : "Tune"}
+        dotColor={editing?.dotColor}
+        fields={[
+          { key: "temp", label: "Temp °F", value: tempStr, onChange: setTempStr, decimal: true, suffix: "°F" },
+          { key: "api", label: "API", value: apiStr, onChange: setApiStr, decimal: true, suffix: "API" },
+        ]}
+        hint="From your gauge or BOL"
+        onCancel={() => setEditing(null)}
+        onSubmit={commit}
+        submitLabel="Set"
+      />
+    </div>
+  );
 }
 
 export default function LoadingModal(props: {
@@ -108,6 +208,11 @@ export default function LoadingModal(props: {
   // passes it in so the empty state reads as a real explanation instead of a
   // dead-end "No filled compartments." (see page.tsx unavailableComps).
   allPlannedUnavailable?: boolean;
+  // "Load basis" / Tune panel: the density basis (temp/API/lbs-gal/date) behind
+  // the planned gallons, per product, editable to recompute gallons live.
+  tuneRows?: TuneRow[];
+  onTuneProduct?: (productId: string, api: number, tempF: number) => void;
+  tuneTempColor?: string;
 }) {
   const {
     open,
@@ -134,6 +239,9 @@ export default function LoadingModal(props: {
     terminalLabel,
     onTapTerminal,
     allPlannedUnavailable,
+    tuneRows,
+    onTuneProduct,
+    tuneTempColor,
   } = props;
 
   const plannedLines = useMemo(() => {
@@ -366,9 +474,17 @@ export default function LoadingModal(props: {
           )}
         </div>
 
-        {/* Live weight / diff-vs-target preview -- plan density (API/Temp are
-            entered later at Log the Load). Same math the final submission
-            uses, so it can never disagree with the recap. */}
+        {/* Load basis / Tune panel -- the density (temp/API) the planned
+            gallons stand on, per product, editable to recompute live. This is
+            what makes "you can load this much" trustworthy instead of a black
+            box, and it's where temp is confirmed now (no separate step). */}
+        {tuneRows && onTuneProduct && tuneRows.length > 0 && (
+          <TunePanel rows={tuneRows} tempColor={tuneTempColor || "#ffffff"} onTune={onTuneProduct} />
+        )}
+
+        {/* Live weight / diff-vs-target preview -- plan density reflects any
+            tune above. Same math the final submission uses, so it can never
+            disagree with the recap. */}
         {showLivePreview && (
           <div style={{
             display: "flex", justifyContent: "space-between", alignItems: "center",

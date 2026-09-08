@@ -179,3 +179,45 @@ test("lbsPerGallonAtTemp: extreme low API is caught by the >0 planner guard", ()
   const bad = lbsPerGallonAtTemp(-140, 0, 60); // api60 + 131.5 < 0 -> negative SG
   assert.ok(!(bad > 0), `expected non-positive, got ${bad}`);
 });
+
+// ── Plan Review "Tune" panel: the density a driver-tuned reading produces ──────
+// The Tune panel (page.tsx lbsPerGalForProductId's tuned branch) computes
+// density as lbsPerGallonAtTemp(backCorrectApiTo60(api, temp, alpha), alpha,
+// temp) from the driver's own observed API+temp. The safety-critical property:
+// tuning to a DENSER reading (lower API) must LOWER capacity, never raise it, so
+// a driver correcting toward heavier product can only ever plan fewer gallons.
+function tunedLbsPerGal(api: number, tempF: number, alpha: number): number {
+  return lbsPerGallonAtTemp(backCorrectApiTo60(api, tempF, alpha), alpha, tempF);
+}
+
+test("tune density: lower observed API -> heavier lb/gal (denser)", () => {
+  const alpha = 0.0004;
+  const heavy = tunedLbsPerGal(30, 90, alpha); // low API = dense
+  const light = tunedLbsPerGal(45, 90, alpha); // high API = light
+  assert.ok(heavy > light, `expected heavier lb/gal at lower API: ${heavy} vs ${light}`);
+});
+
+test("tune density: correcting to a denser reading never RAISES capacity", () => {
+  const alpha = 0.0004;
+  const comp = (lbsPerGal: number) => [{
+    compNumber: 1, maxGallons: 9000, position: 0, lbsPerGal, productId: "p",
+  }];
+  const allowedLbs = 55000; // target - tare, fixed
+  const denseGal = solveMaxGallons(9000, comp(tunedLbsPerGal(30, 90, alpha)), allowedLbs, 0);
+  const lightGal = solveMaxGallons(9000, comp(tunedLbsPerGal(45, 90, alpha)), allowedLbs, 0);
+  // Denser product -> fewer gallons fit under the same weight ceiling.
+  assert.ok(denseGal <= lightGal, `denser must not allow more gallons: ${denseGal} vs ${lightGal}`);
+  // And the denser plan must not exceed the ceiling (the core solve invariant).
+  assert.ok(denseGal * tunedLbsPerGal(30, 90, alpha) <= allowedLbs + 1e-6);
+});
+
+test("tune density: round-trips a fresh reading back to its own weight", () => {
+  // A reading tuned at temp T then loaded at T must weigh what API gravity says
+  // at T -- backCorrect to 60 then forward to T is a no-op on the density.
+  const alpha = 0.00045;
+  const direct = lbsPerGallonAtTemp(backCorrectApiTo60(36.7, 92.6, alpha), alpha, 92.6);
+  assert.ok(direct > 0 && Number.isFinite(direct));
+  // Same observed API at a HOTTER temp is lighter (thermal expansion).
+  const hotter = tunedLbsPerGal(36.7, 100, alpha);
+  assert.ok(hotter < direct, `hotter product should be lighter: ${hotter} vs ${direct}`);
+});

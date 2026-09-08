@@ -77,7 +77,7 @@ import { styles } from "./ui/styles";
 // ── Utils ──────────────────────────────────────────────────────────────────────
 import { addDaysISO_, daysUntilISO_, formatMDYWithCountdown_, formatMDYWithTime_, isPastISO_ } from "./utils/dates";
 import { normState } from "./utils/normalize";
-import { cgSliderToBias, bestLbsPerGallon, lbsPerGallonAtTemp, planForGallons, CG_NEUTRAL } from "./utils/planMath";
+import { cgSliderToBias, bestLbsPerGallon, lbsPerGallonAtTemp, planForGallons, CG_NEUTRAL, backCorrectApiTo60 } from "./utils/planMath";
 import { writeActivePlannedLoad } from "./utils/activePlannedLoad";
 import { productColorFor } from "./utils/productColor";
 import { DEFAULT_STALE_API_DAYS } from "@/lib/config/plannerSafety";
@@ -379,6 +379,13 @@ export default function CalculatorPage() {
   // choice, and every product with a fresh reading). Cleared whenever the
   // Loading modal closes so it can never leak into the planner view.
   const [apiSafetyOverride, setApiSafetyOverride] = useState<Record<string, number>>({});
+  // Per-product driver-tuned observed API + the temp it was read at, entered in
+  // Plan Review's Tune panel. When present it OVERRIDES the density basis for
+  // that product (see lbsPerGalForProductId's first branch), so tuning
+  // recomputes planned gallons live; onTuneProduct also writes the submission
+  // inputs (productInputs) so the logged weight matches what the driver tuned.
+  // Cleared when the Loading modal closes (same as apiSafetyOverride).
+  const [tunedApiTempByProduct, setTunedApiTempByProduct] = useState<Record<string, { api: number; tempF: number }>>({});
   // The stale-API decision overlay's own open state + which products it lists.
   const [staleApiPrompt, setStaleApiPrompt] = useState<{ products: StaleProduct[] } | null>(null);
   // Deferred begin: a choice sets the override AND flips this true; an effect
@@ -937,6 +944,17 @@ export default function CalculatorPage() {
   const lbsPerGalForProductId = useCallback((productId: string): number | null => {
     const p = terminalProducts.find((x) => x.product_id === productId);
     if (!p || p.api_60 == null || p.alpha_per_f == null) return null;
+    // Driver explicitly tuned this product's API/temp in Plan Review's Tune
+    // panel -- their own reading wins over everything (the terminal's last-
+    // observed value, the stale-safety override, and the api_min fallback).
+    // Back-correct the observed API (read at the tuned temp) to API_60, then
+    // density at that same temp -- identical math to bestLbsPerGallon's
+    // observed-reading path, just sourced from the driver's entry.
+    const tuned = tunedApiTempByProduct[productId];
+    if (tuned && Number.isFinite(tuned.api) && Number.isFinite(tuned.tempF)) {
+      const api60 = backCorrectApiTo60(Number(tuned.api), Number(tuned.tempF), Number(p.alpha_per_f));
+      return lbsPerGallonAtTemp(api60, Number(p.alpha_per_f), Number(tuned.tempF));
+    }
     // Stale-API safety override wins outright: the driver chose to assume a
     // specific (heavier) API_60 for this product on the LOAD stale-API
     // prompt, so density is computed from that directly -- never the
@@ -971,7 +989,7 @@ export default function CalculatorPage() {
       p.last_api     != null ? Number(p.last_api)     : null,
       p.last_temp_f  != null ? Number(p.last_temp_f)  : null,
     );
-  }, [terminalProducts, tempF, productTempF, apiSafetyOverride]);
+  }, [terminalProducts, tempF, productTempF, apiSafetyOverride, tunedApiTempByProduct]);
 
   // ── Active compartments ────────────────────────────────────────────────────
   const activeComps = useMemo<ActiveComp[]>(() => {
@@ -1428,11 +1446,12 @@ export default function CalculatorPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [beginAfterOverride]);
 
-  // Clear the safety override whenever the Loading modal closes (complete,
-  // cancel, update-card, or back) so a heavier assumption never lingers into
-  // the planner view or the next load.
+  // Clear the safety override AND the Tune-panel overrides whenever the Loading
+  // modal closes (complete, cancel, update-card, or back) so a heavier
+  // assumption or a driver's tuned reading never lingers into the planner view
+  // or the next load.
   useEffect(() => {
-    if (!loadWorkflow.loadingOpen) setApiSafetyOverride({});
+    if (!loadWorkflow.loadingOpen) { setApiSafetyOverride({}); setTunedApiTempByProduct({}); }
   }, [loadWorkflow.loadingOpen]);
 
   // computeStalePlannedProducts / buildStaleOverride / handleStale* live
@@ -1786,6 +1805,13 @@ export default function CalculatorPage() {
     }
 
     for (const pid of plannedProductIdsForSwitch) setProductApi(pid, "");
+    // Drop any Tune-panel overrides too -- a tuned reading was for the OLD
+    // terminal; the new terminal's own reading (or a fresh tune) should apply.
+    setTunedApiTempByProduct((prev) => {
+      const next = { ...prev };
+      for (const pid of plannedProductIdsForSwitch) delete next[pid];
+      return next;
+    });
 
     const cityChanged = prev.city !== next.city || prev.state !== next.state;
     userAdjustedTempRef.current = false; // an explicit driver-triggered refresh should win over any earlier manual nudge
@@ -1872,6 +1898,82 @@ const lastProductInfoById = useMemo(() => {
     for (const p of terminalProducts) { if (p.product_id && p.hex_code) rec[p.product_id] = String(p.hex_code); }
     return rec;
   }, [terminalProducts]);
+
+  // Short code for the Tune panel (product code, not the full label) -- same
+  // fallback chain the compartment bars already use.
+  const productCodeById = useMemo(() => {
+    const rec: Record<string, string> = {};
+    for (const p of terminalProducts) {
+      if (!p.product_id) continue;
+      const code = (p as any).button_code || (p as any).product_code || String(p.product_name ?? "").split(/\s+/)[0] || "";
+      rec[p.product_id] = String(code);
+    }
+    return rec;
+  }, [terminalProducts]);
+
+  // Confidence -> temp color (same palette as the temp prediction, so the Tune
+  // panel's temp keeps the confidence color the driver already knows).
+  const tuneTempColor = useMemo(() => {
+    const c = fuelTempConfidence;
+    if (c === "high") return "#4ade80";
+    if (c === "medium") return "#fbbf24";
+    if (c === "low") return "#f87171";
+    return "#ffffff";
+  }, [fuelTempConfidence]);
+
+  // Per-product rows for Plan Review's Tune panel: code · temp · API · lbs/gal
+  // · date. Minimal by design. The density (lbsPerGal) already reflects any
+  // tune (lbsPerGalForProductId reads tunedApiTempByProduct), so the panel and
+  // the planned gallons can never disagree.
+  const tuneRows = useMemo(() => {
+    const ids = Array.from(plannedProductIds);
+    const now = Date.now();
+    const rows = ids.map((pid) => {
+      const tuned = tunedApiTempByProduct[pid];
+      const info = lastProductInfoById[pid];
+      const apiVal = tuned ? tuned.api : (info?.last_api ?? null);
+      const tempVal = tuned ? tuned.tempF : (productTempF[pid] ?? tempF);
+      const lpg = lbsPerGalForProductId(pid);
+      let dateLabel: string;
+      if (tuned) {
+        dateLabel = "just now";
+      } else if (apiVal == null) {
+        dateLabel = "no reading";
+      } else if (info?.last_api_updated_at) {
+        const d = new Date(info.last_api_updated_at);
+        if (Number.isNaN(d.getTime())) dateLabel = "unknown";
+        else {
+          const days = Math.floor((now - d.getTime()) / 86400000);
+          dateLabel = days <= 0 ? "today" : days === 1 ? "1 day ago" : `${days} days ago`;
+        }
+      } else {
+        dateLabel = "unknown";
+      }
+      return {
+        productId: pid,
+        code: productCodeById[pid] || (productNameById.get(pid) ?? pid),
+        dotColor: (productHexCodeById[pid] && productHexCodeById[pid].trim()) || "rgba(255,255,255,0.5)",
+        tempF: tempVal,
+        api: apiVal,
+        lbsPerGal: lpg != null && Number.isFinite(lpg) ? lpg : null,
+        dateLabel,
+        tuned: !!tuned,
+      };
+    });
+    rows.sort((a, b) => a.code.localeCompare(b.code));
+    return rows;
+  }, [plannedProductIds, tunedApiTempByProduct, lastProductInfoById, productTempF, tempF, lbsPerGalForProductId, productCodeById, productNameById, productHexCodeById]);
+
+  // Apply a Tune-panel edit: drives the planning density (tunedApiTempByProduct
+  // + productTempF) AND the submission inputs (productInputs) so the logged
+  // weight matches what the driver tuned. Gallons recompute live off the
+  // density change.
+  const onTuneProduct = useCallback((productId: string, api: number, tempFVal: number) => {
+    setTunedApiTempByProduct((prev) => ({ ...prev, [productId]: { api, tempF: tempFVal } }));
+    setSingleProductTempF(productId, tempFVal);
+    setProductApi(productId, String(api));
+    setProductTemp(productId, tempFVal);
+  }, [setSingleProductTempF, setProductApi, setProductTemp]);
 
   // ── Stale-API decision helpers ────────────────────────────────────────────
   // (Placed here, after lastProductInfoById + productHexCodeById, which they
@@ -2635,14 +2737,14 @@ const lastProductInfoById = useMemo(() => {
                 setLoadBlockedMsg(`Cannot Load, all planned products are not available at ${terminalLabel || "this terminal"}`);
                 return;
               }
-              // Step 1 of LOAD: confirm/adjust the planned temp. This is a
-              // must-have -- the prediction can be low-confidence, or the
-              // driver may know the exact product temp -- so temp is
-              // confirmed up front here (in addition to being editable per
-              // product at Log the Load). handleConfirmTempAndBeginLoad
-              // (the modal's Confirm & Continue) then runs the stale-API
-              // check and begins.
-              setTempDialOpen(true);
+              // Temp + API are now confirmed/tuned inside Plan Review's Tune
+              // panel (no separate Confirm Temp step). LOAD runs the stale-API
+              // safety check and begins: if any planned product's reading is
+              // stale/missing, the Good/Better/Best overlay still gates first;
+              // otherwise begin straight into Plan Review.
+              const stale = computeStalePlannedProducts();
+              if (stale.length > 0) setStaleApiPrompt({ products: stale });
+              else requestBegin({});
             }}
             disabled={loadDisabled}
             style={{
@@ -2768,6 +2870,9 @@ const lastProductInfoById = useMemo(() => {
         loadedLabel={loadWorkflow.completeBusy ? "Saving…" : "Log the Load"}
         errorMessage={loadWorkflow.completeError}
         allPlannedUnavailable={unavailableComps.length > 0}
+        tuneRows={tuneRows}
+        onTuneProduct={onTuneProduct}
+        tuneTempColor={tuneTempColor}
       />
 
       <TerminalSwitchDuringLoadSheet
