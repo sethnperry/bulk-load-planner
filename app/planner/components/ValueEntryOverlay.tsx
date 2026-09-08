@@ -54,8 +54,13 @@ export default function ValueEntryOverlay({ open, title, fields, hint, onCancel,
       style={{
         position: "fixed", inset: 0, zIndex: 500,
         background: "rgba(0,0,0,0.6)",
-        display: "flex", alignItems: "center", justifyContent: "center",
-        padding: 24,
+        // Pinned to the TOP, not centered: the on-screen number pad rises from
+        // the bottom and covered a centered card, hiding the field being typed.
+        // Top-aligned (clear of the notch/status bar) keeps the input visible
+        // above the keyboard on a phone.
+        display: "flex", alignItems: "flex-start", justifyContent: "center",
+        paddingLeft: 24, paddingRight: 24, paddingBottom: 24,
+        paddingTop: "calc(env(safe-area-inset-top, 0px) + 24px)",
       }}
     >
       <div

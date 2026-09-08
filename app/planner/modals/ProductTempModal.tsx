@@ -94,7 +94,7 @@ function ProductTempList({ groups, onSetProductTemp }: {
       {editingGroup && (
         <div
           onClick={(e) => { e.stopPropagation(); setEditingId(null); }}
-          style={{ position: "fixed", inset: 0, zIndex: 500, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}
+          style={{ position: "fixed", inset: 0, zIndex: 500, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "flex-start", justifyContent: "center", paddingLeft: 24, paddingRight: 24, paddingBottom: 24, paddingTop: "calc(env(safe-area-inset-top, 0px) + 24px)" }}
         >
           <div
             onClick={(e) => e.stopPropagation()}
