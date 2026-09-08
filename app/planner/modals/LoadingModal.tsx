@@ -44,6 +44,7 @@ export type TuneRow = {
   dotColor: string;
   tempF: number;
   api: number | null;
+  apiColor: string; // confidence color for the API value (see apiBasis.ts tiers)
   lbsPerGal: number | null;
   dateLabel: string;
   tuned: boolean;
@@ -108,7 +109,7 @@ function TunePanel({ rows, tempColor, onTune }: {
               <span style={{ fontSize: 14, fontWeight: 800, color: "#fff", flexShrink: 0 }}>{r.code}</span>
               <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginLeft: "auto", flexWrap: "wrap", justifyContent: "flex-end" }}>
                 <span style={{ fontSize: 14, fontWeight: 800, color: tempColor }}>{r.tempF.toFixed(1)}°F</span>
-                <span style={{ fontSize: 14, fontWeight: 800, color: "#fff" }}>{r.api != null ? `${r.api.toFixed(1)} API` : "— API"}</span>
+                <span style={{ fontSize: 14, fontWeight: 800, color: r.apiColor }}>{r.api != null ? `${r.api.toFixed(1)} API` : "— API"}</span>
                 <span style={{ fontSize: 14, fontWeight: 800, color: "rgba(255,255,255,0.9)" }}>{r.lbsPerGal != null ? `${r.lbsPerGal.toFixed(2)} lb/gal` : "—"}</span>
               </div>
             </div>
@@ -160,10 +161,11 @@ export default function LoadingModal(props: {
   setProductApi: (productId: string, api: string) => void;
   setProductTemp: (productId: string, tempF: number) => void;
 
-  // Commits an isolated Phase-1 gallons override for one compartment --
-  // never redistributes to siblings (see CLAUDE.md / plan doc: this is
-  // deliberately NOT the compartment-cap-slider's binary-search reallocation).
-  onSetCompartmentGallons: (comp: number, gallons: number) => void;
+  // Sets the compartment's CAP (max gallons) -- feeds the weight-bounded
+  // solver, so it can never plan the load over target (unlike a raw gallons
+  // override, which could). Lets the driver cap a compartment down to recover
+  // from a mistype without a separate control. Bounded to the physical cap.
+  onSetCompartmentCap: (comp: number, capGallons: number) => void;
   // The compartment's real configured ceiling (same bound the cap-slider's
   // own blown-up entry uses) -- null/undefined means no cap is known, in
   // which case the override is left unbounded.
@@ -224,7 +226,7 @@ export default function LoadingModal(props: {
     productInputs,
     setProductApi,
     setProductTemp,
-    onSetCompartmentGallons,
+    onSetCompartmentCap,
     persistedCapForComp,
     livePreviewGrossLbs,
     livePreviewDiffLbs,
@@ -284,7 +286,7 @@ export default function LoadingModal(props: {
     const n = parseInt(gallonsInput, 10);
     if (Number.isFinite(n)) {
       const clamped = gallonsCap != null ? Math.max(0, Math.min(gallonsCap, n)) : Math.max(0, n);
-      onSetCompartmentGallons(gallonsTarget.comp, clamped);
+      onSetCompartmentCap(gallonsTarget.comp, clamped);
     }
     setGallonsTarget(null);
   }
@@ -578,12 +580,13 @@ export default function LoadingModal(props: {
         </div>
       </div>
 
-      {/* Gallons tap-to-adjust */}
+      {/* Compartment cap tap-to-adjust -- sets the max gallons for this comp
+          (weight-bounded solver, can't overload); recovers from a mistype. */}
       <ValueEntryOverlay
         open={gallonsTarget != null}
-        title={gallonsTarget ? `C${gallonsTarget.comp} Gallons` : "Gallons"}
-        fields={[{ key: "gallons", label: "Gallons", value: gallonsInput, onChange: setGallonsInput, suffix: "gal" }]}
-        hint={gallonsCap != null ? `Max ${Math.round(gallonsCap)} gal` : undefined}
+        title={gallonsTarget ? `Cap · C${gallonsTarget.comp}` : "Cap"}
+        fields={[{ key: "gallons", label: "Max gallons", value: gallonsInput, onChange: setGallonsInput, suffix: "gal" }]}
+        hint={gallonsCap != null ? `Up to ${Math.round(gallonsCap)} gal` : undefined}
         onCancel={() => setGallonsTarget(null)}
         onSubmit={commitGallonsOverlay}
       />

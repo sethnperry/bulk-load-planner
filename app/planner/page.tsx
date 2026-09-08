@@ -78,6 +78,7 @@ import { styles } from "./ui/styles";
 import { addDaysISO_, daysUntilISO_, formatMDYWithCountdown_, formatMDYWithTime_, isPastISO_ } from "./utils/dates";
 import { normState } from "./utils/normalize";
 import { cgSliderToBias, bestLbsPerGallon, lbsPerGallonAtTemp, planForGallons, CG_NEUTRAL, backCorrectApiTo60 } from "./utils/planMath";
+import { resolveApiBasis, apiTierColor } from "./utils/apiBasis";
 import { writeActivePlannedLoad } from "./utils/activePlannedLoad";
 import { productColorFor } from "./utils/productColor";
 import { DEFAULT_STALE_API_DAYS } from "@/lib/config/plannerSafety";
@@ -964,31 +965,26 @@ export default function CalculatorPage() {
       const t = productTempF[productId] ?? tempF;
       return lbsPerGallonAtTemp(Number(overrideApi60), Number(p.alpha_per_f), t);
     }
-    // Each product uses its OWN planned temp now, not the shared dial value --
-    // a split load (e.g. diesel + regular in the same trailer) really can sit
-    // at two different temps at once, and the weight math needs to reflect
-    // that, not just the display. Falls back to the shared tempF for a
-    // product that hasn't been seeded into productTempF yet (shouldn't
-    // normally happen -- the seeding effect below keeps every planned
-    // product's entry current -- but keeps this callable safely regardless).
+    // Otherwise resolve the API basis by confidence (see apiBasis.ts): a fresh
+    // observed reading if there is one, else the terminal's observed minimum,
+    // else the product's published minimum -- the same resolver the Tune panel
+    // displays, so the shown basis and the planned gallons can never disagree.
+    // A stale/unknown reading always falls back to the HEAVIEST minimum, so it
+    // can only ever make the plan more conservative, never lighter.
+    const basis = resolveApiBasis({
+      alphaPerF: Number(p.alpha_per_f),
+      api60Ref: Number(p.api_60),
+      apiMin: p.api_min != null ? Number(p.api_min) : null,
+      minApiObserved: (p as any).min_api_observed != null ? Number((p as any).min_api_observed) : null,
+      lastApi: p.last_api != null ? Number(p.last_api) : null,
+      lastTempF: p.last_temp_f != null ? Number(p.last_temp_f) : null,
+      lastApiUpdatedAt: (p as any).last_api_updated_at ?? null,
+      tuned: tunedApiTempByProduct[productId] ?? null,
+      nowMs: Date.now(),
+      staleDays: DEFAULT_STALE_API_DAYS,
+    });
     const t = productTempF[productId] ?? tempF;
-    // Use driver-observed API (last_api @ last_temp_f) when available — more accurate
-    // than any static reference. bestLbsPerGallon back-corrects to 60°F first.
-    //
-    // When there's NO observed reading at this terminal yet (a product never
-    // loaded here), fall back to the product's published MINIMUM API (api_min,
-    // = heaviest) rather than the mid-range api_60 -- per explicit direction,
-    // an unproven product should be assumed at its heaviest until a real load
-    // corrects it, so the driver never plans over weight on a guess. Falls
-    // back to api_60 only if api_min was never seeded.
-    const referenceApi60 = p.api_min != null && Number.isFinite(Number(p.api_min)) ? Number(p.api_min) : Number(p.api_60);
-    return bestLbsPerGallon(
-      referenceApi60,
-      Number(p.alpha_per_f),
-      t,
-      p.last_api     != null ? Number(p.last_api)     : null,
-      p.last_temp_f  != null ? Number(p.last_temp_f)  : null,
-    );
+    return lbsPerGallonAtTemp(basis.api60, Number(p.alpha_per_f), t);
   }, [terminalProducts, tempF, productTempF, apiSafetyOverride, tunedApiTempByProduct]);
 
   // ── Active compartments ────────────────────────────────────────────────────
@@ -1929,32 +1925,61 @@ const lastProductInfoById = useMemo(() => {
     const ids = Array.from(plannedProductIds);
     const now = Date.now();
     const rows = ids.map((pid) => {
-      const tuned = tunedApiTempByProduct[pid];
+      const tuned = tunedApiTempByProduct[pid] ?? null;
+      const p = terminalProducts.find((x) => x.product_id === pid);
       const info = lastProductInfoById[pid];
-      const apiVal = tuned ? tuned.api : (info?.last_api ?? null);
-      const tempVal = tuned ? tuned.tempF : (productTempF[pid] ?? tempF);
       const lpg = lbsPerGalForProductId(pid);
+      const tempVal = tuned ? tuned.tempF : (productTempF[pid] ?? tempF);
+
+      // Which API the planner is standing on + its confidence tier -- the SAME
+      // resolver the density uses, so the shown API/lb-gal and the planned
+      // gallons can never disagree. Colored like the temp: green (fresh/tuned),
+      // white (within the stale window), amber (terminal minimum), red (product
+      // minimum -- nothing observed here).
+      let displayApi: number | null = tuned ? tuned.api : null;
+      let apiColor = "#ffffff";
+      if (p && p.alpha_per_f != null && p.api_60 != null) {
+        const basis = resolveApiBasis({
+          alphaPerF: Number(p.alpha_per_f),
+          api60Ref: Number(p.api_60),
+          apiMin: p.api_min != null ? Number(p.api_min) : null,
+          minApiObserved: (p as any).min_api_observed != null ? Number((p as any).min_api_observed) : null,
+          lastApi: p.last_api != null ? Number(p.last_api) : null,
+          lastTempF: p.last_temp_f != null ? Number(p.last_temp_f) : null,
+          lastApiUpdatedAt: (p as any).last_api_updated_at ?? null,
+          tuned,
+          nowMs: now,
+          staleDays: DEFAULT_STALE_API_DAYS,
+        });
+        displayApi = basis.displayApi;
+        apiColor = apiTierColor(basis.tier);
+      }
+
+      // #2: short absolute date/time of the last physical update, or "no
+      // reading" if never updated. (Tuned rows show "edited · just now".)
       let dateLabel: string;
       if (tuned) {
         dateLabel = "just now";
-      } else if (apiVal == null) {
-        dateLabel = "no reading";
       } else if (info?.last_api_updated_at) {
         const d = new Date(info.last_api_updated_at);
-        if (Number.isNaN(d.getTime())) dateLabel = "unknown";
-        else {
-          const days = Math.floor((now - d.getTime()) / 86400000);
-          dateLabel = days <= 0 ? "today" : days === 1 ? "1 day ago" : `${days} days ago`;
+        if (Number.isNaN(d.getTime())) {
+          dateLabel = "no reading";
+        } else {
+          let h = d.getHours(); const mm = d.getMinutes();
+          const ap = h < 12 ? "AM" : "PM"; h = h % 12; if (h === 0) h = 12;
+          dateLabel = `${d.getMonth() + 1}/${d.getDate()} ${h}:${String(mm).padStart(2, "0")} ${ap}`;
         }
       } else {
-        dateLabel = "unknown";
+        dateLabel = "no reading";
       }
+
       return {
         productId: pid,
         code: productCodeById[pid] || (productNameById.get(pid) ?? pid),
         dotColor: (productHexCodeById[pid] && productHexCodeById[pid].trim()) || "rgba(255,255,255,0.5)",
         tempF: tempVal,
-        api: apiVal,
+        api: displayApi,
+        apiColor,
         lbsPerGal: lpg != null && Number.isFinite(lpg) ? lpg : null,
         dateLabel,
         tuned: !!tuned,
@@ -1962,7 +1987,7 @@ const lastProductInfoById = useMemo(() => {
     });
     rows.sort((a, b) => a.code.localeCompare(b.code));
     return rows;
-  }, [plannedProductIds, tunedApiTempByProduct, lastProductInfoById, productTempF, tempF, lbsPerGalForProductId, productCodeById, productNameById, productHexCodeById]);
+  }, [plannedProductIds, tunedApiTempByProduct, terminalProducts, lastProductInfoById, productTempF, tempF, lbsPerGalForProductId, productCodeById, productNameById, productHexCodeById]);
 
   // Apply a Tune-panel edit: drives the planning density (tunedApiTempByProduct
   // + productTempF) AND the submission inputs (productInputs) so the logged
@@ -2737,14 +2762,13 @@ const lastProductInfoById = useMemo(() => {
                 setLoadBlockedMsg(`Cannot Load, all planned products are not available at ${terminalLabel || "this terminal"}`);
                 return;
               }
-              // Temp + API are now confirmed/tuned inside Plan Review's Tune
-              // panel (no separate Confirm Temp step). LOAD runs the stale-API
-              // safety check and begins: if any planned product's reading is
-              // stale/missing, the Good/Better/Best overlay still gates first;
-              // otherwise begin straight into Plan Review.
-              const stale = computeStalePlannedProducts();
-              if (stale.length > 0) setStaleApiPrompt({ products: stale });
-              else requestBegin({});
+              // Temp + API are confirmed/tuned inside Plan Review's Tune panel
+              // now (no separate Confirm Temp step). Staleness is handled there
+              // too: the density falls back to the heaviest safe minimum for a
+              // stale/missing reading (see apiBasis.ts) and the Tune line colors
+              // the API by confidence, so the interrupting Good/Better/Best
+              // overlay is no longer needed -- begin straight into Plan Review.
+              requestBegin({});
             }}
             disabled={loadDisabled}
             style={{
@@ -2857,7 +2881,17 @@ const lastProductInfoById = useMemo(() => {
         onTapTerminal={handleTapTerminalInLoadingModal}
         setProductApi={setProductApi}
         setProductTemp={setProductTemp}
-        onSetCompartmentGallons={(comp, gallons) => setLoadingGallonsOverride((prev) => ({ ...prev, [comp]: gallons }))}
+        onSetCompartmentCap={(comp, capGallons) => {
+          // Tap-to-adjust in Plan Review sets the compartment CAP (feeds the
+          // weight-bounded solver -> can't overload), not a raw gallons
+          // override. Bounded to the physical cap; recomputes the plan live.
+          const physical = persistedCapForComp(comp);
+          const clamped = Math.max(0, Math.min(physical || capGallons, Math.round(capGallons)));
+          setCompPlan((prev: any) => ({
+            ...prev,
+            [comp]: { ...(prev[comp] ?? { empty: false, productId: "" }), capOverride: clamped },
+          }));
+        }}
         persistedCapForComp={persistedCapForComp}
         livePreviewGrossLbs={livePreviewGrossLbs}
         livePreviewDiffLbs={livePreviewDiffLbs}
